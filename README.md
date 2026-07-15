@@ -6,10 +6,20 @@ IntelliJ의 Git 도구가 제공하는 일상적인 작업 흐름을 출발점�
 
 ## 현재 상태
 
-프로젝트 초기화 단계입니다. 구현에 앞서 제품 목표와 지원 범위를 문서화했습니다.
+0단계(기반) 최소 수직 기능이 동작합니다: 저장소 열기, 상태 감지, 변경 파일 목록, diff 보기, stage/unstage, commit.
 
 - [제품 목적과 범위](docs/PRODUCT_VISION.md)
 - [Git 시나리오 카탈로그](docs/GIT_SCENARIOS.md)
+- [쉬운 모드 설계](docs/superpowers/specs/2026-07-15-easy-mode-design.md)
+- [기술 스택 설계](docs/superpowers/specs/2026-07-15-tech-stack-design.md)
+
+### 실행
+
+```
+pnpm install
+pnpm --filter @git-gui/desktop dev   # 앱 실행
+pnpm test                            # 단위·통합 테스트
+```
 
 ## 핵심 원칙
 
@@ -21,8 +31,8 @@ IntelliJ의 Git 도구가 제공하는 일상적인 작업 흐름을 출발점�
 
 ## 다음 단계
 
-1. 데스크톱 런타임과 프런트엔드 스택 결정
-2. Git 실행 계층과 상태 모델의 경계 설계
-3. 저장소 열기, 변경 파일, stage/보류, commit의 최소 수직 기능 구현
-4. 충돌 및 중단 상태별 테스트 fixture 구축
+1. fetch/pull/push와 브랜치 생성·전환 (0단계 마무리)
+2. 취소 가능한 Git 프로세스와 실행 로그
+3. E0: 쉬운 모드 2패널 UI와 디자인 토큰 (React Aria)
+4. 충돌 및 중단 상태별 테스트 fixture 확장
 
