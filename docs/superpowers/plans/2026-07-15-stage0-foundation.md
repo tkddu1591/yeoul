@@ -22,7 +22,7 @@
 package.json                      # 루트: pnpm workspace, 공통 스크립트
 pnpm-workspace.yaml
 tsconfig.base.json                # strict 공통 설정 + @git-gui/* paths
-vitest.workspace.ts
+vitest.config.ts                  # 루트 vitest projects 설정
 packages/domain/                  # 순수 TS: 상태 모델, 상태 감지 정책
 packages/git-process/             # git spawn, 취소, 환경 변수 격리
 packages/git-adapter/             # porcelain 파싱, GitClient(namespace 객체)
@@ -37,7 +37,7 @@ apps/desktop/                     # Electron main/preload/renderer, E2E
 ### Task 1: pnpm 모노레포 부트스트랩
 
 **Files:**
-- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.workspace.ts`
+- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.config.ts`
 - Modify: `.gitignore`
 
 - [ ] **Step 1: 루트 설정 파일 작성**
@@ -47,9 +47,11 @@ apps/desktop/                     # Electron main/preload/renderer, E2E
 {
   "name": "git-gui",
   "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "engines": { "node": ">=22" },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.base.json"
+    "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -64,6 +66,11 @@ apps/desktop/                     # Electron main/preload/renderer, E2E
 packages:
   - "packages/*"
   - "apps/*"
+
+# pnpm 10은 의존성 postinstall을 기본 차단한다 — Electron 바이너리 설치 허용
+onlyBuiltDependencies:
+  - electron
+  - esbuild
 ```
 
 `tsconfig.base.json`:
@@ -71,9 +78,11 @@ packages:
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "isolatedModules": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "types": ["node"],
@@ -89,9 +98,11 @@ packages:
 }
 ```
 
-`vitest.workspace.ts`:
+`vitest.config.ts` — Task 1 시점에는 패키지가 없어 projects를 비워 둔다(Task 2에서 projects 추가). deprecated된 `vitest.workspace.ts` 방식은 사용하지 않는다:
 ```ts
-export default ['packages/*/vitest.config.ts']
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({})
 ```
 
 `.gitignore`에 추가:
@@ -100,17 +111,21 @@ node_modules/
 dist/
 out/
 *.local
+coverage/
+test-results/
+playwright-report/
+.DS_Store
 ```
 
 - [ ] **Step 2: 설치 및 동작 확인**
 
-Run: `pnpm install && pnpm vitest run --passWithNoTests`
-Expected: 설치 성공, "No test files found" 로 종료 코드 0
+Run: `pnpm install && pnpm vitest run --passWithNoTests && pnpm typecheck`
+Expected: 설치 성공, vitest "No test files found"로 종료 코드 0, typecheck(실행할 패키지 없음)도 종료 코드 0. **실제 종료 코드를 확인하고 커밋할 것.**
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add package.json pnpm-workspace.yaml tsconfig.base.json vitest.workspace.ts .gitignore pnpm-lock.yaml
+git add package.json pnpm-workspace.yaml tsconfig.base.json vitest.config.ts .gitignore pnpm-lock.yaml
 git commit -m "chore: pnpm 모노레포 부트스트랩
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -134,7 +149,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "types": "src/index.ts"
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" }
 }
 ```
 
@@ -147,6 +163,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```ts
 import { defineConfig } from 'vitest/config'
 export default defineConfig({ test: { include: ['test/**/*.test.ts'] } })
+```
+
+루트 `vitest.config.ts`를 projects 설정으로 교체 (첫 패키지가 생겼으므로):
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({ test: { projects: ['packages/*/vitest.config.ts'] } })
 ```
 
 - [ ] **Step 2: 실패하는 테스트 작성**
@@ -284,7 +307,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/domain
+git add packages/domain vitest.config.ts
 git commit -m "feat(domain): 저장소 상태 모델과 상태 감지 정책
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -308,7 +331,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "types": "src/index.ts"
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" }
 }
 ```
 
@@ -468,6 +492,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": {
     "@git-gui/domain": "workspace:*",
     "@git-gui/git-process": "workspace:*"
@@ -965,6 +990,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": {
     "@git-gui/domain": "workspace:*"
   }
@@ -1049,6 +1075,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
     "e2e": "electron-vite build && playwright test"
   },
   "dependencies": {
@@ -1088,7 +1115,11 @@ export default defineConfig({
 ```json
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "jsx": "react-jsx", "types": ["node"] },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
   "include": ["src"]
 }
 ```
