@@ -28,6 +28,10 @@ interface FileRowProps {
 function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const actionLabel = staged ? '내리기' : '올리기'
+  // 좁은 열에서 파일명이 먼저 잘리지 않도록 디렉터리와 파일명을 분리해 디렉터리부터 축소한다
+  const slashIndex = change.path.lastIndexOf('/')
+  const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex + 1) : ''
+  const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
   return (
     <li className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
       <button
@@ -37,7 +41,10 @@ function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileR
         onClick={onSelect}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
       >
-        <span className="file-row__name">{change.path}</span>
+        <span className="file-row__name">
+          {directory && <span className="file-row__dir">{directory}</span>}
+          <span className="file-row__base">{basename}</span>
+        </span>
         {kind && <ChangeKindBadge kind={kind} />}
       </button>
       <button

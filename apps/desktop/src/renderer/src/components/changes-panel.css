@@ -50,11 +50,22 @@
   background: transparent;
 }
 .file-row__name {
+  display: flex;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+/* 디렉터리부터 축소 — 파일명(basename)은 항상 보인다 */
+.file-row__dir {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  flex: 0 1 auto;
+  color: var(--color-text-muted);
+}
+.file-row__base {
+  white-space: nowrap;
+  flex: none;
 }
 .file-row__action {
   display: inline-flex;
