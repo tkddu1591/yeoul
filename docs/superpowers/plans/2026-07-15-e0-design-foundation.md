@@ -106,11 +106,16 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
   /* 주 액션·상태 */
   --color-accent: #2e5ce6;
   --color-accent-hover: #244fd0;
+  --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
   --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
   --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
   --opacity-disabled: 0.45;
+
+  /* Git 원어 병기 배지 — "파란 모노 pill = Git 원어"를 별도 정체성으로 고정 (개념색과 디커플링) */
+  --term-badge: #2563eb;
+  --term-badge-bg: #e8f0fe;
 
   /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌)
      색약(적록)에서 shelf↔conflict, branch↔commit은 색만으로 구분되지 않는다 —
@@ -157,10 +162,13 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
 
     --color-accent: #7c97fb;
     --color-accent-hover: #93a9fc;
+    --color-accent-active: #a8b9fd;
     --color-accent-text: #10131a;
     --color-danger: #f97066;
     --color-focus: #4d69c9;
     --color-selection-bg: #222c47;
+    --term-badge: #7aa2ff;
+    --term-badge-bg: #1c2a4a;
 
     --concept-mine: #4ccb8f;
     --concept-mine-bg: #123527;
@@ -297,8 +305,10 @@ const PAIRS: Array<[string, string, number]> = [
   ['--color-text-muted', '--color-surface', 4.5],
   ['--color-text-faint', '--color-surface', 4.5],
   ['--color-accent-text', '--color-accent', 4.5],
+  ['--color-accent-text', '--color-accent-active', 4.5],
   ['--color-danger', '--color-surface', 4.5],
   ['--color-focus', '--color-surface', 3],
+  ['--term-badge', '--term-badge-bg', 4.5],
   ['--concept-mine', '--concept-mine-bg', 4.5],
   ['--concept-branch', '--concept-branch-bg', 4.5],
   ['--concept-commit', '--concept-commit-bg', 4.5],
@@ -327,7 +337,7 @@ describe.each([
 - [ ] **Step 5: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 모두 exit 0 — **68 tests** (기존 38 + 대비 30), E2E 1 passed (기존 화면 그대로 + 폰트만 바뀜)
+Expected: 모두 exit 0 — **72 tests** (기존 38 + 대비 34), E2E 1 passed (기존 화면 그대로 + 폰트만 바뀜)
 
 - [ ] **Step 6: Commit**
 
@@ -404,6 +414,9 @@ export function Button({ variant = 'neutral', size = 'md', testId, children, ...
 .ui-button--primary[data-hovered] {
   background: var(--color-accent-hover);
 }
+.ui-button--primary[data-pressed] {
+  background: var(--color-accent-active);
+}
 .ui-button--neutral {
   background: var(--color-surface);
   color: var(--color-text);
@@ -413,6 +426,9 @@ export function Button({ variant = 'neutral', size = 'md', testId, children, ...
 .ui-button--neutral[data-hovered] {
   border-color: var(--color-text-faint);
 }
+.ui-button--neutral[data-pressed] {
+  background: var(--color-surface-sunken);
+}
 .ui-button--ghost {
   background: transparent;
   color: var(--color-text-muted);
@@ -421,14 +437,14 @@ export function Button({ variant = 'neutral', size = 'md', testId, children, ...
   background: var(--color-surface-sunken);
   color: var(--color-text);
 }
+.ui-button--ghost[data-pressed] {
+  background: var(--color-border);
+}
 .ui-button[data-disabled] {
   opacity: var(--opacity-disabled);
   cursor: default;
 }
-.ui-button[data-focus-visible] {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
+/* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
 ```
 
 - [ ] **Step 2: Badge**
@@ -464,8 +480,8 @@ export function Badge({ children, tone = 'neutral' }: BadgeProps) {
 .ui-badge--git {
   font-family: var(--font-mono);
   font-weight: 500;
-  background: var(--concept-commit-bg);
-  color: var(--concept-commit);
+  background: var(--term-badge-bg);
+  color: var(--term-badge);
 }
 .ui-badge--count {
   min-width: 22px;
@@ -1626,7 +1642,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 38 tests + typecheck 5개 + build + E2E 1 passed, 전부 exit 0
+Expected: 72 tests + typecheck 5개 + build + E2E 1 passed, 전부 exit 0
 
 - [ ] **Step 2: 스크린샷 확보**
 
