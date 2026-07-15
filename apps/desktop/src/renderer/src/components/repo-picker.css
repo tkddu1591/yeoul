@@ -1,0 +1,38 @@
+.repo-picker {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  background: var(--color-bg);
+}
+.repo-picker__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) 56px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  text-align: center;
+}
+.repo-picker__marks {
+  display: flex;
+  gap: var(--space-2);
+}
+.repo-picker__card h1 {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xl);
+  letter-spacing: -0.01em;
+}
+.repo-picker__card p {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+.repo-picker__error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
