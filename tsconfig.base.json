@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@git-gui/domain": ["packages/domain/src/index.ts"],
+      "@git-gui/git-process": ["packages/git-process/src/index.ts"],
+      "@git-gui/git-adapter": ["packages/git-adapter/src/index.ts"],
+      "@git-gui/ipc-contract": ["packages/ipc-contract/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+}
