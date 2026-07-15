@@ -3,3 +3,7 @@ node_modules/
 dist/
 out/
 *.local
+coverage/
+test-results/
+playwright-report/
+.DS_Store
