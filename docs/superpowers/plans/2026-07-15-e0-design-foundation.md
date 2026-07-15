@@ -14,7 +14,9 @@
 
 **검증 방식 주의:** renderer에는 단위 테스트 인프라(jsdom)가 없다 — 이번 범위에서 도입하지 않는다(YAGNI, E2E가 회귀 그물). 각 태스크의 게이트는 `pnpm typecheck` + `pnpm --filter @git-gui/desktop build` + (해당 시) E2E이며, 마지막에 스크린샷을 캡처해 사람이 육안 확인한다.
 
-**금지 사항(스펙 10장):** 보라 그라데이션 남용, 이모지 아이콘, 과도한 glassmorphism, 임의 색·임의 간격(토큰 밖 값). 이 계획의 코드가 디자인 정본이다 — 구현자는 임의로 "개선"하지 않는다.
+**금지 사항(스펙 10장):** 보라 그라데이션 남용, 이모지 아이콘, 과도한 glassmorphism, 임의 색(토큰 밖 색상값). 타입 스케일과 매크로 간격은 토큰을 사용하되, 컴포넌트 내부 미세 수치(패딩 1~2px 조정 등)는 허용한다. 이 계획의 코드가 디자인 정본이다 — 구현자는 임의로 "개선"하지 않는다.
+
+**후속(E0-2/E1) 노트 — 이번 범위 아님:** 앱 내 테마 토글용 `[data-theme]` 셀렉터 병기(지금은 OS 설정 연동만), danger 버튼 hover/bg 토큰 계열(E1 되돌리기 확정 UI에서), 입력 테두리(`--color-border-strong`) 비텍스트 대비 3:1 보강(E1 폼 정비에서).
 
 ---
 
@@ -62,6 +64,9 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
 /* 디자인 토큰 — 모든 색·간격·타이포·모서리·그림자는 여기서만 정의한다.
    컴포넌트는 var()만 사용한다 (스펙 10장). */
 :root {
+  /* 다크 모드에서 네이티브 컨트롤(스크롤바·리사이즈 핸들)도 함께 전환 */
+  color-scheme: light dark;
+
   /* 타이포 */
   --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -70,6 +75,7 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
+  --text-2xl: 22px;
 
   /* 간격 (4px 기반) */
   --space-1: 4px;
@@ -95,31 +101,35 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
   --color-border-strong: #d0d5dd;
   --color-text: #1c2230;
   --color-text-muted: #5f6673;
-  --color-text-faint: #98a1b2;
+  --color-text-faint: #6b7484; /* 정보 텍스트에도 쓰인다 — surface 대비 4.5:1 이상 유지 필수 */
 
   /* 주 액션·상태 */
   --color-accent: #2e5ce6;
   --color-accent-hover: #244fd0;
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
-  --color-focus: #84a4f8;
+  --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
+  --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
+  --opacity-disabled: 0.45;
 
-  /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌) */
+  /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌)
+     색약(적록)에서 shelf↔conflict, branch↔commit은 색만으로 구분되지 않는다 —
+     이 개념들의 아이콘 단독(라벨 없는) 사용은 금지, 항상 라벨·형태를 병행한다 */
   --concept-mine: #0e7a4e;
   --concept-mine-bg: #e6f5ec;
   --concept-branch: #6d4fc4;
   --concept-branch-bg: #efe9fb;
   --concept-commit: #2563eb;
   --concept-commit-bg: #e8f0fe;
-  --concept-shelf: #b97722;
+  --concept-shelf: #9a6119;
   --concept-shelf-bg: #fdf1e2;
   --concept-backup: #0e7490;
   --concept-backup-bg: #e7f6f8;
-  --concept-conflict: #c2410c;
+  --concept-conflict: #b53c0c;
   --concept-conflict-bg: #fdeaea;
 
   /* 변경 종류 */
-  --change-modified: #b97722;
+  --change-modified: #9a6119;
   --change-added: #0e7a4e;
   --change-deleted: #d92d20;
   --change-renamed: #6d4fc4;
@@ -143,13 +153,14 @@ Expected: exit 0. 해석된 버전을 보고에 기록할 것.
     --color-border-strong: #3a4150;
     --color-text: #e8eaf0;
     --color-text-muted: #a3abba;
-    --color-text-faint: #6c7686;
+    --color-text-faint: #828da0;
 
     --color-accent: #7c97fb;
     --color-accent-hover: #93a9fc;
     --color-accent-text: #10131a;
     --color-danger: #f97066;
     --color-focus: #4d69c9;
+    --color-selection-bg: #222c47;
 
     --concept-mine: #4ccb8f;
     --concept-mine-bg: #123527;
@@ -203,8 +214,11 @@ body {
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
 }
-button {
-  font-family: inherit;
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 :focus-visible {
   outline: 2px solid var(--color-focus);
@@ -226,15 +240,99 @@ import { App } from './App'
 createRoot(document.getElementById('root')!).render(<App />)
 ```
 
-- [ ] **Step 4: 검증**
+- [ ] **Step 4: 대비 회귀 테스트** — 토큰이 디자인 정본이므로 WCAG 대비를 테스트로 고정한다 (색을 바꾸면 게이트가 잡는다)
 
-Run: `pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 모두 exit 0, E2E 1 passed (기존 화면 그대로 + 폰트만 바뀜)
+루트 `vitest.config.ts` 전체 교체:
+```ts
+import { defineConfig } from 'vitest/config'
 
-- [ ] **Step 5: Commit**
+export default defineConfig({
+  test: { projects: ['packages/*/vitest.config.ts', 'apps/*/vitest.config.ts'] },
+})
+```
+
+`apps/desktop/vitest.config.ts` 생성:
+```ts
+import { defineConfig } from 'vitest/config'
+export default defineConfig({ test: { include: ['test/**/*.test.ts'] } })
+```
+
+`apps/desktop/test/tokens-contrast.test.ts` 생성:
+```ts
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+// 토큰 CSS가 디자인 정본이다 — 여기서 WCAG 대비를 고정해 색 회귀를 막는다
+const css = readFileSync(join(__dirname, '../src/renderer/src/ui/tokens.css'), 'utf8')
+
+function parseTokens(block: string): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const match of block.matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})/g)) {
+    map.set(match[1]!, match[2]!)
+  }
+  return map
+}
+
+const mediaIndex = css.indexOf('@media')
+const lightTokens = parseTokens(css.slice(0, mediaIndex))
+const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(mediaIndex))])
+
+function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const channel = parseInt(hex.slice(i, i + 2), 16) / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+}
+
+function contrast(foreground: string, background: string): number {
+  const [bright, dim] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+  return (bright! + 0.05) / (dim! + 0.05)
+}
+
+/** [전경 토큰, 배경 토큰, 최소 대비] — 텍스트 4.5:1, 비텍스트(포커스 링) 3:1 */
+const PAIRS: Array<[string, string, number]> = [
+  ['--color-text', '--color-surface', 4.5],
+  ['--color-text-muted', '--color-surface', 4.5],
+  ['--color-text-faint', '--color-surface', 4.5],
+  ['--color-accent-text', '--color-accent', 4.5],
+  ['--color-danger', '--color-surface', 4.5],
+  ['--color-focus', '--color-surface', 3],
+  ['--concept-mine', '--concept-mine-bg', 4.5],
+  ['--concept-branch', '--concept-branch-bg', 4.5],
+  ['--concept-commit', '--concept-commit-bg', 4.5],
+  ['--concept-shelf', '--concept-shelf-bg', 4.5],
+  ['--concept-backup', '--concept-backup-bg', 4.5],
+  ['--concept-conflict', '--concept-conflict-bg', 4.5],
+  ['--diff-add-text', '--diff-add-bg', 4.5],
+  ['--diff-del-text', '--diff-del-bg', 4.5],
+  ['--diff-hunk-text', '--diff-hunk-bg', 4.5],
+]
+
+describe.each([
+  ['라이트', lightTokens],
+  ['다크', darkTokens],
+] as const)('%s 테마 토큰 대비 (WCAG)', (_theme, tokens) => {
+  it.each(PAIRS)('%s / %s ≥ %s:1', (foreground, background, minimum) => {
+    const fg = tokens.get(foreground)
+    const bg = tokens.get(background)
+    expect(fg, `${foreground} 토큰이 없다`).toBeDefined()
+    expect(bg, `${background} 토큰이 없다`).toBeDefined()
+    expect(contrast(fg!, bg!)).toBeGreaterThanOrEqual(minimum)
+  })
+})
+```
+
+- [ ] **Step 5: 검증**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 모두 exit 0 — **68 tests** (기존 38 + 대비 30), E2E 1 passed (기존 화면 그대로 + 폰트만 바뀜)
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add apps/desktop/package.json pnpm-lock.yaml apps/desktop/src/renderer/src/ui apps/desktop/src/renderer/src/main.tsx
+git add apps/desktop/package.json pnpm-lock.yaml apps/desktop/src/renderer/src/ui apps/desktop/src/renderer/src/main.tsx apps/desktop/vitest.config.ts apps/desktop/test vitest.config.ts
 git commit -m "feat(desktop): 디자인 토큰·베이스 스타일과 Pretendard 도입
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -324,7 +422,7 @@ export function Button({ variant = 'neutral', size = 'md', testId, children, ...
   color: var(--color-text);
 }
 .ui-button[data-disabled] {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .ui-button[data-focus-visible] {
@@ -723,7 +821,7 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
 }
 .repo-picker__card h1 {
   margin: var(--space-2) 0 0;
-  font-size: 22px;
+  font-size: var(--text-2xl);
   letter-spacing: -0.01em;
 }
 .repo-picker__card p {
@@ -939,7 +1037,7 @@ export function ChangesPanel({
   border-radius: var(--radius-sm);
 }
 .file-row--selected {
-  background: var(--concept-commit-bg);
+  background: var(--color-selection-bg);
 }
 .file-row__main {
   flex: 1;
@@ -988,7 +1086,7 @@ export function ChangesPanel({
 }
 .file-row__main:disabled,
 .file-row__action:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 ```
