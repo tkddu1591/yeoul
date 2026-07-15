@@ -1,30 +1,11 @@
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
+import { classifyLines } from './diff-lines'
 import './diff-panel.css'
 
 interface DiffPanelProps {
   path: string | null
   diffText: string
-}
-
-type LineTone = 'add' | 'del' | 'hunk' | 'meta' | 'context'
-
-/** 표시용 라인 분류 — hunk 구조 해석(diff 모델)은 1단계에서 adapter가 맡는다 */
-function lineTone(line: string): LineTone {
-  if (
-    line.startsWith('+++') ||
-    line.startsWith('---') ||
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('new file') ||
-    line.startsWith('deleted file')
-  ) {
-    return 'meta'
-  }
-  if (line.startsWith('@@')) return 'hunk'
-  if (line.startsWith('+')) return 'add'
-  if (line.startsWith('-')) return 'del'
-  return 'context'
 }
 
 export function DiffPanel({ path, diffText }: DiffPanelProps) {
@@ -36,6 +17,7 @@ export function DiffPanel({ path, diffText }: DiffPanelProps) {
     )
   }
   const lines = diffText.length > 0 ? diffText.split('\n') : []
+  const tones = classifyLines(lines)
   return (
     <Panel title={path} accessory={<Badge tone="git">diff</Badge>} testId="diff-panel">
       {lines.length === 0 ? (
@@ -43,7 +25,7 @@ export function DiffPanel({ path, diffText }: DiffPanelProps) {
       ) : (
         <pre className="diff-panel__code">
           {lines.map((line, index) => (
-            <span key={index} className={`diff-line diff-line--${lineTone(line)}`}>
+            <span key={index} className={`diff-line diff-line--${tones[index]}`}>
               {line || ' '}
             </span>
           ))}
