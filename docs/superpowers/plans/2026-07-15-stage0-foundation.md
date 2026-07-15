@@ -427,6 +427,16 @@ describe('execGitOrThrow', () => {
     const cwd = await tempDir()
     await expect(execGitOrThrow(['rev-parse', 'HEAD'], { cwd })).rejects.toBeInstanceOf(GitError)
   })
+
+  it('stderr가 비어 있으면 stdout을 메시지로 쓴다', () => {
+    const error = new GitError(['commit'], {
+      stdout: 'nothing to commit, working tree clean\n',
+      stderr: '',
+      exitCode: 1,
+      signal: null,
+    })
+    expect(error.message).toContain('nothing to commit')
+  })
 })
 ```
 
@@ -461,9 +471,10 @@ export class GitError extends Error {
     readonly result: GitResult,
   ) {
     super(
+      // 일부 명령(commit의 "nothing to commit" 등)은 설명을 stdout으로 낸다 — stderr가 비면 stdout으로 폴백
       `git ${args.join(' ')} failed (exit ${result.exitCode}${
         result.signal ? `, signal ${result.signal}` : ''
-      }): ${result.stderr.trim()}`,
+      }): ${result.stderr.trim() || result.stdout.trim()}`,
     )
     this.name = 'GitError'
   }
@@ -1682,10 +1693,10 @@ interface RepositoryStore {
   commit(message: string): Promise<boolean>
 }
 
-/** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 */
+/** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함) */
 function toErrorMessage(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause)
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
 type StoreSet = (partial: Partial<RepositoryStore>) => void
@@ -1735,7 +1746,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      set({ status: await git().repo.status(repoPath) })
+      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff도 함께 무효화한다
+      set({ selected: null, diffText: '', status: await git().repo.status(repoPath) })
     })
   },
 
