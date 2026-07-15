@@ -14,6 +14,11 @@
 
 **알려진 한계(의도적):** 첫 commit이 없는 저장소(unborn HEAD)에서 unstage(`git restore --staged`)는 실패한다. 이 케이스는 1단계에서 다룬다.
 
+**후속 확장 포인트(Task 2 품질 리뷰에서 식별, 이번 범위 아님):**
+- `.git/rebase-apply/`는 `git am` 진행 중에도 생기므로 현재 모델은 `git am`을 rebasing으로 표시한다 — 마커 세분화 필요 시 `applying`/`rebasing` 내부 파일로 구분
+- 다중 cherry-pick 도중 `git commit`으로 CHERRY_PICK_HEAD가 사라져도 `.git/sequencer/`가 남는 케이스(S-004) — sequencer 마커 추가 필요
+- 모순된 메타데이터 조합을 위한 `unknown`/진단 상태 kind(GIT_SCENARIOS 원칙) — 소비자가 생길 때 추가
+
 ---
 
 ## 파일 구조
@@ -307,7 +312,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/domain vitest.config.ts
+git add packages/domain vitest.config.ts pnpm-lock.yaml
 git commit -m "feat(domain): 저장소 상태 모델과 상태 감지 정책
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
