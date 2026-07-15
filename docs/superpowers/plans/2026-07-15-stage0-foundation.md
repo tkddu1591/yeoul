@@ -341,7 +341,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 }
 ```
 
-`tsconfig.json`, `vitest.config.ts`는 Task 2의 domain과 동일한 내용으로 작성.
+`tsconfig.json`은 Task 2의 domain과 동일. `vitest.config.ts`는 프로세스 spawn 테스트가 워커 경합 시 기본 5초를 넘길 수 있어 타임아웃을 상향한다:
+```ts
+import { defineConfig } from 'vitest/config'
+export default defineConfig({ test: { include: ['test/**/*.test.ts'], testTimeout: 15_000 } })
+```
 
 - [ ] **Step 2: 실패하는 테스트 작성**
 
