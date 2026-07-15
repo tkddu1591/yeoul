@@ -35,4 +35,12 @@ describe('detectState', () => {
   it('BISECT_LOG가 있으면 bisecting', () => {
     expect(detectState({ ...none, bisectLog: true })).toBe('bisecting')
   })
+
+  it('rebase 중 CHERRY_PICK_HEAD가 남아 있어도 rebasing', () => {
+    expect(detectState({ ...none, rebaseMerge: true, cherryPickHead: true })).toBe('rebasing')
+  })
+
+  it('bisect 도중 merge 충돌이 나면 merging을 우선한다', () => {
+    expect(detectState({ ...none, bisectLog: true, mergeHead: true })).toBe('merging')
+  })
 })
