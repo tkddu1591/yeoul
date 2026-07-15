@@ -1,6 +1,9 @@
 /* 디자인 토큰 — 모든 색·간격·타이포·모서리·그림자는 여기서만 정의한다.
    컴포넌트는 var()만 사용한다 (스펙 10장). */
 :root {
+  /* 다크 모드에서 네이티브 컨트롤(스크롤바·리사이즈 핸들)도 함께 전환 */
+  color-scheme: light dark;
+
   /* 타이포 */
   --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -9,6 +12,7 @@
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
+  --text-2xl: 22px;
 
   /* 간격 (4px 기반) */
   --space-1: 4px;
@@ -34,31 +38,35 @@
   --color-border-strong: #d0d5dd;
   --color-text: #1c2230;
   --color-text-muted: #5f6673;
-  --color-text-faint: #98a1b2;
+  --color-text-faint: #6b7484; /* 정보 텍스트에도 쓰인다 — surface 대비 4.5:1 이상 유지 필수 */
 
   /* 주 액션·상태 */
   --color-accent: #2e5ce6;
   --color-accent-hover: #244fd0;
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
-  --color-focus: #84a4f8;
+  --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
+  --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
+  --opacity-disabled: 0.45;
 
-  /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌) */
+  /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌)
+     색약(적록)에서 shelf↔conflict, branch↔commit은 색만으로 구분되지 않는다 —
+     이 개념들의 아이콘 단독(라벨 없는) 사용은 금지, 항상 라벨·형태를 병행한다 */
   --concept-mine: #0e7a4e;
   --concept-mine-bg: #e6f5ec;
   --concept-branch: #6d4fc4;
   --concept-branch-bg: #efe9fb;
   --concept-commit: #2563eb;
   --concept-commit-bg: #e8f0fe;
-  --concept-shelf: #b97722;
+  --concept-shelf: #9a6119;
   --concept-shelf-bg: #fdf1e2;
   --concept-backup: #0e7490;
   --concept-backup-bg: #e7f6f8;
-  --concept-conflict: #c2410c;
+  --concept-conflict: #b53c0c;
   --concept-conflict-bg: #fdeaea;
 
   /* 변경 종류 */
-  --change-modified: #b97722;
+  --change-modified: #9a6119;
   --change-added: #0e7a4e;
   --change-deleted: #d92d20;
   --change-renamed: #6d4fc4;
@@ -82,13 +90,14 @@
     --color-border-strong: #3a4150;
     --color-text: #e8eaf0;
     --color-text-muted: #a3abba;
-    --color-text-faint: #6c7686;
+    --color-text-faint: #828da0;
 
     --color-accent: #7c97fb;
     --color-accent-hover: #93a9fc;
     --color-accent-text: #10131a;
     --color-danger: #f97066;
     --color-focus: #4d69c9;
+    --color-selection-bg: #222c47;
 
     --concept-mine: #4ccb8f;
     --concept-mine-bg: #123527;
