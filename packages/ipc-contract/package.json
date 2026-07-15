@@ -1,0 +1,11 @@
+{
+  "name": "@git-gui/ipc-contract",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@git-gui/domain": "workspace:*"
+  }
+}
