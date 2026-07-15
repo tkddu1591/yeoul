@@ -64,4 +64,14 @@ describe('execGitOrThrow', () => {
     const cwd = await tempDir()
     await expect(execGitOrThrow(['rev-parse', 'HEAD'], { cwd })).rejects.toBeInstanceOf(GitError)
   })
+
+  it('stderr가 비어 있으면 stdout을 메시지로 쓴다', () => {
+    const error = new GitError(['commit'], {
+      stdout: 'nothing to commit, working tree clean\n',
+      stderr: '',
+      exitCode: 1,
+      signal: null,
+    })
+    expect(error.message).toContain('nothing to commit')
+  })
 })

@@ -20,9 +20,10 @@ export class GitError extends Error {
     readonly result: GitResult,
   ) {
     super(
+      // 일부 명령(commit의 "nothing to commit" 등)은 설명을 stdout으로 낸다 — stderr가 비면 stdout으로 폴백
       `git ${args.join(' ')} failed (exit ${result.exitCode}${
         result.signal ? `, signal ${result.signal}` : ''
-      }): ${result.stderr.trim()}`,
+      }): ${result.stderr.trim() || result.stdout.trim()}`,
     )
     this.name = 'GitError'
   }
