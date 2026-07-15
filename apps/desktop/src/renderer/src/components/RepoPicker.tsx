@@ -18,7 +18,7 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
           <Pictogram kind="shelf" size={20} />
         </div>
         <h1>Git GUI</h1>
-        <p>
+        <p className="repo-picker__desc">
           프로젝트 폴더를 열면 바뀐 파일을 확인하고
           <br />
           안전하게 저장할 수 있어요.
