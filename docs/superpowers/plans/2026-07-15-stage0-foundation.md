@@ -19,6 +19,8 @@
 - 다중 cherry-pick 도중 `git commit`으로 CHERRY_PICK_HEAD가 사라져도 `.git/sequencer/`가 남는 케이스(S-004) — sequencer 마커 추가 필요
 - 모순된 메타데이터 조합을 위한 `unknown`/진단 상태 kind(GIT_SCENARIOS 원칙) — 소비자가 생길 때 추가
 - `# branch.oid (initial)`(unborn HEAD) 미노출 — 1단계에서 `oid: string | null`로 노출해 unborn 진단에 사용
+- IPC sender 검증(`event.senderFrame` 대조)과 dialog 부모 창 전달 — 1단계 구조화 에러 작업과 함께 도입 (0단계는 창 1개 + 네비게이션 차단으로 수용)
+- IPC 에러 구조화(GitError의 exitCode/stderr 전달) — 현재는 message 문자열만 renderer에 도달
 
 ---
 
@@ -1516,10 +1518,13 @@ function assertString(value: unknown): string {
 }
 
 function assertStringArray(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+  if (!Array.isArray(value)) throw new Error('잘못된 요청 형식이에요.')
+  // sparse array의 hole은 every가 건너뛰어 통과된다 — 실체화(undefined로 변환)한 뒤 검사한다
+  const items = [...(value as unknown[])]
+  if (!items.every((item): item is string => typeof item === 'string')) {
     throw new Error('잘못된 요청 형식이에요.')
   }
-  return value
+  return items
 }
 
 function assertDiffOptions(value: unknown): DiffOptions {
@@ -1532,7 +1537,8 @@ function assertDiffOptions(value: unknown): DiffOptions {
   ) {
     throw new Error('잘못된 요청 형식이에요.')
   }
-  return candidate
+  // 잉여 필드가 하류로 밀수되지 않도록 알려진 필드만 복사한다
+  return { staged: candidate.staged, untracked: candidate.untracked }
 }
 
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
@@ -1550,7 +1556,8 @@ export function registerGitHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null
     const path = result.filePaths[0]!
     const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path })
-    if (check.exitCode !== 0) {
+    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
+    if (check.exitCode !== 0 || check.stdout.trim() !== 'true') {
       throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
     }
     return registerRepoPath(path)
