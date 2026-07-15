@@ -37,13 +37,18 @@ export function App() {
         <ChangesPanel
           changes={status?.changes ?? []}
           selected={store.selected}
+          busy={store.busy}
           onStage={(paths) => void store.stage(paths)}
           onUnstage={(paths) => void store.unstage(paths)}
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="right">
           <DiffPanel path={store.selected?.change.path ?? null} diffText={store.diffText} />
-          <CommitForm stagedCount={stagedCount} busy={store.busy} onCommit={(m) => void store.commit(m)} />
+          <CommitForm
+            stagedCount={stagedCount}
+            busy={store.busy}
+            onCommit={(message) => store.commit(message)}
+          />
         </div>
       </main>
     </div>

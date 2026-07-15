@@ -3,7 +3,7 @@ import { useState } from 'react'
 interface CommitFormProps {
   stagedCount: number
   busy: boolean
-  onCommit(message: string): void
+  onCommit(message: string): Promise<boolean>
 }
 
 export function CommitForm({ stagedCount, busy, onCommit }: CommitFormProps) {
@@ -15,8 +15,10 @@ export function CommitForm({ stagedCount, busy, onCommit }: CommitFormProps) {
       className="commit-form"
       onSubmit={(event) => {
         event.preventDefault()
-        onCommit(message)
-        setMessage('')
+        // 커밋이 실패하면(훅 거부, 충돌 상태 등) 입력한 메시지를 보존한다
+        void onCommit(message).then((committed) => {
+          if (committed) setMessage('')
+        })
       }}
     >
       <textarea

@@ -4,12 +4,14 @@ import type { SelectedFile } from '../store/repository-store'
 interface ChangesPanelProps {
   changes: FileChange[]
   selected: SelectedFile | null
+  /** 작업 중에는 모든 버튼을 비활성화한다 — 연타로 git 작업이 겹치면 index.lock 충돌이 난다 */
+  busy: boolean
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
   onSelect(selected: SelectedFile): void
 }
 
-export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }: ChangesPanelProps) {
+export function ChangesPanel({ changes, selected, busy, onStage, onUnstage, onSelect }: ChangesPanelProps) {
   const stagedChanges = changes.filter((c) => c.staged !== null)
   const unstagedChanges = changes.filter((c) => c.unstaged !== null)
 
@@ -23,10 +25,15 @@ export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }
               key={`staged-${change.path}`}
               className={selected?.staged && selected.change.path === change.path ? 'selected' : ''}
             >
-              <button type="button" className="file" onClick={() => onSelect({ change, staged: true })}>
+              <button
+                type="button"
+                className="file"
+                disabled={busy}
+                onClick={() => onSelect({ change, staged: true })}
+              >
                 {change.path} <em>{change.staged}</em>
               </button>
-              <button type="button" onClick={() => onUnstage([change.path])}>
+              <button type="button" disabled={busy} onClick={() => onUnstage([change.path])}>
                 내리기
               </button>
             </li>
@@ -41,10 +48,15 @@ export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }
               key={`unstaged-${change.path}`}
               className={selected && !selected.staged && selected.change.path === change.path ? 'selected' : ''}
             >
-              <button type="button" className="file" onClick={() => onSelect({ change, staged: false })}>
+              <button
+                type="button"
+                className="file"
+                disabled={busy}
+                onClick={() => onSelect({ change, staged: false })}
+              >
                 {change.path} <em>{change.unstaged}</em>
               </button>
-              <button type="button" onClick={() => onStage([change.path])}>
+              <button type="button" disabled={busy} onClick={() => onStage([change.path])}>
                 올리기
               </button>
             </li>
