@@ -12,12 +12,13 @@
 
 **이번 범위가 아닌 것:** 쉬운 모드 UI(E0), 디자인 토큰/React Aria 적용, push/pull, 히스토리 그래프, 보관함. 이번 renderer UI는 계층 검증용 개발자 모드 골격이며, 디자인 시스템은 E0 계획에서 입힌다.
 
-**알려진 한계(의도적):** 첫 commit이 없는 저장소(unborn HEAD)에서 unstage(`git restore --staged`)는 실패한다. 이 케이스는 1단계에서 다룬다.
+**알려진 한계(의도적):** 첫 commit이 없는 저장소(unborn HEAD)에서 unstage(`git restore --staged`)는 실패한다. 이 케이스는 1단계에서 다룬다. 또한 git-process가 출력을 utf8로 디코딩하므로 비 UTF-8 파일명·내용은 U+FFFD로 치환된다 — macOS(0단계 대상)에서는 드물지만, 1단계에서 Buffer 경계 도입으로 해소한다.
 
 **후속 확장 포인트(Task 2 품질 리뷰에서 식별, 이번 범위 아님):**
 - `.git/rebase-apply/`는 `git am` 진행 중에도 생기므로 현재 모델은 `git am`을 rebasing으로 표시한다 — 마커 세분화 필요 시 `applying`/`rebasing` 내부 파일로 구분
 - 다중 cherry-pick 도중 `git commit`으로 CHERRY_PICK_HEAD가 사라져도 `.git/sequencer/`가 남는 케이스(S-004) — sequencer 마커 추가 필요
 - 모순된 메타데이터 조합을 위한 `unknown`/진단 상태 kind(GIT_SCENARIOS 원칙) — 소비자가 생길 때 추가
+- `# branch.oid (initial)`(unborn HEAD) 미노출 — 1단계에서 `oid: string | null`로 노출해 unborn 진단에 사용
 
 ---
 
@@ -242,8 +243,9 @@ export interface BranchInfo {
   /** detached HEAD면 null */
   name: string | null
   upstream: string | null
-  ahead: number
-  behind: number
+  /** upstream과의 차이. `branch.ab`를 확인하지 못했으면 null (예: upstream ref 소실) — 0/0(동기화됨)으로 추측하지 않는다 */
+  ahead: number | null
+  behind: number | null
 }
 
 export type ChangeKind =
@@ -653,7 +655,38 @@ describe('parseStatusV2', () => {
 
   it('빈 출력이면 빈 결과를 반환한다', () => {
     const parsed = parseStatusV2('')
-    expect(parsed.branch).toEqual({ name: null, upstream: null, ahead: 0, behind: 0 })
+    expect(parsed.branch).toEqual({ name: null, upstream: null, ahead: null, behind: null })
+    expect(parsed.changes).toEqual([])
+  })
+
+  it('upstream은 있지만 branch.ab가 없으면 ahead/behind는 null이다', () => {
+    const parsed = parseStatusV2(
+      raw(['# branch.oid abc', '# branch.head main', '# branch.upstream origin/main']),
+    )
+    expect(parsed.branch).toEqual({
+      name: 'main',
+      upstream: 'origin/main',
+      ahead: null,
+      behind: null,
+    })
+  })
+
+  it('typechange와 copied를 파싱한다', () => {
+    const parsed = parseStatusV2(
+      raw([
+        '1 .T N... 100644 100644 120000 aaa bbb link.ts',
+        '2 C. N... 100644 100644 100644 aaa bbb C100 copy.ts',
+        'orig.ts',
+      ]),
+    )
+    expect(parsed.changes).toEqual([
+      { path: 'link.ts', origPath: null, staged: null, unstaged: 'typechange' },
+      { path: 'copy.ts', origPath: 'orig.ts', staged: 'copied', unstaged: null },
+    ])
+  })
+
+  it('필드가 모자란 기형 레코드는 추측하지 않고 건너뛴다', () => {
+    const parsed = parseStatusV2(raw(['1 .M N... 100644', 'u UU N...']))
     expect(parsed.changes).toEqual([])
   })
 })
@@ -668,12 +701,9 @@ Expected: FAIL — `Cannot find module '../src/status-parser'`
 
 `packages/git-adapter/src/status-parser.ts`:
 ```ts
-import type { BranchInfo, ChangeKind, FileChange } from '@git-gui/domain'
+import type { BranchInfo, ChangeKind, FileChange, RepositoryStatus } from '@git-gui/domain'
 
-export interface ParsedStatus {
-  branch: BranchInfo
-  changes: FileChange[]
-}
+export type ParsedStatus = Pick<RepositoryStatus, 'branch' | 'changes'>
 
 function kindFromChar(char: string): ChangeKind | null {
   switch (char) {
@@ -692,6 +722,8 @@ function kindFromChar(char: string): ChangeKind | null {
     case '.':
       return null
     default:
+      // 실물 porcelain v2의 1/2 레코드에는 위 문자만 등장한다(충돌은 u 레코드 전담).
+      // 미래 git이 새 문자를 도입하면 일단 modified로 표시된다 — 여기가 그 위장 지점이다.
       return 'modified'
   }
 }
@@ -699,10 +731,13 @@ function kindFromChar(char: string): ChangeKind | null {
 /**
  * `git status --porcelain=v2 --branch -z` 출력을 파싱한다.
  * -z 모드: 레코드는 NUL로 구분되고, rename(2) 레코드는 경로 뒤 NUL 다음에 원본 경로가 온다.
+ * 필드 수가 모자란 기형 레코드는 추측해 채우지 않고 건너뛴다.
  */
 export function parseStatusV2(rawOutput: string): ParsedStatus {
-  const tokens = rawOutput.split('\0').filter((t) => t.length > 0)
-  const branch: BranchInfo = { name: null, upstream: null, ahead: 0, behind: 0 }
+  const tokens = rawOutput.split('\0')
+  if (tokens.length > 0 && tokens[tokens.length - 1] === '') tokens.pop()
+
+  const branch: BranchInfo = { name: null, upstream: null, ahead: null, behind: null }
   const changes: FileChange[] = []
 
   let i = 0
@@ -722,33 +757,40 @@ export function parseStatusV2(rawOutput: string): ParsedStatus {
     } else if (token.startsWith('1 ')) {
       // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
       const parts = token.split(' ')
-      const xy = parts[1]!
-      changes.push({
-        path: parts.slice(8).join(' '),
-        origPath: null,
-        staged: kindFromChar(xy[0]!),
-        unstaged: kindFromChar(xy[1]!),
-      })
+      if (parts.length >= 9) {
+        const xy = parts[1]!
+        changes.push({
+          path: parts.slice(8).join(' '),
+          origPath: null,
+          staged: kindFromChar(xy[0]!),
+          unstaged: kindFromChar(xy[1]!),
+        })
+      }
     } else if (token.startsWith('2 ')) {
       // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path> NUL <origPath>
       const parts = token.split(' ')
-      const xy = parts[1]!
-      i += 1
-      changes.push({
-        path: parts.slice(9).join(' '),
-        origPath: tokens[i] ?? null,
-        staged: kindFromChar(xy[0]!),
-        unstaged: kindFromChar(xy[1]!),
-      })
+      const origPath = tokens[i + 1]
+      if (parts.length >= 10 && origPath !== undefined) {
+        i += 1
+        const xy = parts[1]!
+        changes.push({
+          path: parts.slice(9).join(' '),
+          origPath,
+          staged: kindFromChar(xy[0]!),
+          unstaged: kindFromChar(xy[1]!),
+        })
+      }
     } else if (token.startsWith('u ')) {
       // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
       const parts = token.split(' ')
-      changes.push({
-        path: parts.slice(10).join(' '),
-        origPath: null,
-        staged: null,
-        unstaged: 'conflicted',
-      })
+      if (parts.length >= 11) {
+        changes.push({
+          path: parts.slice(10).join(' '),
+          origPath: null,
+          staged: null,
+          unstaged: 'conflicted',
+        })
+      }
     } else if (token.startsWith('? ')) {
       changes.push({
         path: token.slice(2),
@@ -773,7 +815,7 @@ export * from './status-parser'
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm vitest run`
-Expected: PASS (전체 23 tests)
+Expected: PASS (전체 26 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -1030,7 +1072,7 @@ export * from './markers'
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm vitest run`
-Expected: PASS (전체 28 tests)
+Expected: PASS (전체 31 tests)
 
 - [ ] **Step 6: Commit**
 
