@@ -914,6 +914,10 @@ interface FileRowProps {
 function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const actionLabel = staged ? '내리기' : '올리기'
+  // 좁은 열에서 파일명이 먼저 잘리지 않도록 디렉터리와 파일명을 분리해 디렉터리부터 축소한다
+  const slashIndex = change.path.lastIndexOf('/')
+  const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex + 1) : ''
+  const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
   return (
     <li className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
       <button
@@ -923,7 +927,10 @@ function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileR
         onClick={onSelect}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
       >
-        <span className="file-row__name">{change.path}</span>
+        <span className="file-row__name">
+          {directory && <span className="file-row__dir">{directory}</span>}
+          <span className="file-row__base">{basename}</span>
+        </span>
         {kind && <ChangeKindBadge kind={kind} />}
       </button>
       <button
@@ -1079,11 +1086,22 @@ export function ChangesPanel({
   background: transparent;
 }
 .file-row__name {
+  display: flex;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+/* 디렉터리부터 축소 — 파일명(basename)은 항상 보인다 */
+.file-row__dir {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  flex: 0 1 auto;
+  color: var(--color-text-muted);
+}
+.file-row__base {
+  white-space: nowrap;
+  flex: none;
 }
 .file-row__action {
   display: inline-flex;
@@ -1245,7 +1263,7 @@ export function DiffPanel({ path, diffText }: DiffPanelProps) {
 .diff-line {
   padding: 0 var(--space-4);
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere; /* 공백 우선으로 접는다 — break-all은 단어 중간을 자른다 */
 }
 .diff-line--add {
   background: var(--diff-add-bg);
