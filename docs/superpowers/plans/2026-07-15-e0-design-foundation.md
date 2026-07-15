@@ -1111,35 +1111,89 @@ export function ChangesPanel({
 
 - [ ] **Step 2: DiffPanel**
 
+`apps/desktop/src/renderer/src/components/diff-lines.ts` (순수 로직 — 컴포넌트와 분리, 단위 테스트 대상):
+```ts
+export type LineTone = 'add' | 'del' | 'hunk' | 'meta' | 'context'
+
+/**
+ * 표시용 diff 라인 분류 — hunk 구조 해석(diff 모델)은 1단계에서 adapter가 맡는다.
+ * '---'/'+++' 파일 헤더는 첫 @@ 이전(헤더 구간)에만 나타난다 — 위치 기반으로 구분해
+ * '--'로 시작하는 삭제 라인(SQL 주석 등)이나 '++' 추가 라인이 meta로 위장되지 않게 한다.
+ */
+export function classifyLines(lines: string[]): LineTone[] {
+  let inHunk = false
+  return lines.map((line) => {
+    if (line.startsWith('diff ')) {
+      inHunk = false
+      return 'meta'
+    }
+    if (line.startsWith('@@')) {
+      inHunk = true
+      return 'hunk'
+    }
+    if (!inHunk) return 'meta'
+    if (line.startsWith('\\')) return 'meta'
+    if (line.startsWith('+')) return 'add'
+    if (line.startsWith('-')) return 'del'
+    return 'context'
+  })
+}
+```
+
+`apps/desktop/test/diff-lines.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { classifyLines } from '../src/renderer/src/components/diff-lines'
+
+describe('classifyLines', () => {
+  it('첫 @@ 이전의 헤더는 전부 meta다', () => {
+    const tones = classifyLines([
+      'diff --git a/f.sql b/f.sql',
+      'index abc..def 100644',
+      '--- a/f.sql',
+      '+++ b/f.sql',
+      '@@ -1,2 +1,2 @@',
+    ])
+    expect(tones).toEqual(['meta', 'meta', 'meta', 'meta', 'hunk'])
+  })
+
+  it("hunk 안의 '--'/'++' 시작 라인은 del/add로 분류한다 (SQL 주석·증감 연산)", () => {
+    const tones = classifyLines(['@@ -1 +1 @@', '--- SQL comment', '+++counter', ' context'])
+    expect(tones).toEqual(['hunk', 'del', 'add', 'context'])
+  })
+
+  it('rename·binary 등 hunk 없는 diff는 전부 meta다', () => {
+    const tones = classifyLines([
+      'diff --git a/old.ts b/new.ts',
+      'similarity index 100%',
+      'rename from old.ts',
+      'rename to new.ts',
+    ])
+    expect(tones).toEqual(['meta', 'meta', 'meta', 'meta'])
+  })
+
+  it('개행 없음 마커는 meta다', () => {
+    const tones = classifyLines(['@@ -1 +1 @@', '-old', '+new', '\\ No newline at end of file'])
+    expect(tones).toEqual(['hunk', 'del', 'add', 'meta'])
+  })
+
+  it('여러 파일 diff에서 새 파일 헤더가 나오면 다시 meta 구간이 된다', () => {
+    const tones = classifyLines(['@@ -1 +1 @@', '-a', 'diff --git a/b b/b', 'index 1..2'])
+    expect(tones).toEqual(['hunk', 'del', 'meta', 'meta'])
+  })
+})
+```
+
 `apps/desktop/src/renderer/src/components/DiffPanel.tsx` 전체 교체:
 ```tsx
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
+import { classifyLines } from './diff-lines'
 import './diff-panel.css'
 
 interface DiffPanelProps {
   path: string | null
   diffText: string
-}
-
-type LineTone = 'add' | 'del' | 'hunk' | 'meta' | 'context'
-
-/** 표시용 라인 분류 — hunk 구조 해석(diff 모델)은 1단계에서 adapter가 맡는다 */
-function lineTone(line: string): LineTone {
-  if (
-    line.startsWith('+++') ||
-    line.startsWith('---') ||
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('new file') ||
-    line.startsWith('deleted file')
-  ) {
-    return 'meta'
-  }
-  if (line.startsWith('@@')) return 'hunk'
-  if (line.startsWith('+')) return 'add'
-  if (line.startsWith('-')) return 'del'
-  return 'context'
 }
 
 export function DiffPanel({ path, diffText }: DiffPanelProps) {
@@ -1151,6 +1205,7 @@ export function DiffPanel({ path, diffText }: DiffPanelProps) {
     )
   }
   const lines = diffText.length > 0 ? diffText.split('\n') : []
+  const tones = classifyLines(lines)
   return (
     <Panel title={path} accessory={<Badge tone="git">diff</Badge>} testId="diff-panel">
       {lines.length === 0 ? (
@@ -1158,7 +1213,7 @@ export function DiffPanel({ path, diffText }: DiffPanelProps) {
       ) : (
         <pre className="diff-panel__code">
           {lines.map((line, index) => (
-            <span key={index} className={`diff-line diff-line--${lineTone(line)}`}>
+            <span key={index} className={`diff-line diff-line--${tones[index]}`}>
               {line || ' '}
             </span>
           ))}
@@ -1376,8 +1431,8 @@ Expected: exit 0 — 기존 App.tsx가 새 컴포넌트 시그니처와 그대�
 
 - [ ] **Step 7: 검증**
 
-Run: `pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 모두 exit 0, E2E 1 passed, `apps/desktop/test-results/app-*.png` 2장 생성
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 모두 exit 0 — **77 tests** (72 + diff-lines 5), E2E 1 passed, `apps/desktop/test-results/app-*.png` 2장 생성
 
 - [ ] **Step 8: Commit**
 
@@ -1644,7 +1699,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 72 tests + typecheck 5개 + build + E2E 1 passed, 전부 exit 0
+Expected: 77 tests + typecheck 5개 + build + E2E 1 passed, 전부 exit 0
 
 - [ ] **Step 2: 스크린샷 확보**
 
