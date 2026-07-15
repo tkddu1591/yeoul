@@ -30,18 +30,21 @@ test('저장소 열기 → 변경 확인 → stage → commit', async () => {
   try {
     const window = await app.firstWindow()
 
-    // 변경 파일이 보인다
-    await expect(window.getByText('app.txt')).toBeVisible()
+    // 변경 파일이 '지금 바뀐 것' 목록에 보인다
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await window.screenshot({ path: 'test-results/app-initial.png' })
 
     // stage
-    await window.getByRole('button', { name: '올리기' }).click()
-    await expect(window.getByText('저장 예정 (staged) — 1')).toBeVisible()
+    await window.getByTestId('stage-app.txt').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
     // commit
-    await window.getByPlaceholder('저장 메시지를 입력하세요').fill('e2e: 첫 저장')
-    await window.getByRole('button', { name: /저장하기/ }).click()
-    await expect(window.getByText('저장 예정 (staged) — 0')).toBeVisible()
-    await expect(window.getByText('작업 중 (unstaged) — 0')).toBeVisible()
+    await window.getByTestId('commit-message').fill('e2e: 첫 저장')
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    await window.screenshot({ path: 'test-results/app-after-commit.png' })
 
     // 실제 커밋이 생겼는지 검증
     const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })

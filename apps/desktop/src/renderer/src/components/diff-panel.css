@@ -1,0 +1,36 @@
+.diff-panel__empty {
+  padding: var(--space-6);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  text-align: center;
+}
+.diff-panel__code {
+  margin: 0;
+  padding: var(--space-3) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+}
+.diff-line {
+  padding: 0 var(--space-4);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.diff-line--add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+.diff-line--del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-text);
+}
+.diff-line--hunk {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+}
+.diff-line--meta {
+  color: var(--color-text-faint);
+}

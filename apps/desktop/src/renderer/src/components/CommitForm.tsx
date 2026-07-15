@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
+import './commit-form.css'
 
 interface CommitFormProps {
   stagedCount: number
@@ -21,15 +24,20 @@ export function CommitForm({ stagedCount, busy, onCommit }: CommitFormProps) {
         })
       }}
     >
+      <label className="commit-form__label" htmlFor="commit-message">
+        저장 메시지 <Badge tone="git">commit</Badge>
+      </label>
       <textarea
+        id="commit-message"
+        data-testid="commit-message"
         value={message}
         onChange={(event) => setMessage(event.target.value)}
-        placeholder="저장 메시지를 입력하세요"
+        placeholder="무엇을 바꿨는지 적어 주세요"
         rows={3}
       />
-      <button type="submit" disabled={disabled}>
-        저장하기 (commit) — {stagedCount}개 파일
-      </button>
+      <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
+        저장하기 — {stagedCount}개 파일
+      </Button>
     </form>
   )
 }
