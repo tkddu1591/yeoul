@@ -76,7 +76,38 @@ describe('parseStatusV2', () => {
 
   it('빈 출력이면 빈 결과를 반환한다', () => {
     const parsed = parseStatusV2('')
-    expect(parsed.branch).toEqual({ name: null, upstream: null, ahead: 0, behind: 0 })
+    expect(parsed.branch).toEqual({ name: null, upstream: null, ahead: null, behind: null })
+    expect(parsed.changes).toEqual([])
+  })
+
+  it('upstream은 있지만 branch.ab가 없으면 ahead/behind는 null이다', () => {
+    const parsed = parseStatusV2(
+      raw(['# branch.oid abc', '# branch.head main', '# branch.upstream origin/main']),
+    )
+    expect(parsed.branch).toEqual({
+      name: 'main',
+      upstream: 'origin/main',
+      ahead: null,
+      behind: null,
+    })
+  })
+
+  it('typechange와 copied를 파싱한다', () => {
+    const parsed = parseStatusV2(
+      raw([
+        '1 .T N... 100644 100644 120000 aaa bbb link.ts',
+        '2 C. N... 100644 100644 100644 aaa bbb C100 copy.ts',
+        'orig.ts',
+      ]),
+    )
+    expect(parsed.changes).toEqual([
+      { path: 'link.ts', origPath: null, staged: null, unstaged: 'typechange' },
+      { path: 'copy.ts', origPath: 'orig.ts', staged: 'copied', unstaged: null },
+    ])
+  })
+
+  it('필드가 모자란 기형 레코드는 추측하지 않고 건너뛴다', () => {
+    const parsed = parseStatusV2(raw(['1 .M N... 100644', 'u UU N...']))
     expect(parsed.changes).toEqual([])
   })
 })

@@ -10,8 +10,9 @@ export interface BranchInfo {
   /** detached HEAD면 null */
   name: string | null
   upstream: string | null
-  ahead: number
-  behind: number
+  /** upstream과의 차이. `branch.ab`를 확인하지 못했으면 null (예: upstream ref 소실) — 0/0(동기화됨)으로 추측하지 않는다 */
+  ahead: number | null
+  behind: number | null
 }
 
 export type ChangeKind =
