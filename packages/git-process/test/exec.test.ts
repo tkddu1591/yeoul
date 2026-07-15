@@ -36,6 +36,27 @@ describe('execGit', () => {
     controller.abort()
     await expect(execGit(['version'], { cwd, signal: controller.signal })).rejects.toThrow()
   })
+
+  it('git이 stdin을 읽지 않아도 대용량 stdin이 프로세스를 죽이지 않는다 (EPIPE 무시)', async () => {
+    const cwd = await tempDir()
+    const big = 'x'.repeat(8 * 1024 * 1024)
+    const result = await execGit(['version'], { cwd, stdin: big })
+    expect(result.exitCode).toBe(0)
+  })
+
+  it('실행 중 abort하면 거부된다', async () => {
+    const cwd = await tempDir()
+    await execGitOrThrow(['init'], { cwd })
+    const controller = new AbortController()
+    const big = 'x'.repeat(64 * 1024 * 1024)
+    const promise = execGit(['hash-object', '--stdin'], {
+      cwd,
+      stdin: big,
+      signal: controller.signal,
+    })
+    controller.abort()
+    await expect(promise).rejects.toThrow()
+  })
 })
 
 describe('execGitOrThrow', () => {
