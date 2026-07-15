@@ -40,3 +40,9 @@ export interface RepositoryStatus {
   branch: BranchInfo
   changes: FileChange[]
 }
+
+/** diff 조회 대상 — index(staged) 쪽인지, untracked 신규 파일인지. adapter와 IPC 계약이 공유한다 */
+export interface DiffOptions {
+  staged: boolean
+  untracked: boolean
+}

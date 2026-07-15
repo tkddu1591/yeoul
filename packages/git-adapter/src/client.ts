@@ -1,12 +1,9 @@
-import { detectState, type RepositoryStatus } from '@git-gui/domain'
+import { detectState, type DiffOptions, type RepositoryStatus } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { readGitDirMarkers } from './markers'
 import { parseStatusV2 } from './status-parser'
 
-export interface DiffOptions {
-  staged: boolean
-  untracked: boolean
-}
+export type { DiffOptions } from '@git-gui/domain'
 
 export interface GitClient {
   repo: {
