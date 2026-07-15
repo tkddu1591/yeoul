@@ -273,6 +273,12 @@ export interface RepositoryStatus {
   branch: BranchInfo
   changes: FileChange[]
 }
+
+/** diff 조회 대상 — index(staged) 쪽인지, untracked 신규 파일인지. adapter와 IPC 계약이 공유한다 */
+export interface DiffOptions {
+  staged: boolean
+  untracked: boolean
+}
 ```
 
 `packages/domain/src/state.ts`:
@@ -1057,15 +1063,12 @@ export async function readGitDirMarkers(gitDir: string): Promise<GitDirMarkers> 
 
 `packages/git-adapter/src/client.ts`:
 ```ts
-import { detectState, type RepositoryStatus } from '@git-gui/domain'
+import { detectState, type DiffOptions, type RepositoryStatus } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { readGitDirMarkers } from './markers'
 import { parseStatusV2 } from './status-parser'
 
-export interface DiffOptions {
-  staged: boolean
-  untracked: boolean
-}
+export type { DiffOptions } from '@git-gui/domain'
 
 export interface GitClient {
   repo: {
@@ -1228,19 +1231,22 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 `packages/ipc-contract/src/index.ts`:
 ```ts
-import type { RepositoryStatus } from '@git-gui/domain'
+import type { DiffOptions, RepositoryStatus } from '@git-gui/domain'
 
-export interface DiffOptions {
-  staged: boolean
-  untracked: boolean
-}
+export type { DiffOptions } from '@git-gui/domain'
 
-/** preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면 */
+/**
+ * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
+ *
+ * 신뢰 규칙: `repoPath`는 repo.select() 또는 repo.initialPath()가 반환한 값만 유효하다 —
+ * main은 자신이 돌려준 경로만 allowlist로 신뢰하고 그 외는 거부한다.
+ * 파일 `path`는 저장소 루트 상대 경로만 허용된다 (절대 경로·`..`·빈 문자열 거부).
+ */
 export interface GitApi {
   repo: {
-    /** 폴더 선택 다이얼로그. 취소하면 null */
+    /** 폴더 선택 다이얼로그. 취소하면 null. 반환 경로는 저장소 루트로 정규화된다 */
     select(): Promise<string | null>
-    /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로 */
+    /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
     status(repoPath: string): Promise<RepositoryStatus>
   }
@@ -1472,12 +1478,57 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: main 핸들러 구현**
 
-`apps/desktop/src/main/git-handlers.ts` 전체 교체:
+`apps/desktop/src/main/git-handlers.ts` 전체 교체. 두 가지 보안 불변식을 지킨다: (1) **repoPath allowlist** — main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다. (2) **IPC 인자는 unknown으로 취급** — 계약 타입은 renderer 편의이지 main의 신뢰 근거가 아니므로 형태를 직접 검증한다.
 ```ts
 import { dialog, ipcMain } from 'electron'
-import { createGitClient, type DiffOptions } from '@git-gui/git-adapter'
-import { execGit } from '@git-gui/git-process'
+import { createGitClient } from '@git-gui/git-adapter'
+import type { DiffOptions } from '@git-gui/domain'
+import { execGit, execGitOrThrow } from '@git-gui/git-process'
 import { CHANNELS } from '@git-gui/ipc-contract'
+
+/** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
+const allowedRepoPaths = new Set<string>()
+
+function assertAllowedRepo(repoPath: unknown): string {
+  if (typeof repoPath !== 'string' || !allowedRepoPaths.has(repoPath)) {
+    throw new Error('열려 있지 않은 저장소 경로예요. 저장소를 먼저 열어 주세요.')
+  }
+  return repoPath
+}
+
+function assertString(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('잘못된 요청 형식이에요.')
+  return value
+}
+
+function assertStringArray(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
+function assertDiffOptions(value: unknown): DiffOptions {
+  const candidate = value as DiffOptions | null
+  if (
+    typeof candidate !== 'object' ||
+    candidate === null ||
+    typeof candidate.staged !== 'boolean' ||
+    typeof candidate.untracked !== 'boolean'
+  ) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return candidate
+}
+
+/** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
+async function registerRepoPath(path: string): Promise<string> {
+  const topLevel = (
+    await execGitOrThrow(['rev-parse', '--show-toplevel'], { cwd: path })
+  ).stdout.trim()
+  allowedRepoPaths.add(topLevel)
+  return topLevel
+}
 
 export function registerGitHandlers(): void {
   ipcMain.handle(CHANNELS.repoSelect, async () => {
@@ -1488,31 +1539,38 @@ export function registerGitHandlers(): void {
     if (check.exitCode !== 0) {
       throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
     }
-    return path
+    return registerRepoPath(path)
   })
 
-  ipcMain.handle(CHANNELS.repoInitialPath, () => process.env.GIT_GUI_E2E_REPO ?? null)
+  ipcMain.handle(CHANNELS.repoInitialPath, async () => {
+    const initial = process.env.GIT_GUI_E2E_REPO
+    if (!initial) return null
+    return registerRepoPath(initial)
+  })
 
-  ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: string) =>
-    createGitClient(repoPath).repo.status(),
+  ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).repo.status(),
   )
 
-  ipcMain.handle(CHANNELS.changesStage, (_event, repoPath: string, paths: string[]) =>
-    createGitClient(repoPath).changes.stage(paths),
+  ipcMain.handle(CHANNELS.changesStage, (_event, repoPath: unknown, paths: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).changes.stage(assertStringArray(paths)),
   )
 
-  ipcMain.handle(CHANNELS.changesUnstage, (_event, repoPath: string, paths: string[]) =>
-    createGitClient(repoPath).changes.unstage(paths),
+  ipcMain.handle(CHANNELS.changesUnstage, (_event, repoPath: unknown, paths: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).changes.unstage(assertStringArray(paths)),
   )
 
   ipcMain.handle(
     CHANNELS.changesDiff,
-    (_event, repoPath: string, path: string, options: DiffOptions) =>
-      createGitClient(repoPath).changes.diff(path, options),
+    (_event, repoPath: unknown, path: unknown, options: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).changes.diff(
+        assertString(path),
+        assertDiffOptions(options),
+      ),
   )
 
-  ipcMain.handle(CHANNELS.commitsCreate, (_event, repoPath: string, message: string) =>
-    createGitClient(repoPath).commits.create(message),
+  ipcMain.handle(CHANNELS.commitsCreate, (_event, repoPath: unknown, message: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.create(assertString(message)),
   )
 }
 ```
