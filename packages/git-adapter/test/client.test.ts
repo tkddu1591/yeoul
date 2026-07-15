@@ -1,5 +1,7 @@
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { execGit, execGitOrThrow } from '@git-gui/git-process'
+import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { createGitClient } from '../src/client'
 import { createFixtureRepo, FIXTURE_IDENT, writeFixtureFile } from './fixture'
 
@@ -80,5 +82,68 @@ describe('GitClient', () => {
     const status = await createGitClient(repo).repo.status()
     expect(status.state).toBe('merging')
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('stage/unstage에 빈 배열을 넘기면 전체 작업으로 확대되지 않고 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await expect(client.changes.stage([])).rejects.toThrow()
+    await expect(client.changes.unstage([])).rejects.toThrow()
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBeNull()
+  })
+
+  it('pathspec 매직·글롭 파일명을 리터럴로 처리한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'a*.txt', 'glob\n')
+    await writeFixtureFile(repo, 'axx.txt', 'other\n')
+    await writeFixtureFile(repo, ':(top)', 'magic\n')
+    await client.changes.stage(['a*.txt', ':(top)'])
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'a*.txt')?.staged).toBe('added')
+    expect(status.changes.find((c) => c.path === ':(top)')?.staged).toBe('added')
+    expect(status.changes.find((c) => c.path === 'axx.txt')?.staged).toBeNull()
+    expect(status.changes.find((c) => c.path === 'axx.txt')?.unstaged).toBe('untracked')
+  })
+
+  it('untracked 디렉터리 diff는 빈 결과로 위장하지 않고 에러를 던진다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await mkdir(join(repo, 'newdir'))
+    await writeFixtureFile(repo, 'newdir/inner.txt', 'x\n')
+    await expect(
+      client.changes.diff('newdir/', { staged: false, untracked: true }),
+    ).rejects.toThrow()
+  })
+
+  it('저장소 밖 경로의 untracked diff를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.changes.diff('/etc/hosts', { staged: false, untracked: true }),
+    ).rejects.toThrow()
+    await expect(
+      client.changes.diff('../outside.txt', { staged: false, untracked: true }),
+    ).rejects.toThrow()
+  })
+
+  it('저장소 하위 폴더 경로로 열어도 루트 기준으로 동작한다', async () => {
+    const repo = await createFixtureRepo()
+    await mkdir(join(repo, 'sub'))
+    await writeFixtureFile(repo, 'sub/inner.txt', 'v1\n')
+    const client = createGitClient(join(repo, 'sub'))
+    await client.changes.stage(['sub/inner.txt'])
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'sub/inner.txt')?.staged).toBe('added')
+  })
+
+  it('빈 커밋 메시지는 GitError로 거부된다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await client.changes.stage(['README.md'])
+    await expect(client.commits.create('')).rejects.toBeInstanceOf(GitError)
   })
 })
