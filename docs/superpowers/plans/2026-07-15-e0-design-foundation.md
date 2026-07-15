@@ -1610,6 +1610,10 @@ export function App() {
 .app__repo strong {
   font-size: var(--text-lg);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
 }
 .app__repo-path {
   font-size: var(--text-xs);
