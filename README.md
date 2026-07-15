@@ -13,12 +13,17 @@ IntelliJ의 Git 도구가 제공하는 일상적인 작업 흐름을 출발점�
 - [쉬운 모드 설계](docs/superpowers/specs/2026-07-15-easy-mode-design.md)
 - [기술 스택 설계](docs/superpowers/specs/2026-07-15-tech-stack-design.md)
 
+### 요구사항
+
+Node.js 22 이상, pnpm 10, git 2.28 이상
+
 ### 실행
 
 ```
 pnpm install
 pnpm --filter @git-gui/desktop dev   # 앱 실행
 pnpm test                            # 단위·통합 테스트
+pnpm --filter @git-gui/desktop e2e   # E2E 스모크 (Electron 창 실행)
 ```
 
 ## 핵심 원칙
