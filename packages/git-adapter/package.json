@@ -1,0 +1,12 @@
+{
+  "name": "@git-gui/git-adapter",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@git-gui/domain": "workspace:*",
+    "@git-gui/git-process": "workspace:*"
+  }
+}

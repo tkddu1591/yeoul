@@ -20,6 +20,15 @@ importers:
 
   packages/domain: {}
 
+  packages/git-adapter:
+    dependencies:
+      '@git-gui/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@git-gui/git-process':
+        specifier: workspace:*
+        version: link:../git-process
+
   packages/git-process: {}
 
 packages:
