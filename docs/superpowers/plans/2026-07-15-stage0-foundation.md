@@ -958,6 +958,8 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# changed\n')
     await expect(client.changes.stage([])).rejects.toThrow()
     await expect(client.changes.unstage([])).rejects.toThrow()
+    await expect(client.changes.stage([''])).rejects.toThrow()
+    await expect(client.changes.diff('', { staged: false, untracked: false })).rejects.toThrow()
     const status = await client.repo.status()
     expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBeNull()
   })
@@ -1087,15 +1089,16 @@ const NULL_DEVICE = process.platform === 'win32' ? 'NUL' : '/dev/null'
  * staged-only 내용이 워크트리 내용으로 덮어써지는 유실 경로다.
  */
 function toPathspecs(paths: string[]): string[] {
-  if (paths.length === 0) {
-    throw new Error('빈 경로 목록 — 전체 작업으로 확대되는 것을 막기 위해 거부한다')
+  // 빈 문자열 요소도 ':(literal)' + '' = match-all pathspec으로 전락한다 — 함께 거부
+  if (paths.length === 0 || paths.some((path) => path === '')) {
+    throw new Error('빈 경로 — 전체 작업으로 확대되는 것을 막기 위해 거부한다')
   }
   return paths.map((path) => `:(literal)${path}`)
 }
 
-/** 저장소 루트 상대 경로만 허용한다 — 절대 경로와 상위 탈출(..)을 거부한다 */
+/** 저장소 루트 상대 경로만 허용한다 — 빈 경로, 절대 경로, 상위 탈출(..)을 거부한다 */
 function assertRepoRelative(path: string): void {
-  if (path.startsWith('/') || path.split('/').includes('..')) {
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
     throw new Error(`저장소 밖 경로는 다룰 수 없다: ${path}`)
   }
 }
@@ -1135,8 +1138,8 @@ export function createGitClient(repoPath: string): GitClient {
       },
       async diff(path, options) {
         const cwd = await topLevel()
+        assertRepoRelative(path)
         if (options.untracked) {
-          assertRepoRelative(path)
           // --no-index는 차이가 있으면 exit 1이 정상이지만 접근 실패도 exit 1이다 —
           // stdout 유무로 진짜 diff와 에러를 구분한다 (빈 결과로 위장하지 않는다)
           const args = [
