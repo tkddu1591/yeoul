@@ -16,7 +16,7 @@
 
 **금지 사항(스펙 10장):** 보라 그라데이션 남용, 이모지 아이콘, 과도한 glassmorphism, 임의 색(토큰 밖 색상값). 타입 스케일과 매크로 간격은 토큰을 사용하되, 컴포넌트 내부 미세 수치(패딩 1~2px 조정 등)는 허용한다. 이 계획의 코드가 디자인 정본이다 — 구현자는 임의로 "개선"하지 않는다.
 
-**후속(E0-2/E1) 노트 — 이번 범위 아님:** 앱 내 테마 토글용 `[data-theme]` 셀렉터 병기(지금은 OS 설정 연동만), danger 버튼 hover/bg 토큰 계열(E1 되돌리기 확정 UI에서), 입력 테두리(`--color-border-strong`) 비텍스트 대비 3:1 보강(E1 폼 정비에서).
+**후속(E0-2/E1) 노트 — 이번 범위 아님:** 앱 내 테마 토글용 `[data-theme]` 셀렉터 병기(지금은 OS 설정 연동만), danger 버튼 hover/bg 토큰 계열(E1 되돌리기 확정 UI에서), 입력 테두리(`--color-border-strong`) 비텍스트 대비 3:1 보강(E1 폼 정비에서), 에러 상태 E2E(다이얼로그 스텁으로 role=alert·danger 색 검증), 웰컴 화면 용어 통일("프로젝트 폴더" vs "저장소" — E0-2 문구 정비).
 
 ---
 
@@ -792,7 +792,7 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
           <Pictogram kind="shelf" size={20} />
         </div>
         <h1>Git GUI</h1>
-        <p>
+        <p className="repo-picker__desc">
           프로젝트 폴더를 열면 바뀐 파일을 확인하고
           <br />
           안전하게 저장할 수 있어요.
@@ -825,6 +825,7 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-8) 56px;
+  max-width: 420px; /* 긴 에러 메시지가 카드를 무한 확장시키지 않게 */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -840,7 +841,8 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
   font-size: var(--text-2xl);
   letter-spacing: -0.01em;
 }
-.repo-picker__card p {
+/* 설명문은 전용 클래스로 — 요소 셀렉터(p)는 특이도로 __error를 덮어쓴다 */
+.repo-picker__desc {
   margin: 0 0 var(--space-3);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
