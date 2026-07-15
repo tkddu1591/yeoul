@@ -1,0 +1,73 @@
+.ui-pictogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+.ui-pictogram--mine {
+  color: var(--concept-mine);
+  background: var(--concept-mine-bg);
+}
+.ui-pictogram--branch {
+  color: var(--concept-branch);
+  background: var(--concept-branch-bg);
+}
+.ui-pictogram--commit {
+  color: var(--concept-commit);
+  background: var(--concept-commit-bg);
+}
+.ui-pictogram--shelf {
+  color: var(--concept-shelf);
+  background: var(--concept-shelf-bg);
+}
+.ui-pictogram--backup {
+  color: var(--concept-backup);
+  background: var(--concept-backup-bg);
+}
+.ui-pictogram--conflict {
+  color: var(--concept-conflict);
+  background: var(--concept-conflict-bg);
+}
+
+.ui-change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  flex: none;
+}
+.ui-change-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2.5px;
+  background: var(--color-text-faint);
+}
+.ui-change-badge--modified .ui-change-badge__dot {
+  background: var(--change-modified);
+}
+.ui-change-badge--added .ui-change-badge__dot {
+  background: var(--change-added);
+}
+.ui-change-badge--deleted .ui-change-badge__dot {
+  background: var(--change-deleted);
+}
+.ui-change-badge--renamed .ui-change-badge__dot,
+.ui-change-badge--copied .ui-change-badge__dot {
+  background: var(--change-renamed);
+}
+.ui-change-badge--typechange .ui-change-badge__dot {
+  background: var(--change-modified);
+}
+.ui-change-badge--untracked .ui-change-badge__dot {
+  background: var(--change-untracked);
+}
+.ui-change-badge--conflicted {
+  color: var(--concept-conflict);
+  font-weight: 700;
+}
+.ui-change-badge--conflicted .ui-change-badge__dot {
+  background: var(--concept-conflict);
+}
