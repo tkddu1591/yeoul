@@ -1,0 +1,122 @@
+/* 디자인 토큰 — 모든 색·간격·타이포·모서리·그림자는 여기서만 정의한다.
+   컴포넌트는 var()만 사용한다 (스펙 10장). */
+:root {
+  /* 타이포 */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  /* 간격 (4px 기반) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 모서리·그림자 */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 14px;
+  --shadow-1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-2: 0 6px 16px rgb(16 24 40 / 0.1);
+
+  /* 중립 */
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f8f9fb;
+  --color-border: #e4e7ec;
+  --color-border-strong: #d0d5dd;
+  --color-text: #1c2230;
+  --color-text-muted: #5f6673;
+  --color-text-faint: #98a1b2;
+
+  /* 주 액션·상태 */
+  --color-accent: #2e5ce6;
+  --color-accent-hover: #244fd0;
+  --color-accent-text: #ffffff;
+  --color-danger: #d92d20;
+  --color-focus: #84a4f8;
+
+  /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌) */
+  --concept-mine: #0e7a4e;
+  --concept-mine-bg: #e6f5ec;
+  --concept-branch: #6d4fc4;
+  --concept-branch-bg: #efe9fb;
+  --concept-commit: #2563eb;
+  --concept-commit-bg: #e8f0fe;
+  --concept-shelf: #b97722;
+  --concept-shelf-bg: #fdf1e2;
+  --concept-backup: #0e7490;
+  --concept-backup-bg: #e7f6f8;
+  --concept-conflict: #c2410c;
+  --concept-conflict-bg: #fdeaea;
+
+  /* 변경 종류 */
+  --change-modified: #b97722;
+  --change-added: #0e7a4e;
+  --change-deleted: #d92d20;
+  --change-renamed: #6d4fc4;
+  --change-untracked: #0e7490;
+
+  /* diff */
+  --diff-add-bg: #e9f7ee;
+  --diff-add-text: #14663d;
+  --diff-del-bg: #fdeeee;
+  --diff-del-text: #b42318;
+  --diff-hunk-bg: #eef2ff;
+  --diff-hunk-text: #4f5ec0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #16181d;
+    --color-surface: #1e2128;
+    --color-surface-sunken: #191c22;
+    --color-border: #2c313b;
+    --color-border-strong: #3a4150;
+    --color-text: #e8eaf0;
+    --color-text-muted: #a3abba;
+    --color-text-faint: #6c7686;
+
+    --color-accent: #7c97fb;
+    --color-accent-hover: #93a9fc;
+    --color-accent-text: #10131a;
+    --color-danger: #f97066;
+    --color-focus: #4d69c9;
+
+    --concept-mine: #4ccb8f;
+    --concept-mine-bg: #123527;
+    --concept-branch: #a78bfa;
+    --concept-branch-bg: #2b2440;
+    --concept-commit: #7aa2ff;
+    --concept-commit-bg: #1c2a4a;
+    --concept-shelf: #e2a458;
+    --concept-shelf-bg: #38290f;
+    --concept-backup: #5cc8dc;
+    --concept-backup-bg: #10333b;
+    --concept-conflict: #f08c5a;
+    --concept-conflict-bg: #3d1f12;
+
+    --change-modified: #e2a458;
+    --change-added: #4ccb8f;
+    --change-deleted: #f97066;
+    --change-renamed: #a78bfa;
+    --change-untracked: #5cc8dc;
+
+    --diff-add-bg: #12301f;
+    --diff-add-text: #6fd39b;
+    --diff-del-bg: #3a1a18;
+    --diff-del-text: #f9a8a0;
+    --diff-hunk-bg: #232a4a;
+    --diff-hunk-text: #a5b4fc;
+
+    --shadow-1: 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 6px 16px rgb(0 0 0 / 0.5);
+  }
+}
