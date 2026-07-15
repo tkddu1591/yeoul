@@ -586,7 +586,7 @@ const CONCEPT_PATHS: Record<ConceptKind, ReactNode> = {
   mine: (
     <>
       <path d="M12 3 v18" />
-      <circle cx="12" cy="21" r="1.8" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="21" r="2.2" fill="currentColor" stroke="none" />
     </>
   ),
   branch: (
@@ -607,8 +607,8 @@ const CONCEPT_PATHS: Record<ConceptKind, ReactNode> = {
   ),
   conflict: (
     <>
-      <path d="M12 4 L21 19 H3 z M12 10 v4" />
-      <circle cx="12" cy="16.4" r="1" fill="currentColor" stroke="none" />
+      <path d="M12 4 L21 19 H3 z M12 10 v3" />
+      <circle cx="12" cy="16.6" r="1.15" fill="currentColor" stroke="none" />
     </>
   ),
 }
