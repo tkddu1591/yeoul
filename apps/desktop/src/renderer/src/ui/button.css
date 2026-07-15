@@ -25,6 +25,9 @@
 .ui-button--primary[data-hovered] {
   background: var(--color-accent-hover);
 }
+.ui-button--primary[data-pressed] {
+  background: var(--color-accent-active);
+}
 .ui-button--neutral {
   background: var(--color-surface);
   color: var(--color-text);
@@ -34,6 +37,9 @@
 .ui-button--neutral[data-hovered] {
   border-color: var(--color-text-faint);
 }
+.ui-button--neutral[data-pressed] {
+  background: var(--color-surface-sunken);
+}
 .ui-button--ghost {
   background: transparent;
   color: var(--color-text-muted);
@@ -42,11 +48,11 @@
   background: var(--color-surface-sunken);
   color: var(--color-text);
 }
+.ui-button--ghost[data-pressed] {
+  background: var(--color-border);
+}
 .ui-button[data-disabled] {
   opacity: var(--opacity-disabled);
   cursor: default;
 }
-.ui-button[data-focus-visible] {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
+/* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */

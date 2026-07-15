@@ -11,8 +11,8 @@
 .ui-badge--git {
   font-family: var(--font-mono);
   font-weight: 500;
-  background: var(--concept-commit-bg);
-  color: var(--concept-commit);
+  background: var(--term-badge-bg);
+  color: var(--term-badge);
 }
 .ui-badge--count {
   min-width: 22px;

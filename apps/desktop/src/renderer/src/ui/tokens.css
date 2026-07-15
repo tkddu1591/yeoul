@@ -43,11 +43,16 @@
   /* 주 액션·상태 */
   --color-accent: #2e5ce6;
   --color-accent-hover: #244fd0;
+  --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
   --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
   --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
   --opacity-disabled: 0.45;
+
+  /* Git 원어 병기 배지 — "파란 모노 pill = Git 원어"를 별도 정체성으로 고정 (개념색과 디커플링) */
+  --term-badge: #2563eb;
+  --term-badge-bg: #e8f0fe;
 
   /* 개념 정체성 — 앱 전체 고정 (스펙 10장 시각 언어: 내 작업·실험 공간·저장 시점·보관함·백업·충돌)
      색약(적록)에서 shelf↔conflict, branch↔commit은 색만으로 구분되지 않는다 —
@@ -94,10 +99,13 @@
 
     --color-accent: #7c97fb;
     --color-accent-hover: #93a9fc;
+    --color-accent-active: #a8b9fd;
     --color-accent-text: #10131a;
     --color-danger: #f97066;
     --color-focus: #4d69c9;
     --color-selection-bg: #222c47;
+    --term-badge: #7aa2ff;
+    --term-badge-bg: #1c2a4a;
 
     --concept-mine: #4ccb8f;
     --concept-mine-bg: #123527;
