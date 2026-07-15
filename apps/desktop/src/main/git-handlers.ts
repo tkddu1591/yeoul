@@ -20,10 +20,13 @@ function assertString(value: unknown): string {
 }
 
 function assertStringArray(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+  if (!Array.isArray(value)) throw new Error('잘못된 요청 형식이에요.')
+  // sparse array의 hole은 every가 건너뛰어 통과된다 — 실체화(undefined로 변환)한 뒤 검사한다
+  const items = [...(value as unknown[])]
+  if (!items.every((item): item is string => typeof item === 'string')) {
     throw new Error('잘못된 요청 형식이에요.')
   }
-  return value
+  return items
 }
 
 function assertDiffOptions(value: unknown): DiffOptions {
@@ -36,7 +39,8 @@ function assertDiffOptions(value: unknown): DiffOptions {
   ) {
     throw new Error('잘못된 요청 형식이에요.')
   }
-  return candidate
+  // 잉여 필드가 하류로 밀수되지 않도록 알려진 필드만 복사한다
+  return { staged: candidate.staged, untracked: candidate.untracked }
 }
 
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
@@ -54,7 +58,8 @@ export function registerGitHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null
     const path = result.filePaths[0]!
     const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path })
-    if (check.exitCode !== 0) {
+    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
+    if (check.exitCode !== 0 || check.stdout.trim() !== 'true') {
       throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
     }
     return registerRepoPath(path)
