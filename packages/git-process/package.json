@@ -1,0 +1,8 @@
+{
+  "name": "@git-gui/git-process",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" }
+}
