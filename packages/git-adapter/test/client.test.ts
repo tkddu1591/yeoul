@@ -90,6 +90,8 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# changed\n')
     await expect(client.changes.stage([])).rejects.toThrow()
     await expect(client.changes.unstage([])).rejects.toThrow()
+    await expect(client.changes.stage([''])).rejects.toThrow()
+    await expect(client.changes.diff('', { staged: false, untracked: false })).rejects.toThrow()
     const status = await client.repo.status()
     expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBeNull()
   })
