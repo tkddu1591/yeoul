@@ -6,7 +6,7 @@ IntelliJ의 Git 도구가 제공하는 일상적인 작업 흐름을 출발점�
 
 ## 현재 상태
 
-0단계(기반) 최소 수직 기능이 동작합니다: 저장소 열기, 상태 감지, 변경 파일 목록, diff 보기, stage/unstage, commit.
+0단계(기반) 최소 수직 기능과 E0-1 디자인 기반이 동작합니다: 저장소 열기, 상태 감지, 변경 파일 목록, diff 보기, stage/unstage, commit — 디자인 토큰·픽토그램 시스템·정식 3열 레이아웃 적용.
 
 - [제품 목적과 범위](docs/PRODUCT_VISION.md)
 - [Git 시나리오 카탈로그](docs/GIT_SCENARIOS.md)
@@ -36,8 +36,8 @@ pnpm --filter @git-gui/desktop e2e   # E2E 스모크 (Electron 창 실행)
 
 ## 다음 단계
 
-1. fetch/pull/push와 브랜치 생성·전환 (0단계 마무리)
+1. E0-2: 저장된 역사(log 엔진 + 목록), 백업(push), 저장 메시지 자동 제안
 2. 취소 가능한 Git 프로세스와 실행 로그
-3. E0: 쉬운 모드 2패널 UI와 디자인 토큰 (React Aria)
+3. 1단계: 보관함(stash), 실험 공간(branch) 만들기·합치기
 4. 충돌 및 중단 상태별 테스트 fixture 확장
 
