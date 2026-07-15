@@ -16,7 +16,7 @@
 
 **금지 사항(스펙 10장):** 보라 그라데이션 남용, 이모지 아이콘, 과도한 glassmorphism, 임의 색(토큰 밖 색상값). 타입 스케일과 매크로 간격은 토큰을 사용하되, 컴포넌트 내부 미세 수치(패딩 1~2px 조정 등)는 허용한다. 이 계획의 코드가 디자인 정본이다 — 구현자는 임의로 "개선"하지 않는다.
 
-**후속(E0-2/E1) 노트 — 이번 범위 아님:** 앱 내 테마 토글용 `[data-theme]` 셀렉터 병기(지금은 OS 설정 연동만), danger 버튼 hover/bg 토큰 계열(E1 되돌리기 확정 UI에서), 입력 테두리(`--color-border-strong`) 비텍스트 대비 3:1 보강(E1 폼 정비에서), 에러 상태 E2E(다이얼로그 스텁으로 role=alert·danger 색 검증), 웰컴 화면 용어 통일("프로젝트 폴더" vs "저장소" — E0-2 문구 정비).
+**후속(E0-2/E1) 노트 — 이번 범위 아님:** 앱 내 테마 토글용 `[data-theme]` 셀렉터 병기(지금은 OS 설정 연동만), danger 버튼 hover/bg 토큰 계열(E1 되돌리기 확정 UI에서), 입력 테두리(`--color-border-strong`) 비텍스트 대비 3:1 보강(E1 폼 정비에서), 에러 상태 E2E(다이얼로그 스텁으로 role=alert·danger 색 검증), 웰컴 화면 용어 통일("프로젝트 폴더" vs "저장소" — E0-2 문구 정비), repoName 추출의 Windows 경로 분리자 처리(도메인 유틸로 이동 시), 좁은 창에서 사이드 열 `minmax(280px, …)` 완화, 충돌 마커(`<<<<<<<`) 라인의 별도 시각 처리(E0-2 충돌 UX).
 
 ---
 
@@ -1712,7 +1712,32 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 7: 최종 게이트 + 육안 확인 스크린샷 + README
 
 **Files:**
+- Modify: `apps/desktop/src/main/index.ts` (창 최소 크기), `apps/desktop/src/renderer/src/layout.css` (저장소명 말줄임)
 - Modify: `README.md` ("현재 상태"에 디자인 기반 반영, "다음 단계" 갱신)
+
+- [ ] **Step 0: Task 6 리뷰 반영 — 창 최소 크기·저장소명 말줄임**
+
+`apps/desktop/src/main/index.ts`의 BrowserWindow 옵션에 추가 (700px 이하에서 3열 고정 열이 붕괴하는 것을 실렌더로 확인):
+```ts
+  const window = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 960,
+    minHeight: 600,
+```
+(이하 webPreferences 등 기존 그대로)
+
+`apps/desktop/src/renderer/src/layout.css`의 `.app__repo strong` 교체:
+```css
+.app__repo strong {
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+```
 
 - [ ] **Step 1: 전체 게이트**
 
