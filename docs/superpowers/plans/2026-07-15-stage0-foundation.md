@@ -1678,15 +1678,29 @@ interface RepositoryStore {
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
-  commit(message: string): Promise<void>
+  /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
+  commit(message: string): Promise<boolean>
 }
 
-async function guard(set: (partial: Partial<RepositoryStore>) => void, run: () => Promise<void>) {
+/** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 */
+function toErrorMessage(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+}
+
+type StoreSet = (partial: Partial<RepositoryStore>) => void
+type StoreGet = () => RepositoryStore
+
+/** busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다 */
+async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Promise<boolean> {
+  if (get().busy) return false
   set({ busy: true, error: null })
   try {
     await run()
+    return true
   } catch (cause) {
-    set({ error: cause instanceof Error ? cause.message : String(cause) })
+    set({ error: toErrorMessage(cause) })
+    return false
   } finally {
     set({ busy: false })
   }
@@ -1701,53 +1715,53 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   busy: false,
 
   async init() {
-    const initial = await git().repo.initialPath()
-    if (initial) {
-      set({ repoPath: initial })
-      await get().refresh()
-    }
+    await guard(set, get, async () => {
+      const initial = await git().repo.initialPath()
+      if (!initial) return
+      set({ repoPath: initial, status: await git().repo.status(initial) })
+    })
   },
 
   async openRepository() {
-    await guard(set, async () => {
+    await guard(set, get, async () => {
       const path = await git().repo.select()
       if (!path) return
-      set({ repoPath: path, selected: null, diffText: '' })
-      await get().refresh()
+      // guard가 재진입을 거부하므로 refresh()를 부르지 않고 status를 직접 조회한다
+      set({ repoPath: path, selected: null, diffText: '', status: await git().repo.status(path) })
     })
   },
 
   async refresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, async () => {
-      const status = await git().repo.status(repoPath)
-      set({ status })
+    await guard(set, get, async () => {
+      set({ status: await git().repo.status(repoPath) })
     })
   },
 
   async stage(paths) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, async () => {
+    await guard(set, get, async () => {
       await git().changes.stage(repoPath, paths)
-      set({ status: await git().repo.status(repoPath) })
+      // stage 후에는 보고 있던 diff의 의미가 달라진다(오인 커밋 방지) — 선택을 비운다
+      set({ selected: null, diffText: '', status: await git().repo.status(repoPath) })
     })
   },
 
   async unstage(paths) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, async () => {
+    await guard(set, get, async () => {
       await git().changes.unstage(repoPath, paths)
-      set({ status: await git().repo.status(repoPath) })
+      set({ selected: null, diffText: '', status: await git().repo.status(repoPath) })
     })
   },
 
   async selectFile(selected) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, async () => {
+    await guard(set, get, async () => {
       const untracked = selected.change.unstaged === 'untracked'
       const diffText = await git().changes.diff(repoPath, selected.change.path, {
         staged: selected.staged,
@@ -1759,8 +1773,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async commit(message) {
     const { repoPath } = get()
-    if (!repoPath) return
-    await guard(set, async () => {
+    if (!repoPath) return false
+    return guard(set, get, async () => {
       await git().commits.create(repoPath, message)
       set({ selected: null, diffText: '', status: await git().repo.status(repoPath) })
     })
@@ -1798,12 +1812,14 @@ import type { SelectedFile } from '../store/repository-store'
 interface ChangesPanelProps {
   changes: FileChange[]
   selected: SelectedFile | null
+  /** 작업 중에는 모든 버튼을 비활성화한다 — 연타로 git 작업이 겹치면 index.lock 충돌이 난다 */
+  busy: boolean
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
   onSelect(selected: SelectedFile): void
 }
 
-export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }: ChangesPanelProps) {
+export function ChangesPanel({ changes, selected, busy, onStage, onUnstage, onSelect }: ChangesPanelProps) {
   const stagedChanges = changes.filter((c) => c.staged !== null)
   const unstagedChanges = changes.filter((c) => c.unstaged !== null)
 
@@ -1817,10 +1833,15 @@ export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }
               key={`staged-${change.path}`}
               className={selected?.staged && selected.change.path === change.path ? 'selected' : ''}
             >
-              <button type="button" className="file" onClick={() => onSelect({ change, staged: true })}>
+              <button
+                type="button"
+                className="file"
+                disabled={busy}
+                onClick={() => onSelect({ change, staged: true })}
+              >
                 {change.path} <em>{change.staged}</em>
               </button>
-              <button type="button" onClick={() => onUnstage([change.path])}>
+              <button type="button" disabled={busy} onClick={() => onUnstage([change.path])}>
                 내리기
               </button>
             </li>
@@ -1835,10 +1856,15 @@ export function ChangesPanel({ changes, selected, onStage, onUnstage, onSelect }
               key={`unstaged-${change.path}`}
               className={selected && !selected.staged && selected.change.path === change.path ? 'selected' : ''}
             >
-              <button type="button" className="file" onClick={() => onSelect({ change, staged: false })}>
+              <button
+                type="button"
+                className="file"
+                disabled={busy}
+                onClick={() => onSelect({ change, staged: false })}
+              >
                 {change.path} <em>{change.unstaged}</em>
               </button>
-              <button type="button" onClick={() => onStage([change.path])}>
+              <button type="button" disabled={busy} onClick={() => onStage([change.path])}>
                 올리기
               </button>
             </li>
@@ -1875,7 +1901,7 @@ import { useState } from 'react'
 interface CommitFormProps {
   stagedCount: number
   busy: boolean
-  onCommit(message: string): void
+  onCommit(message: string): Promise<boolean>
 }
 
 export function CommitForm({ stagedCount, busy, onCommit }: CommitFormProps) {
@@ -1887,8 +1913,10 @@ export function CommitForm({ stagedCount, busy, onCommit }: CommitFormProps) {
       className="commit-form"
       onSubmit={(event) => {
         event.preventDefault()
-        onCommit(message)
-        setMessage('')
+        // 커밋이 실패하면(훅 거부, 충돌 상태 등) 입력한 메시지를 보존한다
+        void onCommit(message).then((committed) => {
+          if (committed) setMessage('')
+        })
       }}
     >
       <textarea
@@ -1948,13 +1976,18 @@ export function App() {
         <ChangesPanel
           changes={status?.changes ?? []}
           selected={store.selected}
+          busy={store.busy}
           onStage={(paths) => void store.stage(paths)}
           onUnstage={(paths) => void store.unstage(paths)}
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="right">
           <DiffPanel path={store.selected?.change.path ?? null} diffText={store.diffText} />
-          <CommitForm stagedCount={stagedCount} busy={store.busy} onCommit={(m) => void store.commit(m)} />
+          <CommitForm
+            stagedCount={stagedCount}
+            busy={store.busy}
+            onCommit={(message) => store.commit(message)}
+          />
         </div>
       </main>
     </div>
