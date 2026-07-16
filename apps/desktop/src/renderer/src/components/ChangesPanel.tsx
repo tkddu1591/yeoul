@@ -8,6 +8,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import './changes-panel.css'
+import './virtual.css'
 
 interface ChangesPanelProps {
   changes: FileChange[]

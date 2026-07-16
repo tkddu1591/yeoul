@@ -3,6 +3,7 @@ import { useRef } from 'react'
 import type { DiffLine, FileDiff } from '@git-gui/domain'
 import { buildDiffRows } from './diff-rows'
 import './diff-panel.css'
+import './virtual.css'
 
 interface DiffViewProps {
   diff: FileDiff

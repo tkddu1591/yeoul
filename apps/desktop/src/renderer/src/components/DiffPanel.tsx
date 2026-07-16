@@ -53,7 +53,8 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       }
       testId="diff-panel"
     >
-      <DiffView diff={diff} view={view} />
+      {/* key=path — 파일 전환 시 스크롤 위치와 가상 측정 캐시를 리셋한다 (이전 파일 끝에서 열리는 것 방지) */}
+      <DiffView key={path} diff={diff} view={view} />
     </Panel>
   )
 }
