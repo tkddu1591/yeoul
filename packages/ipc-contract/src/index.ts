@@ -1,4 +1,4 @@
-import type { DiffOptions, RepositoryStatus } from '@git-gui/domain'
+import type { CommitSummary, DiffOptions, RepositoryStatus } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
 
@@ -25,6 +25,14 @@ export interface GitApi {
   commits: {
     create(repoPath: string, message: string): Promise<void>
   }
+  history: {
+    /** 최신순 커밋 요약 (limit 1~500) */
+    list(repoPath: string, limit: number): Promise<CommitSummary[]>
+  }
+  sync: {
+    /** 현재 브랜치를 원격으로 백업(push). 원격이 없으면 에러 */
+    push(repoPath: string): Promise<void>
+  }
 }
 
 export const GIT_API_KEY = 'gitApi' as const
@@ -37,4 +45,6 @@ export const CHANNELS = {
   changesUnstage: 'changes:unstage',
   changesDiff: 'changes:diff',
   commitsCreate: 'commits:create',
+  historyList: 'history:list',
+  syncPush: 'sync:push',
 } as const

@@ -43,6 +43,13 @@ function assertDiffOptions(value: unknown): DiffOptions {
   return { staged: candidate.staged, untracked: candidate.untracked }
 }
 
+function assertLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 500) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
 async function registerRepoPath(path: string): Promise<string> {
   const topLevel = (
@@ -94,5 +101,13 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.commitsCreate, (_event, repoPath: unknown, message: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).commits.create(assertString(message)),
+  )
+
+  ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).history.list(assertLimit(limit)),
+  )
+
+  ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).sync.push(),
   )
 }

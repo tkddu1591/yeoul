@@ -17,6 +17,12 @@ const api: GitApi = {
   commits: {
     create: (repoPath, message) => ipcRenderer.invoke(CHANNELS.commitsCreate, repoPath, message),
   },
+  history: {
+    list: (repoPath, limit) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit),
+  },
+  sync: {
+    push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),
+  },
 }
 
 contextBridge.exposeInMainWorld(GIT_API_KEY, api)
