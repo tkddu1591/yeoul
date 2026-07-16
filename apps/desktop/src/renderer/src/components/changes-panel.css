@@ -1,6 +1,7 @@
-/* 가상 리스트 공통 — 스크롤 컨테이너는 flex 잔여 공간을 차지하고, 행은 절대 배치로 쌓인다 */
+/* 가상 리스트 공통 — 스크롤 컨테이너는 flex 잔여 공간을 차지하고, 행은 절대 배치로 쌓인다.
+   panel body의 자식 flex:none 규칙은 :where(특이도 0)라 이 클래스가 결정적으로 이긴다 */
 .virtual-scroll {
-  flex: 1 1 auto !important;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
@@ -39,9 +40,8 @@
 .file-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   border-radius: var(--radius-sm);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-3) 0 0;
   width: 100%;
 }
 .file-row--selected {
@@ -120,6 +120,21 @@
 .file-list__check-all input {
   accent-color: var(--color-accent);
   cursor: pointer;
+}
+/* 가로 스크롤 중에도 체크박스는 왼쪽에 고정 — 칩 배경이 밑을 지나는 텍스트를 가린다 */
+.file-row__checkcell {
+  flex: none;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--color-surface);
+}
+.file-row--selected .file-row__checkcell {
+  background: var(--color-selection-bg);
 }
 .file-row__check {
   flex: none;

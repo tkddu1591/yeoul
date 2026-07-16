@@ -51,15 +51,18 @@ function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSele
   const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
   return (
     <div className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
-      <input
-        type="checkbox"
-        className="file-row__check"
-        checked={isChecked}
-        onChange={onToggle}
-        disabled={busy}
-        aria-label={`${change.path} 선택`}
-        data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
-      />
+      {/* 칩(sticky) — 가로 스크롤 중에도 체크박스가 왼쪽에 남는다 */}
+      <span className="file-row__checkcell">
+        <input
+          type="checkbox"
+          className="file-row__check"
+          checked={isChecked}
+          onChange={onToggle}
+          disabled={busy}
+          aria-label={`${change.path} 선택`}
+          data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+        />
+      </span>
       <button
         type="button"
         className={`file-row__main file-row__main--${kind ?? 'none'}`}
