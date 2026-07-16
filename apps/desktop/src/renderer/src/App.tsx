@@ -2,11 +2,12 @@ import { CloudUpload, RefreshCw } from 'lucide-react'
 import { useEffect } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { ChangesPanel } from './components/ChangesPanel'
+import { CommitDetailPanel } from './components/CommitDetailPanel'
 import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { RepoPicker } from './components/RepoPicker'
-import { HISTORY_LIMIT, useRepositoryStore } from './store/repository-store'
+import { useRepositoryStore } from './store/repository-store'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
@@ -104,12 +105,23 @@ export function App() {
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">
-          <DiffPanel
-            path={store.selected?.change.path ?? null}
-            diff={store.diff}
-            busy={store.busy}
-            onClose={() => store.clearSelection()}
-          />
+          {store.commitDetail !== null ? (
+            <CommitDetailPanel
+              detail={store.commitDetail}
+              selectedFile={store.commitFile}
+              diff={store.diff}
+              busy={store.busy}
+              onSelectFile={(file) => void store.selectCommitFile(file)}
+              onClose={() => store.clearCommit()}
+            />
+          ) : (
+            <DiffPanel
+              path={store.selected?.change.path ?? null}
+              diff={store.diff}
+              busy={store.busy}
+              onClose={() => store.clearSelection()}
+            />
+          )}
           <CommitForm
             stagedCount={stagedCount}
             busy={store.busy}
@@ -117,7 +129,15 @@ export function App() {
             onCommit={(message) => store.commit(message)}
           />
         </div>
-        <HistoryPanel history={store.history} limit={HISTORY_LIMIT} />
+        <HistoryPanel
+          history={store.history}
+          historyLimit={store.historyLimit}
+          currentBranch={status?.branch.name ?? null}
+          selectedHash={store.commitDetail?.hash ?? null}
+          busy={store.busy}
+          onSelect={(hash) => void store.selectCommit(hash)}
+          onLoadMore={() => void store.loadMoreHistory()}
+        />
       </main>
     </div>
   )

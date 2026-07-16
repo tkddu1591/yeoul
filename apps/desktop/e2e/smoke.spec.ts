@@ -191,3 +191,58 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('커밋을 누르면 전체 메시지·바뀐 파일·diff가 보인다', async () => {
+  const repo = await createRepoWithChange()
+  // 본문 있는 커밋을 하나 더 쌓는다 — 상세에서 본문 표시를 검증한다
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(
+    ['commit', '-m', '두 번째 저장', '-m', '자세한 설명 줄'],
+    { cwd: repo },
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    // 최신 커밋 클릭 → 상세: 제목·본문·파일 목록
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
+    await expect(window.getByTestId('commit-detail-body')).toHaveText('자세한 설명 줄')
+    await expect(window.getByTestId('commit-detail-file-count')).toHaveText('1')
+    // 파일 클릭 → diff (v1 → v2 수정이 보인다)
+    await window.getByTestId('commit-file-app.txt').click()
+    await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
+    // 닫기 → 원래 diff 패널로 복귀
+    await window.getByTestId('commit-detail-close').click()
+    await expect(window.getByTestId('diff-panel')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('스크롤 끝에서 저장 역사를 더 불러온다 (50개 제한 해제)', async () => {
+  const repo = await createRepoWithChange()
+  for (let i = 0; i < 60; i += 1) {
+    await execGitOrThrow(['commit', '--allow-empty', '-m', `bulk ${i}`], { cwd: repo })
+  }
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('50+')
+    // 히스토리 스크롤을 끝까지 내리면 다음 페이지를 불러온다 (⑩)
+    await window.getByTestId('history-scroll').evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    await expect(window.getByTestId('history-count')).toHaveText('61')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

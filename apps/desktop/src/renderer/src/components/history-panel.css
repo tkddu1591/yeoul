@@ -15,11 +15,10 @@
 .history-panel__list {
   list-style: none;
   margin: 0;
-  padding: var(--space-2) 0;
-  position: relative;
+  padding: 0;
 }
-/* 커넥터는 항목 단위로 그린다 — 첫 점 위·마지막 점 아래에 선이 남지 않는다 (#5) */
-.history-item:not(:last-child)::after {
+/* 커넥터는 항목 단위로 그린다 — 가상화에서 :last-child가 전체의 끝이 아니므로 JS가 클래스로 판정한다 (#5) */
+.history-item--connected::after {
   content: '';
   position: absolute;
   left: 16px;
@@ -29,13 +28,9 @@
   background: var(--color-border);
 }
 /* 목록이 상한에 잘렸을 때만: 마지막 점 아래로 흐려지며 이어지는 표시 */
-.history-panel__list--truncated .history-item:last-child::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  top: 21px;
+.history-item--truncated::after {
+  bottom: auto;
   height: 16px;
-  width: 2px;
   background: linear-gradient(var(--color-border), transparent);
 }
 .history-item {
@@ -44,6 +39,23 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   position: relative;
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.history-item:hover:not(:disabled) {
+  background: var(--color-surface-sunken);
+}
+.history-item--selected,
+.history-item--selected:hover:not(:disabled) {
+  background: var(--color-selection-bg);
+}
+.history-item:disabled {
+  cursor: default;
 }
 .history-item__dot {
   width: 9px;
@@ -56,7 +68,7 @@
   position: relative;
   z-index: 1;
 }
-.history-item:first-child .history-item__dot {
+.history-item--head .history-item__dot {
   background: var(--concept-commit);
 }
 .history-item__body {
@@ -65,12 +77,51 @@
   min-width: 0;
   flex: 1;
 }
+.history-item__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+/* 브랜치/태그 배지 (#7) — 이 커밋이 어느 실험 공간의 끝인지 보여준다 */
+.history-item__ref {
+  flex: none;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+.history-item__ref--head {
+  background: var(--color-selection-bg);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+/* 병합 커밋 표시 (#7) — 두 흐름이 합쳐진 저장임을 알린다 */
+.history-item__mergemark {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  color: var(--concept-branch);
+}
 .history-item__subject {
   font-size: var(--text-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .history-item__meta {
   font-size: var(--text-xs);
