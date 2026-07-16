@@ -39,23 +39,37 @@ apps/desktop/test/tokens-contrast.test.ts     # change-* 대비 쌍 추가
 ### Task 1: FileRow — IntelliJ식 파일명 색상과 오버플로 수정 (#2·#3)
 
 **Files:**
-- Modify: `apps/desktop/test/tokens-contrast.test.ts` (change-* 대비 쌍 5개 추가)
+- Modify: `apps/desktop/test/tokens-contrast.test.ts` (change-* 대비 쌍 — surface 5 + selection-bg 6)
+- Modify: `apps/desktop/src/renderer/src/ui/tokens.css` (라이트 change-modified/deleted 교정)
 - Modify: `apps/desktop/src/renderer/src/components/ChangesPanel.tsx`, `components/changes-panel.css`
+- Modify: `apps/desktop/src/renderer/src/ui/Pictogram.tsx`, `ui/pictogram.css` (죽은 코드 제거 — ChangeKindBadge·CHANGE_LABELS·.ui-change-badge 규칙: 이 커밋으로 사용처가 사라짐)
 
 - [ ] **Step 1: 대비 회귀 테스트에 파일명 색 쌍 먼저 추가**
 
 `apps/desktop/test/tokens-contrast.test.ts`의 PAIRS에서 `['--term-badge', '--term-badge-bg', 4.5],` 다음에 추가:
 ```ts
-  // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요
+  // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요.
+  // 선택 행(selection-bg) 위에서도 읽혀야 한다 — 사용자가 지금 보고 있는 바로 그 행이다.
   ['--change-modified', '--color-surface', 4.5],
   ['--change-added', '--color-surface', 4.5],
   ['--change-deleted', '--color-surface', 4.5],
   ['--change-renamed', '--color-surface', 4.5],
   ['--change-untracked', '--color-surface', 4.5],
+  ['--change-modified', '--color-selection-bg', 4.5],
+  ['--change-added', '--color-selection-bg', 4.5],
+  ['--change-deleted', '--color-selection-bg', 4.5],
+  ['--change-renamed', '--color-selection-bg', 4.5],
+  ['--change-untracked', '--color-selection-bg', 4.5],
+  ['--concept-conflict', '--color-selection-bg', 4.5],
 ```
 
 Run: `pnpm test`
-Expected: **112 tests** — 통과 여부 확인. 실패하는 쌍이 있으면 우회하지 말고 실패 값을 보고하라(토큰 교정은 코디네이터 결정).
+Expected: **124 tests** — 라이트 테마에서 `--change-modified`(4.42:1)·`--change-deleted`(4.16:1) vs selection-bg 쌍이 실패해야 한다(TDD Red). 확인 후 `apps/desktop/src/renderer/src/ui/tokens.css`의 라이트 값 두 개를 교정한다:
+```
+  --change-modified: #8f5a17;
+  --change-deleted: #c62a1e;
+```
+(다크 값·나머지 색은 이미 통과 — 변경 금지. `--color-danger`는 별개 토큰이므로 그대로.) 재실행 → 124 tests 전부 통과.
 
 - [ ] **Step 2: ChangesPanel — 배지 제거, 파일명 색상, 오버플로 수정**
 
@@ -99,10 +113,27 @@ interface FileRowProps {
   onAction(): void
 }
 
+/** 색과 함께 쓰는 형태 신호 — 색약(적록)에서 modified/added 색이 수렴해도 글자로 구분된다 */
+const KIND_GLYPHS: Record<ChangeKind, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  renamed: 'R',
+  copied: 'C',
+  typechange: 'T',
+  untracked: 'U',
+  conflicted: '!',
+}
+
 function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const actionLabel = staged ? '내리기' : '올리기'
   const kindLabel = kind ? KIND_LABELS[kind] : ''
+  // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
+  const tooltip =
+    kind === 'renamed' && change.origPath !== null
+      ? `${change.origPath} → ${change.path} — ${kindLabel}`
+      : `${change.path} — ${kindLabel}`
   // 좁은 열에서 파일명이 먼저 잘리지 않도록 디렉터리와 파일명을 분리해 디렉터리부터 축소한다
   const slashIndex = change.path.lastIndexOf('/')
   const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex + 1) : ''
@@ -114,11 +145,13 @@ function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileR
         className={`file-row__main file-row__main--${kind ?? 'none'}`}
         disabled={busy}
         onClick={onSelect}
-        title={`${change.path} — ${kindLabel}`}
-        aria-label={`${change.path} (${kindLabel})`}
+        title={tooltip}
+        aria-label={tooltip}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
       >
-        <span className="file-row__kind-dot" aria-hidden="true" />
+        <span className="file-row__kind" aria-hidden="true">
+          {kind ? KIND_GLYPHS[kind] : ''}
+        </span>
         <span className="file-row__name">
           {directory && <span className="file-row__dir">{directory}</span>}
           <span className="file-row__base">{basename}</span>
@@ -275,21 +308,25 @@ export function ChangesPanel({
 .file-row--selected .file-row__main:hover:not(:disabled) {
   background: transparent;
 }
-/* 변경 종류 = 파일명 색 + 선행 점 (IntelliJ식). 색 단독 금지 원칙은 점+title+aria-label로 충족 */
-.file-row__kind-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 2.5px;
-  background: currentColor;
+/* 변경 종류 = 파일명 색 + 선행 글리프(M/A/D/R/C/T/U/!) — 색약에서도 형태로 구분된다 (스펙 10장) */
+.file-row__kind {
   flex: none;
+  width: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: currentColor;
 }
 .file-row__main--modified,
 .file-row__main--typechange {
   color: var(--change-modified);
 }
-.file-row__main--added,
-.file-row__main--untracked {
+.file-row__main--added {
   color: var(--change-added);
+}
+.file-row__main--untracked {
+  color: var(--change-untracked);
 }
 .file-row__main--deleted {
   color: var(--change-deleted);
@@ -353,15 +390,17 @@ export function ChangesPanel({
 
 - [ ] **Step 3: 검증**
 
+Step 2.5: 죽은 코드 제거 — `ui/Pictogram.tsx`에서 `CHANGE_LABELS`·`ChangeKindBadge`와 `ChangeKind` import 제거(개념 Pictogram만 남긴다), `ui/pictogram.css`에서 `.ui-change-badge` 관련 규칙 전부 제거.
+
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 112 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0 (E2E 셀렉터는 data-testid 기반이라 배지 제거와 무관)
+Expected: 124 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0 (E2E 셀렉터는 data-testid 기반이라 배지 제거와 무관)
 
 추가 육안: 매우 긴 파일명(`veryveryverylongfilename-that-overflows-everything.tsx`)과 깊은 경로 fixture로 dev를 띄워 액션 버튼이 밀리지 않는지 스크린샷 확인 (일회성 스크립트, 커밋 미포함).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add apps/desktop/test/tokens-contrast.test.ts apps/desktop/src/renderer/src/components/ChangesPanel.tsx apps/desktop/src/renderer/src/components/changes-panel.css
+git add apps/desktop/test/tokens-contrast.test.ts apps/desktop/src/renderer/src/components apps/desktop/src/renderer/src/ui
 git commit -m "feat(desktop): 파일 행 IntelliJ식 색상 표기와 오버플로 수정
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -946,7 +985,7 @@ git rm apps/desktop/src/renderer/src/components/diff-lines.ts apps/desktop/test/
 - [ ] **Step 7: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: **114 tests** (112 + 파서 7 − diff-lines 5), typecheck 5, build, E2E 2 passed — 전부 exit 0
+Expected: **126 tests** (124 + 파서 7 − diff-lines 5), typecheck 5, build, E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 8: Commit**
 
@@ -1214,7 +1253,7 @@ export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
 - [ ] **Step 5: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: **119 tests** (114 + split 5), typecheck 5, build, E2E 2 passed — 전부 exit 0
+Expected: **131 tests** (126 + split 5), typecheck 5, build, E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -1232,7 +1271,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 119 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
+Expected: 131 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
