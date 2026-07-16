@@ -332,6 +332,10 @@ export function parseLog(rawOutput: string): CommitSummary[] {
 
     const limited = await client.history.list(1)
     expect(limited.map((c) => c.subject)).toEqual(['두 번째 저장'])
+
+    // NaN 같은 비유한수는 기본값(50)으로 동작해야 한다 — --max-count=NaN 방지
+    const withNaN = await client.history.list(Number.NaN)
+    expect(withNaN.map((c) => c.subject)).toEqual(['두 번째 저장', 'init'])
   })
 
   it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {
@@ -370,10 +374,14 @@ import {
     history: {
       async list(limit) {
         const cwd = await topLevel()
-        const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500)
+        // NaN은 min/max를 그대로 통과한다 — 유한수가 아니면 기본값으로
+        const safeLimit = Number.isFinite(limit)
+          ? Math.min(Math.max(Math.trunc(limit), 1), 500)
+          : 50
         const args = [
           'log',
           `--max-count=${safeLimit}`,
+          '--no-show-signature',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',
           '-z',
         ]
@@ -411,6 +419,23 @@ Expected: **92 tests** (85 + 파서 5 + history 2), typecheck 5개 — 전부 ex
 ```bash
 git add packages/git-adapter
 git commit -m "feat(git-adapter): log 파서와 history.list — unborn은 빈 목록
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 8 (리뷰 반영): git-process 로케일 고정**
+
+unborn 감지가 stderr 문자열 매칭인데, 번역 카탈로그가 있는 git(Homebrew·Linux) + 한국어 로케일에서는 메시지가 번역되어 오판된다. `packages/git-process/src/exec.ts`의 env 주입에 한 줄 추가:
+```ts
+  env.GIT_TERMINAL_PROMPT = '0'
+  env.GIT_OPTIONAL_LOCKS = '0'
+  env.GIT_EDITOR = 'true' // 에디터를 여는 명령이 GUI를 행시키지 않도록
+  env.LC_ALL = 'C' // stderr 메시지를 영어로 고정 — unborn 감지 등 문자열 매칭의 로케일 의존 제거
+```
+커밋:
+```bash
+git add packages/git-process/src/exec.ts
+git commit -m "fix(git-process): LC_ALL=C 고정 — stderr 문자열 매칭의 로케일 의존 제거
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
