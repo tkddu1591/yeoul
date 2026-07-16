@@ -12,7 +12,7 @@
 
 **이번 범위가 아닌 것 (E0-1 후속 노트에서 이관하지 않는 항목 포함):** 히스토리 점진 로딩("더 보기" — 지금은 최근 50개), push 진행률·취소(네트워크 원격은 1단계 취소 가능 프로세스와 함께), AI 메시지 제안(스펙상 선택 옵션 — 후속), 테마 토글, 충돌 마커 시각 처리. **백업 버튼의 위험 표시**: 이번 push는 force가 아니므로 위험 동작 구분 불필요.
 
-**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단). 동시 push 재호출은 renderer busy가 1차 방어 — main 쪽 per-repo in-flight dedupe는 1단계 push 진행률 작업과 함께.
+**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단). 동시 push 재호출은 renderer busy가 1차 방어 — main 쪽 per-repo in-flight dedupe는 1단계 push 진행률 작업과 함께. 히스토리가 정확히 50개면 "50+"로 표기된다(51개째 존재 여부 미구분 — "더 보기" 도입 시 limit+1 조회로 해소). 헤더 백업 버튼은 Lucide 아이콘 사용 — 개념 픽토그램(backup 청록)과의 통일은 백업이 다른 화면에 등장하는 E1에서 결정.
 
 ---
 
@@ -1053,7 +1053,7 @@ export function HistoryPanel({ history, limit }: HistoryPanelProps) {
   content: '';
   position: absolute;
   left: 16px;
-  top: var(--space-3);
+  top: 25px; /* 첫 점 중심에서 시작 — 최신 시점 "위"로 역사가 이어지는 인상 방지 */
   bottom: var(--space-3);
   width: 2px;
   background: var(--color-border);
@@ -1148,6 +1148,12 @@ export function CommitForm({ stagedCount, busy, suggestion, onCommit }: CommitFo
         placeholder={suggestion || '무엇을 바꿨는지 적어 주세요'}
         rows={3}
       />
+      {message.trim().length === 0 && suggestion.length > 0 && (
+        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 저장 문구임을 알린다
+        <p className="commit-form__hint" data-testid="commit-hint">
+          비워 두고 저장하면 위 제안 문구로 저장돼요
+        </p>
+      )}
       <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
         저장하기 — {stagedCount}개 파일
       </Button>
@@ -1315,8 +1321,24 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 7: E2E 확장 + 최종 게이트 + README + 스크린샷
 
 **Files:**
+- Modify: `apps/desktop/src/renderer/src/components/CommitForm.tsx`, `commit-form.css`, `components/history-panel.css` (Task 6 리뷰 반영)
 - Modify: `apps/desktop/e2e/smoke.spec.ts` (전체 교체 — 테스트 2개)
 - Modify: `README.md`
+
+- [ ] **Step 0: Task 6 리뷰 반영 — 제안 안내 캡션·타임라인 레일 정렬**
+
+`CommitForm.tsx`를 플랜 Task 6의 갱신 블록과 일치시킨다 — textarea와 Button 사이에 조건부 캡션 추가(주석·data-testid="commit-hint" 포함).
+
+`commit-form.css` 끝에 추가:
+```css
+.commit-form__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+```
+
+`history-panel.css`의 `.history-panel__list::before`를 플랜 Task 6 갱신 블록과 일치 — `top: 25px` + 주석.
 
 - [ ] **Step 1: E2E 전체 교체**
 
@@ -1414,11 +1436,12 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
     await window.getByTestId('stage-app.txt').click()
     await expect(window.getByTestId('staged-count')).toHaveText('1')
 
-    // 제안이 placeholder로 보인다
+    // 제안이 placeholder로 보이고, 빈 채로 저장하면 그 문구로 저장된다는 안내가 뜬다
     await expect(window.getByTestId('commit-message')).toHaveAttribute(
       'placeholder',
       'app.txt 수정',
     )
+    await expect(window.getByTestId('commit-hint')).toBeVisible()
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
     await window.getByTestId('commit-button').click()
