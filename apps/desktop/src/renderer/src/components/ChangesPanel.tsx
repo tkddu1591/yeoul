@@ -1,5 +1,5 @@
 import { CircleMinus, CirclePlus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChangeKind, FileChange } from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
@@ -39,6 +39,14 @@ const KIND_GLYPHS: Record<ChangeKind, string> = {
   typechange: 'T',
   untracked: 'U',
   conflicted: '!',
+}
+
+/** 이름 변경은 새 경로와 원래 경로가 index에 쌍으로 있다 — 함께 넘겨야 반쪽 unstage가 안 된다 */
+function actionPaths(change: FileChange, staged: boolean): string[] {
+  if (staged && change.staged === 'renamed' && change.origPath !== null) {
+    return [change.path, change.origPath]
+  }
+  return [change.path]
 }
 
 interface FileRowProps {
@@ -150,9 +158,17 @@ function FileList({
 }: FileListProps) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
   // 목록에서 사라진 경로는 체크에서 자동 제외한다 — stage/unstage 후 잔존 방지
-  const validChecked = changes.filter((c) => checked.has(c.path)).map((c) => c.path)
+  const validChecked = changes.filter((c) => checked.has(c.path))
   const allChecked = changes.length > 0 && validChecked.length === changes.length
   const side = staged ? 'staged' : 'unstaged'
+
+  // 사라졌던 경로가 목록에 돌아와도 저절로 다시 체크되지 않게, 목록 변경 시 stale 경로를 정리한다
+  useEffect(() => {
+    setChecked((prev) => {
+      const valid = new Set(changes.filter((c) => prev.has(c.path)).map((c) => c.path))
+      return valid.size === prev.size ? prev : valid
+    })
+  }, [changes])
 
   const toggle = (path: string) => {
     setChecked((prev) => {
@@ -166,7 +182,7 @@ function FileList({
     setChecked(allChecked ? new Set() : new Set(changes.map((c) => c.path)))
   }
   const runBulk = () => {
-    onAction(validChecked)
+    onAction(validChecked.flatMap((change) => actionPaths(change, staged)))
     setChecked(new Set())
   }
 
@@ -229,7 +245,7 @@ function FileList({
                 busy={busy}
                 onToggle={() => toggle(change.path)}
                 onSelect={() => onSelect({ change, staged })}
-                onAction={() => onAction([change.path])}
+                onAction={() => onAction(actionPaths(change, staged))}
               />
             ))}
           </ul>

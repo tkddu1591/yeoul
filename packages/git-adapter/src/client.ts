@@ -72,7 +72,10 @@ export function createGitClient(repoPath: string): GitClient {
     repo: {
       async status() {
         const cwd = await topLevel()
-        const raw = await execGitOrThrow(['status', '--porcelain=v2', '--branch', '-z'], { cwd })
+        // -uall: 미추적 디렉터리를 접지 않고 파일 단위로 나열한다 — 접힌 `dir/` 행은
+        // 이름 없는 행·diff 에러·stage/unstage 왕복 시 경로 정체성 문제를 만든다.
+        // (알려진 한계: 거대한 미추적 트리는 행이 폭발한다 — E0-3b 가상화에서 흡수)
+        const raw = await execGitOrThrow(['status', '--porcelain=v2', '--branch', '-uall', '-z'], { cwd })
         const parsed = parseStatusV2(raw.stdout)
         const gitDir = (
           await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })

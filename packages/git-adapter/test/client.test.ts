@@ -112,6 +112,16 @@ describe('GitClient', () => {
     expect(status.changes.find((c) => c.path === 'axx.txt')?.unstaged).toBe('untracked')
   })
 
+  it('status — 미추적 디렉터리는 접히지 않고 개별 파일로 나열된다 (-uall)', async () => {
+    const repo = await createFixtureRepo()
+    await mkdir(join(repo, 'newdir'))
+    await writeFixtureFile(repo, 'newdir/inner.txt', 'x\n')
+    const status = await createGitClient(repo).repo.status()
+    expect(status.changes.map((c) => c.path)).toContain('newdir/inner.txt')
+    // 디렉터리 행(trailing slash)이 오면 이름 없는 행·diff 에러로 이어진다
+    expect(status.changes.some((c) => c.path.endsWith('/'))).toBe(false)
+  })
+
   it('untracked 디렉터리 diff는 빈 결과로 위장하지 않고 에러를 던진다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

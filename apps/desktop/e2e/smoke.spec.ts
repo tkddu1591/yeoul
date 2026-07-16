@@ -135,3 +135,26 @@ test('체크박스로 여러 파일을 한 번에 올린다', async () => {
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('이름이 바뀐 파일을 내려도 반쪽(삭제)이 남지 않는다', async () => {
+  const repo = await createRepoWithChange()
+  // v2 수정을 되돌려 내용을 HEAD와 같게 만든다 — 그래야 mv가 exact rename(R100)으로 감지된다
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['mv', 'app.txt', 'renamed.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await window.getByTestId('check-all-staged').click()
+    await window.getByTestId('unstage-selected').click()
+    // origPath 없이 내리면 옛 경로의 삭제가 staged에 잔존한다(반쪽 rename 커밋 위험)
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
