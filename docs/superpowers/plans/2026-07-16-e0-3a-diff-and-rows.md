@@ -1094,6 +1094,22 @@ describe('pairHunkLines', () => {
       { left: line('note', '\\ No newline at end of file'), right: line('note', '\\ No newline at end of file') },
     ])
   })
+
+  it("del 런 뒤 note는 왼쪽, add 런 뒤 note는 오른쪽에 붙는다 (no-eol 실제 순서)", () => {
+    const rows = pairHunkLines([
+      line('del', 'old last'),
+      line('note', '\\ No newline at end of file'),
+      line('add', 'new last'),
+      line('note', '\\ No newline at end of file'),
+    ])
+    expect(rows).toEqual([
+      { left: line('del', 'old last'), right: line('add', 'new last') },
+      {
+        left: line('note', '\\ No newline at end of file'),
+        right: line('note', '\\ No newline at end of file'),
+      },
+    ])
+  })
 })
 ```
 
@@ -1114,13 +1130,21 @@ export interface SplitRow {
 /**
  * hunk 라인을 좌(변경 전)/우(변경 후) 행으로 짝짓는다.
  * 연속된 del 런과 그 뒤의 add 런을 순서대로 zip — 남는 쪽은 반대편을 비운다.
+ * '\ No newline' note는 실제 git 출력에서 del 런과 add 런 "사이"에 온다 —
+ * 런 뒤의 note를 해당 측에 귀속시켜 변경 쌍의 좌우 정렬이 깨지지 않게 한다.
  */
 export function pairHunkLines(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = []
   let index = 0
   while (index < lines.length) {
     const current = lines[index]!
-    if (current.kind === 'context' || current.kind === 'note') {
+    if (current.kind === 'context') {
+      rows.push({ left: current, right: current })
+      index += 1
+      continue
+    }
+    if (current.kind === 'note') {
+      // 런 밖의 note(context 뒤 등) — 양쪽에 걸치는 단독 행
       rows.push({ left: current, right: current })
       index += 1
       continue
@@ -1130,14 +1154,33 @@ export function pairHunkLines(lines: DiffLine[]): SplitRow[] {
       dels.push(lines[index]!)
       index += 1
     }
+    const leftNotes: DiffLine[] = []
+    if (dels.length > 0) {
+      while (index < lines.length && lines[index]!.kind === 'note') {
+        leftNotes.push(lines[index]!)
+        index += 1
+      }
+    }
     const adds: DiffLine[] = []
     while (index < lines.length && lines[index]!.kind === 'add') {
       adds.push(lines[index]!)
       index += 1
     }
+    const rightNotes: DiffLine[] = []
+    if (adds.length > 0) {
+      while (index < lines.length && lines[index]!.kind === 'note') {
+        rightNotes.push(lines[index]!)
+        index += 1
+      }
+    }
     const rowCount = Math.max(dels.length, adds.length)
     for (let i = 0; i < rowCount; i += 1) {
       rows.push({ left: dels[i] ?? null, right: adds[i] ?? null })
+    }
+    // note는 실제로 한쪽 파일에만 해당한다 — 소속 측에만 배치
+    const noteRows = Math.max(leftNotes.length, rightNotes.length)
+    for (let i = 0; i < noteRows; i += 1) {
+      rows.push({ left: leftNotes[i] ?? null, right: rightNotes[i] ?? null })
     }
   }
   return rows
@@ -1179,13 +1222,22 @@ function UnifiedLine({ line }: { line: DiffLine }) {
   )
 }
 
-function SplitCell({ line, side }: { line: DiffLine | null; side: 'left' | 'right' }) {
+function SplitCell({
+  line,
+  side,
+  duplicate = false,
+}: {
+  line: DiffLine | null
+  side: 'left' | 'right'
+  /** 좌우에 같은 라인이 놓인 사본(context 등) — 오른쪽 사본은 스크린리더 중복 낭독을 막는다 */
+  duplicate?: boolean
+}) {
   if (line === null) {
     return <div className="diff-cell diff-cell--empty" aria-hidden="true" />
   }
   const lineNo = side === 'left' ? line.oldLine : line.newLine
   return (
-    <div className={`diff-cell diff-line--${line.kind === 'context' || line.kind === 'note' ? line.kind : side === 'left' ? 'del' : 'add'}`}>
+    <div className={`diff-cell diff-line--${line.kind}`} aria-hidden={duplicate ? true : undefined}>
       <span className="diff-line__no" aria-hidden="true">
         {lineNo ?? ''}
       </span>
@@ -1211,12 +1263,12 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
+          {/* 가시 라벨이 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
           <Button
             variant="ghost"
             size="sm"
             onPress={() => setView(view === 'unified' ? 'split' : 'unified')}
             testId="diff-view-toggle"
-            aria-label={view === 'unified' ? '좌우로 비교 보기' : '한 줄로 보기'}
           >
             {view === 'unified' ? (
               <Columns2 size={13} aria-hidden="true" />
@@ -1256,7 +1308,11 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
                 : pairHunkLines(hunk.lines).map((row, rowIndex) => (
                     <div key={rowIndex} className="diff-split-row">
                       <SplitCell line={row.left} side="left" />
-                      <SplitCell line={row.right} side="right" />
+                      <SplitCell
+                        line={row.right}
+                        side="right"
+                        duplicate={row.right !== null && row.left === row.right}
+                      />
                     </div>
                   ))}
             </div>
@@ -1283,8 +1339,15 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 .diff-split-row .diff-cell:first-child {
   border-left: none;
 }
+/* 대응 줄 없음 — 라이트에서 sunken 단색은 흰 배경과 구분이 안 돼 은은한 대각선 패턴으로 */
 .diff-cell--empty {
-  background: var(--color-surface-sunken);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-surface-sunken),
+    var(--color-surface-sunken) 4px,
+    var(--color-bg) 4px,
+    var(--color-bg) 8px
+  );
 }
 ```
 
@@ -1304,7 +1367,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 - [ ] **Step 5: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: **131 tests** (126 + split 5), typecheck 5, build, E2E 2 passed — 전부 exit 0
+Expected: **132 tests** (126 + split 6), typecheck 5, build, E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -1697,7 +1760,7 @@ test('체크박스로 여러 파일을 한 번에 올린다', async () => {
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 131 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
+Expected: 132 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
 
 - [ ] **Step 5: Commit**
 
@@ -1715,7 +1778,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 131 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
+Expected: 132 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
