@@ -3647,8 +3647,8 @@ export function CommitDetailPanel({
       title="저장 내용"
       accessory={
         <>
+          {/* 해시 배지는 좁은 우측 열에서 잘려 겹친다(실측) — 해시는 아래 메시지 meta로 */}
           <Badge tone="git">commit</Badge>
-          <Badge tone="count">{detail.shortHash}</Badge>
           <Button
             variant="ghost"
             size="sm"
@@ -3704,7 +3704,8 @@ export function CommitDetailPanel({
           </pre>
         )}
         <p className="commit-detail__meta">
-          {formatRelativeTime(detail.committedAt, Date.now())} · {detail.authorName}
+          {detail.shortHash} · {formatRelativeTime(detail.committedAt, Date.now())} ·{' '}
+          {detail.authorName}
           {detail.parents.length >= 2 &&
             ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
         </p>
@@ -3805,7 +3806,7 @@ export function CommitDetailPanel({
             history={store.history}
             historyLimit={store.historyLimit}
             currentBranch={status?.branch.name ?? null}
-            selectedHash={store.commitDetail?.hash ?? null}
+            selectedHash={null}
             busy={store.busy}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
