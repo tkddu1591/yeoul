@@ -1296,7 +1296,8 @@ Expected: dependencies에 `@tanstack/react-virtual` 추가 (v3.x)
   display: flex;
   flex-direction: column;
 }
-.ui-panel__body > * {
+/* :where()로 특이도를 0으로 — 가상 스크롤 등 자식이 클래스 한 개로 결정적으로 이길 수 있다 */
+.ui-panel__body > :where(*) {
   flex: none;
 }
 ```
@@ -1391,15 +1392,18 @@ function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSele
   const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
   return (
     <div className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
-      <input
-        type="checkbox"
-        className="file-row__check"
-        checked={isChecked}
-        onChange={onToggle}
-        disabled={busy}
-        aria-label={`${change.path} 선택`}
-        data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
-      />
+      {/* 칩(sticky) — 가로 스크롤 중에도 체크박스가 왼쪽에 남는다 */}
+      <span className="file-row__checkcell">
+        <input
+          type="checkbox"
+          className="file-row__check"
+          checked={isChecked}
+          onChange={onToggle}
+          disabled={busy}
+          aria-label={`${change.path} 선택`}
+          data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+        />
+      </span>
       <button
         type="button"
         className={`file-row__main file-row__main--${kind ?? 'none'}`}
@@ -1623,9 +1627,10 @@ export function ChangesPanel({
 (a) 파일 상단 `.changes-panel` 블록 **앞**에 추가 (가상 리스트 공통 — HistoryPanel·DiffView도 사용한다):
 
 ```css
-/* 가상 리스트 공통 — 스크롤 컨테이너는 flex 잔여 공간을 차지하고, 행은 절대 배치로 쌓인다 */
+/* 가상 리스트 공통 — 스크롤 컨테이너는 flex 잔여 공간을 차지하고, 행은 절대 배치로 쌓인다.
+   panel body의 자식 flex:none 규칙은 :where(특이도 0)라 이 클래스가 결정적으로 이긴다 */
 .virtual-scroll {
-  flex: 1 1 auto !important;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
@@ -1652,22 +1657,36 @@ export function ChangesPanel({
 }
 ```
 
-(c) `.file-row` 블록을 교체 — li → div가 되었고, 좌측 여백을 bulk 바와 동일한 `var(--space-3)`으로 맞춰 체크박스 세로선을 정렬한다(②):
+(c) `.file-row` 블록을 교체 — li → div가 되었고, 좌측 여백은 체크박스 칩(아래 (d))이 담당한다:
 
 ```css
 .file-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   border-radius: var(--radius-sm);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-3) 0 0;
   width: 100%;
 }
 ```
 
-(d) `.file-row__check` 블록을 교체 (별도 margin 제거 — 행 padding이 정렬을 담당한다):
+(d) `.file-row__check` 블록을 다음 세 블록으로 교체 — 체크박스는 가로 스크롤 중에도 왼쪽에 고정된다(③과 ②의 양립, 리뷰 실측 반영). 칩의 좌측 padding `var(--space-3)`이 bulk 바와의 세로선 정렬(②)을 담당한다:
 
 ```css
+/* 가로 스크롤 중에도 체크박스는 왼쪽에 고정 — 칩 배경이 밑을 지나는 텍스트를 가린다 */
+.file-row__checkcell {
+  flex: none;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--color-surface);
+}
+.file-row--selected .file-row__checkcell {
+  background: var(--color-selection-bg);
+}
 .file-row__check {
   flex: none;
 }
@@ -2846,12 +2865,13 @@ Create `apps/desktop/src/renderer/src/components/commit-detail-panel.css`:
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
 }
-/* 파일 목록과 diff가 세로 공간을 나눈다 — 목록은 상한을 갖고 diff가 잔여를 차지한다 */
-.commit-detail__files {
-  flex: 0 1 220px !important;
+/* 파일 목록과 diff가 세로 공간을 나눈다 — 목록은 상한을 갖고 diff가 잔여를 차지한다.
+   .virtual-scroll(flex:1)보다 특이도 높은 복합 선택자로 결정적으로 이긴다 (!important 불요) */
+.commit-detail__files.virtual-scroll {
+  flex: 0 1 220px;
 }
 .commit-detail__diff {
-  flex: 1 1 auto !important;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
