@@ -181,6 +181,30 @@ describe('GitClient', () => {
     expect(withNaN.map((c) => c.subject)).toEqual(['두 번째 저장', 'init'])
   })
 
+  it('history — refs와 parents를 반환하고 병합 커밋을 식별한다', async () => {
+    const repo = await createFixtureRepo()
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main-side'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'merge', '--no-edit', 'side'], { cwd: repo })
+
+    const history = await createGitClient(repo).history.list(10)
+    const merge = history[0]!
+    expect(merge.parents).toHaveLength(2)
+    expect(merge.refs).toContain('main')
+    // 일반 커밋은 부모 1개, 배지 없음
+    const plain = history.find((c) => c.subject === 'main-side')!
+    expect(plain.parents).toHaveLength(1)
+    expect(plain.refs).toEqual([])
+    // root 커밋은 부모 없음
+    expect(history[history.length - 1]!.parents).toEqual([])
+  })
+
   it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-'))
     await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })

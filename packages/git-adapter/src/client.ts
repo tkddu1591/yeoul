@@ -134,7 +134,7 @@ export function createGitClient(repoPath: string): GitClient {
           'log',
           `--max-count=${safeLimit}`,
           '--no-show-signature',
-          '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',
+          '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
           '-z',
         ]
         const result = await execGit(args, { cwd })

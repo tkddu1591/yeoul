@@ -3,7 +3,24 @@ import type { CommitSummary } from '@git-gui/domain'
 const FIELD_SEPARATOR = '\x1f'
 
 /**
- * `git log --format=%H%x1f%h%x1f%an%x1f%ct%x1f%s -z` 출력을 파싱한다.
+ * `%D` 장식 문자열을 이름 배열로 정리한다.
+ * "HEAD -> main, origin/main, tag: v1" → ['main', 'origin/main', 'v1'].
+ * detached HEAD의 단독 "HEAD"는 브랜치가 아니므로 제외한다.
+ */
+function parseRefs(decoration: string): string[] {
+  if (decoration === '') return []
+  return decoration
+    .split(', ')
+    .map((ref) => {
+      if (ref.startsWith('HEAD -> ')) return ref.slice('HEAD -> '.length)
+      if (ref.startsWith('tag: ')) return ref.slice('tag: '.length)
+      return ref
+    })
+    .filter((ref) => ref !== 'HEAD')
+}
+
+/**
+ * `git log --format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s -z` 출력을 파싱한다.
  * 레코드는 NUL, 필드는 US(0x1f)로 구분된다. %s(subject)는 git이 한 줄로 정리해 준다.
  * 기형 레코드는 추측해 채우지 않고 건너뛴다.
  */
@@ -14,7 +31,7 @@ export function parseLog(rawOutput: string): CommitSummary[] {
   const commits: CommitSummary[] = []
   for (const record of records) {
     const fields = record.split(FIELD_SEPARATOR)
-    if (fields.length < 5) continue
+    if (fields.length < 7) continue
     const committedAt = Number(fields[3])
     if (!Number.isFinite(committedAt)) continue
     commits.push({
@@ -22,8 +39,10 @@ export function parseLog(rawOutput: string): CommitSummary[] {
       shortHash: fields[1]!,
       authorName: fields[2]!,
       committedAt,
+      refs: parseRefs(fields[4]!),
+      parents: fields[5]! === '' ? [] : fields[5]!.split(' '),
       // subject에 구분자가 섞이는 일은 없지만 방어적으로 나머지를 합친다
-      subject: fields.slice(4).join(FIELD_SEPARATOR),
+      subject: fields.slice(6).join(FIELD_SEPARATOR),
     })
   }
   return commits
