@@ -8,7 +8,7 @@
 
 **Tech Stack:** 기존과 동일 (신규 의존성 없음).
 
-**사용자 피드백 매핑:** #2·#3 → Task 1, #8·#5 → Task 2, #1 → Task 3·4. (#4 가상화, #6 커밋 상세, #7 refs 배지는 E0-3b 플랜.)
+**사용자 피드백 매핑:** #2·#3 → Task 1, #8·#5 → Task 2, #1 → Task 3·4, 추가 피드백(IntelliJ식 체크박스 일괄 처리 + 파일명 우선·경로 후행 표기) → Task 5. (#4 가상화, #6 커밋 상세, #7 refs 배지는 E0-3b 플랜. 체크 선택 후 stash는 보관함 엔진이 생기는 1단계에서.)
 
 **알려진 한계(의도적):** merge commit의 combined diff(`--cc`)는 파서가 다루지 않는다(현재 UI는 커밋 diff를 보여주지 않음 — E0-3b 커밋 상세에서 첫 부모 기준으로 다룬다). split 뷰의 워드 단위 하이라이트는 후속.
 
@@ -1278,16 +1278,409 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: 최종 게이트 + 스크린샷 + README
+### Task 5: 체크박스 일괄 처리와 파일명 우선 표기 (추가 피드백)
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/ChangesPanel.tsx` (전체 교체 — FileList 분리, 체크박스·모두 선택·일괄 버튼, 파일명 먼저·경로 후행)
+- Modify: `components/changes-panel.css` (체크박스·일괄 바·이름 순서)
+- Modify: `apps/desktop/e2e/smoke.spec.ts` (일괄 스테이징 테스트 추가)
+
+- [ ] **Step 1: ChangesPanel 전체 교체**
+
+```tsx
+import { CircleMinus, CirclePlus } from 'lucide-react'
+import { useState } from 'react'
+import type { ChangeKind, FileChange } from '@git-gui/domain'
+import type { SelectedFile } from '../store/repository-store'
+import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
+import { Panel } from '../ui/Panel'
+import './changes-panel.css'
+
+interface ChangesPanelProps {
+  changes: FileChange[]
+  selected: SelectedFile | null
+  /** 작업 중에는 모든 버튼을 비활성화한다 — 연타로 git 작업이 겹치면 index.lock 충돌이 난다 */
+  busy: boolean
+  onStage(paths: string[]): void
+  onUnstage(paths: string[]): void
+  onSelect(selected: SelectedFile): void
+}
+
+/** 변경 종류의 한국어 라벨 — 색 단독으로 의미를 전달하지 않기 위해 tooltip/aria에 병행한다 */
+const KIND_LABELS: Record<ChangeKind, string> = {
+  modified: '수정됨',
+  added: '추가됨',
+  deleted: '삭제됨',
+  renamed: '이름 변경',
+  copied: '복사됨',
+  typechange: '형식 변경',
+  untracked: '새 파일',
+  conflicted: '충돌',
+}
+
+/** 색과 함께 쓰는 형태 신호 — 색약(적록)에서 modified/added 색이 수렴해도 글자로 구분된다 */
+const KIND_GLYPHS: Record<ChangeKind, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  renamed: 'R',
+  copied: 'C',
+  typechange: 'T',
+  untracked: 'U',
+  conflicted: '!',
+}
+
+interface FileRowProps {
+  change: FileChange
+  staged: boolean
+  isSelected: boolean
+  isChecked: boolean
+  busy: boolean
+  onToggle(): void
+  onSelect(): void
+  onAction(): void
+}
+
+function FileRow({
+  change,
+  staged,
+  isSelected,
+  isChecked,
+  busy,
+  onToggle,
+  onSelect,
+  onAction,
+}: FileRowProps) {
+  const kind = staged ? change.staged : change.unstaged
+  const actionLabel = staged ? '내리기' : '올리기'
+  const kindLabel = kind ? KIND_LABELS[kind] : ''
+  // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
+  const tooltip =
+    kind === 'renamed' && change.origPath !== null
+      ? `${change.origPath} → ${change.path} — ${kindLabel}`
+      : `${change.path} — ${kindLabel}`
+  // IntelliJ처럼 파일명을 먼저, 경로를 뒤에 흐리게 — 좁은 열에서는 경로부터 축소한다
+  const slashIndex = change.path.lastIndexOf('/')
+  const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex) : ''
+  const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
+  return (
+    <li className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
+      <input
+        type="checkbox"
+        className="file-row__check"
+        checked={isChecked}
+        onChange={onToggle}
+        disabled={busy}
+        aria-label={`${change.path} 선택`}
+        data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+      />
+      <button
+        type="button"
+        className={`file-row__main file-row__main--${kind ?? 'none'}`}
+        disabled={busy}
+        onClick={onSelect}
+        title={tooltip}
+        aria-label={tooltip}
+        data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+      >
+        <span className="file-row__kind" aria-hidden="true">
+          {kind ? KIND_GLYPHS[kind] : ''}
+        </span>
+        <span className="file-row__name">
+          <span className="file-row__base">{basename}</span>
+          {directory && <span className="file-row__dir">{directory}</span>}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="file-row__action"
+        disabled={busy}
+        onClick={onAction}
+        aria-label={`${change.path} ${actionLabel}`}
+        data-testid={`${staged ? 'unstage' : 'stage'}-${change.path}`}
+      >
+        {staged ? (
+          <CircleMinus size={14} aria-hidden="true" />
+        ) : (
+          <CirclePlus size={14} aria-hidden="true" />
+        )}
+        {actionLabel}
+      </button>
+    </li>
+  )
+}
+
+interface FileListProps {
+  title: string
+  termBadge: string
+  countTestId: string
+  emptyText: string
+  changes: FileChange[]
+  staged: boolean
+  selected: SelectedFile | null
+  busy: boolean
+  bulkLabel: string
+  onAction(paths: string[]): void
+  onSelect(selected: SelectedFile): void
+}
+
+function FileList({
+  title,
+  termBadge,
+  countTestId,
+  emptyText,
+  changes,
+  staged,
+  selected,
+  busy,
+  bulkLabel,
+  onAction,
+  onSelect,
+}: FileListProps) {
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
+  // 목록에서 사라진 경로는 체크에서 자동 제외한다 — stage/unstage 후 잔존 방지
+  const validChecked = changes.filter((c) => checked.has(c.path)).map((c) => c.path)
+  const allChecked = changes.length > 0 && validChecked.length === changes.length
+  const side = staged ? 'staged' : 'unstaged'
+
+  const toggle = (path: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    setChecked(allChecked ? new Set() : new Set(changes.map((c) => c.path)))
+  }
+  const runBulk = () => {
+    onAction(validChecked)
+    setChecked(new Set())
+  }
+
+  return (
+    <Panel
+      title={title}
+      accessory={
+        <>
+          <Badge tone="git">{termBadge}</Badge>
+          <Badge tone="count">
+            <span data-testid={countTestId}>{changes.length}</span>
+          </Badge>
+        </>
+      }
+    >
+      {changes.length === 0 ? (
+        <p className="changes-panel__empty">{emptyText}</p>
+      ) : (
+        <>
+          <div className="file-list__bulk">
+            <label className="file-list__check-all">
+              <input
+                type="checkbox"
+                checked={allChecked}
+                ref={(element) => {
+                  // 일부만 체크된 중간 상태 표시
+                  if (element) element.indeterminate = validChecked.length > 0 && !allChecked
+                }}
+                onChange={toggleAll}
+                disabled={busy}
+                data-testid={`check-all-${side}`}
+              />
+              모두 선택
+            </label>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy || validChecked.length === 0}
+              onPress={runBulk}
+              testId={`${staged ? 'unstage' : 'stage'}-selected`}
+            >
+              {staged ? (
+                <CircleMinus size={13} aria-hidden="true" />
+              ) : (
+                <CirclePlus size={13} aria-hidden="true" />
+              )}
+              선택 {bulkLabel} ({validChecked.length})
+            </Button>
+          </div>
+          <ul className="changes-panel__list">
+            {changes.map((change) => (
+              <FileRow
+                key={`${side}-${change.path}`}
+                change={change}
+                staged={staged}
+                isSelected={
+                  selected !== null && selected.staged === staged && selected.change.path === change.path
+                }
+                isChecked={checked.has(change.path)}
+                busy={busy}
+                onToggle={() => toggle(change.path)}
+                onSelect={() => onSelect({ change, staged })}
+                onAction={() => onAction([change.path])}
+              />
+            ))}
+          </ul>
+        </>
+      )}
+    </Panel>
+  )
+}
+
+export function ChangesPanel({
+  changes,
+  selected,
+  busy,
+  onStage,
+  onUnstage,
+  onSelect,
+}: ChangesPanelProps) {
+  const stagedChanges = changes.filter((c) => c.staged !== null)
+  const unstagedChanges = changes.filter((c) => c.unstaged !== null)
+
+  return (
+    <div className="changes-panel">
+      <FileList
+        title="지금 바뀐 것"
+        termBadge="unstaged"
+        countTestId="unstaged-count"
+        emptyText="바뀐 파일이 없어요"
+        changes={unstagedChanges}
+        staged={false}
+        selected={selected}
+        busy={busy}
+        bulkLabel="올리기"
+        onAction={onStage}
+        onSelect={onSelect}
+      />
+      <FileList
+        title="저장 예정"
+        termBadge="staged"
+        countTestId="staged-count"
+        emptyText="파일을 올리면 여기에 모여요"
+        changes={stagedChanges}
+        staged
+        selected={selected}
+        busy={busy}
+        bulkLabel="내리기"
+        onAction={onUnstage}
+        onSelect={onSelect}
+      />
+    </div>
+  )
+}
+```
+
+- [ ] **Step 2: CSS 갱신**
+
+`changes-panel.css`에서 `.file-row__name`/`.file-row__dir`/`.file-row__base` 블록을 다음으로 교체하고, 체크박스·일괄 바 규칙을 추가:
+```css
+.file-list__bulk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.file-list__check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.file-row__check,
+.file-list__check-all input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.file-row__check {
+  flex: none;
+  margin-left: var(--space-2);
+}
+.file-row__check:disabled,
+.file-list__check-all input:disabled {
+  cursor: default;
+}
+.file-row__name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+/* IntelliJ식: 파일명 먼저, 경로는 뒤에 흐리게 — 좁으면 경로(1000)부터 축소 */
+.file-row__base {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 48px;
+}
+.file-row__dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1000 auto;
+  margin-left: var(--space-2);
+  color: var(--color-text-faint);
+}
+```
+
+- [ ] **Step 3: E2E 일괄 스테이징 테스트 추가**
+
+`apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
+```ts
+test('체크박스로 여러 파일을 한 번에 올린다', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'notes.txt'), 'memo\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    await window.getByTestId('check-all-unstaged').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('2')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 4: 검증**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 131 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/components apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 체크박스 일괄 스테이징과 파일명 우선 표기 — IntelliJ식
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 131 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
+Expected: 131 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
-일회성 스크립트(커밋 미포함)로: (a) 색상 파일 행(수정·추가·삭제 혼합 + 긴 파일명), (b) 좌우 diff 보기, (c) 다크 모드 한 장 — `test-results/`에 캡처. 코디네이터가 사용자에게 전달.
+일회성 스크립트(커밋 미포함)로: (a) 색상 파일 행(수정·추가·삭제 혼합 + 긴 파일명 + 체크박스·일괄 버튼), (b) 좌우 diff 보기, (c) 다크 모드 한 장 — `test-results/`에 캡처. 코디네이터가 사용자에게 전달.
 
 - [ ] **Step 3: README "현재 상태" 한 줄 갱신**
 
