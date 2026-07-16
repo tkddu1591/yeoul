@@ -3416,8 +3416,6 @@ Expected: FAIL — 모듈 없음
 Create `apps/desktop/src/renderer/src/ui/theme.ts`:
 
 ```ts
-const THEME_KEY = 'git-gui-theme'
-
 export type Theme = 'light' | 'dark'
 
 /** 저장된 값이 있으면 그것을, 없으면 시스템 설정을 따른다 — 순수 함수라 단위 테스트한다 */
@@ -3426,20 +3424,20 @@ export function resolveInitialTheme(stored: string | null, systemDark: boolean):
   return systemDark ? 'dark' : 'light'
 }
 
-/** 첫 렌더에서 호출해 문서 루트에 테마를 새기고 현재 값을 돌려준다 */
+/** 첫 렌더에서 호출해 문서 루트에 테마를 새기고 현재 값을 돌려준다 — preload의 동기 스냅샷이라 깜빡임이 없다 */
 export function initTheme(): Theme {
   const theme = resolveInitialTheme(
-    localStorage.getItem(THEME_KEY),
+    window.settingsApi.initial.theme ?? null,
     window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
   document.documentElement.dataset.theme = theme
   return theme
 }
 
-/** 테마를 적용하고 기억한다 */
+/** 테마를 적용하고 기억한다 — main이 settings.json으로 영속화한다 (Task 8h) */
 export function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme
-  localStorage.setItem(THEME_KEY, theme)
+  void window.settingsApi.set({ theme })
 }
 ```
 
@@ -3524,25 +3522,32 @@ import { applyTheme, initTheme, type Theme } from './ui/theme'
 `apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
 
 ```ts
-test('테마를 버튼으로 전환하고 기억한다', async () => {
+test('테마를 버튼으로 전환하고 재시작해도 기억한다', async () => {
   const repo = await createRepoWithChange()
-  const app = await electron.launch({
-    args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
-  })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  let flipped: string | undefined
   try {
     const window = await app.firstWindow()
     const initial = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(['light', 'dark']).toContain(initial)
     await window.getByTestId('theme-toggle').click()
-    const flipped = await window.evaluate(() => document.documentElement.dataset.theme)
+    flipped = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(flipped).not.toBe(initial)
-    // 선택은 저장되어 다음 실행의 초기값이 된다
-    const stored = await window.evaluate(() => localStorage.getItem('git-gui-theme'))
-    expect(stored).toBe(flipped)
   } finally {
     await app.close()
+  }
+  // 재시작 — 같은 userData면 선택한 테마가 초기값이 된다 (파일 영속화)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    const restored = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(restored).toBe(flipped)
+  } finally {
+    await second.close()
     await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
   }
 })
 ```
@@ -3550,7 +3555,7 @@ test('테마를 버튼으로 전환하고 기억한다', async () => {
 - [ ] **Step 8: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 177 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
+Expected: 180 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -4632,12 +4637,240 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8h: 설정 영속화 — main 파일 저장 (localStorage file:// 미영속 해소)
+
+**실측 발견:** 패키징 경로(`loadFile` → file:// origin)에서 localStorage가 앱 재시작 간 유지되지 않는다 — "폭을 기억한다"(8f)·"테마를 기억한다"(8c 예정) 약속이 프로덕션에서 깨진다. main이 `userData/settings.json`으로 영속화하고, preload가 **동기(sendSync)** 로 초기 스냅샷을 읽어 첫 렌더 깜빡임 없이 노출한다. E2E 격리를 위해 `GIT_GUI_USER_DATA` env로 userData를 재지정할 수 있게 한다.
+
+**Files:**
+- Modify: `packages/ipc-contract/src/index.ts` (settings 계약), `apps/desktop/src/main/index.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/src/renderer/src/env.d.ts`, `apps/desktop/src/renderer/src/ui/column-resize.ts`, `apps/desktop/test/column-resize.test.ts`, `apps/desktop/e2e/smoke.spec.ts`
+- Create: `apps/desktop/src/main/settings.ts`, `packages/ipc-contract/test/settings.test.ts`
+
+- [ ] **Step 1: 실패하는 sanitize 테스트**
+
+Create `packages/ipc-contract/test/settings.test.ts` (vitest projects가 `packages/*/test`를 포함하는지 확인 — 안 잡히면 우회 말고 보고):
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { sanitizeSettings } from '../src/index'
+
+describe('sanitizeSettings', () => {
+  it('알려진 필드만, 올바른 타입만 통과시킨다', () => {
+    expect(
+      sanitizeSettings({ theme: 'dark', rightWidth: 420, evil: 'x', __proto__: { a: 1 } }),
+    ).toEqual({ theme: 'dark', rightWidth: 420 })
+  })
+
+  it('잘못된 값은 조용히 버린다 — 설정은 전부 선택적이다', () => {
+    expect(sanitizeSettings({ theme: 'sepia', rightWidth: 'wide' })).toEqual({})
+    expect(sanitizeSettings({ rightWidth: NaN })).toEqual({})
+  })
+
+  it('객체가 아니면 빈 설정', () => {
+    expect(sanitizeSettings(null)).toEqual({})
+    expect(sanitizeSettings('{}')).toEqual({})
+    expect(sanitizeSettings([1, 2])).toEqual({})
+  })
+})
+```
+
+- [ ] **Step 2: ipc-contract — 설정 계약**
+
+`packages/ipc-contract/src/index.ts` 끝에 추가:
+
+```ts
+/**
+ * 렌더러가 기억해야 하는 소량 설정. file:// origin의 localStorage는 앱 재시작 간
+ * 유지되지 않아(실측) main이 userData/settings.json으로 영속화한다.
+ */
+export interface AppSettings {
+  theme?: 'light' | 'dark'
+  rightWidth?: number
+}
+
+/** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
+export function sanitizeSettings(value: unknown): AppSettings {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const candidate = value as AppSettings
+  const settings: AppSettings = {}
+  if (candidate.theme === 'light' || candidate.theme === 'dark') settings.theme = candidate.theme
+  if (typeof candidate.rightWidth === 'number' && Number.isFinite(candidate.rightWidth)) {
+    settings.rightWidth = candidate.rightWidth
+  }
+  return settings
+}
+
+/** preload가 노출하는 설정 표면 — initial은 시작 시점 스냅샷(동기), set은 부분 갱신 */
+export interface SettingsApi {
+  initial: AppSettings
+  set(partial: AppSettings): Promise<void>
+}
+
+export const SETTINGS_API_KEY = 'settingsApi' as const
+
+export const SETTINGS_CHANNELS = {
+  /** preload 전용 동기 채널 — 첫 렌더 전에 테마를 결정해야 깜빡임이 없다 */
+  getSync: 'settings:get-sync',
+  set: 'settings:set',
+} as const
+```
+
+Run: `npx vitest run packages/ipc-contract/test/settings.test.ts`
+Expected: PASS (3 tests). (Step 1에서 Red 확인 후)
+
+- [ ] **Step 3: main — settings.ts + 등록 + userData env**
+
+Create `apps/desktop/src/main/settings.ts`:
+
+```ts
+import { app, ipcMain } from 'electron'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { sanitizeSettings, SETTINGS_CHANNELS, type AppSettings } from '@git-gui/ipc-contract'
+
+function settingsPath(): string {
+  return join(app.getPath('userData'), 'settings.json')
+}
+
+function loadSettings(): AppSettings {
+  try {
+    return sanitizeSettings(JSON.parse(readFileSync(settingsPath(), 'utf8')))
+  } catch {
+    // 첫 실행·깨진 파일 — 빈 설정에서 시작한다 (설정은 전부 선택적)
+    return {}
+  }
+}
+
+export function registerSettingsHandlers(): void {
+  let settings = loadSettings()
+  ipcMain.on(SETTINGS_CHANNELS.getSync, (event) => {
+    event.returnValue = settings
+  })
+  ipcMain.handle(SETTINGS_CHANNELS.set, (_event, partial: unknown) => {
+    settings = { ...settings, ...sanitizeSettings(partial) }
+    mkdirSync(app.getPath('userData'), { recursive: true })
+    writeFileSync(settingsPath(), JSON.stringify(settings))
+  })
+}
+```
+
+`apps/desktop/src/main/index.ts` 수정:
+(a) import에 `registerSettingsHandlers` 추가(기존 registerGitHandlers import 옆, 상대 경로 `./settings`).
+(b) `app.whenReady()` **이전**(파일 상단, app import 직후 위치)에 추가:
+
+```ts
+// E2E·테스트 격리 — userData를 임시 폴더로 재지정할 수 있게 한다 (설정 파일이 실제 프로필을 오염하지 않게)
+if (process.env.GIT_GUI_USER_DATA) {
+  app.setPath('userData', process.env.GIT_GUI_USER_DATA)
+}
+```
+
+(c) `registerGitHandlers()` 호출 바로 뒤에 `registerSettingsHandlers()` 추가.
+
+- [ ] **Step 4: preload — 동기 스냅샷 브리지**
+
+`apps/desktop/src/preload/index.ts` 수정 — import에 `SETTINGS_API_KEY, SETTINGS_CHANNELS`와 `type AppSettings, type SettingsApi` 추가, 파일 끝(`contextBridge.exposeInMainWorld(GIT_API_KEY, api)` 뒤)에:
+
+```ts
+// 시작 시점 설정을 동기로 읽는다 — 첫 렌더 전에 테마·폭이 결정되어 깜빡임이 없다
+const initialSettings = ipcRenderer.sendSync(SETTINGS_CHANNELS.getSync) as AppSettings
+
+const settingsApi: SettingsApi = {
+  initial: initialSettings,
+  set: (partial) => ipcRenderer.invoke(SETTINGS_CHANNELS.set, partial),
+}
+
+contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)
+```
+
+`apps/desktop/src/renderer/src/env.d.ts`의 window 인터페이스에 `settingsApi: SettingsApi` 추가 (기존 gitApi 선언과 같은 방식 — import 경로 `@git-gui/ipc-contract`).
+
+- [ ] **Step 5: column-resize.ts — localStorage → settings**
+
+`apps/desktop/src/renderer/src/ui/column-resize.ts`의 localStorage 3함수를 교체 (clampRightWidth·parseStoredWidth·RIGHT_COLUMN_DEFAULT는 그대로, parseStoredWidth 시그니처만 `raw: unknown`으로):
+
+```ts
+/** 저장값 → 폭. 깨진 값은 조용히 기본값으로 (드래그로 다시 정하면 된다) */
+export function parseStoredWidth(raw: unknown): number {
+  const parsed = Number(raw)
+  if (raw == null || !Number.isFinite(parsed) || parsed < 260) return RIGHT_COLUMN_DEFAULT
+  return Math.round(parsed)
+}
+
+export function loadRightWidth(): number {
+  return parseStoredWidth(window.settingsApi.initial.rightWidth)
+}
+
+export function saveRightWidth(px: number): void {
+  void window.settingsApi.set({ rightWidth: px })
+}
+
+export function resetRightWidth(): void {
+  void window.settingsApi.set({ rightWidth: RIGHT_COLUMN_DEFAULT })
+}
+```
+
+`apps/desktop/test/column-resize.test.ts`의 parseStoredWidth 테스트에서 `parseStoredWidth(null)`은 유지되고 `'420'`·`'abc'`·`'-50'` 케이스도 그대로 동작해야 한다(문자열 입력 방어 유지) — 테스트 무변경으로 PASS 확인.
+
+- [ ] **Step 6: E2E — 재시작 영속 검증으로 교체**
+
+`apps/desktop/e2e/smoke.spec.ts`의 '우측 열 폭을 드래그로 조절하고 기억한다' 테스트 전체를 교체 (localStorage 단언 → **실제 재시작** 후 폭 복원):
+
+```ts
+test('우측 열 폭을 드래그로 조절하고 재시작해도 기억한다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  let widened = 0
+  try {
+    const window = await app.firstWindow()
+    const before = (await window.getByTestId('history-panel').boundingBox())!.width
+    const handle = (await window.getByTestId('column-resizer').boundingBox())!
+    await window.mouse.move(handle.x + 3, handle.y + 200)
+    await window.mouse.down()
+    await window.mouse.move(handle.x - 120, handle.y + 200, { steps: 5 })
+    await window.mouse.up()
+    widened = (await window.getByTestId('history-panel').boundingBox())!.width
+    expect(widened).toBeGreaterThan(before + 80)
+  } finally {
+    await app.close()
+  }
+  // 재시작 — 같은 userData면 폭이 복원되어야 한다 (파일 영속화)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    const restored = (await window.getByTestId('history-panel').boundingBox())!.width
+    expect(Math.abs(restored - widened)).toBeLessThan(2)
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 7: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **177 tests** + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/ipc-contract apps/desktop/src apps/desktop/test apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 설정 영속화 — file:// localStorage 미영속을 main 파일 저장으로 해소
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 177 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
+Expected: 180 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
@@ -4678,8 +4911,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 8b 후 | **E2E 8** (변경 취소) |
 | Task 8f 후 | +4 (resize·절대시각) → 168, E2E 9 |
 | Task 8g 후 | +6 (buildGraph) → 174 |
-| Task 8c 후 | +3 (theme) → **177 tests**, **E2E 10** (테마) |
-| 최종 | 177 tests + typecheck 5 + build + E2E 10 — 전부 exit 0 |
+| Task 8h 후 | +3 (sanitize) → 177, 리사이즈 E2E가 재시작 영속 검증으로 |
+| Task 8c 후 | +3 (theme) → **180 tests**, **E2E 10** (테마 재시작) |
+| 최종 | 180 tests + typecheck 5 + build + E2E 10 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
