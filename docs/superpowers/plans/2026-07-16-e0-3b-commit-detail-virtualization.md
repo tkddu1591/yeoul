@@ -1727,8 +1727,10 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('unstaged-count')).toHaveText('1501')
-    // 가상화 — 렌더된 행 수는 가시 범위 + overscan 수준이어야 한다
+    // 가상화 — 렌더된 행 수는 가시 범위 + overscan 수준이어야 한다.
+    // 하한(> 0)이 없으면 컨테이너 부재/오타 시 count 0으로 공허하게 통과한다 — 함께 고정
     const rendered = await window.locator('[data-testid="file-scroll-unstaged"] .file-row').count()
+    expect(rendered).toBeGreaterThan(0)
     expect(rendered).toBeLessThan(120)
     // 체크는 데이터 기반 — 화면 밖 행까지 전체에 적용된다
     await window.getByTestId('check-all-unstaged').click()
@@ -1742,10 +1744,10 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
 })
 ```
 
-- [ ] **Step 8: 실패 확인 → 통과 확인**
+- [ ] **Step 8: 검출력 실증 → 통과 확인**
 
 Run: `cd apps/desktop && pnpm e2e`
-Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(1501개 전부 렌더). 적용 후 재실행 시 **E2E 5 passed**. (구현을 먼저 했다면 `git stash push apps/desktop/src/renderer/src/components/ChangesPanel.tsx` → 실패 확인 → `git stash pop`으로 검출력을 실증한다. stash 확인 시에는 Step 6의 스펙 변경도 함께 stash되므로 가상화 테스트의 rendered 단언 실패만 본다.)
+Expected: **E2E 5 passed**. 검출력 실증(test-the-test): 새 구현에서 `overscan: 10`을 잠시 `10000`으로 변이 → 가상화 테스트가 `Expected: < 120, Received: 1501`로 FAIL함을 확인 후 원복. (주의: 구 코드를 stash하는 방식은 red가 안 된다 — `file-scroll-unstaged` 컨테이너가 없으면 count가 0이 되어 상한 단언이 공허하게 통과한다. 그래서 테스트에 하한 `toBeGreaterThan(0)`도 있다.)
 
 - [ ] **Step 9: 전체 게이트**
 
