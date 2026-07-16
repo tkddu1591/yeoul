@@ -4101,8 +4101,18 @@ import {
 (b) `const store = useRepositoryStore()` 뒤에 추가:
 
 ```tsx
-  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 상세 모드는 최소 420px을 보장
-  const [rightWidth, setRightWidth] = useState<number>(() => loadRightWidth())
+  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
+  // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
+  const [rightWidth, setRightWidth] = useState<number>(() =>
+    clampRightWidth(loadRightWidth(), window.innerWidth),
+  )
+  useEffect(() => {
+    const onWindowResize = () => {
+      setRightWidth((width) => clampRightWidth(width, window.innerWidth))
+    }
+    window.addEventListener('resize', onWindowResize)
+    return () => window.removeEventListener('resize', onWindowResize)
+  }, [])
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const onMove = (move: PointerEvent) => {
@@ -4111,16 +4121,22 @@ import {
     const onUp = (up: PointerEvent) => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
       saveRightWidth(clampRightWidth(window.innerWidth - up.clientX - 20, window.innerWidth))
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
   const resetResize = () => {
     resetRightWidth()
     setRightWidth(RIGHT_COLUMN_DEFAULT)
   }
-  const effectiveRight = store.commitDetail !== null ? Math.max(rightWidth, 420) : rightWidth
+  // 상세 모드 최소폭도 뷰포트 클램프를 통과시킨다 — 좁은 창에서 중앙 diff가 살아남는다
+  const effectiveRight =
+    store.commitDetail !== null
+      ? clampRightWidth(Math.max(rightWidth, 420), window.innerWidth)
+      : rightWidth
 ```
 
 (c) `<main>` 행을 다음으로 교체 (모드 클래스는 유지 — E2E가 사용):
@@ -4291,6 +4307,8 @@ describe('buildGraph', () => {
     expect(rows.map((r) => r.nodeLane)).toEqual([0, 0, 0])
     expect(rows[2]!.forkLanes).toEqual([]) // root는 아래로 뻗는 선이 없다
     expect(rows.every((r) => r.laneCount === 1)).toBe(true)
+    // 첫 행(HEAD)은 위에서 내려오는 선이 없다 — 점 위 stub 방지
+    expect(rows.map((r) => r.hasIncoming)).toEqual([false, true, true])
   })
 
   it('다이아몬드(분기 후 병합) — 병합 행에서 두 레인이 열리고 공통 조상에서 수렴한다', () => {
@@ -4374,6 +4392,8 @@ export interface GraphRow {
   joinLanes: number[]
   /** 점에서 아래로 뻗는 레인들 — 첫 부모 포함, root면 빈 배열 */
   forkLanes: number[]
+  /** 위 행에서 이 점으로 내려오는 선이 있는가 — 목록 첫 행·새 갈래의 머리는 false (점 위 stub 방지) */
+  hasIncoming: boolean
   /** 이 행에서 거터 폭 계산에 쓸 레인 수 */
   laneCount: number
 }
@@ -4432,7 +4452,14 @@ export function buildGraph(commits: CommitSummary[]): GraphRow[] {
     // 끝의 빈 레인은 다음 행부터 폭을 차지하지 않게 정리한다
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
 
-    rows.push({ nodeLane, passLanes, joinLanes, forkLanes, laneCount })
+    rows.push({
+      nodeLane,
+      passLanes,
+      joinLanes,
+      forkLanes,
+      hasIncoming: waiting.length > 0,
+      laneCount,
+    })
   }
   return rows
 }
@@ -4501,15 +4528,17 @@ function GraphCell({ row, isHead }: { row: GraphRow; isHead: boolean }) {
           strokeWidth={2}
         />
       ))}
-      {/* 점의 레인 자체도 위(수렴 전)와 아래(첫 부모)로 이어진다 — fork에 nodeLane이 있으면 아래로 */}
-      <line
-        x1={nodeX}
-        y1={0}
-        x2={nodeX}
-        y2={NODE_Y}
-        stroke={laneColor(row.nodeLane)}
-        strokeWidth={2}
-      />
+      {/* 점의 레인이 위에서 내려올 때만 위쪽 선을 그린다 — 첫 행·새 갈래 머리의 stub 방지 */}
+      {row.hasIncoming && (
+        <line
+          x1={nodeX}
+          y1={0}
+          x2={nodeX}
+          y2={NODE_Y}
+          stroke={laneColor(row.nodeLane)}
+          strokeWidth={2}
+        />
+      )}
       {row.joinLanes.map((lane) => (
         <path
           key={`join-${lane}`}
@@ -4656,6 +4685,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## 후속 노트 (1단계 이관 후보)
 
+- 레인 그래프: committer date가 역전된 병리적 저장소(머신 시계 어긋남 — 부모가 자식보다 위에 나옴)에서는 해당 레인 선이 목록 끝까지 매달린다(리뷰 합성 재현). git 기본 정렬에서 정상 시계면 발생 불가 — 알려진 한계.
 - discard 부분 실패(취소 도중 일부만 성공) 시 체크 초기화 방어선(`runDiscard`의 setChecked)은 테스트가 지키지 않는다(변이 미검출 — 성공 경로에선 pruning effect가 대신 정리). 부분 실패 E2E는 플랫폼 의존(권한 조작)이라 보류 — 취소 가능 프로세스(1단계)와 함께.
 - 960px 좁은 폭에서 커밋 diff 제목(`파일명 — 저장 해시`)이 말줄임되며 해시 컨텍스트가 사라지고 diff 배지가 찌그러진다(8d 리뷰 Minor) — 좁은 폭 배지 숨김 또는 접미사를 title 속성으로.
 - '목록으로' 복귀 후 마지막 본 커밋 하이라이트 없음(`selectedHash={null}` — 전환형 설계의 의도적 결정) — 대형 히스토리 탐색이 잦아지면 재고.
