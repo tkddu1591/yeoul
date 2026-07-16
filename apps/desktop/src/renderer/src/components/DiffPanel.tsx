@@ -27,7 +27,8 @@ export function DiffPanel({ path, diffText, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
-          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close" aria-label="선택 해제">
+          {/* 가시 라벨 "닫기"가 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
+          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close">
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>

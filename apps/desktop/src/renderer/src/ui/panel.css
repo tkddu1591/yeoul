@@ -21,8 +21,12 @@
   font-size: var(--text-sm);
   font-weight: 700;
 }
-.ui-panel__head > .ui-button {
+.ui-panel__head > .ui-button:first-of-type {
   margin-left: auto;
+}
+.ui-panel__head > .ui-button {
+  flex: none;
+  white-space: nowrap;
 }
 .ui-panel__body {
   flex: 1;
