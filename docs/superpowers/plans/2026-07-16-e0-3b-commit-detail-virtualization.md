@@ -12,6 +12,8 @@
 
 **2차 피드백 매핑 (2026-07-16, 사용자 승인 범위):** ①개별 올리기/내리기 버튼 제거(체크박스 일괄만) → Task 5, ②상단 체크박스·버튼 indent를 행과 정렬 → Task 5, ③파일명·경로 말줄임(…) 대신 가로 스크롤 → Task 5, ⑥다크/라이트 토글 버튼 → Task 8c, ⑩로그 50개 제한 해제(스크롤 끝 더 불러오기) → Task 4·7·8, ⑪선택 파일 변경 취소(확인창 방식 — 사용자 선택: "지금 바로, 확인창만") → Task 3b·4·7·8b. (⑦우클릭 메뉴·⑧브랜치 컨트롤은 다음 마일스톤 — 브랜치·되돌리기 엔진 필요.)
 
+**3차 피드백 (2026-07-16, 커밋 상세 UX 재설계 — 사용자 원문 방향 그대로):** "우측 트리 클릭시 나오는 중앙 설명 멘트가 제대로 안 보여… diff를 보는 게 좌측 사이드에서 누르는 거랑 동일한 역할을 해야 해. 우측에서 누르면 우측 트리가 좌측 리스트처럼 똑같이 변하고 상단 파일 리스트 하단 커밋 메시지 이런 식으로." → **Task 8d**: 커밋 상세를 중앙 3분할에서 **우측 패널 전환형**으로 재설계 — 커밋 클릭 시 우측 열이 [상단 파일 목록 + 하단 메시지 + "목록으로" 복귀]로 바뀌고, 파일 클릭 시 diff는 좌측 흐름과 동일하게 **중앙 DiffPanel 전체**에 뜬다.
+
 **실측으로 확정한 git 명령 (probe 저장소에서 검증됨):**
 - merge 커밋에 `git diff-tree <sha>`는 **빈 출력**이다 — 부모가 있으면 `git diff --name-status -M -z <첫부모> <sha>`로 첫 부모 기준을 명시한다.
 - root 커밋(부모 없음)은 `git diff-tree --no-commit-id --root -r -M -z --name-status <sha>`.
@@ -3524,6 +3526,350 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8d: 커밋 상세 UX 재설계 — 우측 패널 전환형 (3차 피드백)
+
+중앙 3분할(메시지+파일+diff)은 diff가 눌려 죽는다(사용자·리뷰 실측 공통 지적). 커밋 클릭 시 **우측 열이 상세로 전환**(상단 파일 목록·하단 메시지·"목록으로" 복귀)되고, 파일 클릭 시 diff는 좌측 목록과 **완전히 동일하게 중앙 DiffPanel**(전체 높이·한 줄/좌우 토글·닫기)에 뜬다.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (clearCommitFile 추가)
+- Modify: `apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx` (전체 교체), `apps/desktop/src/renderer/src/components/commit-detail-panel.css` (전체 교체), `apps/desktop/src/renderer/src/App.tsx`
+- Test: `apps/desktop/e2e/smoke.spec.ts` (커밋 상세 테스트 교체)
+
+- [ ] **Step 1: store — clearCommitFile**
+
+`apps/desktop/src/renderer/src/store/repository-store.ts` 수정:
+
+(a) 인터페이스의 `clearCommit(): void` 행 **뒤**에 추가:
+
+```ts
+  /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 guard 불필요 */
+  clearCommitFile(): void
+```
+
+(b) 구현부의 `clearCommit()` 블록 **뒤**에 추가:
+
+```ts
+  clearCommitFile() {
+    set({ commitFile: null, diff: null })
+  },
+```
+
+- [ ] **Step 2: CommitDetailPanel 전체 교체 (우측 열 버전)**
+
+`apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx` 전체 교체:
+
+```tsx
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { ArrowLeft } from 'lucide-react'
+import { useRef } from 'react'
+import type { CommitDetail, CommitFileChange } from '@git-gui/domain'
+import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
+import { Panel } from '../ui/Panel'
+import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
+import { formatRelativeTime } from './relative-time'
+import './commit-detail-panel.css'
+import './virtual.css'
+
+interface CommitDetailPanelProps {
+  detail: CommitDetail
+  /** 상세 안에서 선택된 파일 — diff는 좌측 흐름과 동일하게 중앙 패널(공용 diff 슬롯)에 뜬다 */
+  selectedFile: CommitFileChange | null
+  busy: boolean
+  onSelectFile(file: CommitFileChange): void
+  onBack(): void
+}
+
+function CommitFileRow({
+  file,
+  isSelected,
+  busy,
+  onSelect,
+}: {
+  file: CommitFileChange
+  isSelected: boolean
+  busy: boolean
+  onSelect(): void
+}) {
+  const kindLabel = KIND_LABELS[file.kind]
+  const tooltip =
+    file.kind === 'renamed' && file.origPath !== null
+      ? `${file.origPath} → ${file.path} — ${kindLabel}`
+      : `${file.path} — ${kindLabel}`
+  const slashIndex = file.path.lastIndexOf('/')
+  const directory = slashIndex >= 0 ? file.path.slice(0, slashIndex) : ''
+  const basename = slashIndex >= 0 ? file.path.slice(slashIndex + 1) : file.path
+  return (
+    <button
+      type="button"
+      className={`file-row__main file-row__main--${file.kind} commit-file-row${
+        isSelected ? ' commit-file-row--selected' : ''
+      }`}
+      disabled={busy}
+      onClick={onSelect}
+      title={tooltip}
+      aria-label={tooltip}
+      data-testid={`commit-file-${file.path}`}
+    >
+      <span className="file-row__kind" aria-hidden="true">
+        {KIND_GLYPHS[file.kind]}
+      </span>
+      <span className="file-row__name">
+        <span className="file-row__base">{basename}</span>
+        {directory && <span className="file-row__dir">{directory}</span>}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * 커밋 클릭 상세 (#6·3차 피드백) — 우측 열이 타임라인에서 이 패널로 전환된다:
+ * 상단 파일 목록(가상), 하단 메시지. 파일을 누르면 diff는 중앙 패널에 뜬다.
+ */
+export function CommitDetailPanel({
+  detail,
+  selectedFile,
+  busy,
+  onSelectFile,
+  onBack,
+}: CommitDetailPanelProps) {
+  // 대형 커밋(수천 파일)에서도 파일 목록은 가시 범위만 렌더한다 (#4)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: detail.files.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 31,
+    overscan: 10,
+  })
+
+  return (
+    <Panel
+      title="저장 내용"
+      accessory={
+        <>
+          <Badge tone="git">commit</Badge>
+          <Badge tone="count">{detail.shortHash}</Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={busy}
+            onPress={onBack}
+            testId="commit-detail-back"
+          >
+            <ArrowLeft size={13} aria-hidden="true" /> 목록으로
+          </Button>
+        </>
+      }
+      testId="commit-detail-panel"
+    >
+      <div className="commit-detail__files-head">
+        바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
+        {detail.files.length > 0
+          ? ' — 누르면 가운데에 비교를 보여드려요'
+          : ' — 메시지만 남긴 저장이에요'}
+      </div>
+      <div ref={scrollRef} className="virtual-scroll commit-detail__files">
+        <ul
+          className="changes-panel__list"
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+        >
+          {virtualizer.getVirtualItems().map((item) => {
+            const file = detail.files[item.index]!
+            return (
+              <li
+                key={file.path}
+                ref={virtualizer.measureElement}
+                data-index={item.index}
+                className="virtual-row"
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                <CommitFileRow
+                  file={file}
+                  isSelected={selectedFile?.path === file.path}
+                  busy={busy}
+                  onSelect={() => onSelectFile(file)}
+                />
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+      <div className="commit-detail__message">
+        <p className="commit-detail__subject" data-testid="commit-detail-subject">
+          {detail.subject}
+        </p>
+        {detail.body !== '' && (
+          <pre className="commit-detail__body" data-testid="commit-detail-body">
+            {detail.body}
+          </pre>
+        )}
+        <p className="commit-detail__meta">
+          {formatRelativeTime(detail.committedAt, Date.now())} · {detail.authorName}
+          {detail.parents.length >= 2 &&
+            ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
+        </p>
+      </div>
+    </Panel>
+  )
+}
+```
+
+- [ ] **Step 3: commit-detail-panel.css 전체 교체**
+
+```css
+/* 우측 열 전환형(3차 피드백) — 상단 파일 목록(잔여 공간), 하단 메시지(상한 + 자체 스크롤) */
+.commit-detail__files-head {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.commit-detail__files.virtual-scroll {
+  min-height: 120px;
+}
+.commit-detail__message {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-4);
+  max-height: 40%;
+  overflow-y: auto;
+}
+.commit-detail__subject {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.commit-detail__body {
+  margin: var(--space-2) 0 0;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.commit-detail__meta {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+.commit-file-row {
+  width: 100%;
+}
+.commit-file-row--selected {
+  background: var(--color-selection-bg);
+}
+```
+
+- [ ] **Step 4: App 배선 교체**
+
+`apps/desktop/src/renderer/src/App.tsx`의 `<main className="app__main">` 안쪽 전체(ChangesPanel부터 HistoryPanel/CommitDetailPanel 분기까지)를 다음으로 교체 — 중앙은 항상 DiffPanel, 우측이 타임라인↔상세로 전환된다:
+
+```tsx
+        <ChangesPanel
+          changes={status?.changes ?? []}
+          selected={store.selected}
+          busy={store.busy}
+          onStage={(paths) => void store.stage(paths)}
+          onUnstage={(paths) => void store.unstage(paths)}
+          onSelect={(selected) => void store.selectFile(selected)}
+        />
+        <div className="app__center">
+          <DiffPanel
+            path={
+              store.commitFile !== null && store.commitDetail !== null
+                ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
+                : store.selected?.change.path ?? null
+            }
+            diff={store.diff}
+            busy={store.busy}
+            onClose={() =>
+              store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
+            }
+          />
+          <CommitForm
+            stagedCount={stagedCount}
+            busy={store.busy}
+            suggestion={suggestion}
+            onCommit={(message) => store.commit(message)}
+          />
+        </div>
+        {store.commitDetail !== null ? (
+          <CommitDetailPanel
+            detail={store.commitDetail}
+            selectedFile={store.commitFile}
+            busy={store.busy}
+            onSelectFile={(file) => void store.selectCommitFile(file)}
+            onBack={() => store.clearCommit()}
+          />
+        ) : (
+          <HistoryPanel
+            history={store.history}
+            historyLimit={store.historyLimit}
+            currentBranch={status?.branch.name ?? null}
+            selectedHash={store.commitDetail?.hash ?? null}
+            busy={store.busy}
+            onSelect={(hash) => void store.selectCommit(hash)}
+            onLoadMore={() => void store.loadMoreHistory()}
+          />
+        )}
+```
+
+- [ ] **Step 5: E2E 교체 — 우측 전환 흐름**
+
+`apps/desktop/e2e/smoke.spec.ts`의 `'커밋을 누르면 전체 메시지·바뀐 파일·diff가 보인다'` 테스트 전체를 다음으로 교체:
+
+```ts
+test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데에 뜬다', async () => {
+  const repo = await createRepoWithChange()
+  // 본문 있는 커밋을 하나 더 쌓는다 — 상세에서 본문 표시를 검증한다
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(
+    ['commit', '-m', '두 번째 저장', '-m', '자세한 설명 줄'],
+    { cwd: repo },
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    // 최신 커밋 클릭 → 우측 열이 타임라인에서 상세로 전환
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('history-panel')).toHaveCount(0)
+    await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
+    await expect(window.getByTestId('commit-detail-body')).toHaveText('자세한 설명 줄')
+    await expect(window.getByTestId('commit-detail-file-count')).toHaveText('1')
+    // 파일 클릭 → 좌측 흐름과 동일하게 중앙 diff에 뜬다 (v1 → v2 수정)
+    await window.getByTestId('commit-file-app.txt').click()
+    await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
+    await expect(window.getByTestId('diff-panel')).toContainText('저장')
+    // 목록으로 → 타임라인 복귀
+    await window.getByTestId('commit-detail-back').click()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 6: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 164 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 커밋 상세를 우측 전환형으로 재설계 — diff는 중앙 전체 높이 (3차 피드백)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
@@ -3534,7 +3880,7 @@ Expected: 167 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 - [ ] **Step 2: 스크린샷**
 
 일회성 스크립트(커밋 미포함)로 실제 앱을 fixture로 구동해 `apps/desktop/test-results/`에 캡처 (1440×900):
-- (a) `e0-3b-commit-detail.png` — 커밋 상세: 제목·본문·병합 안내 문구·파일 목록·파일 diff까지 한 화면 (merge 커밋 fixture)
+- (a) `e0-3b-commit-detail.png` — 커밋 상세(우측 전환형): 우측에 파일 목록+메시지(병합 안내 문구), 중앙에 파일 diff가 전체 높이로 뜬 한 화면 (merge 커밋 fixture)
 - (b) `e0-3b-history-badges.png` — 타임라인: 현재 브랜치 강조 배지 + 다른 브랜치 배지 + "병합" 표시가 보이는 히스토리
 - (c) `e0-3b-virtual.png` — 1500개 파일 변경 목록(개별 버튼 없는 새 행 UI + 긴 경로 가로 스크롤 중간 위치), 다크 모드로 촬영 — 테마 토글 확인 겸용
 - (d) `e0-3b-discard.png` — 파일 여러 개 체크 후 "변경 취소 (N)" 확인창이 열린 모습
