@@ -1262,7 +1262,7 @@ Expected: 전부 PASS/Done/성공 (신규 테스트 없음 — E2E는 Task 8에�
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts
+git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts packages/git-adapter/src/client.ts
 git commit -m "feat(ipc): commits.show·diffFile 채널 + DiffOptions.origPath
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
