@@ -731,6 +731,8 @@ import type { DiffHunk, DiffLine, FileDiff } from '@git-gui/domain'
  * 단일 파일 patch(`git diff -- <path>` 출력)를 FileDiff로 구조화한다.
  * 줄 번호는 @@ -a,b +c,d @@ 헤더에서 시작해 누적한다.
  * 위치 기반 분류 — 헤더 구간(첫 @@ 이전)은 meta, hunk 안 '-'/'+'는 내용이다.
+ * 주의: 단일 파일 patch 전용 — 다중 파일 patch를 넣으면 두 번째 diff 헤더부터 오분류된다
+ * (커밋 상세 등에서 다중 파일을 다루려면 파일별로 분할해 호출할 것).
  */
 export function parsePatch(rawPatch: string): FileDiff {
   const lines = rawPatch.split('\n')
@@ -899,7 +901,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       </Panel>
     )
   }
-  const isEmpty = diff.hunks.length === 0 && !diff.isBinary
+  const hasHunks = diff.hunks.length > 0
   return (
     <Panel
       title={path}
@@ -916,7 +918,16 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
     >
       {diff.isBinary ? (
         <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
-      ) : isEmpty ? (
+      ) : !hasHunks && diff.meta.length > 0 ? (
+        // 내용 변경 없는 메타 변경(권한 모드 등) — 원문을 그대로 보여준다 (정보 손실 방지)
+        <div className="diff-panel__code">
+          {diff.meta.map((line, index) => (
+            <div key={index} className="diff-line diff-line--note">
+              <span className="diff-line__text">{line}</span>
+            </div>
+          ))}
+        </div>
+      ) : !hasHunks ? (
         <p className="diff-panel__empty">변경 내용이 없어요</p>
       ) : (
         <div className="diff-panel__code">
@@ -1193,7 +1204,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       </Panel>
     )
   }
-  const isEmpty = diff.hunks.length === 0 && !diff.isBinary
+  const hasHunks = diff.hunks.length > 0
   return (
     <Panel
       title={path}
@@ -1224,7 +1235,16 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
     >
       {diff.isBinary ? (
         <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
-      ) : isEmpty ? (
+      ) : !hasHunks && diff.meta.length > 0 ? (
+        // 내용 변경 없는 메타 변경(권한 모드 등) — 원문을 그대로 보여준다 (정보 손실 방지)
+        <div className="diff-panel__code">
+          {diff.meta.map((line, index) => (
+            <div key={index} className="diff-line diff-line--note">
+              <span className="diff-line__text">{line}</span>
+            </div>
+          ))}
+        </div>
+      ) : !hasHunks ? (
         <p className="diff-panel__empty">변경 내용이 없어요</p>
       ) : (
         <div className="diff-panel__code" data-testid={`diff-view-${view}`}>
