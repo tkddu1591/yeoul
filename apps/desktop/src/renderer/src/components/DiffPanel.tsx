@@ -21,7 +21,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       </Panel>
     )
   }
-  const isEmpty = diff.hunks.length === 0 && !diff.isBinary
+  const hasHunks = diff.hunks.length > 0
   return (
     <Panel
       title={path}
@@ -38,7 +38,16 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
     >
       {diff.isBinary ? (
         <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
-      ) : isEmpty ? (
+      ) : !hasHunks && diff.meta.length > 0 ? (
+        // 내용 변경 없는 메타 변경(권한 모드 등) — 원문을 그대로 보여준다 (정보 손실 방지)
+        <div className="diff-panel__code">
+          {diff.meta.map((line, index) => (
+            <div key={index} className="diff-line diff-line--note">
+              <span className="diff-line__text">{line}</span>
+            </div>
+          ))}
+        </div>
+      ) : !hasHunks ? (
         <p className="diff-panel__empty">변경 내용이 없어요</p>
       ) : (
         <div className="diff-panel__code">

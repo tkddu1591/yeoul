@@ -4,6 +4,8 @@ import type { DiffHunk, DiffLine, FileDiff } from '@git-gui/domain'
  * 단일 파일 patch(`git diff -- <path>` 출력)를 FileDiff로 구조화한다.
  * 줄 번호는 @@ -a,b +c,d @@ 헤더에서 시작해 누적한다.
  * 위치 기반 분류 — 헤더 구간(첫 @@ 이전)은 meta, hunk 안 '-'/'+'는 내용이다.
+ * 주의: 단일 파일 patch 전용 — 다중 파일 patch를 넣으면 두 번째 diff 헤더부터 오분류된다
+ * (커밋 상세 등에서 다중 파일을 다루려면 파일별로 분할해 호출할 것).
  */
 export function parsePatch(rawPatch: string): FileDiff {
   const lines = rawPatch.split('\n')
