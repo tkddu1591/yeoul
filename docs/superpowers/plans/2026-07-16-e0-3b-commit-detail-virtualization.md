@@ -4643,7 +4643,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `packages/ipc-contract/src/index.ts` (settings 계약), `apps/desktop/src/main/index.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/src/renderer/src/env.d.ts`, `apps/desktop/src/renderer/src/ui/column-resize.ts`, `apps/desktop/test/column-resize.test.ts`, `apps/desktop/e2e/smoke.spec.ts`
-- Create: `apps/desktop/src/main/settings.ts`, `packages/ipc-contract/test/settings.test.ts`
+- Create: `apps/desktop/src/main/settings.ts`, `packages/ipc-contract/test/settings.test.ts`, `packages/ipc-contract/vitest.config.ts` (domain의 것과 동일한 1줄 config — 이것이 없으면 루트 projects 글롭이 새 테스트를 잡지 않는다)
 
 - [ ] **Step 1: 실패하는 sanitize 테스트**
 
