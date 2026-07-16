@@ -539,7 +539,7 @@ export function DiffPanel({ path, diffText, onClose }: DiffPanelProps) {
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 112 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
+Expected: 124 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 5: Commit**
 
@@ -862,10 +862,12 @@ import './diff-panel.css'
 interface DiffPanelProps {
   path: string | null
   diff: FileDiff | null
+  /** in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 */
+  busy: boolean
   onClose(): void
 }
 
-export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
+export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
   if (!path || diff === null) {
     return (
       <Panel title="변경 내용" testId="diff-panel">
@@ -880,7 +882,14 @@ export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
-          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close" aria-label="선택 해제">
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={busy}
+            onPress={onClose}
+            testId="diff-close"
+            aria-label="선택 해제"
+          >
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
@@ -973,6 +982,7 @@ export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
           <DiffPanel
             path={store.selected?.change.path ?? null}
             diff={store.diff}
+            busy={store.busy}
             onClose={() => store.clearSelection()}
           />
 ```
@@ -1121,6 +1131,8 @@ import './diff-panel.css'
 interface DiffPanelProps {
   path: string | null
   diff: FileDiff | null
+  /** in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 */
+  busy: boolean
   onClose(): void
 }
 
@@ -1153,7 +1165,7 @@ function SplitCell({ line, side }: { line: DiffLine | null; side: 'left' | 'righ
   )
 }
 
-export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
+export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
   const [view, setView] = useState<'unified' | 'split'>('unified')
 
   if (!path || diff === null) {
@@ -1184,7 +1196,14 @@ export function DiffPanel({ path, diff, onClose }: DiffPanelProps) {
             )}
             {view === 'unified' ? '좌우 보기' : '한 줄 보기'}
           </Button>
-          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close" aria-label="선택 해제">
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={busy}
+            onPress={onClose}
+            testId="diff-close"
+            aria-label="선택 해제"
+          >
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
