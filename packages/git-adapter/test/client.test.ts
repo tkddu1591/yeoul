@@ -208,4 +208,40 @@ describe('GitClient', () => {
     await execGitOrThrow(['checkout', '--detach'], { cwd: repo })
     await expect(createGitClient(repo).sync.push()).rejects.toThrow('브랜치가 아닌 시점')
   })
+
+  it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push() // upstream 연결
+
+    // 다른 브랜치에 원격에 없는 커밋을 만들어 둔다
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', '1\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side-only'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'm.txt', '1\n')
+    await client.changes.stage(['m.txt'])
+    await client.commits.create('main-two')
+
+    // 전역 push.default=matching 시나리오를 저장소 로컬 설정으로 재현
+    await execGitOrThrow(['config', 'push.default', 'matching'], { cwd: repo })
+    await client.sync.push()
+
+    const remoteBranches = await execGitOrThrow(['branch', '--format=%(refname:short)'], {
+      cwd: remote,
+    })
+    expect(remoteBranches.stdout).not.toContain('side')
+    const remoteLog = await execGitOrThrow(['log', '-1', '--format=%s', 'main'], { cwd: remote })
+    expect(remoteLog.stdout.trim()).toBe('main-two')
+  })
+
+  it('push — 커밋이 없는 저장소는 읽히는 에러를 던진다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-push-'))
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
+    const bare = await mkdtemp(join(tmpdir(), 'git-gui-unborn-remote-'))
+    await execGitOrThrow(['init', '--bare'], { cwd: bare })
+    await execGitOrThrow(['remote', 'add', 'origin', bare], { cwd: dir })
+    await expect(createGitClient(dir).sync.push()).rejects.toThrow('아직 저장된 시점이 없어요')
+  })
 })

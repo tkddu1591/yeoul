@@ -145,25 +145,37 @@ export function createGitClient(repoPath: string): GitClient {
       async push() {
         const cwd = await topLevel()
         const remotes = await execGitOrThrow(['remote'], { cwd })
-        const firstRemote = remotes.stdout.trim().split('\n')[0] ?? ''
-        if (firstRemote === '') {
+        const remoteNames = remotes.stdout
+          .trim()
+          .split('\n')
+          .filter((name) => name !== '')
+        if (remoteNames.length === 0) {
           throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
         }
+        // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
+        const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
           { cwd },
         )
         if (upstream.exitCode === 0) {
-          await execGitOrThrow(['push'], { cwd })
+          // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
+          await execGitOrThrow(['-c', 'push.default=simple', 'push'], { cwd })
           return
+        }
+        // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
+        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+        if (head.exitCode !== 0) {
+          throw new Error('아직 저장된 시점이 없어요. 먼저 저장(commit)한 뒤 백업해 주세요.')
         }
         // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
         const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         if (branch.exitCode !== 0) {
           throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
         }
-        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다)
-        await execGitOrThrow(['push', '-u', firstRemote, 'HEAD'], { cwd })
+        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다).
+        // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
+        await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
       },
     },
     commits: {
