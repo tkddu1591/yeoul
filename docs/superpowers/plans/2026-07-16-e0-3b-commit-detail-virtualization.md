@@ -18,7 +18,7 @@
 - staged rename에 pathspec을 새 경로만 주면 "새 파일 추가"로 표시되지만, **원래 경로를 함께 주면 `rename from/to` meta로 정상 표시**된다 (Task 3의 근거).
 - `git rev-parse -q --verify <sha>^1`은 root면 exit 1, 아니면 첫 부모 해시를 출력한다.
 
-**알려진 한계(의도적):** merge 커밋의 combined diff(`--cc`)는 다루지 않는다 — 모든 커밋 diff는 첫 부모 기준(스펙 원칙: 비개발자에게 "이 저장으로 무엇이 바뀌었나"만 답한다). 레인 그래프·두 번째 부모 비교는 1단계. 커밋 상세의 파일 목록도 rename 감지는 `-M`(기본 유사도)이다.
+**알려진 한계(의도적):** merge 커밋의 combined diff(`--cc`)는 다루지 않는다 — 모든 커밋 diff는 첫 부모 기준(스펙 원칙: 비개발자에게 "이 저장으로 무엇이 바뀌었나"만 답한다). 레인 그래프·두 번째 부모 비교는 1단계. 커밋 상세의 파일 목록도 rename 감지는 `-M`(기본 유사도)이다. shallow clone의 grafted 커밋은 `%P`가 비어 parents=[]로(root처럼) 보인다 — shallow의 본질적 한계로 수용한다.
 
 ---
 
@@ -149,6 +149,11 @@ describe('parseLog', () => {
     expect(commits[1]?.refs).toEqual([])
   })
 
+  it('refs — shallow clone의 pseudo-decoration grafted는 배지가 아니다', () => {
+    const raw = record('a'.repeat(40), 'aaaaaaa', 'A', '100', 'grafted, HEAD -> main', '', 'x') + '\0'
+    expect(parseLog(raw)[0]?.refs).toEqual(['main'])
+  })
+
   it('parents — 공백 구분 해시를 배열로, root 커밋(빈 %P)은 빈 배열로', () => {
     const merge = record('a'.repeat(40), 'aaaaaaa', 'A', '100', '', `${'b'.repeat(40)} ${'c'.repeat(40)}`, 'merge') + '\0'
     const root = record('d'.repeat(40), 'ddddddd', 'D', '100', '', '', 'root') + '\0'
@@ -196,7 +201,8 @@ const FIELD_SEPARATOR = '\x1f'
 /**
  * `%D` 장식 문자열을 이름 배열로 정리한다.
  * "HEAD -> main, origin/main, tag: v1" → ['main', 'origin/main', 'v1'].
- * detached HEAD의 단독 "HEAD"는 브랜치가 아니므로 제외한다.
+ * detached HEAD의 단독 "HEAD"와 shallow clone의 pseudo-decoration "grafted"는
+ * ref가 아니므로 제외한다 (origin/HEAD·replace ref는 log 인자에서 장식 제외).
  */
 function parseRefs(decoration: string): string[] {
   if (decoration === '') return []
@@ -207,7 +213,7 @@ function parseRefs(decoration: string): string[] {
       if (ref.startsWith('tag: ')) return ref.slice('tag: '.length)
       return ref
     })
-    .filter((ref) => ref !== 'HEAD')
+    .filter((ref) => ref !== 'HEAD' && ref !== 'grafted')
 }
 
 /**
@@ -242,13 +248,14 @@ export function parseLog(rawOutput: string): CommitSummary[] {
 
 - [ ] **Step 5: client.ts의 log format 확장**
 
-`packages/git-adapter/src/client.ts`의 history.list에서 format 행을 교체:
+`packages/git-adapter/src/client.ts`의 history.list에서 기존 `'--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',` 행을 다음 4줄로 교체 (다른 인자는 그대로):
 
 ```ts
+          // clone 기본 장식의 origin/HEAD와 replace ref는 배지 소음이다 — 장식에서 제외한다 (실측 확인)
+          '--decorate-refs-exclude=refs/remotes/*/HEAD',
+          '--decorate-refs-exclude=refs/replace/*',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
 ```
-
-(기존 `'--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',` 행을 위 한 줄로 교체. 다른 인자는 그대로.)
 
 - [ ] **Step 6: client 통합 테스트 — refs·parents 실측**
 
@@ -283,7 +290,7 @@ export function parseLog(rawOutput: string): CommitSummary[] {
 - [ ] **Step 7: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: 전부 PASS (log-parser 7 + client에 1 추가), typecheck 5 Done
+Expected: 전부 PASS (log-parser 8 + client에 1 추가), typecheck 5 Done
 
 - [ ] **Step 8: Commit**
 
@@ -1412,7 +1419,7 @@ Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(150
 - [ ] **Step 8: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 152 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 153 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -1720,7 +1727,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 - [ ] **Step 8: 전체 게이트 (diff 토글 E2E가 기존 회귀 방어)**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 155 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 156 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -2564,7 +2571,7 @@ Run: `cd apps/desktop && pnpm e2e`
 Expected: Step 1~5 적용 전이면 새 테스트 FAIL(클릭 불가·상세 없음), 적용 후 **E2E 6 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 155 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
+Expected: 156 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
 
 - [ ] **Step 8: Commit**
 
@@ -2582,7 +2589,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 155 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
+Expected: 156 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
@@ -2612,13 +2619,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 | 시점 | 기대치 |
 | --- | --- |
-| Task 1 후 | 136 tests (133 − log 5 + log 7 + client 1) |
-| Task 2 후 | +8 (parser) +5 (client show) → 149 |
-| Task 3 후 | +3 (diff origPath·diffFile) → 152 |
+| Task 1 후 | 137 tests (133 − log 5 + log 8 + client 1) |
+| Task 2 후 | +8 (parser) +5 (client show) → 150 |
+| Task 3 후 | +3 (diff origPath·diffFile) → 153 |
 | Task 5 후 | E2E 5 (가상화) |
-| Task 6 후 | +3 (diff-rows) → **155 tests** |
+| Task 6 후 | +3 (diff-rows) → **156 tests** |
 | Task 8 후 | **E2E 6** (커밋 상세) |
-| 최종 | 155 tests + typecheck 5 + build + E2E 6 — 전부 exit 0 |
+| 최종 | 156 tests + typecheck 5 + build + E2E 6 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
