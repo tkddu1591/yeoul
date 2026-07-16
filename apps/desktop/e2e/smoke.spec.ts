@@ -49,6 +49,14 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
     await expect(window.getByTestId('staged-count')).toHaveText('1')
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
+    // diff 확인 — 좌우 보기 토글과 선택 해제
+    await window.getByTestId('file-staged-app.txt').click()
+    await expect(window.getByTestId('diff-view-unified')).toBeVisible()
+    await window.getByTestId('diff-view-toggle').click()
+    await expect(window.getByTestId('diff-view-split')).toBeVisible()
+    await window.getByTestId('diff-close').click()
+    await expect(window.getByTestId('diff-panel')).toContainText('파일을 선택하면')
+
     // commit (명시 메시지)
     await window.getByTestId('commit-message').fill('e2e: 첫 저장')
     await window.getByTestId('commit-button').click()
