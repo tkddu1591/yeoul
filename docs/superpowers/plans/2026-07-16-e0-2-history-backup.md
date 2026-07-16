@@ -12,7 +12,7 @@
 
 **이번 범위가 아닌 것 (E0-1 후속 노트에서 이관하지 않는 항목 포함):** 히스토리 점진 로딩("더 보기" — 지금은 최근 50개), push 진행률·취소(네트워크 원격은 1단계 취소 가능 프로세스와 함께), AI 메시지 제안(스펙상 선택 옵션 — 후속), 테마 토글, 충돌 마커 시각 처리. **백업 버튼의 위험 표시**: 이번 push는 force가 아니므로 위험 동작 구분 불필요.
 
-**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단). 동시 push 재호출은 renderer busy가 1차 방어 — main 쪽 per-repo in-flight dedupe는 1단계 push 진행률 작업과 함께. 히스토리가 정확히 50개면 "50+"로 표기된다(51개째 존재 여부 미구분 — "더 보기" 도입 시 limit+1 조회로 해소). 헤더 백업 버튼은 Lucide 아이콘 사용 — 개념 픽토그램(backup 청록)과의 통일은 백업이 다른 화면에 등장하는 E1에서 결정.
+**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단). 동시 push 재호출은 renderer busy가 1차 방어 — main 쪽 per-repo in-flight dedupe는 1단계 push 진행률 작업과 함께. 히스토리가 정확히 50개면 "50+"로 표기된다(51개째 존재 여부 미구분 — "더 보기" 도입 시 limit+1 조회로 해소). 헤더 백업 버튼은 Lucide 아이콘 사용 — 개념 픽토그램(backup 청록)과의 통일은 백업이 다른 화면에 등장하는 E1에서 결정. 사용자 gitconfig의 `i18n.logOutputEncoding`이 비UTF-8이면 역사 제목이 깨질 수 있다 — 1단계에서 log 명령에 `-c i18n.logOutputEncoding=utf-8` 주입 검토.
 
 ---
 
@@ -821,7 +821,7 @@ function toErrorMessage(cause: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
-/** 상태와 역사를 함께 스냅샷으로 읽는다 — 화면이 서로 다른 시점을 섞어 보여주지 않게 */
+/** 상태와 역사를 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
 async function fetchSnapshot(
   repoPath: string,
 ): Promise<Pick<RepositoryStore, 'status' | 'history'>> {

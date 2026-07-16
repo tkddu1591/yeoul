@@ -37,7 +37,7 @@ function toErrorMessage(cause: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
-/** 상태와 역사를 함께 스냅샷으로 읽는다 — 화면이 서로 다른 시점을 섞어 보여주지 않게 */
+/** 상태와 역사를 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
 async function fetchSnapshot(
   repoPath: string,
 ): Promise<Pick<RepositoryStore, 'status' | 'history'>> {
