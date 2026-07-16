@@ -317,7 +317,7 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
   let flipped: string | undefined
   try {
     const window = await app.firstWindow()
-    // firstWindow는 React 마운트 전(readyState interactive)에 돌아올 수 있다 — 마운트를 기다린다
+    // firstWindow는 React 마운트 전에 반환될 수 있다 — UI가 뜬 뒤 테마를 읽는다 (실측 레이스)
     await expect(window.getByTestId('theme-toggle')).toBeVisible()
     const initial = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(['light', 'dark']).toContain(initial)
