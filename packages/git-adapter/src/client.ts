@@ -70,6 +70,9 @@ function assertFullHash(hash: string): void {
   }
 }
 
+/** CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 이 문구로 */
+const MISSING_COMMIT_MESSAGE = '그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.'
+
 export function createGitClient(repoPath: string): GitClient {
   // porcelain 출력 경로는 루트 상대, pathspec은 cwd 상대다 —
   // 하위 폴더로 열려도 어긋나지 않도록 cwd를 저장소 루트로 정규화한다.
@@ -137,8 +140,10 @@ export function createGitClient(repoPath: string): GitClient {
           assertRepoRelative(options.origPath)
           pathspecs.push(`:(literal)${options.origPath}`)
         }
+        // -M: 사용자 전역 diff.renames=false여도 rename 감지를 고정한다 —
+        // rename이 del+add 2파일 patch로 갈라지면 단일 파일 전용 parsePatch가 오분류한다(실측)
         const args = options.staged
-          ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', ...pathspecs]
+          ? ['diff', '--cached', '-M', '--no-color', '--no-ext-diff', '--', ...pathspecs]
           : ['diff', '--no-color', '--no-ext-diff', '--', ...pathspecs]
         return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
       },
@@ -226,9 +231,8 @@ export function createGitClient(repoPath: string): GitClient {
         ]
         const metaRaw = await execGit(showArgs, { cwd })
         if (metaRaw.exitCode !== 0) {
-          // CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 읽히는 메시지로
           if (metaRaw.stderr.includes('bad object')) {
-            throw new Error('그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.')
+            throw new Error(MISSING_COMMIT_MESSAGE)
           }
           throw new GitError(showArgs, metaRaw)
         }
@@ -246,11 +250,18 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         assertFullHash(hash)
         assertRepoRelative(path)
-        if (origPath !== null) assertRepoRelative(origPath)
+        if (origPath != null) assertRepoRelative(origPath)
         const pathspecs =
-          origPath !== null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
-        // 첫 부모 확인 — root 커밋(부모 없음)은 --root diff-tree로 다룬다 (병합 커밋 diff-tree는 빈 출력)
+          origPath != null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
+        // 첫 부모 확인 — root 커밋(부모 없음)은 --root diff-tree로 다룬다 (병합 커밋 diff-tree는 빈 출력).
+        // rev-parse는 root와 사라진 해시를 구분하지 못한다 — 커밋 존재를 따로 확인해 읽히는 에러를 낸다
         const parent = await execGit(['rev-parse', '-q', '--verify', `${hash}^1`], { cwd })
+        if (parent.exitCode !== 0) {
+          const exists = await execGit(['rev-parse', '-q', '--verify', `${hash}^{commit}`], { cwd })
+          if (exists.exitCode !== 0) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+        }
         const args =
           parent.exitCode === 0
             ? [
@@ -258,6 +269,7 @@ export function createGitClient(repoPath: string): GitClient {
                 '-M',
                 '--no-color',
                 '--no-ext-diff',
+                '--end-of-options',
                 parent.stdout.trim(),
                 hash,
                 '--',
@@ -272,6 +284,7 @@ export function createGitClient(repoPath: string): GitClient {
                 '-M',
                 '--no-color',
                 '--no-ext-diff',
+                '--end-of-options',
                 hash,
                 '--',
                 ...pathspecs,

@@ -115,6 +115,28 @@ describe('GitClient', () => {
     await expect(client.commits.diffFile(head.hash, 'README.md', '../out.txt')).rejects.toThrow()
   })
 
+  it('diffFile — 사라진(존재하지 않는) 커밋은 원시 git 에러 대신 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.diffFile('deadbeef'.repeat(5), 'README.md', null),
+    ).rejects.toThrow(/저장 시점을 찾을 수 없어요/)
+  })
+
+  it('diff — 사용자 전역 diff.renames=false여도 staged rename은 rename으로 표시된다 (-M 고정)', async () => {
+    const repo = await createFixtureRepo()
+    await execGitOrThrow(['config', 'diff.renames', 'false'], { cwd: repo })
+    const client = createGitClient(repo)
+    await execGitOrThrow(['mv', 'README.md', 'DOCS.md'], { cwd: repo })
+    const diff = await client.changes.diff('DOCS.md', {
+      staged: true,
+      untracked: false,
+      origPath: 'README.md',
+    })
+    expect(diff.meta.some((line) => line.startsWith('rename from README.md'))).toBe(true)
+    expect(diff.hunks).toEqual([])
+  })
+
   it('commit — stage된 변경으로 커밋을 만들고 changes가 비워진다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
