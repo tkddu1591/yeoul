@@ -2251,8 +2251,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().changes.discard(repoPath, trackedPaths, untrackedPaths)
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      // 파괴적 작업 — 부분 실행으로 실패해도 이미 지워진 것이 있다.
+      // finally로 스냅샷을 갱신해 stale한 "수정됨" 표시를 남기지 않는다 (리뷰 실측 반영)
+      try {
+        await git().changes.discard(repoPath, trackedPaths, untrackedPaths)
+      } finally {
+        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      }
     })
   },
 
