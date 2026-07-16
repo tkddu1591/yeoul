@@ -202,4 +202,10 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     await expect(createGitClient(repo).sync.push()).rejects.toThrow('원격 저장소가 없어요')
   })
+
+  it('push — detached HEAD에서는 읽히는 에러를 던진다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    await execGitOrThrow(['checkout', '--detach'], { cwd: repo })
+    await expect(createGitClient(repo).sync.push()).rejects.toThrow('브랜치가 아닌 시점')
+  })
 })

@@ -155,10 +155,15 @@ export function createGitClient(repoPath: string): GitClient {
         )
         if (upstream.exitCode === 0) {
           await execGitOrThrow(['push'], { cwd })
-        } else {
-          // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다)
-          await execGitOrThrow(['push', '-u', firstRemote, 'HEAD'], { cwd })
+          return
         }
+        // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        if (branch.exitCode !== 0) {
+          throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
+        }
+        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다)
+        await execGitOrThrow(['push', '-u', firstRemote, 'HEAD'], { cwd })
       },
     },
     commits: {
