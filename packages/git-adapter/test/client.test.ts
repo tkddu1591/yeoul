@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { createGitClient } from '../src/client'
-import { createFixtureRepo, FIXTURE_IDENT, writeFixtureFile } from './fixture'
+import { createFixtureRepo, createFixtureRepoWithRemote, FIXTURE_IDENT, writeFixtureFile } from './fixture'
 
 describe('GitClient', () => {
   it('깨끗한 저장소의 status — normal 상태, main 브랜치, 변경 없음', async () => {
@@ -175,5 +175,31 @@ describe('GitClient', () => {
     await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
     const commits = await createGitClient(dir).history.list(50)
     expect(commits).toEqual([])
+  })
+
+  it('push — 첫 백업은 upstream을 연결하며 올리고, 이후는 그대로 push한다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+
+    await client.sync.push()
+    let remoteLog = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: remote })
+    expect(remoteLog.stdout.trim()).toBe('init')
+
+    const status = await client.repo.status()
+    expect(status.branch.upstream).toBe('origin/main')
+    expect(status.branch.ahead).toBe(0)
+    expect(status.branch.behind).toBe(0)
+
+    await writeFixtureFile(repo, 'b.txt', '1\n')
+    await client.changes.stage(['b.txt'])
+    await client.commits.create('둘째')
+    await client.sync.push()
+    remoteLog = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: remote })
+    expect(remoteLog.stdout.trim()).toBe('둘째')
+  })
+
+  it('push — 원격이 없으면 친절한 에러를 던진다', async () => {
+    const repo = await createFixtureRepo()
+    await expect(createGitClient(repo).sync.push()).rejects.toThrow('원격 저장소가 없어요')
   })
 })

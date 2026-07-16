@@ -24,6 +24,10 @@ export interface GitClient {
     /** 최신순 커밋 요약. limit은 1~500으로 잘린다 */
     list(limit: number): Promise<CommitSummary[]>
   }
+  sync: {
+    /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 */
+    push(): Promise<void>
+  }
   commits: {
     create(message: string): Promise<void>
   }
@@ -135,6 +139,26 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, result)
         }
         return parseLog(result.stdout)
+      },
+    },
+    sync: {
+      async push() {
+        const cwd = await topLevel()
+        const remotes = await execGitOrThrow(['remote'], { cwd })
+        const firstRemote = remotes.stdout.trim().split('\n')[0] ?? ''
+        if (firstRemote === '') {
+          throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+        }
+        const upstream = await execGit(
+          ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          { cwd },
+        )
+        if (upstream.exitCode === 0) {
+          await execGitOrThrow(['push'], { cwd })
+        } else {
+          // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다)
+          await execGitOrThrow(['push', '-u', firstRemote, 'HEAD'], { cwd })
+        }
       },
     },
     commits: {

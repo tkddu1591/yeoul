@@ -18,3 +18,12 @@ export async function createFixtureRepo(): Promise<string> {
 export async function writeFixtureFile(repo: string, name: string, content: string): Promise<void> {
   await writeFile(join(repo, name), content)
 }
+
+/** GIT_SCENARIOS fixture 원칙 — 네트워크 대신 로컬 bare remote로 push를 검증한다 */
+export async function createFixtureRepoWithRemote(): Promise<{ repo: string; remote: string }> {
+  const repo = await createFixtureRepo()
+  const remote = await mkdtemp(join(tmpdir(), 'git-gui-remote-'))
+  await execGitOrThrow(['init', '--bare', '--initial-branch=main'], { cwd: remote })
+  await execGitOrThrow(['remote', 'add', 'origin', remote], { cwd: repo })
+  return { repo, remote }
+}
