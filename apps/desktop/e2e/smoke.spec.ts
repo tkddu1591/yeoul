@@ -115,3 +115,23 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('체크박스로 여러 파일을 한 번에 올린다', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'notes.txt'), 'memo\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    await window.getByTestId('check-all-unstaged').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('2')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

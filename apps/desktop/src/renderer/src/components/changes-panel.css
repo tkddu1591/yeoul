@@ -82,26 +82,56 @@
   color: var(--concept-conflict);
   font-weight: 700;
 }
+.file-list__bulk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.file-list__check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.file-row__check,
+.file-list__check-all input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.file-row__check {
+  flex: none;
+  margin-left: var(--space-2);
+}
+.file-row__check:disabled,
+.file-list__check-all input:disabled {
+  cursor: default;
+}
 .file-row__name {
   display: flex;
+  align-items: baseline;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-/* 축소 우선순위: 디렉터리(1000)가 먼저 줄고, 그다음 파일명(1) — 액션 버튼은 절대 밀리지 않는다 */
-.file-row__dir {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 0 1000 auto;
-  color: var(--color-text-muted);
-}
+/* IntelliJ식: 파일명 먼저, 경로는 뒤에 흐리게 — 좁으면 경로(1000)부터 축소 */
 .file-row__base {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 0 1 auto;
   min-width: 48px;
+}
+.file-row__dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1000 auto;
+  margin-left: var(--space-2);
+  color: var(--color-text-faint);
 }
 .file-row__action {
   display: inline-flex;
