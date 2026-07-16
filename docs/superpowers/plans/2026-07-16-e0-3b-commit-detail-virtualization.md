@@ -1006,6 +1006,16 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBeNull()
   })
 
+  it('discard — 글롭·매직 파일명을 리터럴로 처리해 다른 파일을 지우지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, '*.txt', 'glob\n')
+    await writeFixtureFile(repo, 'victim.txt', 'v\n')
+    await client.changes.discard([], ['*.txt'])
+    expect(existsSync(join(repo, '*.txt'))).toBe(false)
+    expect(existsSync(join(repo, 'victim.txt'))).toBe(true)
+  })
+
   it('discard — 둘 다 빈 배열이면 거부한다 (전체 확대 방지)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
@@ -1038,7 +1048,11 @@ Expected: FAIL — `client.changes.discard is not a function`
 (a) `GitClient` 인터페이스의 changes 블록에 diff 앞 행으로 추가:
 
 ```ts
-    /** 선택 파일의 작업 내용 취소 — tracked는 마지막 저장 상태로 복원, untracked는 삭제. 되돌릴 수 없다 */
+    /**
+     * 선택 파일의 아직 올리지 않은(unstaged) 변경 취소 — tracked는 index 상태로 복원(staged 보존),
+     * untracked는 삭제. 되돌릴 수 없다. 경로는 파일 단위여야 한다(-uall status가 공급) —
+     * 디렉터리 pathspec을 주면 clean이 그 아래 미추적 전체를 지운다(실측).
+     */
     discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
 ```
 
@@ -1063,7 +1077,7 @@ Expected: FAIL — `client.changes.discard is not a function`
 - [ ] **Step 4: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: 전부 PASS (156 + 4 = 160), typecheck 5 Done
+Expected: 전부 PASS (156 + 5 = 161), typecheck 5 Done
 
 - [ ] **Step 5: Commit**
 
@@ -1736,7 +1750,7 @@ Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(150
 - [ ] **Step 9: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 160 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 161 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 10: Commit**
 
@@ -2044,7 +2058,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 - [ ] **Step 8: 전체 게이트 (diff 토글 E2E가 기존 회귀 방어)**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 163 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 164 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -2962,7 +2976,7 @@ Run: `cd apps/desktop && pnpm e2e`
 Expected: Step 1~5 적용 전이면 새 테스트 2개 FAIL(클릭 불가·상세 없음·50+ 고정), 적용 후 **E2E 7 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 163 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
+Expected: 164 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
 
 - [ ] **Step 8: Commit**
 
@@ -3175,7 +3189,8 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
               onConfirm={runDiscard}
               onCancel={() => setConfirmingDiscard(false)}
             >
-              선택한 파일 {validChecked.length}개의 바뀐 내용을 마지막 저장 상태로 되돌려요.
+              선택한 파일 {validChecked.length}개의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔
+              (staged) 내용은 남아요.
               {discardUntracked.length > 0 && ` 새 파일 ${discardUntracked.length}개는 삭제돼요.`} 이
               동작은 되돌릴 수 없어요.
             </ConfirmDialog>
@@ -3231,7 +3246,7 @@ Run: `cd apps/desktop && pnpm e2e`
 Expected: 구현 전 새 테스트 FAIL(`discard-selected` 없음), 구현 후 **E2E 8 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 163 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
+Expected: 164 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
 
 - [ ] **Step 7: Commit**
 
@@ -3422,7 +3437,7 @@ test('테마를 버튼으로 전환하고 기억한다', async () => {
 - [ ] **Step 8: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 166 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 167 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -3440,7 +3455,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 166 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 167 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
@@ -3474,13 +3489,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 1 후 | 137 tests (133 − log 5 + log 8 + client 1) |
 | Task 2 후 | +8 (parser) +5 (client show) → 150, 보완 +1 → 151 |
 | Task 3 후 | +3 → 154, 보완 +2 → 156 |
-| Task 3b 후 | +4 (discard) → 160 |
+| Task 3b 후 | +5 (discard) → 161 |
 | Task 5 후 | E2E 5 (가상화, 기존 2개는 체크박스 흐름 전환) |
-| Task 6 후 | +3 (diff-rows) → **163 tests** |
+| Task 6 후 | +3 (diff-rows) → **164 tests** |
 | Task 8 후 | **E2E 7** (커밋 상세·로그 더 불러오기) |
 | Task 8b 후 | **E2E 8** (변경 취소) |
-| Task 8c 후 | +3 (theme) → **166 tests**, **E2E 9** (테마) |
-| 최종 | 166 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
+| Task 8c 후 | +3 (theme) → **167 tests**, **E2E 9** (테마) |
+| 최종 | 167 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
