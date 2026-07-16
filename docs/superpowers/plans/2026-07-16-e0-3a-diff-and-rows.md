@@ -12,6 +12,8 @@
 
 **알려진 한계(의도적):** merge commit의 combined diff(`--cc`)는 파서가 다루지 않는다(현재 UI는 커밋 diff를 보여주지 않음 — E0-3b 커밋 상세에서 첫 부모 기준으로 다룬다). split 뷰의 워드 단위 하이라이트는 후속.
 
+**후속 노트(최종 통합 리뷰 발견, E0-3b로 이관):** staged rename(R)의 diff가 "새 파일 추가"로 표시된다 — `changes.diff`의 pathspec에 rename 상대편(origPath)이 없어 rename 감지가 깨짐 (client.ts의 `--cached -- :(literal)새경로`, selectFile이 origPath 미동봉). unstage에는 origPath를 동봉(Task 5-보완)하면서 diff에는 안 한 비대칭. main에도 존재하던 사전 한계로 커밋 결과는 정확하나, R9x(내용 수정 동반)에서 실제 delta 대신 전체 파일이 add로 보인다. `-uall` 거대 미추적 트리 행 폭발도 E0-3b 가상화에서 흡수.
+
 ---
 
 ## 파일 구조
