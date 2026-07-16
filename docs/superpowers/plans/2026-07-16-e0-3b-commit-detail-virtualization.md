@@ -10,6 +10,8 @@
 
 **사용자 피드백 매핑:** #6(커밋 클릭 상세) → Task 1·2·3·4·7·8, #7(refs/merge 배지 — 사용자 선택: "이번엔 배지까지, 레인 그래프는 1단계") → Task 1·8, #4(5000건 렉 — 가상화) → Task 5·6·8. E0-3a 후속 노트 이관: staged rename diff origPath 동봉 → Task 3, `-uall` 행 폭발 → Task 5 가상화로 흡수.
 
+**2차 피드백 매핑 (2026-07-16, 사용자 승인 범위):** ①개별 올리기/내리기 버튼 제거(체크박스 일괄만) → Task 5, ②상단 체크박스·버튼 indent를 행과 정렬 → Task 5, ③파일명·경로 말줄임(…) 대신 가로 스크롤 → Task 5, ⑥다크/라이트 토글 버튼 → Task 8c, ⑩로그 50개 제한 해제(스크롤 끝 더 불러오기) → Task 4·7·8, ⑪선택 파일 변경 취소(확인창 방식 — 사용자 선택: "지금 바로, 확인창만") → Task 3b·4·7·8b. (⑦우클릭 메뉴·⑧브랜치 컨트롤은 다음 마일스톤 — 브랜치·되돌리기 엔진 필요.)
+
 **실측으로 확정한 git 명령 (probe 저장소에서 검증됨):**
 - merge 커밋에 `git diff-tree <sha>`는 **빈 출력**이다 — 부모가 있으면 `git diff --name-status -M -z <첫부모> <sha>`로 첫 부모 기준을 명시한다.
 - root 커밋(부모 없음)은 `git diff-tree --no-commit-id --root -r -M -z --name-status <sha>`.
@@ -39,8 +41,10 @@ apps/desktop/src/renderer/src/components/DiffPanel.tsx  # DiffView 위임 (수�
 apps/desktop/src/renderer/src/components/ChangesPanel.tsx # FileList 가상화 (수정)
 apps/desktop/src/renderer/src/components/HistoryPanel.tsx # 가상화·클릭·refs/병합 배지 (수정)
 apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx # 커밋 상세 (신규)
-apps/desktop/src/renderer/src/store/repository-store.ts # selectCommit·selectCommitFile·clearCommit (수정)
-apps/desktop/src/renderer/src/App.tsx                   # 중앙 패널 분기·HistoryPanel 배선 (수정)
+apps/desktop/src/renderer/src/store/repository-store.ts # selectCommit·selectCommitFile·clearCommit·discard·loadMoreHistory (수정)
+apps/desktop/src/renderer/src/App.tsx                   # 중앙 패널 분기·HistoryPanel 배선·테마 토글 (수정)
+apps/desktop/src/renderer/src/ui/ConfirmDialog.tsx      # 되돌릴 수 없는 동작 확인창 (신규, Task 8b)
+apps/desktop/src/renderer/src/ui/theme.ts               # 테마 결정·적용 로직 (신규, Task 8c)
 ```
 
 ---
@@ -835,6 +839,117 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 3b: adapter — changes.discard (선택 파일 변경 취소, 피드백 ⑪)
+
+**유일하게 데이터를 지우는 작업이다.** tracked 파일은 `git restore --`(worktree를 index 상태로 되돌림), untracked 파일은 `git clean -f --`(파일 삭제)로 나눠 처리한다 — restore는 untracked에 pathspec 불일치 에러를 내므로 섞어 보낼 수 없다. 확인창은 renderer(Task 8b) 책임이고, 엔진은 빈 pathspec 거부(전체 확대 방지)만 책임진다.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: 실패하는 테스트**
+
+`packages/git-adapter/test/client.test.ts`의 `'stage/unstage에 빈 배열을 넘기면 전체 작업으로 확대되지 않고 거부한다'` 테스트 **앞**에 추가:
+
+```ts
+  it('discard — tracked 수정은 마지막 저장 상태로 되돌리고, untracked는 삭제한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await writeFixtureFile(repo, 'new.txt', 'n\n')
+
+    await client.changes.discard(['README.md'], ['new.txt'])
+    const status = await client.repo.status()
+    expect(status.changes).toEqual([])
+    expect(existsSync(join(repo, 'new.txt'))).toBe(false)
+    // tracked 파일은 삭제가 아니라 복원이다
+    expect(existsSync(join(repo, 'README.md'))).toBe(true)
+  })
+
+  it('discard — staged 내용은 건드리지 않는다 (worktree만 되돌린다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# staged\n')
+    await client.changes.stage(['README.md'])
+    await writeFixtureFile(repo, 'README.md', '# worktree\n')
+
+    await client.changes.discard(['README.md'], [])
+    const status = await client.repo.status()
+    // staged 변경은 그대로, unstaged 변경만 사라진다 (worktree = index)
+    expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBe('modified')
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBeNull()
+  })
+
+  it('discard — 둘 다 빈 배열이면 거부한다 (전체 확대 방지)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.changes.discard([], [])).rejects.toThrow()
+  })
+
+  it('discard — 빈 문자열 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.changes.discard([''], [])).rejects.toThrow()
+    await expect(client.changes.discard([], [''])).rejects.toThrow()
+  })
+```
+
+그리고 파일 상단 import에 `existsSync` 추가 — 첫 행 `import { mkdir, mkdtemp } from 'node:fs/promises'` **앞**에:
+
+```ts
+import { existsSync } from 'node:fs'
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run packages/git-adapter/test/client.test.ts --testNamePattern "discard"`
+Expected: FAIL — `client.changes.discard is not a function`
+
+- [ ] **Step 3: 구현**
+
+`packages/git-adapter/src/client.ts` 수정:
+
+(a) `GitClient` 인터페이스의 changes 블록에 diff 앞 행으로 추가:
+
+```ts
+    /** 선택 파일의 작업 내용 취소 — tracked는 마지막 저장 상태로 복원, untracked는 삭제. 되돌릴 수 없다 */
+    discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+```
+
+(b) 구현부 changes의 `unstage` 뒤에 추가:
+
+```ts
+      async discard(trackedPaths, untrackedPaths) {
+        if (trackedPaths.length === 0 && untrackedPaths.length === 0) {
+          throw new Error('빈 경로 — 전체 작업으로 확대되는 것을 막기 위해 거부한다')
+        }
+        const cwd = await topLevel()
+        // restore는 untracked에 pathspec 불일치 에러를 내므로 tracked/untracked를 나눠 실행한다
+        if (trackedPaths.length > 0) {
+          await execGitOrThrow(['restore', '--', ...toPathspecs(trackedPaths)], { cwd })
+        }
+        if (untrackedPaths.length > 0) {
+          await execGitOrThrow(['clean', '-f', '--', ...toPathspecs(untrackedPaths)], { cwd })
+        }
+      },
+```
+
+- [ ] **Step 4: 통과 확인**
+
+Run: `pnpm test && pnpm typecheck`
+Expected: 전부 PASS (+4), typecheck 5 Done
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "feat(adapter): changes.discard — 선택 파일 변경 취소 (restore + clean 분리)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 4: IPC — contract·handlers·preload 확장
 
 **Files:**
@@ -856,9 +971,16 @@ import type {
 } from '@git-gui/domain'
 ```
 
-(b) `GitApi`의 commits 블록을 교체:
+(b) `GitApi`의 changes·commits 블록을 교체:
 
 ```ts
+  changes: {
+    stage(repoPath: string, paths: string[]): Promise<void>
+    unstage(repoPath: string, paths: string[]): Promise<void>
+    /** 선택 파일 변경 취소 — tracked는 복원, untracked는 삭제. 되돌릴 수 없다 (확인창은 renderer 책임) */
+    discard(repoPath: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+    diff(repoPath: string, path: string, options: DiffOptions): Promise<FileDiff>
+  }
   commits: {
     create(repoPath: string, message: string): Promise<void>
     /** 커밋 상세 — hash는 40자 hex 전체 해시만 허용된다 */
@@ -868,12 +990,18 @@ import type {
   }
 ```
 
-(c) `CHANNELS`에 두 항목 추가 — `commitsCreate` 행 뒤에:
+(c) `CHANNELS`에 세 항목 추가 — `changesUnstage` 행 뒤에 `changesDiscard`, `commitsCreate` 행 뒤에 나머지 둘:
+
+```ts
+  changesDiscard: 'changes:discard',
+```
 
 ```ts
   commitsShow: 'commits:show',
   commitsDiffFile: 'commits:diff-file',
 ```
+
+(d) `GitApi.history`의 doc 주석에서 "limit은 1~500 정수"를 "limit은 1~10000 정수"로 교체 (로그 더 불러오기 — 피드백 ⑩).
 
 - [ ] **Step 2: main 핸들러**
 
@@ -933,11 +1061,51 @@ function assertDiffOptions(value: unknown): DiffOptions {
   )
 ```
 
-- [ ] **Step 3: preload 브리지**
-
-`apps/desktop/src/preload/index.ts`의 commits 블록을 교체:
+(c-2) `changesUnstage` 핸들러 뒤에 추가:
 
 ```ts
+  ipcMain.handle(
+    CHANNELS.changesDiscard,
+    (_event, repoPath: unknown, trackedPaths: unknown, untrackedPaths: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).changes.discard(
+        assertStringArray(trackedPaths),
+        assertStringArray(untrackedPaths),
+      ),
+  )
+```
+
+(c-3) `assertLimit`의 상한을 교체 — 로그 더 불러오기(⑩)가 상한을 키워 가며 재조회한다:
+
+```ts
+function assertLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 10000) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+```
+
+(c-4) `packages/git-adapter/src/client.ts`의 history.list clamp도 맞춘다 — 기존 `Math.min(Math.max(Math.trunc(limit), 1), 500)` 행을 다음으로 교체하고, `GitClient.history`의 doc 주석 "limit은 1~500으로 잘린다"를 "limit은 1~10000으로 잘린다"로 교체:
+
+```ts
+        const safeLimit = Number.isFinite(limit)
+          ? Math.min(Math.max(Math.trunc(limit), 1), 10000)
+          : 50
+```
+
+- [ ] **Step 3: preload 브리지**
+
+`apps/desktop/src/preload/index.ts`의 changes·commits 블록을 교체:
+
+```ts
+  changes: {
+    stage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesStage, repoPath, paths),
+    unstage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesUnstage, repoPath, paths),
+    discard: (repoPath, trackedPaths, untrackedPaths) =>
+      ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, trackedPaths, untrackedPaths),
+    diff: (repoPath, path, options: DiffOptions) =>
+      ipcRenderer.invoke(CHANNELS.changesDiff, repoPath, path, options),
+  },
   commits: {
     create: (repoPath, message) => ipcRenderer.invoke(CHANNELS.commitsCreate, repoPath, message),
     show: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsShow, repoPath, hash),
@@ -962,7 +1130,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: renderer — @tanstack/react-virtual 도입 + 변경 목록 가상화
+### Task 5: renderer — 행 UI 개편(①개별 버튼 제거·②정렬·③가로 스크롤) + 변경 목록 가상화
+
+2차 피드백 반영: 행마다 있던 개별 올리기/내리기 버튼을 제거하고 체크박스 + 일괄 버튼만 남긴다(①). 상단 모두 선택 체크박스와 행 체크박스의 가로 위치를 정렬한다(②). 파일명·경로는 말줄임(…) 대신 가로 스크롤로 전체를 보여준다(③ — 가상 행이 절대 배치라 `min-width:100%; width:max-content` 행이 스크롤 폭을 만든다. 알려진 트레이드오프: 가로 스크롤 범위가 "렌더된 행 중 최장"이라 세로 스크롤 중 미세하게 변할 수 있다).
 
 **Files:**
 - Modify: `apps/desktop/package.json` (의존성), `apps/desktop/src/renderer/src/ui/panel.css`, `apps/desktop/src/renderer/src/components/ChangesPanel.tsx`, `apps/desktop/src/renderer/src/components/changes-panel.css`
@@ -1065,21 +1235,10 @@ interface FileRowProps {
   busy: boolean
   onToggle(): void
   onSelect(): void
-  onAction(): void
 }
 
-function FileRow({
-  change,
-  staged,
-  isSelected,
-  isChecked,
-  busy,
-  onToggle,
-  onSelect,
-  onAction,
-}: FileRowProps) {
+function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSelect }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
-  const actionLabel = staged ? '내리기' : '올리기'
   const kindLabel = kind ? KIND_LABELS[kind] : ''
   // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
   const tooltip =
@@ -1117,21 +1276,6 @@ function FileRow({
           <span className="file-row__base">{basename}</span>
           {directory && <span className="file-row__dir">{directory}</span>}
         </span>
-      </button>
-      <button
-        type="button"
-        className="file-row__action"
-        disabled={busy}
-        onClick={onAction}
-        aria-label={`${change.path} ${actionLabel}`}
-        data-testid={`${staged ? 'unstage' : 'stage'}-${change.path}`}
-      >
-        {staged ? (
-          <CircleMinus size={14} aria-hidden="true" />
-        ) : (
-          <CirclePlus size={14} aria-hidden="true" />
-        )}
-        {actionLabel}
       </button>
     </div>
   )
@@ -1261,7 +1405,7 @@ function FileList({
                     key={`${side}-${change.path}`}
                     ref={virtualizer.measureElement}
                     data-index={item.index}
-                    className="virtual-row"
+                    className="virtual-row virtual-row--wide"
                     style={{ transform: `translateY(${item.start}px)` }}
                   >
                     <FileRow
@@ -1276,7 +1420,6 @@ function FileList({
                       busy={busy}
                       onToggle={() => toggle(change.path)}
                       onSelect={() => onSelect({ change, staged })}
-                      onAction={() => onAction(actionPaths(change, staged))}
                     />
                   </li>
                 )
@@ -1344,13 +1487,18 @@ export function ChangesPanel({
 .virtual-scroll {
   flex: 1 1 auto !important;
   min-height: 0;
-  overflow-y: auto;
+  overflow: auto;
 }
 .virtual-row {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
+}
+/* 가로 스크롤 리스트(③) — 절대 배치 행은 컨테이너 폭을 늘리지 못하므로 행 자신이 폭을 만든다 */
+.virtual-row--wide {
+  min-width: 100%;
+  width: max-content;
 }
 ```
 
@@ -1364,19 +1512,62 @@ export function ChangesPanel({
 }
 ```
 
-(c) `.file-row` 블록을 교체 (li → div가 되었고, 행 여백을 행 자신이 갖는다):
+(c) `.file-row` 블록을 교체 — li → div가 되었고, 좌측 여백을 bulk 바와 동일한 `var(--space-3)`으로 맞춰 체크박스 세로선을 정렬한다(②):
 
 ```css
 .file-row {
   display: flex;
-  align-items: stretch;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-2);
   border-radius: var(--radius-sm);
-  margin: 0 var(--space-1);
+  padding: 0 var(--space-3);
+  width: 100%;
 }
 ```
 
-- [ ] **Step 6: 실패하는 E2E — 가상화 검증**
+(d) `.file-row__check` 블록을 교체 (별도 margin 제거 — 행 padding이 정렬을 담당한다):
+
+```css
+.file-row__check {
+  flex: none;
+}
+```
+
+(e) `.file-list__check-all` 블록의 `gap: 6px;`를 `gap: var(--space-2);`로 교체 (행 gap과 동일하게 — 체크박스 폭이 같으므로 세로선이 맞는다).
+
+(f) 말줄임 제거(③) — `.file-row__name`·`.file-row__base`·`.file-row__dir` 블록을 다음으로 교체:
+
+```css
+.file-row__name {
+  display: flex;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+/* IntelliJ식: 파일명 먼저, 경로는 뒤에 흐리게 — 잘라내지 않고 가로 스크롤로 전체를 보여준다(③) */
+.file-row__base {
+  flex: none;
+}
+.file-row__dir {
+  flex: none;
+  margin-left: var(--space-2);
+  color: var(--color-text-faint);
+}
+```
+
+(g) `.file-row__action` 블록과 `.file-row__action:hover:not(:disabled)` 블록을 삭제하고, `.file-row__main:disabled, .file-row__action:disabled` 선택자를 `.file-row__main:disabled`로 교체한다 (①).
+
+- [ ] **Step 6: 기존 E2E를 체크박스 흐름으로 전환 (개별 버튼 제거에 따라)**
+
+`apps/desktop/e2e/smoke.spec.ts`에서 `stage-app.txt` 클릭 2곳(1번 테스트 '열기 → stage → …'와 2번 테스트 '빈 메시지로 저장하면 …')을 각각 다음 두 줄로 교체:
+
+```ts
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
+```
+
+- [ ] **Step 7: 실패하는 E2E — 가상화 검증**
 
 `apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
 
@@ -1411,21 +1602,21 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
 })
 ```
 
-- [ ] **Step 7: 실패 확인 → 통과 확인**
+- [ ] **Step 8: 실패 확인 → 통과 확인**
 
 Run: `cd apps/desktop && pnpm e2e`
-Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(1501개 전부 렌더). 적용 후 재실행 시 **E2E 5 passed**. (구현을 먼저 했다면 `git stash push apps/desktop/src/renderer/src/components/ChangesPanel.tsx` → 실패 확인 → `git stash pop`으로 검출력을 실증한다.)
+Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(1501개 전부 렌더). 적용 후 재실행 시 **E2E 5 passed**. (구현을 먼저 했다면 `git stash push apps/desktop/src/renderer/src/components/ChangesPanel.tsx` → 실패 확인 → `git stash pop`으로 검출력을 실증한다. stash 확인 시에는 Step 6의 스펙 변경도 함께 stash되므로 가상화 테스트의 rendered 단언 실패만 본다.)
 
-- [ ] **Step 8: 전체 게이트**
+- [ ] **Step 9: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 153 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 157 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add apps/desktop/package.json pnpm-lock.yaml apps/desktop/src/renderer/src/ui/panel.css apps/desktop/src/renderer/src/components apps/desktop/e2e/smoke.spec.ts
-git commit -m "feat(desktop): 변경 목록 가상화 — 수천 파일에서도 가시 범위만 렌더 (#4)
+git commit -m "feat(desktop): 행 UI 개편과 변경 목록 가상화 — 개별 버튼 제거·가로 스크롤·수천 파일 (#4·①②③)
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -1727,7 +1918,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 - [ ] **Step 8: 전체 게이트 (diff 토글 E2E가 기존 회귀 방어)**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 156 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 160 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -1740,7 +1931,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: renderer — store 커밋 선택 상태
+### Task 7: renderer — store 커밋 선택 상태 + 변경 취소 + 로그 더 불러오기
 
 **Files:**
 - Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
@@ -1762,8 +1953,11 @@ import type {
 
 const git = () => window.gitApi
 
-/** 히스토리 조회 상한 — UI가 "잘림" 표기(50+)에 사용한다 */
+/** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
+const HISTORY_PAGE = 200
+/** IPC assertLimit와 동일한 상한 — 이 이상은 더 불러오지 않는다 */
+const HISTORY_MAX = 10000
 
 export interface SelectedFile {
   change: FileChange
@@ -1774,6 +1968,8 @@ interface RepositoryStore {
   repoPath: string | null
   status: RepositoryStatus | null
   history: CommitSummary[]
+  /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
+  historyLimit: number
   selected: SelectedFile | null
   diff: FileDiff | null
   /** 커밋 클릭 상세 — 열려 있으면 중앙 패널이 커밋 상세로 바뀐다. 파일 diff 선택과 상호 배타 */
@@ -1788,6 +1984,8 @@ interface RepositoryStore {
   refresh(): Promise<void>
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
+  /** 선택 파일 변경 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 (⑪) */
+  discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
   /** diff 선택 해제 — 동기 상태 변경이라 guard 불필요 */
   clearSelection(): void
@@ -1795,6 +1993,8 @@ interface RepositoryStore {
   selectCommitFile(file: CommitFileChange): Promise<void>
   /** 커밋 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
   clearCommit(): void
+  /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
+  loadMoreHistory(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
   commit(message: string): Promise<boolean>
   backup(): Promise<void>
@@ -1809,10 +2009,11 @@ function toErrorMessage(cause: unknown): string {
 /** 상태와 역사를 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
 async function fetchSnapshot(
   repoPath: string,
+  limit: number,
 ): Promise<Pick<RepositoryStore, 'status' | 'history'>> {
   const [status, history] = await Promise.all([
     git().repo.status(repoPath),
-    git().history.list(repoPath, HISTORY_LIMIT),
+    git().history.list(repoPath, limit),
   ])
   return { status, history }
 }
@@ -1847,6 +2048,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
   status: null,
   history: [],
+  historyLimit: HISTORY_LIMIT,
   selected: null,
   diff: null,
   commitDetail: null,
@@ -1858,7 +2060,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       const initial = await git().repo.initialPath()
       if (!initial) return
-      set({ repoPath: initial, ...(await fetchSnapshot(initial)) })
+      set({ repoPath: initial, ...(await fetchSnapshot(initial, get().historyLimit)) })
     })
   },
 
@@ -1866,8 +2068,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       const path = await git().repo.select()
       if (!path) return
-      // guard가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다
-      set({ repoPath: path, ...CLEAR_SELECTIONS, ...(await fetchSnapshot(path)) })
+      // guard가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.
+      // 다른 저장소다 — 히스토리 상한도 첫 페이지로 되돌린다
+      set({
+        repoPath: path,
+        historyLimit: HISTORY_LIMIT,
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(path, HISTORY_LIMIT)),
+      })
     })
   },
 
@@ -1876,7 +2084,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff·상세도 함께 무효화한다
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath)) })
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
@@ -1886,7 +2094,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       await git().changes.stage(repoPath, paths)
       // stage 후에는 보고 있던 diff의 의미가 달라진다(오인 커밋 방지) — 선택을 비운다
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath)) })
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
@@ -1895,7 +2103,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().changes.unstage(repoPath, paths)
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath)) })
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async discard(trackedPaths, untrackedPaths) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().changes.discard(repoPath, trackedPaths, untrackedPaths)
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
@@ -1941,12 +2158,23 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     set({ commitDetail: null, commitFile: null, diff: null })
   },
 
+  async loadMoreHistory() {
+    const { repoPath, history, historyLimit } = get()
+    // 끝까지 다 봤거나(뒤가 없음) 상한에 닿았으면 더 부르지 않는다
+    if (!repoPath || history.length < historyLimit || historyLimit >= HISTORY_MAX) return
+    await guard(set, get, async () => {
+      const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
+      const more = await git().history.list(repoPath, next)
+      set({ history: more, historyLimit: next })
+    })
+  },
+
   async commit(message) {
     const { repoPath } = get()
     if (!repoPath) return false
     return guard(set, get, async () => {
       await git().commits.create(repoPath, message)
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath)) })
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
@@ -1956,7 +2184,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       await git().sync.push(repoPath)
       // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신
-      set({ ...(await fetchSnapshot(repoPath)) })
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 }))
@@ -1991,7 +2219,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ```tsx
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import type { CommitSummary } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
@@ -2001,24 +2229,26 @@ import './history-panel.css'
 
 interface HistoryPanelProps {
   history: CommitSummary[]
-  /** 조회 상한 — 목록이 상한에 닿으면 "N+"로 표기해 잘렸음을 알린다 */
-  limit: number
+  /** 현재 조회 상한 — 목록이 상한에 닿으면 "N+"로 표기하고, 스크롤 끝에서 더 불러온다 (⑩) */
+  historyLimit: number
   /** 현재 브랜치 — 같은 이름의 ref 배지를 강조한다 */
   currentBranch: string | null
   selectedHash: string | null
   busy: boolean
   onSelect(hash: string): void
+  onLoadMore(): void
 }
 
 export function HistoryPanel({
   history,
-  limit,
+  historyLimit,
   currentBranch,
   selectedHash,
   busy,
   onSelect,
+  onLoadMore,
 }: HistoryPanelProps) {
-  const truncated = history.length >= limit
+  const truncated = history.length >= historyLimit
   // 수천 커밋에서도 DOM은 가시 범위만 유지한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
@@ -2027,6 +2257,13 @@ export function HistoryPanel({
     estimateSize: () => 52,
     overscan: 10,
   })
+  const virtualItems = virtualizer.getVirtualItems()
+  const lastRendered = virtualItems[virtualItems.length - 1]?.index ?? -1
+
+  // 마지막 행이 렌더 범위에 들어오면 다음 페이지를 불러온다 (⑩) — busy·상한은 store가 이중 방어한다
+  useEffect(() => {
+    if (truncated && !busy && lastRendered >= history.length - 1) onLoadMore()
+  }, [truncated, busy, lastRendered, history.length, onLoadMore])
 
   return (
     <Panel
@@ -2035,7 +2272,9 @@ export function HistoryPanel({
         <>
           <Badge tone="git">log</Badge>
           <Badge tone="count">
-            <span data-testid="history-count">{truncated ? `${limit}+` : history.length}</span>
+            <span data-testid="history-count">
+              {truncated ? `${historyLimit}+` : history.length}
+            </span>
           </Badge>
         </>
       }
@@ -2051,13 +2290,13 @@ export function HistoryPanel({
           </p>
         </div>
       ) : (
-        <div ref={scrollRef} className="virtual-scroll">
+        <div ref={scrollRef} className="virtual-scroll" data-testid="history-scroll">
           <ol
             className="history-panel__list"
             data-testid="history-list"
             style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
           >
-            {virtualizer.getVirtualItems().map((item) => {
+            {virtualItems.map((item) => {
               const commit = history[item.index]!
               // 가상화에서는 :last-child가 "전체의 마지막"이 아니다 — 커넥터·잘림 표시는 index로 판정한다
               const isLast = item.index === history.length - 1
@@ -2519,13 +2758,16 @@ import { CommitDetailPanel } from './components/CommitDetailPanel'
         </div>
         <HistoryPanel
           history={store.history}
-          limit={HISTORY_LIMIT}
+          historyLimit={store.historyLimit}
           currentBranch={status?.branch.name ?? null}
           selectedHash={store.commitDetail?.hash ?? null}
           busy={store.busy}
           onSelect={(hash) => void store.selectCommit(hash)}
+          onLoadMore={() => void store.loadMoreHistory()}
         />
 ```
+
+(c) `HISTORY_LIMIT` import가 더는 쓰이지 않는다 — `import { HISTORY_LIMIT, useRepositoryStore } from './store/repository-store'` 행을 `import { useRepositoryStore } from './store/repository-store'`로 교체.
 
 - [ ] **Step 6: 실패하는 E2E — 커밋 상세**
 
@@ -2563,15 +2805,38 @@ test('커밋을 누르면 전체 메시지·바뀐 파일·diff가 보인다', a
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('스크롤 끝에서 저장 역사를 더 불러온다 (50개 제한 해제)', async () => {
+  const repo = await createRepoWithChange()
+  for (let i = 0; i < 60; i += 1) {
+    await execGitOrThrow(['commit', '--allow-empty', '-m', `bulk ${i}`], { cwd: repo })
+  }
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('50+')
+    // 히스토리 스크롤을 끝까지 내리면 다음 페이지를 불러온다 (⑩)
+    await window.getByTestId('history-scroll').evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    await expect(window.getByTestId('history-count')).toHaveText('61')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
 ```
 
 - [ ] **Step 7: 실패 확인 → 전체 게이트**
 
 Run: `cd apps/desktop && pnpm e2e`
-Expected: Step 1~5 적용 전이면 새 테스트 FAIL(클릭 불가·상세 없음), 적용 후 **E2E 6 passed**
+Expected: Step 1~5 적용 전이면 새 테스트 2개 FAIL(클릭 불가·상세 없음·50+ 고정), 적용 후 **E2E 7 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 156 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
+Expected: 160 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
 
 - [ ] **Step 8: Commit**
 
@@ -2584,25 +2849,486 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8b: renderer — 선택 파일 변경 취소 UI (확인창, 피드백 ⑪)
+
+사용자 결정: "지금 바로, 확인창만" — 되돌릴 수 없음을 명시한 확인창을 거쳐 store.discard를 호출한다. unstaged 목록에만 붙는다(staged는 내리기가 이미 안전한 취소다).
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/ui/Button.tsx`, `apps/desktop/src/renderer/src/ui/button.css`, `apps/desktop/src/renderer/src/components/ChangesPanel.tsx`, `apps/desktop/src/renderer/src/App.tsx`
+- Create: `apps/desktop/src/renderer/src/ui/ConfirmDialog.tsx`, `apps/desktop/src/renderer/src/ui/confirm-dialog.css`
+- Test: `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: Button danger 변형**
+
+`apps/desktop/src/renderer/src/ui/Button.tsx`의 `type Variant = 'primary' | 'neutral' | 'ghost'`를 다음으로 교체:
+
+```ts
+type Variant = 'primary' | 'neutral' | 'ghost' | 'danger'
+```
+
+`apps/desktop/src/renderer/src/ui/button.css` 끝에 추가:
+
+```css
+/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다 */
+.ui-button--danger {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-danger);
+}
+.ui-button--danger[data-hovered] {
+  background: var(--color-surface-sunken);
+}
+.ui-button--danger[data-pressed] {
+  background: var(--color-border);
+}
+```
+
+- [ ] **Step 2: ConfirmDialog**
+
+Create `apps/desktop/src/renderer/src/ui/ConfirmDialog.tsx`:
+
+```tsx
+import type { ReactNode } from 'react'
+import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
+import { Button } from './Button'
+import './confirm-dialog.css'
+
+interface ConfirmDialogProps {
+  isOpen: boolean
+  title: string
+  children: ReactNode
+  confirmLabel: string
+  onConfirm(): void
+  onCancel(): void
+}
+
+/** 되돌릴 수 없는 동작 전용 확인창 — ESC·바깥 클릭은 취소와 같다 */
+export function ConfirmDialog({
+  isOpen,
+  title,
+  children,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
+  return (
+    <ModalOverlay
+      className="ui-modal-overlay"
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onCancel()
+      }}
+      isDismissable
+    >
+      <Modal className="ui-modal">
+        <Dialog role="alertdialog" className="ui-dialog">
+          <Heading slot="title" className="ui-dialog__title">
+            {title}
+          </Heading>
+          <div className="ui-dialog__body">{children}</div>
+          <div className="ui-dialog__actions">
+            <Button variant="ghost" size="sm" onPress={onCancel} testId="confirm-cancel">
+              그만두기
+            </Button>
+            <Button variant="danger" size="sm" onPress={onConfirm} testId="confirm-accept">
+              {confirmLabel}
+            </Button>
+          </div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  )
+}
+```
+
+Create `apps/desktop/src/renderer/src/ui/confirm-dialog.css`:
+
+```css
+.ui-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.ui-modal {
+  outline: none;
+}
+.ui-dialog {
+  width: 340px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-4);
+  outline: none;
+}
+.ui-dialog__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.ui-dialog__body {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+.ui-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+```
+
+- [ ] **Step 3: ChangesPanel에 변경 취소 흐름**
+
+`apps/desktop/src/renderer/src/components/ChangesPanel.tsx` 수정:
+
+(a) import에 ConfirmDialog 추가 — `import { Button } from '../ui/Button'` 뒤에:
+
+```tsx
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+```
+
+(b) `ChangesPanelProps`에 `onUnstage` 뒤 행으로 추가:
+
+```ts
+  /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
+  onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
+```
+
+(c) `FileListProps`에 `bulkLabel: string` 뒤 행으로 추가:
+
+```ts
+  /** unstaged 목록에만 있다 — 확인창을 거쳐 선택 파일의 변경을 취소한다 */
+  onDiscard?: (trackedPaths: string[], untrackedPaths: string[]) => void
+```
+
+(d) `FileList` 파라미터 구조 분해의 `bulkLabel,` 뒤에 `onDiscard,` 추가.
+
+(e) `FileList` 본문의 `const runBulk = () => { ... }` 뒤에 추가:
+
+```tsx
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const discardTracked = validChecked.filter((c) => c.unstaged !== 'untracked').map((c) => c.path)
+  const discardUntracked = validChecked.filter((c) => c.unstaged === 'untracked').map((c) => c.path)
+  const runDiscard = () => {
+    setConfirmingDiscard(false)
+    onDiscard?.(discardTracked, discardUntracked)
+    setChecked(new Set())
+  }
+```
+
+(f) bulk 바의 일괄 버튼(`선택 {bulkLabel} …` Button) 바로 뒤에 추가:
+
+```tsx
+            {onDiscard && (
+              <Button
+                variant="danger"
+                size="sm"
+                isDisabled={busy || validChecked.length === 0}
+                onPress={() => setConfirmingDiscard(true)}
+                testId="discard-selected"
+              >
+                변경 취소 ({validChecked.length})
+              </Button>
+            )}
+```
+
+(g) `</Panel>` 닫기 직전(가상 리스트 `</div>` 뒤, `</>` 앞)에 추가:
+
+```tsx
+          {onDiscard && (
+            <ConfirmDialog
+              isOpen={confirmingDiscard}
+              title="변경 내용을 취소할까요?"
+              confirmLabel="변경 취소"
+              onConfirm={runDiscard}
+              onCancel={() => setConfirmingDiscard(false)}
+            >
+              선택한 파일 {validChecked.length}개의 바뀐 내용을 마지막 저장 상태로 되돌려요.
+              {discardUntracked.length > 0 && ` 새 파일 ${discardUntracked.length}개는 삭제돼요.`} 이
+              동작은 되돌릴 수 없어요.
+            </ConfirmDialog>
+          )}
+```
+
+(h) `ChangesPanel` 함수: props 구조 분해에 `onDiscard,` 추가(`onUnstage,` 뒤), unstaged 쪽 `<FileList …>`에 `onDiscard={onDiscard}` prop 추가 (`onAction={onStage}` 뒤 행).
+
+- [ ] **Step 4: App 배선**
+
+`apps/desktop/src/renderer/src/App.tsx`의 `<ChangesPanel …>`에 `onUnstage` 행 뒤로 추가:
+
+```tsx
+          onDiscard={(trackedPaths, untrackedPaths) =>
+            void store.discard(trackedPaths, untrackedPaths)
+          }
+```
+
+- [ ] **Step 5: 실패하는 E2E**
+
+`apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
+
+```ts
+test('선택한 파일의 변경을 확인창을 거쳐 취소한다 — 새 파일은 삭제된다', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'temp.txt'), 'temp\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    await window.getByTestId('check-all-unstaged').click()
+    await window.getByTestId('discard-selected').click()
+    // 그만두기 — 아무 일도 일어나지 않고 체크는 유지된다
+    await window.getByTestId('confirm-cancel').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    // 다시 열어 변경 취소 — tracked는 복원, untracked(temp.txt)는 삭제
+    await window.getByTestId('discard-selected').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 6: 실패 확인 → 전체 게이트**
+
+Run: `cd apps/desktop && pnpm e2e`
+Expected: 구현 전 새 테스트 FAIL(`discard-selected` 없음), 구현 후 **E2E 8 passed**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 160 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 선택 파일 변경 취소 — 되돌릴 수 없음을 확인창으로 (⑪)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8c: renderer — 다크/라이트 테마 토글 (피드백 ⑥)
+
+시스템 설정을 초기값으로 쓰되 버튼으로 전환하고 localStorage에 기억한다. tokens.css의 다크 블록을 media query에서 `:root[data-theme='dark']` 선택자로 옮겨 단일 정본을 유지한다(토큰 중복 없음).
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/ui/tokens.css`, `apps/desktop/test/tokens-contrast.test.ts`, `apps/desktop/src/renderer/src/App.tsx`
+- Create: `apps/desktop/src/renderer/src/ui/theme.ts`
+- Test: `apps/desktop/test/theme.test.ts`, `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: 실패하는 theme 단위 테스트**
+
+Create `apps/desktop/test/theme.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { resolveInitialTheme } from '../src/renderer/src/ui/theme'
+
+describe('resolveInitialTheme', () => {
+  it('저장된 값이 있으면 시스템 설정보다 우선한다', () => {
+    expect(resolveInitialTheme('light', true)).toBe('light')
+    expect(resolveInitialTheme('dark', false)).toBe('dark')
+  })
+
+  it('저장된 값이 없으면 시스템 설정을 따른다', () => {
+    expect(resolveInitialTheme(null, true)).toBe('dark')
+    expect(resolveInitialTheme(null, false)).toBe('light')
+  })
+
+  it('알 수 없는 저장값은 무시하고 시스템 설정을 따른다', () => {
+    expect(resolveInitialTheme('sepia', true)).toBe('dark')
+  })
+})
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run apps/desktop/test/theme.test.ts`
+Expected: FAIL — 모듈 없음
+
+- [ ] **Step 3: theme.ts 구현**
+
+Create `apps/desktop/src/renderer/src/ui/theme.ts`:
+
+```ts
+const THEME_KEY = 'git-gui-theme'
+
+export type Theme = 'light' | 'dark'
+
+/** 저장된 값이 있으면 그것을, 없으면 시스템 설정을 따른다 — 순수 함수라 단위 테스트한다 */
+export function resolveInitialTheme(stored: string | null, systemDark: boolean): Theme {
+  if (stored === 'light' || stored === 'dark') return stored
+  return systemDark ? 'dark' : 'light'
+}
+
+/** 첫 렌더에서 호출해 문서 루트에 테마를 새기고 현재 값을 돌려준다 */
+export function initTheme(): Theme {
+  const theme = resolveInitialTheme(
+    localStorage.getItem(THEME_KEY),
+    window.matchMedia('(prefers-color-scheme: dark)').matches,
+  )
+  document.documentElement.dataset.theme = theme
+  return theme
+}
+
+/** 테마를 적용하고 기억한다 */
+export function applyTheme(theme: Theme): void {
+  document.documentElement.dataset.theme = theme
+  localStorage.setItem(THEME_KEY, theme)
+}
+```
+
+Run: `npx vitest run apps/desktop/test/theme.test.ts`
+Expected: PASS (3 tests)
+
+- [ ] **Step 4: tokens.css — 다크 블록을 data-theme 선택자로**
+
+`apps/desktop/src/renderer/src/ui/tokens.css`에서:
+
+(a) 다크 블록을 여는 두 줄을 한 줄로 교체:
+
+기존:
+```css
+@media (prefers-color-scheme: dark) {
+  :root {
+```
+교체:
+```css
+:root[data-theme='dark'] {
+```
+
+(b) 파일 끝의 닫는 중괄호 두 줄(`  }` + `}`)을 한 줄 `}`로 교체. (블록 안 토큰 행들의 4칸 들여쓰기는 그대로 둔다 — 유효한 CSS.)
+
+- [ ] **Step 5: 대비 회귀 테스트의 다크 블록 추출부 갱신**
+
+`apps/desktop/test/tokens-contrast.test.ts`의 다음 세 줄을 교체:
+
+기존:
+```ts
+const mediaIndex = css.indexOf('@media')
+const lightTokens = parseTokens(css.slice(0, mediaIndex))
+const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(mediaIndex))])
+```
+교체:
+```ts
+const darkIndex = css.indexOf(":root[data-theme='dark']")
+const lightTokens = parseTokens(css.slice(0, darkIndex))
+const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(darkIndex))])
+```
+
+Run: `npx vitest run apps/desktop/test/tokens-contrast.test.ts`
+Expected: PASS (다크 대비 쌍이 계속 계산되는지 — 전멸 방어로 다크 토큰 수가 0이면 이 테스트가 실패해야 한다. 통과 후 `darkIndex`가 -1이 아님을 한 번 확인)
+
+- [ ] **Step 6: App 헤더에 토글 버튼**
+
+`apps/desktop/src/renderer/src/App.tsx` 수정:
+
+(a) import 교체 — `import { CloudUpload, RefreshCw } from 'lucide-react'` → `import { CloudUpload, Moon, RefreshCw, Sun } from 'lucide-react'`, `import { useEffect } from 'react'` → `import { useEffect, useState } from 'react'`, 그리고 `import { Badge } from './ui/Badge'` 행 앞에:
+
+```tsx
+import { applyTheme, initTheme, type Theme } from './ui/theme'
+```
+
+(b) `const store = useRepositoryStore()` 뒤에 추가:
+
+```tsx
+  // 첫 렌더에서 문서에 테마를 새긴다 — 저장값 우선, 없으면 시스템 설정 (⑥)
+  const [theme, setTheme] = useState<Theme>(() => initTheme())
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    applyTheme(next)
+    setTheme(next)
+  }
+```
+
+(c) `app__actions`의 백업 버튼 **앞**에 추가:
+
+```tsx
+          <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
+            {theme === 'dark' ? (
+              <Sun size={13} aria-hidden="true" />
+            ) : (
+              <Moon size={13} aria-hidden="true" />
+            )}
+            {theme === 'dark' ? '밝게' : '어둡게'}
+          </Button>
+```
+
+- [ ] **Step 7: E2E — 전환·기억**
+
+`apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
+
+```ts
+test('테마를 버튼으로 전환하고 기억한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const initial = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(['light', 'dark']).toContain(initial)
+    await window.getByTestId('theme-toggle').click()
+    const flipped = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(flipped).not.toBe(initial)
+    // 선택은 저장되어 다음 실행의 초기값이 된다
+    const stored = await window.evaluate(() => localStorage.getItem('git-gui-theme'))
+    expect(stored).toBe(flipped)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 8: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 163 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/test apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 다크/라이트 테마 토글 — 시스템 초기값·localStorage 기억 (⑥)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 156 tests + typecheck 5 + build + **E2E 6 passed** — 전부 exit 0
+Expected: 163 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
 일회성 스크립트(커밋 미포함)로 실제 앱을 fixture로 구동해 `apps/desktop/test-results/`에 캡처 (1440×900):
 - (a) `e0-3b-commit-detail.png` — 커밋 상세: 제목·본문·병합 안내 문구·파일 목록·파일 diff까지 한 화면 (merge 커밋 fixture)
 - (b) `e0-3b-history-badges.png` — 타임라인: 현재 브랜치 강조 배지 + 다른 브랜치 배지 + "병합" 표시가 보이는 히스토리
-- (c) `e0-3b-virtual.png` — 1500개 파일 변경 목록이 스크롤 중간 위치에서 렌더된 모습 (다크 모드로 촬영)
+- (c) `e0-3b-virtual.png` — 1500개 파일 변경 목록(개별 버튼 없는 새 행 UI + 긴 경로 가로 스크롤 중간 위치), 다크 모드로 촬영 — 테마 토글 확인 겸용
+- (d) `e0-3b-discard.png` — 파일 여러 개 체크 후 "변경 취소 (N)" 확인창이 열린 모습
 
 캡처 후 임시 스크립트·fixture 정리. 코디네이터가 사용자에게 전달.
 
 - [ ] **Step 3: README "현재 상태" 갱신**
 
-"diff 보기(한 줄/좌우 전환, 줄 번호)" 뒤의 나열에 커밋 상세와 가상화가 드러나도록, 해당 문장에서 "저장된 역사 타임라인"을 "저장된 역사 타임라인(브랜치·병합 배지, 커밋 클릭 상세)"로 교체하고, 문장 끝에 " 대형 저장소를 위해 변경 목록·역사·diff는 가상 스크롤로 렌더됩니다."를 추가한다.
+"diff 보기(한 줄/좌우 전환, 줄 번호)" 뒤의 나열에 커밋 상세와 가상화가 드러나도록, 해당 문장에서 "저장된 역사 타임라인"을 "저장된 역사 타임라인(브랜치·병합 배지, 커밋 클릭 상세, 스크롤로 이어서 불러오기)"로 교체하고, "stage/unstage"를 "체크박스 일괄 stage/unstage/변경 취소"로 교체하고, 문장 끝에 " 다크/라이트 테마를 전환할 수 있고, 대형 저장소를 위해 변경 목록·역사·diff는 가상 스크롤로 렌더됩니다."를 추가한다.
 
 - [ ] **Step 4: Commit**
 
@@ -2622,10 +3348,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 1 후 | 137 tests (133 − log 5 + log 8 + client 1) |
 | Task 2 후 | +8 (parser) +5 (client show) → 150 |
 | Task 3 후 | +3 (diff origPath·diffFile) → 153 |
-| Task 5 후 | E2E 5 (가상화) |
-| Task 6 후 | +3 (diff-rows) → **156 tests** |
-| Task 8 후 | **E2E 6** (커밋 상세) |
-| 최종 | 156 tests + typecheck 5 + build + E2E 6 — 전부 exit 0 |
+| Task 3b 후 | +4 (discard) → 157 |
+| Task 5 후 | E2E 5 (가상화, 기존 2개는 체크박스 흐름 전환) |
+| Task 6 후 | +3 (diff-rows) → **160 tests** |
+| Task 8 후 | **E2E 7** (커밋 상세·로그 더 불러오기) |
+| Task 8b 후 | **E2E 8** (변경 취소) |
+| Task 8c 후 | +3 (theme) → **163 tests**, **E2E 9** (테마) |
+| 최종 | 163 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
