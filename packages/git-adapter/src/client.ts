@@ -134,6 +134,9 @@ export function createGitClient(repoPath: string): GitClient {
           'log',
           `--max-count=${safeLimit}`,
           '--no-show-signature',
+          // clone 기본 장식의 origin/HEAD와 replace ref는 배지 소음이다 — 장식에서 제외한다 (실측 확인)
+          '--decorate-refs-exclude=refs/remotes/*/HEAD',
+          '--decorate-refs-exclude=refs/replace/*',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
           '-z',
         ]

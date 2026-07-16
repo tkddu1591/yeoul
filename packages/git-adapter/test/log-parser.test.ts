@@ -48,6 +48,11 @@ describe('parseLog', () => {
     expect(commits[1]?.refs).toEqual([])
   })
 
+  it('refs — shallow clone의 pseudo-decoration grafted는 배지가 아니다', () => {
+    const raw = record('a'.repeat(40), 'aaaaaaa', 'A', '100', 'grafted, HEAD -> main', '', 'x') + '\0'
+    expect(parseLog(raw)[0]?.refs).toEqual(['main'])
+  })
+
   it('parents — 공백 구분 해시를 배열로, root 커밋(빈 %P)은 빈 배열로', () => {
     const merge = record('a'.repeat(40), 'aaaaaaa', 'A', '100', '', `${'b'.repeat(40)} ${'c'.repeat(40)}`, 'merge') + '\0'
     const root = record('d'.repeat(40), 'ddddddd', 'D', '100', '', '', 'root') + '\0'

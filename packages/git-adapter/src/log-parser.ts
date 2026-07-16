@@ -5,7 +5,8 @@ const FIELD_SEPARATOR = '\x1f'
 /**
  * `%D` 장식 문자열을 이름 배열로 정리한다.
  * "HEAD -> main, origin/main, tag: v1" → ['main', 'origin/main', 'v1'].
- * detached HEAD의 단독 "HEAD"는 브랜치가 아니므로 제외한다.
+ * detached HEAD의 단독 "HEAD"와 shallow clone의 pseudo-decoration "grafted"는
+ * ref가 아니므로 제외한다 (origin/HEAD·replace ref는 log 인자에서 장식 제외).
  */
 function parseRefs(decoration: string): string[] {
   if (decoration === '') return []
@@ -16,7 +17,7 @@ function parseRefs(decoration: string): string[] {
       if (ref.startsWith('tag: ')) return ref.slice('tag: '.length)
       return ref
     })
-    .filter((ref) => ref !== 'HEAD')
+    .filter((ref) => ref !== 'HEAD' && ref !== 'grafted')
 }
 
 /**
