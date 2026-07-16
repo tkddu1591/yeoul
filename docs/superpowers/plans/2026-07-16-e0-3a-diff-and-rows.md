@@ -565,7 +565,26 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `packages/git-adapter/src/client.ts`, `src/index.ts`, `test/client.test.ts`(diff 단언 갱신)
 - Modify: `packages/ipc-contract/src/index.ts`
 - Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`, `components/DiffPanel.tsx`, `components/diff-panel.css`, `App.tsx`
+- Modify: `ui/Panel.tsx`, `ui/panel.css` (제목 ellipsis — 무절단 극단 파일명이 헤더 버튼을 밀어내는 잔존 오버플로 해소)
 - Delete: `apps/desktop/src/renderer/src/components/diff-lines.ts`, `apps/desktop/test/diff-lines.test.ts` (`git rm`)
+
+**Step 0: 패널 제목 ellipsis**
+
+`ui/Panel.tsx`의 h2를 `<h2 title={title}>{title}</h2>` 로 교체 (전문은 툴팁으로).
+
+`ui/panel.css`의 `.ui-panel__head h2` 블록을 다음으로 교체:
+```css
+.ui-panel__head h2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+```
+(무절단 세그먼트의 min-content가 배지·버튼을 패널 밖으로 밀어내지 못하게 — 제목은 한 줄 ellipsis + title 툴팁)
 
 - [ ] **Step 1: domain 타입**
 
