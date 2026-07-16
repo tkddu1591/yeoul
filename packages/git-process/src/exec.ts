@@ -64,6 +64,7 @@ export function execGit(args: string[], options: GitExecOptions): Promise<GitRes
   env.GIT_TERMINAL_PROMPT = '0'
   env.GIT_OPTIONAL_LOCKS = '0'
   env.GIT_EDITOR = 'true' // 에디터를 여는 명령이 GUI를 행시키지 않도록
+  env.LC_ALL = 'C' // stderr 메시지를 영어로 고정 — unborn 감지 등 문자열 매칭의 로케일 의존 제거
 
   return new Promise<GitResult>((resolve, reject) => {
     const child = spawn('git', args, { cwd: options.cwd, env, signal: options.signal })
