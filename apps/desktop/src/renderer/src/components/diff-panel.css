@@ -59,6 +59,13 @@
 .diff-split-row .diff-cell:first-child {
   border-left: none;
 }
+/* 대응 줄 없음 — 라이트에서 sunken 단색은 흰 배경과 구분이 안 돼 은은한 대각선 패턴으로 */
 .diff-cell--empty {
-  background: var(--color-surface-sunken);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-surface-sunken),
+    var(--color-surface-sunken) 4px,
+    var(--color-bg) 4px,
+    var(--color-bg) 8px
+  );
 }

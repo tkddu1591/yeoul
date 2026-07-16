@@ -44,4 +44,20 @@ describe('pairHunkLines', () => {
       { left: line('note', '\\ No newline at end of file'), right: line('note', '\\ No newline at end of file') },
     ])
   })
+
+  it("del 런 뒤 note는 왼쪽, add 런 뒤 note는 오른쪽에 붙는다 (no-eol 실제 순서)", () => {
+    const rows = pairHunkLines([
+      line('del', 'old last'),
+      line('note', '\\ No newline at end of file'),
+      line('add', 'new last'),
+      line('note', '\\ No newline at end of file'),
+    ])
+    expect(rows).toEqual([
+      { left: line('del', 'old last'), right: line('add', 'new last') },
+      {
+        left: line('note', '\\ No newline at end of file'),
+        right: line('note', '\\ No newline at end of file'),
+      },
+    ])
+  })
 })

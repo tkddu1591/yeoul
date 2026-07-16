@@ -29,13 +29,22 @@ function UnifiedLine({ line }: { line: DiffLine }) {
   )
 }
 
-function SplitCell({ line, side }: { line: DiffLine | null; side: 'left' | 'right' }) {
+function SplitCell({
+  line,
+  side,
+  duplicate = false,
+}: {
+  line: DiffLine | null
+  side: 'left' | 'right'
+  /** 좌우에 같은 라인이 놓인 사본(context 등) — 오른쪽 사본은 스크린리더 중복 낭독을 막는다 */
+  duplicate?: boolean
+}) {
   if (line === null) {
     return <div className="diff-cell diff-cell--empty" aria-hidden="true" />
   }
   const lineNo = side === 'left' ? line.oldLine : line.newLine
   return (
-    <div className={`diff-cell diff-line--${line.kind === 'context' || line.kind === 'note' ? line.kind : side === 'left' ? 'del' : 'add'}`}>
+    <div className={`diff-cell diff-line--${line.kind}`} aria-hidden={duplicate ? true : undefined}>
       <span className="diff-line__no" aria-hidden="true">
         {lineNo ?? ''}
       </span>
@@ -61,12 +70,12 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
+          {/* 가시 라벨이 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
           <Button
             variant="ghost"
             size="sm"
             onPress={() => setView(view === 'unified' ? 'split' : 'unified')}
             testId="diff-view-toggle"
-            aria-label={view === 'unified' ? '좌우로 비교 보기' : '한 줄로 보기'}
           >
             {view === 'unified' ? (
               <Columns2 size={13} aria-hidden="true" />
@@ -106,7 +115,11 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
                 : pairHunkLines(hunk.lines).map((row, rowIndex) => (
                     <div key={rowIndex} className="diff-split-row">
                       <SplitCell line={row.left} side="left" />
-                      <SplitCell line={row.right} side="right" />
+                      <SplitCell
+                        line={row.right}
+                        side="right"
+                        duplicate={row.right !== null && row.left === row.right}
+                      />
                     </div>
                   ))}
             </div>
