@@ -3530,6 +3530,8 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
   let flipped: string | undefined
   try {
     const window = await app.firstWindow()
+    // firstWindow는 React 마운트 전에 반환될 수 있다 — UI가 뜬 뒤 테마를 읽는다 (실측 레이스)
+    await expect(window.getByTestId('theme-toggle')).toBeVisible()
     const initial = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(['light', 'dark']).toContain(initial)
     await window.getByTestId('theme-toggle').click()
@@ -3542,6 +3544,7 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
   const second = await electron.launch({ args: [APP_ROOT], env })
   try {
     const window = await second.firstWindow()
+    await expect(window.getByTestId('theme-toggle')).toBeVisible()
     const restored = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(restored).toBe(flipped)
   } finally {
