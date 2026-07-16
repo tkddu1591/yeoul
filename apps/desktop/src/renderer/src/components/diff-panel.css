@@ -6,7 +6,7 @@
   text-align: center;
 }
 .diff-panel__code {
-  padding: var(--space-3) 0;
+  padding: 0;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.7;
