@@ -197,6 +197,16 @@ describe('GitClient', () => {
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBeNull()
   })
 
+  it('discard — 글롭·매직 파일명을 리터럴로 처리해 다른 파일을 지우지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, '*.txt', 'glob\n')
+    await writeFixtureFile(repo, 'victim.txt', 'v\n')
+    await client.changes.discard([], ['*.txt'])
+    expect(existsSync(join(repo, '*.txt'))).toBe(false)
+    expect(existsSync(join(repo, 'victim.txt'))).toBe(true)
+  })
+
   it('discard — 둘 다 빈 배열이면 거부한다 (전체 확대 방지)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

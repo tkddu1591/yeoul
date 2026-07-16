@@ -22,7 +22,11 @@ export interface GitClient {
   changes: {
     stage(paths: string[]): Promise<void>
     unstage(paths: string[]): Promise<void>
-    /** 선택 파일의 작업 내용 취소 — tracked는 마지막 저장 상태로 복원, untracked는 삭제. 되돌릴 수 없다 */
+    /**
+     * 선택 파일의 아직 올리지 않은(unstaged) 변경 취소 — tracked는 index 상태로 복원(staged 보존),
+     * untracked는 삭제. 되돌릴 수 없다. 경로는 파일 단위여야 한다(-uall status가 공급) —
+     * 디렉터리 pathspec을 주면 clean이 그 아래 미추적 전체를 지운다(실측).
+     */
     discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
     diff(path: string, options: DiffOptions): Promise<FileDiff>
   }
