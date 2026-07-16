@@ -3534,7 +3534,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## 후속 노트 (1단계 이관 후보)
 
-- 히스토리 무한 스크롤/페이지네이션 (지금은 HISTORY_LIMIT=50 — 가상화는 준비됨)
+- store.discard 이중 실패(取消 실패 + 직후 스냅샷 조회도 실패) 시 finally의 스냅샷 에러가 discard 원인 에러를 대체한다(리뷰 실측) — 저장소 자체가 읽히지 않는 상황이라 실용 영향 작음. 구조화 에러(1단계) 도입 시 함께 정리.
+- loadMoreHistory는 append가 아니라 상한 확장 재조회 — 최악 10000건 재파싱(실측상 수백 ms 이내). 필요해지면 --skip 페이지네이션으로.
 - 레인 그래프 (#7의 나머지 절반 — 사용자 결정: 1단계)
 - 커밋 상세에서 두 번째 부모 기준 비교 (combined diff)
 - split 뷰 워드 단위 하이라이트
