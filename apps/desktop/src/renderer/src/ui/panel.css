@@ -25,6 +25,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 좁은 폭에서는 배지가 먼저 줄어든다 — 제목이 최소 폭을 지킨다 */
+.ui-panel__head h2 {
+  min-width: 72px;
+}
+.ui-panel__head > .ui-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ui-panel__head > .ui-button:first-of-type {
   margin-left: auto;
 }

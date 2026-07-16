@@ -82,10 +82,13 @@
   align-items: baseline;
   gap: var(--space-1);
   min-width: 0;
+  overflow: hidden; /* 배지가 hash 영역으로 새는 것을 차단 — 제목이 최우선 생존자 */
 }
-/* 브랜치/태그 배지 (#7) — 이 커밋이 어느 실험 공간의 끝인지 보여준다 */
+/* 브랜치/태그 배지 (#7) — 이 커밋이 어느 실험 공간의 끝인지 보여준다.
+   좁은 폭에서는 배지가 먼저 줄어들고(flex 0 1) 제목은 min-width 40%를 지킨다 (리뷰 실측 반영) */
 .history-item__ref {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 32px;
   max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -121,7 +124,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  flex: 1;
+  min-width: 40%;
 }
 .history-item__meta {
   font-size: var(--text-xs);
@@ -132,4 +136,11 @@
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   flex: none;
+}
+/* 자동 더-불러오기 피드백 — 잘림 상태에서만 목록 끝에 보인다 (⑩) */
+.history-panel__more {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  text-align: center;
 }

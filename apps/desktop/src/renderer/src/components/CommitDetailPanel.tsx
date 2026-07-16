@@ -128,12 +128,15 @@ export function CommitDetailPanel({
         )}
         <p className="commit-detail__meta">
           {formatRelativeTime(detail.committedAt, Date.now())} · {detail.authorName}
-          {detail.parents.length >= 2 && ' · 병합 (첫 번째 흐름 기준으로 보여드려요)'}
+          {detail.parents.length >= 2 &&
+            ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
         </p>
       </div>
       <div className="commit-detail__files-head">
         바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
-        {detail.files.length > 0 && ' — 파일을 누르면 무엇이 바뀌었는지 보여드려요'}
+        {detail.files.length > 0
+          ? ' — 파일을 누르면 무엇이 바뀌었는지 보여드려요'
+          : ' — 메시지만 남긴 저장이에요'}
       </div>
       <div ref={scrollRef} className="virtual-scroll commit-detail__files">
         <ul

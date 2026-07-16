@@ -103,6 +103,7 @@ export function HistoryPanel({
                       .join(' ')}
                     disabled={busy}
                     onClick={() => onSelect(commit.hash)}
+                    aria-current={selectedHash === commit.hash ? 'true' : undefined}
                     data-testid={`history-item-${commit.hash}`}
                   >
                     <span className="history-item__dot" aria-hidden="true" />
@@ -135,6 +136,11 @@ export function HistoryPanel({
               )
             })}
           </ol>
+          {truncated && (
+            <div className="history-panel__more" aria-hidden="true">
+              이전 기록 불러오는 중…
+            </div>
+          )}
         </div>
       )}
     </Panel>
