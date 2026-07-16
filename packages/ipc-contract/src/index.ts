@@ -26,7 +26,7 @@ export interface GitApi {
     create(repoPath: string, message: string): Promise<void>
   }
   history: {
-    /** 최신순 커밋 요약 (limit 1~500) */
+    /** 최신순 커밋 요약. limit은 1~500 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어) */
     list(repoPath: string, limit: number): Promise<CommitSummary[]>
   }
   sync: {
