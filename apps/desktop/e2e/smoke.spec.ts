@@ -176,8 +176,10 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('unstaged-count')).toHaveText('1501')
-    // 가상화 — 렌더된 행 수는 가시 범위 + overscan 수준이어야 한다
+    // 가상화 — 렌더된 행 수는 가시 범위 + overscan 수준이어야 한다.
+    // 하한(> 0)이 없으면 컨테이너 부재/오타 시 count 0으로 공허하게 통과한다 — 함께 고정
     const rendered = await window.locator('[data-testid="file-scroll-unstaged"] .file-row').count()
+    expect(rendered).toBeGreaterThan(0)
     expect(rendered).toBeLessThan(120)
     // 체크는 데이터 기반 — 화면 밖 행까지 전체에 적용된다
     await window.getByTestId('check-all-unstaged').click()
