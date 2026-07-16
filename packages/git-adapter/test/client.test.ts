@@ -36,22 +36,23 @@ describe('GitClient', () => {
     expect(status.changes.find((c) => c.path === 'new.txt')?.unstaged).toBe('untracked')
   })
 
-  it('diff — unstaged, staged, untracked 각각 patch 텍스트를 반환한다', async () => {
+  it('diff — unstaged, staged, untracked 각각 구조화된 diff를 반환한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# changed\n')
     await writeFixtureFile(repo, 'new.txt', 'hello\n')
 
     const unstaged = await client.changes.diff('README.md', { staged: false, untracked: false })
-    expect(unstaged).toContain('-# fixture')
-    expect(unstaged).toContain('+# changed')
+    const unstagedLines = unstaged.hunks.flatMap((hunk) => hunk.lines)
+    expect(unstagedLines).toContainEqual({ kind: 'del', oldLine: 1, newLine: null, text: '# fixture' })
+    expect(unstagedLines).toContainEqual({ kind: 'add', oldLine: null, newLine: 1, text: '# changed' })
 
     await client.changes.stage(['README.md'])
     const staged = await client.changes.diff('README.md', { staged: true, untracked: false })
-    expect(staged).toContain('+# changed')
+    expect(staged.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === '# changed')).toBe(true)
 
     const untracked = await client.changes.diff('new.txt', { staged: false, untracked: true })
-    expect(untracked).toContain('+hello')
+    expect(untracked.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === 'hello')).toBe(true)
   })
 
   it('commit — stage된 변경으로 커밋을 만들고 changes가 비워진다', async () => {

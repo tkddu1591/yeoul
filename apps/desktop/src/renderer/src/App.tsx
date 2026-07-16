@@ -106,7 +106,8 @@ export function App() {
         <div className="app__center">
           <DiffPanel
             path={store.selected?.change.path ?? null}
-            diffText={store.diffText}
+            diff={store.diff}
+            busy={store.busy}
             onClose={() => store.clearSelection()}
           />
           <CommitForm

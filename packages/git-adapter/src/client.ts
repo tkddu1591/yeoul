@@ -2,10 +2,12 @@ import {
   detectState,
   type CommitSummary,
   type DiffOptions,
+  type FileDiff,
   type RepositoryStatus,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { parseLog } from './log-parser'
+import { parsePatch } from './diff-parser'
 import { readGitDirMarkers } from './markers'
 import { parseStatusV2 } from './status-parser'
 
@@ -18,7 +20,7 @@ export interface GitClient {
   changes: {
     stage(paths: string[]): Promise<void>
     unstage(paths: string[]): Promise<void>
-    diff(path: string, options: DiffOptions): Promise<string>
+    diff(path: string, options: DiffOptions): Promise<FileDiff>
   }
   history: {
     /** 최신순 커밋 요약. limit은 1~500으로 잘린다 */
@@ -110,12 +112,12 @@ export function createGitClient(repoPath: string): GitClient {
           ) {
             throw new GitError(args, result)
           }
-          return result.stdout
+          return parsePatch(result.stdout)
         }
         const args = options.staged
           ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
           : ['diff', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
-        return (await execGitOrThrow(args, { cwd })).stdout
+        return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
       },
     },
     history: {

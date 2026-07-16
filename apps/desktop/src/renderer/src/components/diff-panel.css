@@ -6,18 +6,29 @@
   text-align: center;
 }
 .diff-panel__code {
-  margin: 0;
   padding: var(--space-3) 0;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.7;
-  display: flex;
-  flex-direction: column;
 }
 .diff-line {
-  padding: 0 var(--space-4);
+  display: flex;
+  align-items: baseline;
+}
+.diff-line__no {
+  flex: none;
+  width: 42px;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--color-text-faint);
+  user-select: none;
+}
+.diff-line__text {
+  flex: 1;
+  min-width: 0;
   white-space: pre-wrap;
-  overflow-wrap: anywhere; /* 공백 우선으로 접는다 — break-all은 단어 중간을 자른다 */
+  overflow-wrap: anywhere;
+  padding-right: var(--space-4);
 }
 .diff-line--add {
   background: var(--diff-add-bg);
@@ -30,7 +41,8 @@
 .diff-line--hunk {
   background: var(--diff-hunk-bg);
   color: var(--diff-hunk-text);
+  padding: 0 var(--space-4);
 }
-.diff-line--meta {
+.diff-line--note {
   color: var(--color-text-faint);
 }

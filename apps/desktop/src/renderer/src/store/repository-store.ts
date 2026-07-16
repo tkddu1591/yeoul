@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CommitSummary, FileChange, RepositoryStatus } from '@git-gui/domain'
+import type { CommitSummary, FileChange, FileDiff, RepositoryStatus } from '@git-gui/domain'
 
 const git = () => window.gitApi
 
@@ -16,7 +16,7 @@ interface RepositoryStore {
   status: RepositoryStatus | null
   history: CommitSummary[]
   selected: SelectedFile | null
-  diffText: string
+  diff: FileDiff | null
   error: string | null
   busy: boolean
 
@@ -73,7 +73,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   status: null,
   history: [],
   selected: null,
-  diffText: '',
+  diff: null,
   error: null,
   busy: false,
 
@@ -90,7 +90,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const path = await git().repo.select()
       if (!path) return
       // guard가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다
-      set({ repoPath: path, selected: null, diffText: '', ...(await fetchSnapshot(path)) })
+      set({ repoPath: path, selected: null, diff: null, ...(await fetchSnapshot(path)) })
     })
   },
 
@@ -99,7 +99,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff도 함께 무효화한다
-      set({ selected: null, diffText: '', ...(await fetchSnapshot(repoPath)) })
+      set({ selected: null, diff: null, ...(await fetchSnapshot(repoPath)) })
     })
   },
 
@@ -109,7 +109,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       await git().changes.stage(repoPath, paths)
       // stage 후에는 보고 있던 diff의 의미가 달라진다(오인 커밋 방지) — 선택을 비운다
-      set({ selected: null, diffText: '', ...(await fetchSnapshot(repoPath)) })
+      set({ selected: null, diff: null, ...(await fetchSnapshot(repoPath)) })
     })
   },
 
@@ -118,7 +118,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().changes.unstage(repoPath, paths)
-      set({ selected: null, diffText: '', ...(await fetchSnapshot(repoPath)) })
+      set({ selected: null, diff: null, ...(await fetchSnapshot(repoPath)) })
     })
   },
 
@@ -127,16 +127,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       const untracked = selected.change.unstaged === 'untracked'
-      const diffText = await git().changes.diff(repoPath, selected.change.path, {
+      const diff = await git().changes.diff(repoPath, selected.change.path, {
         staged: selected.staged,
         untracked,
       })
-      set({ selected, diffText })
+      set({ selected, diff })
     })
   },
 
   clearSelection() {
-    set({ selected: null, diffText: '' })
+    set({ selected: null, diff: null })
   },
 
   async commit(message) {
@@ -144,7 +144,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return false
     return guard(set, get, async () => {
       await git().commits.create(repoPath, message)
-      set({ selected: null, diffText: '', ...(await fetchSnapshot(repoPath)) })
+      set({ selected: null, diff: null, ...(await fetchSnapshot(repoPath)) })
     })
   },
 

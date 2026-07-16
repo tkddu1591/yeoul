@@ -1,4 +1,4 @@
-import type { CommitSummary, DiffOptions, RepositoryStatus } from '@git-gui/domain'
+import type { CommitSummary, DiffOptions, FileDiff, RepositoryStatus } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
 
@@ -20,7 +20,7 @@ export interface GitApi {
   changes: {
     stage(repoPath: string, paths: string[]): Promise<void>
     unstage(repoPath: string, paths: string[]): Promise<void>
-    diff(repoPath: string, path: string, options: DiffOptions): Promise<string>
+    diff(repoPath: string, path: string, options: DiffOptions): Promise<FileDiff>
   }
   commits: {
     create(repoPath: string, message: string): Promise<void>

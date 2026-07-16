@@ -20,6 +20,10 @@
   margin: 0;
   font-size: var(--text-sm);
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ui-panel__head > .ui-button:first-of-type {
   margin-left: auto;
