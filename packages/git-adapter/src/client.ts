@@ -181,6 +181,9 @@ export function createGitClient(repoPath: string): GitClient {
           // clone 기본 장식의 origin/HEAD와 replace ref는 배지 소음이다 — 장식에서 제외한다 (실측 확인)
           '--decorate-refs-exclude=refs/remotes/*/HEAD',
           '--decorate-refs-exclude=refs/replace/*',
+          // 타임스탬프가 같은 커밋(스크립트 연속 커밋 등)에서도 부모가 자식보다 아래에 오도록
+          // 고정한다 — 레인 그래프는 "기다리던 커밋이 아래에 나타난다"를 전제한다 (실측: 동률에서 유령 레인)
+          '--date-order',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
           '-z',
         ]

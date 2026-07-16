@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -413,6 +414,35 @@ describe('GitClient', () => {
     expect(plain.refs).toEqual([])
     // root 커밋은 부모 없음
     expect(history[history.length - 1]!.parents).toEqual([])
+  })
+
+  it('history — 타임스탬프가 같아도 부모가 자식보다 항상 아래에 온다 (--date-order, 레인 그래프 전제)', async () => {
+    const repo = await createFixtureRepo()
+    const at = '2026-07-16T12:00:00+09:00'
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: at,
+      GIT_COMMITTER_DATE: at,
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@test.local',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@test.local',
+    }
+    const run = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+    run(['checkout', '-b', 'side'])
+    for (let i = 0; i < 3; i += 1) run(['commit', '--allow-empty', '-m', `side ${i}`])
+    run(['checkout', 'main'])
+    for (let i = 0; i < 3; i += 1) run(['commit', '--allow-empty', '-m', `main ${i}`])
+    run(['merge', '--no-edit', '--no-ff', 'side'])
+
+    const history = await createGitClient(repo).history.list(50)
+    const position = new Map(history.map((c, index) => [c.hash, index]))
+    for (const commit of history) {
+      for (const parent of commit.parents) {
+        // 이 fixture는 전부 화면 안 — 부모는 반드시 자식보다 뒤(아래)여야 한다
+        expect(position.get(parent)!).toBeGreaterThan(position.get(commit.hash)!)
+      }
+    }
   })
 
   it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {
