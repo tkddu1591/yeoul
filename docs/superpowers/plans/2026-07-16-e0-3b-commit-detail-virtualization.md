@@ -1349,6 +1349,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import './changes-panel.css'
+import './virtual.css'
 
 interface ChangesPanelProps {
   changes: FileChange[]
@@ -1624,7 +1625,7 @@ export function ChangesPanel({
 
 `apps/desktop/src/renderer/src/components/changes-panel.css` 수정:
 
-(a) 파일 상단 `.changes-panel` 블록 **앞**에 추가 (가상 리스트 공통 — HistoryPanel·DiffView도 사용한다):
+(a) Create `apps/desktop/src/renderer/src/components/virtual.css` (가상 리스트 공통 — ChangesPanel·DiffView·HistoryPanel·CommitDetailPanel이 각자 import한다. 번들 전역 의존을 import 수준에서 보이게 하는 거처):
 
 ```css
 /* 가상 리스트 공통 — 스크롤 컨테이너는 flex 잔여 공간을 차지하고, 행은 절대 배치로 쌓인다.
@@ -1882,6 +1883,7 @@ import { useRef } from 'react'
 import type { DiffLine, FileDiff } from '@git-gui/domain'
 import { buildDiffRows } from './diff-rows'
 import './diff-panel.css'
+import './virtual.css'
 
 interface DiffViewProps {
   diff: FileDiff
@@ -2057,7 +2059,8 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       }
       testId="diff-panel"
     >
-      <DiffView diff={diff} view={view} />
+      {/* key=path — 파일 전환 시 스크롤 위치와 가상 측정 캐시를 리셋한다 (이전 파일 끝에서 열리는 것 방지) */}
+      <DiffView key={path} diff={diff} view={view} />
     </Panel>
   )
 }
@@ -2392,6 +2395,7 @@ import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { formatRelativeTime } from './relative-time'
 import './history-panel.css'
+import './virtual.css'
 
 interface HistoryPanelProps {
   history: CommitSummary[]
@@ -2671,6 +2675,7 @@ import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { DiffView } from './DiffView'
 import { formatRelativeTime } from './relative-time'
 import './commit-detail-panel.css'
+import './virtual.css'
 
 interface CommitDetailPanelProps {
   detail: CommitDetail
@@ -2824,7 +2829,8 @@ export function CommitDetailPanel({
       </div>
       {selectedFile !== null && diff !== null && (
         <div className="commit-detail__diff">
-          <DiffView diff={diff} view={view} />
+          {/* key — 파일 전환 시 스크롤 위치와 가상 측정 캐시를 리셋한다 */}
+          <DiffView key={selectedFile.path} diff={diff} view={view} />
         </div>
       )}
     </Panel>
