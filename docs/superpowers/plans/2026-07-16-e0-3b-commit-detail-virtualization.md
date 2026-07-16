@@ -600,6 +600,9 @@ function assertFullHash(hash: string): void {
     throw new Error(`올바른 커밋 해시가 아니에요: ${hash}`)
   }
 }
+
+/** CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 이 문구로 */
+const MISSING_COMMIT_MESSAGE = '그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.'
 ```
 
 (d) 구현부 `commits:` 블록을 교체:
@@ -625,9 +628,8 @@ function assertFullHash(hash: string): void {
         ]
         const metaRaw = await execGit(showArgs, { cwd })
         if (metaRaw.exitCode !== 0) {
-          // CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 읽히는 메시지로
           if (metaRaw.stderr.includes('bad object')) {
-            throw new Error('그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.')
+            throw new Error(MISSING_COMMIT_MESSAGE)
           }
           throw new GitError(showArgs, metaRaw)
         }
@@ -828,8 +830,10 @@ export interface DiffOptions {
           assertRepoRelative(options.origPath)
           pathspecs.push(`:(literal)${options.origPath}`)
         }
+        // -M: 사용자 전역 diff.renames=false여도 rename 감지를 고정한다 —
+        // rename이 del+add 2파일 patch로 갈라지면 단일 파일 전용 parsePatch가 오분류한다(실측)
         const args = options.staged
-          ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', ...pathspecs]
+          ? ['diff', '--cached', '-M', '--no-color', '--no-ext-diff', '--', ...pathspecs]
           : ['diff', '--no-color', '--no-ext-diff', '--', ...pathspecs]
         return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
 ```
@@ -841,11 +845,18 @@ export interface DiffOptions {
         const cwd = await topLevel()
         assertFullHash(hash)
         assertRepoRelative(path)
-        if (origPath !== null) assertRepoRelative(origPath)
+        if (origPath != null) assertRepoRelative(origPath)
         const pathspecs =
-          origPath !== null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
-        // 첫 부모 확인 — root 커밋(부모 없음)은 --root diff-tree로 다룬다 (병합 커밋 diff-tree는 빈 출력)
+          origPath != null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
+        // 첫 부모 확인 — root 커밋(부모 없음)은 --root diff-tree로 다룬다 (병합 커밋 diff-tree는 빈 출력).
+        // rev-parse는 root와 사라진 해시를 구분하지 못한다 — 커밋 존재를 따로 확인해 읽히는 에러를 낸다
         const parent = await execGit(['rev-parse', '-q', '--verify', `${hash}^1`], { cwd })
+        if (parent.exitCode !== 0) {
+          const exists = await execGit(['rev-parse', '-q', '--verify', `${hash}^{commit}`], { cwd })
+          if (exists.exitCode !== 0) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+        }
         const args =
           parent.exitCode === 0
             ? [
@@ -853,6 +864,7 @@ export interface DiffOptions {
                 '-M',
                 '--no-color',
                 '--no-ext-diff',
+                '--end-of-options',
                 parent.stdout.trim(),
                 hash,
                 '--',
@@ -867,6 +879,7 @@ export interface DiffOptions {
                 '-M',
                 '--no-color',
                 '--no-ext-diff',
+                '--end-of-options',
                 hash,
                 '--',
                 ...pathspecs,
@@ -885,6 +898,67 @@ Expected: 전부 PASS, typecheck 5 Done
 ```bash
 git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
 git commit -m "feat(adapter): commits.diffFile + staged rename diff origPath 동봉 — 비대칭 해소
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3-보완: diffFile 사라진 해시 친화 에러·-M 고정·null 판정 통일 (품질 리뷰 반영)
+
+품질 리뷰 실측 3건: (1) diffFile에 사라진 해시 → rev-parse가 root와 구분 못 해 diff-tree 분기에서 원시 git 에러 노출(show와 동일 흐름인데 비일관), (2) staged diff에 `-M`이 없어 사용자 전역 `diff.renames=false`면 rename이 2파일 patch로 갈라져 parsePatch 오분류, (3) origPath null 판정이 `!==`/`!=`로 갈라져 undefined 유입 시 crash. Task 3의 관련 블록들이 갱신되었다(MISSING_COMMIT_MESSAGE 상수 공유, show도 상수 사용).
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: 실패하는 테스트 2개**
+
+`packages/git-adapter/test/client.test.ts`의 `'diffFile — 잘못된 해시·저장소 밖 경로를 거부한다'` 테스트 **뒤**에 추가:
+
+```ts
+  it('diffFile — 사라진(존재하지 않는) 커밋은 원시 git 에러 대신 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.diffFile('deadbeef'.repeat(5), 'README.md', null),
+    ).rejects.toThrow(/저장 시점을 찾을 수 없어요/)
+  })
+
+  it('diff — 사용자 전역 diff.renames=false여도 staged rename은 rename으로 표시된다 (-M 고정)', async () => {
+    const repo = await createFixtureRepo()
+    await execGitOrThrow(['config', 'diff.renames', 'false'], { cwd: repo })
+    const client = createGitClient(repo)
+    await execGitOrThrow(['mv', 'README.md', 'DOCS.md'], { cwd: repo })
+    const diff = await client.changes.diff('DOCS.md', {
+      staged: true,
+      untracked: false,
+      origPath: 'README.md',
+    })
+    expect(diff.meta.some((line) => line.startsWith('rename from README.md'))).toBe(true)
+    expect(diff.hunks).toEqual([])
+  })
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run packages/git-adapter/test/client.test.ts --testNamePattern "사라진|renames"`
+Expected: diffFile 테스트는 GitError 원문(`bad object`)으로, -M 테스트는 rename meta 부재로 FAIL (show의 '사라진 커밋' 테스트는 계속 PASS)
+
+- [ ] **Step 3: 갱신된 Task 2·3 블록에 byte 재동기화**
+
+client.ts를 갱신 블록에 맞춘다: MISSING_COMMIT_MESSAGE 상수(assertFullHash 아래), show의 상수 사용, changes.diff staged 인자에 `-M`(주석 포함), diffFile의 `!= null` 판정·커밋 존재 확인·`--end-of-options`.
+
+- [ ] **Step 4: 통과 확인 + 게이트**
+
+Run: `pnpm test && pnpm typecheck`
+Expected: **156 tests** PASS + 5 Done
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "fix(adapter): diffFile 사라진 해시 친화 에러·staged diff -M 고정·null 판정 통일
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -989,7 +1063,7 @@ Expected: FAIL — `client.changes.discard is not a function`
 - [ ] **Step 4: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: 전부 PASS (+4), typecheck 5 Done
+Expected: 전부 PASS (156 + 4 = 160), typecheck 5 Done
 
 - [ ] **Step 5: Commit**
 
@@ -1662,7 +1736,7 @@ Expected: Step 4·5 적용 전 기준으로는 rendered < 120 단언이 FAIL(150
 - [ ] **Step 9: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 158 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 160 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 10: Commit**
 
@@ -1970,7 +2044,7 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
 - [ ] **Step 8: 전체 게이트 (diff 토글 E2E가 기존 회귀 방어)**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 161 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
+Expected: 163 tests + typecheck 5 + build + **E2E 5 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -2888,7 +2962,7 @@ Run: `cd apps/desktop && pnpm e2e`
 Expected: Step 1~5 적용 전이면 새 테스트 2개 FAIL(클릭 불가·상세 없음·50+ 고정), 적용 후 **E2E 7 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 161 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
+Expected: 163 tests + typecheck 5 + build + **E2E 7 passed** — 전부 exit 0
 
 - [ ] **Step 8: Commit**
 
@@ -3157,7 +3231,7 @@ Run: `cd apps/desktop && pnpm e2e`
 Expected: 구현 전 새 테스트 FAIL(`discard-selected` 없음), 구현 후 **E2E 8 passed**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 161 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
+Expected: 163 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
 
 - [ ] **Step 7: Commit**
 
@@ -3348,7 +3422,7 @@ test('테마를 버튼으로 전환하고 기억한다', async () => {
 - [ ] **Step 8: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 164 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 166 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -3366,7 +3440,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 164 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 166 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
@@ -3399,14 +3473,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | --- | --- |
 | Task 1 후 | 137 tests (133 − log 5 + log 8 + client 1) |
 | Task 2 후 | +8 (parser) +5 (client show) → 150, 보완 +1 → 151 |
-| Task 3 후 | +3 (diff origPath·diffFile) → 154 |
-| Task 3b 후 | +4 (discard) → 158 |
+| Task 3 후 | +3 → 154, 보완 +2 → 156 |
+| Task 3b 후 | +4 (discard) → 160 |
 | Task 5 후 | E2E 5 (가상화, 기존 2개는 체크박스 흐름 전환) |
-| Task 6 후 | +3 (diff-rows) → **161 tests** |
+| Task 6 후 | +3 (diff-rows) → **163 tests** |
 | Task 8 후 | **E2E 7** (커밋 상세·로그 더 불러오기) |
 | Task 8b 후 | **E2E 8** (변경 취소) |
-| Task 8c 후 | +3 (theme) → **164 tests**, **E2E 9** (테마) |
-| 최종 | 164 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
+| Task 8c 후 | +3 (theme) → **166 tests**, **E2E 9** (테마) |
+| 최종 | 166 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
