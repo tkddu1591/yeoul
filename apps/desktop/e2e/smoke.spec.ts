@@ -45,7 +45,8 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
     await window.screenshot({ path: 'test-results/app-initial.png' })
 
     // stage
-    await window.getByTestId('stage-app.txt').click()
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('staged-count')).toHaveText('1')
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
@@ -95,7 +96,8 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
   try {
     const window = await app.firstWindow()
 
-    await window.getByTestId('stage-app.txt').click()
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('staged-count')).toHaveText('1')
 
     // 제안이 placeholder로 보이고, 빈 채로 저장하면 그 문구로 저장된다는 안내가 뜬다
@@ -153,6 +155,35 @@ test('이름이 바뀐 파일을 내려도 반쪽(삭제)이 남지 않는다', 
     // origPath 없이 내리면 옛 경로의 삭제가 staged에 잔존한다(반쪽 rename 커밋 위험)
     await expect(window.getByTestId('staged-count')).toHaveText('0')
     await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 유지하고 일괄 스테이징은 전체에 적용된다', async () => {
+  const repo = await createRepoWithChange()
+  // 저장소 루트에 미추적 파일 1500개 — 행 수 폭발 상황을 재현한다
+  await Promise.all(
+    Array.from({ length: 1500 }, (_, i) =>
+      writeFile(join(repo, `bulk-${String(i).padStart(4, '0')}.txt`), `${i}\n`),
+    ),
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1501')
+    // 가상화 — 렌더된 행 수는 가시 범위 + overscan 수준이어야 한다
+    const rendered = await window.locator('[data-testid="file-scroll-unstaged"] .file-row').count()
+    expect(rendered).toBeLessThan(120)
+    // 체크는 데이터 기반 — 화면 밖 행까지 전체에 적용된다
+    await window.getByTestId('check-all-unstaged').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1501', { timeout: 30000 })
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

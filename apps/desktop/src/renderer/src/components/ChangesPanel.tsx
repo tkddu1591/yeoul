@@ -1,10 +1,12 @@
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { CircleMinus, CirclePlus } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import type { ChangeKind, FileChange } from '@git-gui/domain'
+import { useEffect, useRef, useState } from 'react'
+import type { FileChange } from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
+import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import './changes-panel.css'
 
 interface ChangesPanelProps {
@@ -15,30 +17,6 @@ interface ChangesPanelProps {
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
   onSelect(selected: SelectedFile): void
-}
-
-/** 변경 종류의 한국어 라벨 — 색 단독으로 의미를 전달하지 않기 위해 tooltip/aria에 병행한다 */
-const KIND_LABELS: Record<ChangeKind, string> = {
-  modified: '수정됨',
-  added: '추가됨',
-  deleted: '삭제됨',
-  renamed: '이름 변경',
-  copied: '복사됨',
-  typechange: '형식 변경',
-  untracked: '새 파일',
-  conflicted: '충돌',
-}
-
-/** 색과 함께 쓰는 형태 신호 — 색약(적록)에서 modified/added 색이 수렴해도 글자로 구분된다 */
-const KIND_GLYPHS: Record<ChangeKind, string> = {
-  modified: 'M',
-  added: 'A',
-  deleted: 'D',
-  renamed: 'R',
-  copied: 'C',
-  typechange: 'T',
-  untracked: 'U',
-  conflicted: '!',
 }
 
 /** 이름 변경은 새 경로와 원래 경로가 index에 쌍으로 있다 — 함께 넘겨야 반쪽 unstage가 안 된다 */
@@ -57,21 +35,10 @@ interface FileRowProps {
   busy: boolean
   onToggle(): void
   onSelect(): void
-  onAction(): void
 }
 
-function FileRow({
-  change,
-  staged,
-  isSelected,
-  isChecked,
-  busy,
-  onToggle,
-  onSelect,
-  onAction,
-}: FileRowProps) {
+function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSelect }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
-  const actionLabel = staged ? '내리기' : '올리기'
   const kindLabel = kind ? KIND_LABELS[kind] : ''
   // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
   const tooltip =
@@ -83,7 +50,7 @@ function FileRow({
   const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex) : ''
   const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
   return (
-    <li className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
+    <div className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
       <input
         type="checkbox"
         className="file-row__check"
@@ -110,22 +77,7 @@ function FileRow({
           {directory && <span className="file-row__dir">{directory}</span>}
         </span>
       </button>
-      <button
-        type="button"
-        className="file-row__action"
-        disabled={busy}
-        onClick={onAction}
-        aria-label={`${change.path} ${actionLabel}`}
-        data-testid={`${staged ? 'unstage' : 'stage'}-${change.path}`}
-      >
-        {staged ? (
-          <CircleMinus size={14} aria-hidden="true" />
-        ) : (
-          <CirclePlus size={14} aria-hidden="true" />
-        )}
-        {actionLabel}
-      </button>
-    </li>
+    </div>
   )
 }
 
@@ -169,6 +121,15 @@ function FileList({
       return valid.size === prev.size ? prev : valid
     })
   }, [changes])
+
+  // 수천 개 행에서도 DOM은 가시 범위만 유지한다 (#4). 행 높이는 실측(measureElement)한다
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: changes.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 31,
+    overscan: 10,
+  })
 
   const toggle = (path: string) => {
     setChecked((prev) => {
@@ -232,23 +193,39 @@ function FileList({
               선택 {bulkLabel} ({validChecked.length})
             </Button>
           </div>
-          <ul className="changes-panel__list">
-            {changes.map((change) => (
-              <FileRow
-                key={`${side}-${change.path}`}
-                change={change}
-                staged={staged}
-                isSelected={
-                  selected !== null && selected.staged === staged && selected.change.path === change.path
-                }
-                isChecked={checked.has(change.path)}
-                busy={busy}
-                onToggle={() => toggle(change.path)}
-                onSelect={() => onSelect({ change, staged })}
-                onAction={() => onAction(actionPaths(change, staged))}
-              />
-            ))}
-          </ul>
+          <div ref={scrollRef} className="virtual-scroll" data-testid={`file-scroll-${side}`}>
+            <ul
+              className="changes-panel__list"
+              style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+            >
+              {virtualizer.getVirtualItems().map((item) => {
+                const change = changes[item.index]!
+                return (
+                  <li
+                    key={`${side}-${change.path}`}
+                    ref={virtualizer.measureElement}
+                    data-index={item.index}
+                    className="virtual-row virtual-row--wide"
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    <FileRow
+                      change={change}
+                      staged={staged}
+                      isSelected={
+                        selected !== null &&
+                        selected.staged === staged &&
+                        selected.change.path === change.path
+                      }
+                      isChecked={checked.has(change.path)}
+                      busy={busy}
+                      onToggle={() => toggle(change.path)}
+                      onSelect={() => onSelect({ change, staged })}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
         </>
       )}
     </Panel>
