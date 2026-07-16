@@ -210,6 +210,8 @@ test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데
     // 최신 커밋 클릭 → 우측 열이 타임라인에서 상세로 전환
     await window.locator('[data-testid^="history-item-"]').first().click()
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    // 상세 모드에서 우측 열이 확장된다 (4차 피드백)
+    await expect(window.locator('.app__main')).toHaveClass(/app__main--detail/)
     await expect(window.getByTestId('history-panel')).toHaveCount(0)
     await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
     await expect(window.getByTestId('commit-detail-body')).toHaveText('자세한 설명 줄')

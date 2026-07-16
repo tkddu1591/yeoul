@@ -119,7 +119,7 @@ export function CommitDetailPanel({
                 key={file.path}
                 ref={virtualizer.measureElement}
                 data-index={item.index}
-                className="virtual-row"
+                className="virtual-row virtual-row--wide"
                 style={{ transform: `translateY(${item.start}px)` }}
               >
                 <CommitFileRow

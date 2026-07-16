@@ -95,7 +95,7 @@ export function App() {
           {store.error}
         </p>
       )}
-      <main className="app__main">
+      <main className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}>
         <ChangesPanel
           changes={status?.changes ?? []}
           selected={store.selected}

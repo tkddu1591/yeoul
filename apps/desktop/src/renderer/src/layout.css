@@ -76,11 +76,16 @@
 }
 .app__main {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr) 260px;
+  grid-template-columns: 340px minmax(0, 1fr) 300px;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   flex: 1;
   min-height: 0;
+  transition: grid-template-columns 0.15s ease;
+}
+/* 커밋 상세 모드 — 파일 목록이 주인공이 되도록 우측 열이 넓어지고 중앙이 양보한다 (4차 피드백) */
+.app__main--detail {
+  grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 30%);
 }
 .app__center {
   display: flex;
