@@ -4,7 +4,7 @@ import type { CommitSummary } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
-import { formatRelativeTime } from './relative-time'
+import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
 import './history-panel.css'
 import './virtual.css'
 
@@ -103,12 +103,16 @@ export function HistoryPanel({
                       .join(' ')}
                     disabled={busy}
                     onClick={() => onSelect(commit.hash)}
+                    title={`${commit.subject}\n${formatAbsoluteTime(commit.committedAt)} · ${commit.authorName}`}
                     aria-current={selectedHash === commit.hash ? 'true' : undefined}
                     data-testid={`history-item-${commit.hash}`}
                   >
                     <span className="history-item__dot" aria-hidden="true" />
                     <div className="history-item__body">
                       <span className="history-item__title">
+                        {item.index === 0 && (
+                          <span className="history-item__here">지금 여기</span>
+                        )}
                         {commit.refs.map((ref) => (
                           <span
                             key={ref}

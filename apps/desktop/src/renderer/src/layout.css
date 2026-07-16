@@ -76,16 +76,20 @@
 }
 .app__main {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr) 300px;
+  /* 열 폭은 App이 inline style로 관리한다 (드래그 리사이즈) — 여기 값은 초기 페인트 폴백 */
+  grid-template-columns: 340px minmax(0, 1fr) 6px 360px;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   flex: 1;
   min-height: 0;
-  transition: grid-template-columns 0.15s ease;
 }
-/* 커밋 상세 모드 — 파일 목록이 주인공이 되도록 우측 열이 넓어지고 중앙이 양보한다 (4차 피드백) */
-.app__main--detail {
-  grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 30%);
+.app__resizer {
+  cursor: col-resize;
+  border-radius: 3px;
+  background: transparent;
+}
+.app__resizer:hover {
+  background: var(--color-border-strong);
 }
 .app__center {
   display: flex;

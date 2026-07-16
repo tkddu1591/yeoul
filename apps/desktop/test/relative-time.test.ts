@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatRelativeTime } from '../src/renderer/src/components/relative-time'
+import { formatAbsoluteTime, formatRelativeTime } from '../src/renderer/src/components/relative-time'
 
 const NOW_MS = 1_752_600_000_000 // 고정 기준 시각
 
@@ -34,5 +34,11 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(epoch, NOW_MS)).toBe(
       `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`,
     )
+  })
+
+  it('formatAbsoluteTime — 로컬 타임존의 YYYY-MM-DD HH:mm', () => {
+    expect(formatAbsoluteTime(1752561600)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+    // 같은 epoch은 항상 같은 문자열 (결정성)
+    expect(formatAbsoluteTime(1752561600)).toBe(formatAbsoluteTime(1752561600))
   })
 })

@@ -12,3 +12,12 @@ export function formatRelativeTime(epochSeconds: number, nowMs: number): string 
   const date = new Date(epochSeconds * 1000)
   return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`
 }
+
+/** 절대 시각(로컬 타임존) — 행 툴팁 등 "언제였는지 정확히"가 필요한 곳에 */
+export function formatAbsoluteTime(epochSeconds: number): string {
+  const date = new Date(epochSeconds * 1000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`
+}

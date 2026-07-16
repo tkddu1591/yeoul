@@ -1,5 +1,5 @@
 import { CloudUpload, RefreshCw } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { ChangesPanel } from './components/ChangesPanel'
 import { CommitDetailPanel } from './components/CommitDetailPanel'
@@ -7,6 +7,13 @@ import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { RepoPicker } from './components/RepoPicker'
+import {
+  clampRightWidth,
+  loadRightWidth,
+  resetRightWidth,
+  RIGHT_COLUMN_DEFAULT,
+  saveRightWidth,
+} from './ui/column-resize'
 import { useRepositoryStore } from './store/repository-store'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -24,6 +31,27 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
 
 export function App() {
   const store = useRepositoryStore()
+
+  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 상세 모드는 최소 420px을 보장
+  const [rightWidth, setRightWidth] = useState<number>(() => loadRightWidth())
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const onMove = (move: PointerEvent) => {
+      setRightWidth(clampRightWidth(window.innerWidth - move.clientX - 20, window.innerWidth))
+    }
+    const onUp = (up: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      saveRightWidth(clampRightWidth(window.innerWidth - up.clientX - 20, window.innerWidth))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  const resetResize = () => {
+    resetRightWidth()
+    setRightWidth(RIGHT_COLUMN_DEFAULT)
+  }
+  const effectiveRight = store.commitDetail !== null ? Math.max(rightWidth, 420) : rightWidth
 
   useEffect(() => {
     void store.init()
@@ -95,7 +123,10 @@ export function App() {
           {store.error}
         </p>
       )}
-      <main className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}>
+      <main
+        className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}
+        style={{ gridTemplateColumns: `340px minmax(0, 1fr) 6px ${effectiveRight}px` }}
+      >
         <ChangesPanel
           changes={status?.changes ?? []}
           selected={store.selected}
@@ -127,6 +158,16 @@ export function App() {
             onCommit={(message) => store.commit(message)}
           />
         </div>
+        {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값 */}
+        <div
+          className="app__resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="타임라인 폭 조절"
+          onPointerDown={startResize}
+          onDoubleClick={resetResize}
+          data-testid="column-resizer"
+        />
         {store.commitDetail !== null ? (
           <CommitDetailPanel
             detail={store.commitDetail}

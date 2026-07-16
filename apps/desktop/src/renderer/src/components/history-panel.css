@@ -107,6 +107,16 @@
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* 현재 위치(HEAD) — "내가 어디에 있는지"를 최신 행에 명시한다 (5차 피드백) */
+.history-item__here {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
 /* 병합 커밋 표시 (#7) — 두 흐름이 합쳐진 저장임을 알린다 */
 .history-item__mergemark {
   flex: none;

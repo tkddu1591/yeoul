@@ -276,3 +276,28 @@ test('선택한 파일의 변경을 확인창을 거쳐 취소한다 — 새 파
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('우측 열 폭을 드래그로 조절하고 기억한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const before = (await window.getByTestId('history-panel').boundingBox())!.width
+    const handle = (await window.getByTestId('column-resizer').boundingBox())!
+    await window.mouse.move(handle.x + 3, handle.y + 200)
+    await window.mouse.down()
+    await window.mouse.move(handle.x - 120, handle.y + 200, { steps: 5 })
+    await window.mouse.up()
+    const after = (await window.getByTestId('history-panel').boundingBox())!.width
+    expect(after).toBeGreaterThan(before + 80)
+    // 폭은 저장되어 다음 실행의 초기값이 된다
+    const stored = await window.evaluate(() => localStorage.getItem('git-gui-right-width'))
+    expect(Number(stored)).toBeGreaterThan(before + 80)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
