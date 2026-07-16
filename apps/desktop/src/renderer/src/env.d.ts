@@ -1,8 +1,9 @@
-import type { GitApi } from '@git-gui/ipc-contract'
+import type { GitApi, SettingsApi } from '@git-gui/ipc-contract'
 
 declare global {
   interface Window {
     gitApi: GitApi
+    settingsApi: SettingsApi
   }
 }
 

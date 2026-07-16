@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DiffOptions, GitApi } from '@git-gui/ipc-contract'
-import { CHANNELS, GIT_API_KEY } from '@git-gui/ipc-contract'
+import type { AppSettings, DiffOptions, GitApi, SettingsApi } from '@git-gui/ipc-contract'
+import { CHANNELS, GIT_API_KEY, SETTINGS_API_KEY, SETTINGS_CHANNELS } from '@git-gui/ipc-contract'
 
 const api: GitApi = {
   repo: {
@@ -31,3 +31,13 @@ const api: GitApi = {
 }
 
 contextBridge.exposeInMainWorld(GIT_API_KEY, api)
+
+// 시작 시점 설정을 동기로 읽는다 — 첫 렌더 전에 테마·폭이 결정되어 깜빡임이 없다
+const initialSettings = ipcRenderer.sendSync(SETTINGS_CHANNELS.getSync) as AppSettings
+
+const settingsApi: SettingsApi = {
+  initial: initialSettings,
+  set: (partial) => ipcRenderer.invoke(SETTINGS_CHANNELS.set, partial),
+}
+
+contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)

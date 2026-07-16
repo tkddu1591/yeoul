@@ -1,6 +1,12 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { registerGitHandlers } from './git-handlers'
+import { registerSettingsHandlers } from './settings'
+
+// E2E·테스트 격리 — userData를 임시 폴더로 재지정할 수 있게 한다 (설정 파일이 실제 프로필을 오염하지 않게)
+if (process.env.GIT_GUI_USER_DATA) {
+  app.setPath('userData', process.env.GIT_GUI_USER_DATA)
+}
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -33,6 +39,7 @@ app
   .whenReady()
   .then(() => {
     registerGitHandlers()
+    registerSettingsHandlers()
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
