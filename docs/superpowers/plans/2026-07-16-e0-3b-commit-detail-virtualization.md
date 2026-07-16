@@ -3550,7 +3550,7 @@ test('테마를 버튼으로 전환하고 기억한다', async () => {
 - [ ] **Step 8: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 167 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 177 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
 
 - [ ] **Step 9: Commit**
 
@@ -3973,12 +3973,642 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8f: 우측 열 드래그 리사이즈 + 행 정보 강화 (5차 피드백)
+
+사용자: "트리도 열이 좁아. 브랜치가 여러 개고 확인을 다 해야 할 때 상세 커밋 메시지도 제대로 안 보이고, 내가 어디에 있는지, 이 커밋이 언제 되었는지." → 우측 열 경계를 드래그해 폭을 조절(기억·더블클릭 초기화)하고 기본 폭을 360px로 올린다. 커밋 행 툴팁에 전체 메시지+절대 시각, HEAD 행에 "지금 여기" 표시.
+
+**Files:**
+- Create: `apps/desktop/src/renderer/src/ui/column-resize.ts`
+- Modify: `apps/desktop/src/renderer/src/App.tsx`, `apps/desktop/src/renderer/src/layout.css`, `apps/desktop/src/renderer/src/components/relative-time.ts`, `apps/desktop/src/renderer/src/components/HistoryPanel.tsx`, `apps/desktop/src/renderer/src/components/history-panel.css`
+- Test: `apps/desktop/test/column-resize.test.ts`, `apps/desktop/test/relative-time.test.ts`, `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: 실패하는 단위 테스트**
+
+Create `apps/desktop/test/column-resize.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { clampRightWidth, parseStoredWidth, RIGHT_COLUMN_DEFAULT } from '../src/renderer/src/ui/column-resize'
+
+describe('clampRightWidth', () => {
+  it('최소 260px, 최대 뷰포트 45%로 자른다', () => {
+    expect(clampRightWidth(100, 1440)).toBe(260)
+    expect(clampRightWidth(2000, 1440)).toBe(648)
+    expect(clampRightWidth(400, 1440)).toBe(400)
+  })
+
+  it('좁은 뷰포트에서도 최소폭이 이긴다 (창이 줄어도 열이 사라지지 않는다)', () => {
+    expect(clampRightWidth(400, 500)).toBe(260)
+  })
+})
+
+describe('parseStoredWidth', () => {
+  it('저장된 숫자를 복원하고, 없거나 깨진 값은 기본값으로', () => {
+    expect(parseStoredWidth('420')).toBe(420)
+    expect(parseStoredWidth(null)).toBe(RIGHT_COLUMN_DEFAULT)
+    expect(parseStoredWidth('abc')).toBe(RIGHT_COLUMN_DEFAULT)
+    expect(parseStoredWidth('-50')).toBe(RIGHT_COLUMN_DEFAULT)
+  })
+})
+```
+
+`apps/desktop/test/relative-time.test.ts` 끝(마지막 `})` 앞)에 추가:
+
+```ts
+  it('formatAbsoluteTime — 로컬 타임존의 YYYY-MM-DD HH:mm', () => {
+    expect(formatAbsoluteTime(1752561600)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+    // 같은 epoch은 항상 같은 문자열 (결정성)
+    expect(formatAbsoluteTime(1752561600)).toBe(formatAbsoluteTime(1752561600))
+  })
+```
+
+그리고 같은 파일의 import를 `import { formatAbsoluteTime, formatRelativeTime } from '../src/renderer/src/components/relative-time'` 형태로 교체.
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run apps/desktop/test/column-resize.test.ts apps/desktop/test/relative-time.test.ts`
+Expected: FAIL — 모듈/함수 없음
+
+- [ ] **Step 3: 구현 — column-resize.ts·formatAbsoluteTime**
+
+Create `apps/desktop/src/renderer/src/ui/column-resize.ts`:
+
+```ts
+const RIGHT_WIDTH_KEY = 'git-gui-right-width'
+
+export const RIGHT_COLUMN_DEFAULT = 360
+
+/** 우측 열 폭 제한 — 최소 260px(내용 붕괴 방지), 최대 뷰포트 45%(중앙 diff 생존) */
+export function clampRightWidth(px: number, viewportWidth: number): number {
+  const max = Math.max(260, Math.floor(viewportWidth * 0.45))
+  return Math.min(Math.max(Math.round(px), 260), max)
+}
+
+/** localStorage 원문 → 폭. 깨진 값은 조용히 기본값으로 (드래그로 다시 정하면 된다) */
+export function parseStoredWidth(raw: string | null): number {
+  const parsed = Number(raw)
+  if (raw === null || !Number.isFinite(parsed) || parsed < 260) return RIGHT_COLUMN_DEFAULT
+  return Math.round(parsed)
+}
+
+export function loadRightWidth(): number {
+  return parseStoredWidth(localStorage.getItem(RIGHT_WIDTH_KEY))
+}
+
+export function saveRightWidth(px: number): void {
+  localStorage.setItem(RIGHT_WIDTH_KEY, String(px))
+}
+
+export function resetRightWidth(): void {
+  localStorage.removeItem(RIGHT_WIDTH_KEY)
+}
+```
+
+`apps/desktop/src/renderer/src/components/relative-time.ts` 끝에 추가:
+
+```ts
+/** 절대 시각(로컬 타임존) — 행 툴팁 등 "언제였는지 정확히"가 필요한 곳에 */
+export function formatAbsoluteTime(epochSeconds: number): string {
+  const date = new Date(epochSeconds * 1000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`
+}
+```
+
+Run: `npx vitest run apps/desktop/test/column-resize.test.ts apps/desktop/test/relative-time.test.ts`
+Expected: PASS
+
+- [ ] **Step 4: App — 리사이저와 폭 상태**
+
+`apps/desktop/src/renderer/src/App.tsx` 수정:
+
+(a) import 추가 — `import { applyTheme, … }` 자리가 아직 없으므로 `import { useRepositoryStore } from './store/repository-store'` 행 **앞**에:
+
+```tsx
+import {
+  clampRightWidth,
+  loadRightWidth,
+  resetRightWidth,
+  RIGHT_COLUMN_DEFAULT,
+  saveRightWidth,
+} from './ui/column-resize'
+```
+
+그리고 `import { useEffect } from 'react'`를 `import { useEffect, useState } from 'react'`로 교체.
+
+(b) `const store = useRepositoryStore()` 뒤에 추가:
+
+```tsx
+  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 상세 모드는 최소 420px을 보장
+  const [rightWidth, setRightWidth] = useState<number>(() => loadRightWidth())
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const onMove = (move: PointerEvent) => {
+      setRightWidth(clampRightWidth(window.innerWidth - move.clientX - 20, window.innerWidth))
+    }
+    const onUp = (up: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      saveRightWidth(clampRightWidth(window.innerWidth - up.clientX - 20, window.innerWidth))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  const resetResize = () => {
+    resetRightWidth()
+    setRightWidth(RIGHT_COLUMN_DEFAULT)
+  }
+  const effectiveRight = store.commitDetail !== null ? Math.max(rightWidth, 420) : rightWidth
+```
+
+(c) `<main>` 행을 다음으로 교체 (모드 클래스는 유지 — E2E가 사용):
+
+```tsx
+      <main
+        className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}
+        style={{ gridTemplateColumns: `340px minmax(0, 1fr) 6px ${effectiveRight}px` }}
+      >
+```
+
+(d) `.app__center` 닫힘(`</div>`) 뒤, 우측 열 분기(`{store.commitDetail !== null ? (`) **앞**에 리사이저 추가:
+
+```tsx
+        {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값 */}
+        <div
+          className="app__resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="타임라인 폭 조절"
+          onPointerDown={startResize}
+          onDoubleClick={resetResize}
+          data-testid="column-resizer"
+        />
+```
+
+- [ ] **Step 5: layout.css — 4열 그리드·리사이저**
+
+`.app__main`·`.app__main--detail` 블록을 교체 (폭은 inline style이 정본이 된다 — transition 제거, 드래그 중 즉답이 우선):
+
+```css
+.app__main {
+  display: grid;
+  /* 열 폭은 App이 inline style로 관리한다 (드래그 리사이즈) — 여기 값은 초기 페인트 폴백 */
+  grid-template-columns: 340px minmax(0, 1fr) 6px 360px;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  flex: 1;
+  min-height: 0;
+}
+.app__resizer {
+  cursor: col-resize;
+  border-radius: 3px;
+  background: transparent;
+}
+.app__resizer:hover {
+  background: var(--color-border-strong);
+}
+```
+
+- [ ] **Step 6: HistoryPanel — 행 툴팁·지금 여기**
+
+`apps/desktop/src/renderer/src/components/HistoryPanel.tsx` 수정:
+
+(a) import 교체: `import { formatRelativeTime } from './relative-time'` → `import { formatAbsoluteTime, formatRelativeTime } from './relative-time'`
+
+(b) 행 `<button …>`에 `aria-current` 행 **앞**으로 title 속성 추가:
+
+```tsx
+                    title={`${commit.subject}\n${formatAbsoluteTime(commit.committedAt)} · ${commit.authorName}`}
+```
+
+(c) `history-item__title` 안, refs 배지 map **앞**에 추가:
+
+```tsx
+                        {item.index === 0 && (
+                          <span className="history-item__here">지금 여기</span>
+                        )}
+```
+
+(d) `history-panel.css`의 `.history-item__ref--head` 블록 **뒤**에 추가:
+
+```css
+/* 현재 위치(HEAD) — "내가 어디에 있는지"를 최신 행에 명시한다 (5차 피드백) */
+.history-item__here {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+```
+
+- [ ] **Step 7: 실패하는 E2E — 리사이즈**
+
+`apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
+
+```ts
+test('우측 열 폭을 드래그로 조절하고 기억한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const before = (await window.getByTestId('history-panel').boundingBox())!.width
+    const handle = (await window.getByTestId('column-resizer').boundingBox())!
+    await window.mouse.move(handle.x + 3, handle.y + 200)
+    await window.mouse.down()
+    await window.mouse.move(handle.x - 120, handle.y + 200, { steps: 5 })
+    await window.mouse.up()
+    const after = (await window.getByTestId('history-panel').boundingBox())!.width
+    expect(after).toBeGreaterThan(before + 80)
+    // 폭은 저장되어 다음 실행의 초기값이 된다
+    const stored = await window.evaluate(() => localStorage.getItem('git-gui-right-width'))
+    expect(Number(stored)).toBeGreaterThan(before + 80)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 8: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **168 tests** + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/test apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 우측 열 드래그 리사이즈·행 툴팁 절대시각·지금 여기 (5차 피드백)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8g: 레인 그래프 — 브랜치 갈라짐·병합을 선으로 (5차 피드백, 사용자 선택: 이번에 당기기)
+
+"어떤 게 어떻게 병합되는지"를 배지가 아니라 선으로 보여준다. parents(%P) 데이터는 이미 있다 — 순수 함수 `buildGraph`가 레인을 배정하고, 행마다 작은 SVG 거터가 세로선·합류·분기 곡선·커밋 점을 그린다. 그래프 좌표를 단순하게 유지하기 위해 히스토리 행 높이를 **고정(52px)** 한다.
+
+**레인 배정 규칙:** 각 레인은 "아래에서 만나기로 한 커밋 해시"를 기다린다. 커밋 행에서 (1) 그 해시를 기다리던 레인들이 점으로 수렴(첫 레인이 점의 자리, 나머지는 join), (2) 첫 부모가 점의 레인을 이어받고, (3) 추가 부모는 이미 기다리는 레인이 있으면 그쪽으로 fork 곡선만, 없으면 빈 레인을 재사용해 연다. 잘린 목록 끝의 부모는 레인이 열린 채 남아 선이 아래로 이어진다(자연스러운 "계속됨" 표시).
+
+**Files:**
+- Create: `apps/desktop/src/renderer/src/components/history-graph.ts`
+- Modify: `apps/desktop/src/renderer/src/components/HistoryPanel.tsx`, `apps/desktop/src/renderer/src/components/history-panel.css`
+- Test: `apps/desktop/test/history-graph.test.ts`
+
+- [ ] **Step 1: 실패하는 buildGraph 테스트**
+
+Create `apps/desktop/test/history-graph.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import type { CommitSummary } from '@git-gui/domain'
+import { buildGraph } from '../src/renderer/src/components/history-graph'
+
+function commit(hash: string, parents: string[]): CommitSummary {
+  return {
+    hash,
+    shortHash: hash.slice(0, 7),
+    subject: hash,
+    authorName: 'T',
+    committedAt: 0,
+    refs: [],
+    parents,
+  }
+}
+
+describe('buildGraph', () => {
+  it('일직선 역사 — 전부 레인 0', () => {
+    const rows = buildGraph([commit('c', ['b']), commit('b', ['a']), commit('a', [])])
+    expect(rows.map((r) => r.nodeLane)).toEqual([0, 0, 0])
+    expect(rows[2]!.forkLanes).toEqual([]) // root는 아래로 뻗는 선이 없다
+    expect(rows.every((r) => r.laneCount === 1)).toBe(true)
+  })
+
+  it('다이아몬드(분기 후 병합) — 병합 행에서 두 레인이 열리고 공통 조상에서 수렴한다', () => {
+    // m(merge: a,b) → a(r) → b(r) → r
+    const rows = buildGraph([
+      commit('m', ['a', 'b']),
+      commit('a', ['r']),
+      commit('b', ['r']),
+      commit('r', []),
+    ])
+    expect(rows[0]!.nodeLane).toBe(0)
+    expect(rows[0]!.forkLanes).toEqual([0, 1]) // 첫 부모는 제 레인, 둘째 부모는 새 레인
+    expect(rows[1]!.passLanes).toEqual([1]) // a 행에서 b의 레인이 지나간다
+    expect(rows[2]!.nodeLane).toBe(1)
+    expect(rows[3]!.nodeLane).toBe(0)
+    expect(rows[3]!.joinLanes).toEqual([1]) // r에서 두 갈래가 합쳐진다
+    expect(rows[3]!.forkLanes).toEqual([])
+  })
+
+  it('둘째 부모가 이미 기다려지는 커밋이면 새 레인을 열지 않고 그 레인으로 fork한다', () => {
+    // m2(c,b) → c(m1) → m1(a,b) → a(r) → b(r) → r  형태의 연속 병합
+    const rows = buildGraph([
+      commit('m2', ['c', 'b']),
+      commit('c', ['m1']),
+      commit('m1', ['a', 'b']),
+      commit('a', ['r']),
+      commit('b', ['r']),
+      commit('r', []),
+    ])
+    // m1 행: 둘째 부모 b는 m2가 이미 lane1에서 기다림 — 새 레인 없이 lane1로 fork
+    expect(rows[2]!.forkLanes).toEqual([0, 1])
+    expect(rows[2]!.laneCount).toBe(2)
+  })
+
+  it('octopus(부모 3) — 레인 3개로 갈라진다', () => {
+    const rows = buildGraph([
+      commit('m', ['a', 'b', 'c']),
+      commit('a', []),
+      commit('b', []),
+      commit('c', []),
+    ])
+    expect(rows[0]!.forkLanes).toEqual([0, 1, 2])
+    expect(rows[0]!.laneCount).toBe(3)
+  })
+
+  it('서로 무관한 역사 두 줄(root 2개) — 두 번째 갈래는 빈 레인을 재사용한다', () => {
+    const rows = buildGraph([
+      commit('a', []),
+      commit('x', []),
+    ])
+    expect(rows[0]!.nodeLane).toBe(0)
+    expect(rows[1]!.nodeLane).toBe(0) // a가 root로 닫혀 레인 0이 비었으므로 재사용
+  })
+
+  it('잘린 목록 — 마지막 행의 부모가 화면 밖이면 fork 선이 남는다 (계속됨 표시)', () => {
+    const rows = buildGraph([commit('b', ['a'])])
+    expect(rows[0]!.forkLanes).toEqual([0])
+  })
+})
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run apps/desktop/test/history-graph.test.ts`
+Expected: FAIL — 모듈 없음
+
+- [ ] **Step 3: buildGraph 구현**
+
+Create `apps/desktop/src/renderer/src/components/history-graph.ts`:
+
+```ts
+import type { CommitSummary } from '@git-gui/domain'
+
+/** 한 행의 그래프 렌더 정보 — 레인 index에 LANE_WIDTH를 곱해 x좌표를 얻는다 */
+export interface GraphRow {
+  /** 커밋 점이 놓이는 레인 */
+  nodeLane: number
+  /** 위에서 내려와 이 행을 그대로 지나가는 레인들 (점·합류 제외) */
+  passLanes: number[]
+  /** 위에서 내려온 선이 이 커밋 점으로 합류하는 레인들 (분기의 수렴) */
+  joinLanes: number[]
+  /** 점에서 아래로 뻗는 레인들 — 첫 부모 포함, root면 빈 배열 */
+  forkLanes: number[]
+  /** 이 행에서 거터 폭 계산에 쓸 레인 수 */
+  laneCount: number
+}
+
+/**
+ * log(최신순) 목록에 레인을 배정한다.
+ * 각 레인은 "아래에서 만나기로 한 커밋 해시"를 기다린다 — 기다리던 커밋이 나타나면
+ * 첫 레인이 점의 자리가 되고 나머지는 점으로 합류(join)한다. 첫 부모는 점의 레인을
+ * 이어받고, 추가 부모는 기존 대기 레인으로 fork하거나 빈 레인을 재사용해 연다.
+ */
+export function buildGraph(commits: CommitSummary[]): GraphRow[] {
+  const lanes: (string | null)[] = []
+  const rows: GraphRow[] = []
+  for (const commit of commits) {
+    const before = [...lanes]
+    const waiting: number[] = []
+    for (let i = 0; i < before.length; i += 1) {
+      if (before[i] === commit.hash) waiting.push(i)
+    }
+    let nodeLane: number
+    if (waiting.length > 0) {
+      nodeLane = waiting[0]!
+    } else {
+      const free = before.indexOf(null)
+      nodeLane = free >= 0 ? free : before.length
+    }
+    while (lanes.length <= nodeLane) lanes.push(null)
+
+    const passLanes: number[] = []
+    for (let i = 0; i < before.length; i += 1) {
+      if (before[i] !== null && before[i] !== commit.hash) passLanes.push(i)
+    }
+    const joinLanes = waiting.slice(1)
+    for (const lane of joinLanes) lanes[lane] = null
+
+    const forkLanes: number[] = []
+    const firstParent = commit.parents[0] ?? null
+    lanes[nodeLane] = firstParent
+    if (firstParent !== null) forkLanes.push(nodeLane)
+    for (const parent of commit.parents.slice(1)) {
+      const existing = lanes.findIndex((hash, i) => hash === parent && i !== nodeLane)
+      if (existing >= 0) {
+        forkLanes.push(existing)
+        continue
+      }
+      let lane = lanes.findIndex((hash, i) => hash === null && i !== nodeLane)
+      if (lane < 0) {
+        lanes.push(null)
+        lane = lanes.length - 1
+      }
+      lanes[lane] = parent
+      forkLanes.push(lane)
+    }
+
+    const laneCount = Math.max(before.length, lanes.length, nodeLane + 1)
+    // 끝의 빈 레인은 다음 행부터 폭을 차지하지 않게 정리한다
+    while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
+
+    rows.push({ nodeLane, passLanes, joinLanes, forkLanes, laneCount })
+  }
+  return rows
+}
+```
+
+- [ ] **Step 4: 통과 확인**
+
+Run: `npx vitest run apps/desktop/test/history-graph.test.ts`
+Expected: PASS (6 tests)
+
+- [ ] **Step 5: HistoryPanel — 그래프 거터 렌더**
+
+`apps/desktop/src/renderer/src/components/HistoryPanel.tsx` 수정:
+
+(a) import에 추가 — `import { formatAbsoluteTime, … }` 행 **앞**에:
+
+```tsx
+import { buildGraph, type GraphRow } from './history-graph'
+```
+
+(b) `export function HistoryPanel(` **앞**에 그래프 셀 컴포넌트와 상수 추가:
+
+```tsx
+/** 레인 간격·행 높이 — 행 높이는 고정이라 그래프 좌표가 단순해진다 (measureElement 불필요) */
+const LANE_WIDTH = 12
+const ROW_HEIGHT = 52
+const NODE_Y = ROW_HEIGHT / 2
+/** 레인 색 — 위치가 1차 신호, 색은 보조(색약 대응: 인접 레인이 형태·위치로 구분된다) */
+const LANE_COLORS = [
+  'var(--concept-commit)',
+  'var(--concept-branch)',
+  'var(--concept-mine)',
+  'var(--concept-shelf)',
+  'var(--concept-backup)',
+  'var(--concept-conflict)',
+]
+
+function laneColor(lane: number): string {
+  return LANE_COLORS[lane % LANE_COLORS.length]!
+}
+
+function laneX(lane: number): number {
+  return lane * LANE_WIDTH + LANE_WIDTH / 2
+}
+
+/** 한 행의 그래프 거터 — 세로선(pass), 위→점 합류(join), 점→아래 분기(fork), 커밋 점 */
+function GraphCell({ row, isHead }: { row: GraphRow; isHead: boolean }) {
+  const width = row.laneCount * LANE_WIDTH
+  const nodeX = laneX(row.nodeLane)
+  return (
+    <svg
+      className="history-item__graph"
+      width={width}
+      height={ROW_HEIGHT}
+      viewBox={`0 0 ${width} ${ROW_HEIGHT}`}
+      aria-hidden="true"
+    >
+      {row.passLanes.map((lane) => (
+        <line
+          key={`pass-${lane}`}
+          x1={laneX(lane)}
+          y1={0}
+          x2={laneX(lane)}
+          y2={ROW_HEIGHT}
+          stroke={laneColor(lane)}
+          strokeWidth={2}
+        />
+      ))}
+      {/* 점의 레인 자체도 위(수렴 전)와 아래(첫 부모)로 이어진다 — fork에 nodeLane이 있으면 아래로 */}
+      <line
+        x1={nodeX}
+        y1={0}
+        x2={nodeX}
+        y2={NODE_Y}
+        stroke={laneColor(row.nodeLane)}
+        strokeWidth={2}
+      />
+      {row.joinLanes.map((lane) => (
+        <path
+          key={`join-${lane}`}
+          d={`M ${laneX(lane)} 0 C ${laneX(lane)} ${NODE_Y * 0.7}, ${nodeX} ${NODE_Y * 0.5}, ${nodeX} ${NODE_Y}`}
+          stroke={laneColor(lane)}
+          strokeWidth={2}
+          fill="none"
+        />
+      ))}
+      {row.forkLanes.map((lane) => (
+        <path
+          key={`fork-${lane}`}
+          d={
+            lane === row.nodeLane
+              ? `M ${nodeX} ${NODE_Y} L ${nodeX} ${ROW_HEIGHT}`
+              : `M ${nodeX} ${NODE_Y} C ${nodeX} ${NODE_Y * 1.5}, ${laneX(lane)} ${NODE_Y * 1.3}, ${laneX(lane)} ${ROW_HEIGHT}`
+          }
+          stroke={laneColor(lane)}
+          strokeWidth={2}
+          fill="none"
+        />
+      ))}
+      <circle
+        cx={nodeX}
+        cy={NODE_Y}
+        r={4.5}
+        fill={isHead ? laneColor(row.nodeLane) : 'var(--color-surface)'}
+        stroke={laneColor(row.nodeLane)}
+        strokeWidth={2}
+      />
+    </svg>
+  )
+}
+```
+
+(c) `HistoryPanel` 본문에서:
+- `const virtualizer = useVirtualizer({ … })`의 `estimateSize: () => 52,`는 유지하되, 행 li에서 `ref={virtualizer.measureElement}`와 `data-index={item.index}` 행을 **제거**하고 `style={{ transform: … }}`에 `height: ROW_HEIGHT,`를 추가한다 (고정 높이 — 측정 불필요):
+
+```tsx
+                <li
+                  key={commit.hash}
+                  className="virtual-row"
+                  style={{ height: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+                >
+```
+
+- `virtualizer` 선언 **앞**에 그래프 계산 추가:
+
+```tsx
+  // 레인 그래프 — 목록이 바뀔 때마다 전체를 다시 배정한다 (10000행 수 ms — 실측상 무해)
+  const graph = buildGraph(history)
+```
+
+- 행 안의 `<span className="history-item__dot" aria-hidden="true" />`를 다음으로 교체:
+
+```tsx
+                    <GraphCell row={graph[item.index]!} isHead={item.index === 0} />
+```
+
+(d) `history-panel.css`에서:
+- `.history-item--connected::after`와 `.history-item--truncated::after` 블록을 **삭제**한다 (그래프 선이 연결을 그린다 — 잘린 목록 끝은 fork 선이 자연스럽게 아래로 이어진다).
+- `.history-item__dot`·`.history-item--head .history-item__dot` 블록을 **삭제**하고 그 자리에:
+
+```css
+.history-item__graph {
+  flex: none;
+  align-self: stretch;
+  height: 100%;
+}
+```
+
+- `.history-item` 블록의 `align-items: flex-start;`를 `align-items: center;`로, `padding: var(--space-2) var(--space-3);`을 `padding: 0 var(--space-3) 0 var(--space-2);`로 교체하고 `height: 100%;` 행을 추가한다 (고정 행 높이에 맞춤).
+
+(e) HistoryPanel의 행 className 배열에서 `connected ? 'history-item--connected' : ''`와 `isLast && truncated ? 'history-item--truncated' : ''` 두 행, 그리고 `const isLast`·`const connected` 계산 두 행을 **제거**한다 (그래프가 대체).
+
+- [ ] **Step 6: 게이트 + 실렌더 확인**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **174 tests** + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+
+실렌더: merge 2개+브랜치 2개 fixture로 그래프가 갈라졌다 합쳐지는 선을 그리는지 스크린샷 육안 확인 (구현자 보고에 포함).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/test
+git commit -m "feat(desktop): 레인 그래프 — 브랜치 갈라짐·병합을 선으로 (5차 피드백)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 167 tests + typecheck 5 + build + **E2E 9 passed** — 전부 exit 0
+Expected: 177 tests + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
@@ -4017,8 +4647,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 6 후 | +3 (diff-rows) → **164 tests** |
 | Task 8 후 | **E2E 7** (커밋 상세·로그 더 불러오기) |
 | Task 8b 후 | **E2E 8** (변경 취소) |
-| Task 8c 후 | +3 (theme) → **167 tests**, **E2E 9** (테마) |
-| 최종 | 167 tests + typecheck 5 + build + E2E 9 — 전부 exit 0 |
+| Task 8f 후 | +4 (resize·절대시각) → 168, E2E 9 |
+| Task 8g 후 | +6 (buildGraph) → 174 |
+| Task 8c 후 | +3 (theme) → **177 tests**, **E2E 10** (테마) |
+| 최종 | 177 tests + typecheck 5 + build + E2E 10 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
