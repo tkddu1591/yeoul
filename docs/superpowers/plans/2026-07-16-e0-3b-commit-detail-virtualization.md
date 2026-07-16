@@ -260,6 +260,9 @@ export function parseLog(rawOutput: string): CommitSummary[] {
           // clone 기본 장식의 origin/HEAD와 replace ref는 배지 소음이다 — 장식에서 제외한다 (실측 확인)
           '--decorate-refs-exclude=refs/remotes/*/HEAD',
           '--decorate-refs-exclude=refs/replace/*',
+          // 타임스탬프가 같은 커밋(스크립트 연속 커밋 등)에서도 부모가 자식보다 아래에 오도록
+          // 고정한다 — 레인 그래프는 "기다리던 커밋이 아래에 나타난다"를 전제한다 (실측: 동률에서 유령 레인)
+          '--date-order',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
 ```
 
@@ -4900,6 +4903,80 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+## Task 9-보완: `--date-order` — 타임스탬프 동률 유령 레인 해소 (최종 통합 리뷰 반영)
+
+최종 통합 리뷰 실측: 같은 초에 만들어진 커밋들(스크립트 연속 커밋 — 흔함)에서 git log 기본 정렬이 부모를 다른 자식보다 위에 방출할 수 있고, buildGraph의 전제("기다리던 커밋은 아래에 나타난다")가 깨져 유령 레인이 목록 끝까지 이어진다. history.list에 `--date-order`를 고정한다(부모는 모든 자식 뒤에 — 그래프 전제 보장). Task 1 Step 5의 args 블록이 갱신되었다.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: 실패하는 회귀 테스트**
+
+`packages/git-adapter/test/client.test.ts`의 `'history — refs와 parents를 반환하고 병합 커밋을 식별한다'` 테스트 **뒤**에 추가 (git-process의 env 격리를 우회해 committer date를 고정해야 하므로 fixture 커밋은 execFileSync로 직접 만든다):
+
+```ts
+  it('history — 타임스탬프가 같아도 부모가 자식보다 항상 아래에 온다 (--date-order, 레인 그래프 전제)', async () => {
+    const repo = await createFixtureRepo()
+    const at = '2026-07-16T12:00:00+09:00'
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: at,
+      GIT_COMMITTER_DATE: at,
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@test.local',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@test.local',
+    }
+    const run = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+    run(['checkout', '-b', 'side'])
+    for (let i = 0; i < 3; i += 1) run(['commit', '--allow-empty', '-m', `side ${i}`])
+    run(['checkout', 'main'])
+    for (let i = 0; i < 3; i += 1) run(['commit', '--allow-empty', '-m', `main ${i}`])
+    run(['merge', '--no-edit', '--no-ff', 'side'])
+
+    const history = await createGitClient(repo).history.list(50)
+    const position = new Map(history.map((c, index) => [c.hash, index]))
+    for (const commit of history) {
+      for (const parent of commit.parents) {
+        // 이 fixture는 전부 화면 안 — 부모는 반드시 자식보다 뒤(아래)여야 한다
+        expect(position.get(parent)!).toBeGreaterThan(position.get(commit.hash)!)
+      }
+    }
+  })
+```
+
+그리고 파일 상단 `import { existsSync } from 'node:fs'` **앞**에 추가:
+
+```ts
+import { execFileSync } from 'node:child_process'
+```
+
+- [ ] **Step 2: 실패 확인 (검출력)**
+
+Run: `npx vitest run packages/git-adapter/test/client.test.ts --testNamePattern "date-order"`
+Expected: FAIL — 기본 정렬에서 부모가 자식보다 위에 오는 위반이 잡힌다. **만약 이 fixture로 Red가 재현되지 않으면 우회·완화하지 말고 그대로 보고하라** (통합 리뷰어의 재현 fixture와 대조 필요).
+
+- [ ] **Step 3: 갱신된 Task 1 Step 5 블록에 byte 재동기화**
+
+client.ts history args에 `'--date-order',` + 주석 2줄 (format 행 앞).
+
+- [ ] **Step 4: 통과 확인 + 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **181 tests** + typecheck 5 + build + **E2E 10 passed** — 전부 exit 0
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "fix(adapter): history에 --date-order 고정 — 타임스탬프 동률 유령 레인 해소
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -4916,19 +4993,19 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 8g 후 | +6 (buildGraph) → 174 |
 | Task 8h 후 | +3 (sanitize) → 177, 리사이즈 E2E가 재시작 영속 검증으로 |
 | Task 8c 후 | +3 (theme) → **180 tests**, **E2E 10** (테마 재시작) |
-| 최종 | 180 tests + typecheck 5 + build + E2E 10 — 전부 exit 0 |
+| Task 9-보완 후 | +1 (--date-order) → 181 |
+| 최종 | 181 tests + typecheck 5 + build + E2E 10 — 전부 exit 0 |
 
 (테스트 수는 파일 재구성에 따라 ±1 오차가 있을 수 있다 — 게이트의 본질은 "전부 PASS + 신규 테스트가 실제로 존재"다. 최종 수치가 다르면 커밋 메시지가 아니라 이 표를 갱신한다.)
 
 ## 후속 노트 (1단계 이관 후보)
 
-- 레인 그래프: committer date가 역전된 병리적 저장소(머신 시계 어긋남 — 부모가 자식보다 위에 나옴)에서는 해당 레인 선이 목록 끝까지 매달린다(리뷰 합성 재현). git 기본 정렬에서 정상 시계면 발생 불가 — 알려진 한계.
+- 레인 그래프: log 순서에서 부모가 자식보다 위에 오면 해당 레인 선이 목록 끝까지 매달린다. **타임스탬프 동률(정상 시계, 스크립트 연속 커밋)** 만으로도 기본 정렬에서 발생함이 최종 통합 리뷰에서 실측됨 → history.list에 `--date-order`를 고정해 해소(Task 9-보완). committer date가 실제로 역전된 병리적 저장소(시계 어긋남)는 `--date-order`로도 남는 진짜 한계.
 - discard 부분 실패(취소 도중 일부만 성공) 시 체크 초기화 방어선(`runDiscard`의 setChecked)은 테스트가 지키지 않는다(변이 미검출 — 성공 경로에선 pruning effect가 대신 정리). 부분 실패 E2E는 플랫폼 의존(권한 조작)이라 보류 — 취소 가능 프로세스(1단계)와 함께.
 - 960px 좁은 폭에서 커밋 diff 제목(`파일명 — 저장 해시`)이 말줄임되며 해시 컨텍스트가 사라지고 diff 배지가 찌그러진다(8d 리뷰 Minor) — 좁은 폭 배지 숨김 또는 접미사를 title 속성으로.
 - '목록으로' 복귀 후 마지막 본 커밋 하이라이트 없음(`selectedHash={null}` — 전환형 설계의 의도적 결정) — 대형 히스토리 탐색이 잦아지면 재고.
 
 - store.discard 이중 실패(取消 실패 + 직후 스냅샷 조회도 실패) 시 finally의 스냅샷 에러가 discard 원인 에러를 대체한다(리뷰 실측) — 저장소 자체가 읽히지 않는 상황이라 실용 영향 작음. 구조화 에러(1단계) 도입 시 함께 정리.
 - loadMoreHistory는 append가 아니라 상한 확장 재조회 — 최악 10000건 재파싱(실측상 수백 ms 이내). 필요해지면 --skip 페이지네이션으로.
-- 레인 그래프 (#7의 나머지 절반 — 사용자 결정: 1단계)
 - 커밋 상세에서 두 번째 부모 기준 비교 (combined diff)
 - split 뷰 워드 단위 하이라이트
