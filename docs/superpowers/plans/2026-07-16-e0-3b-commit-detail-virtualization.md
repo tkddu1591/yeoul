@@ -3085,17 +3085,18 @@ type Variant = 'primary' | 'neutral' | 'ghost' | 'danger'
 `apps/desktop/src/renderer/src/ui/button.css` 끝에 추가:
 
 ```css
-/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다 */
+/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다.
+   hover는 옅은 빨강 틴트 — 흰 다이얼로그 표면 위에서도 구분된다 (리뷰 실측 반영) */
 .ui-button--danger {
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-danger);
 }
 .ui-button--danger[data-hovered] {
-  background: var(--color-surface-sunken);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 .ui-button--danger[data-pressed] {
-  background: var(--color-border);
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
 }
 ```
 
@@ -3169,6 +3170,18 @@ Create `apps/desktop/src/renderer/src/ui/confirm-dialog.css`:
   justify-content: center;
   z-index: 100;
 }
+/* 앱 전반의 0.12s 모션 톤에 맞춘 진입 페이드 — alertdialog라 퇴장은 즉시 */
+.ui-modal-overlay[data-entering] {
+  animation: ui-fade-in 120ms ease;
+}
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 .ui-modal {
   outline: none;
 }
@@ -3238,7 +3251,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
   }
 ```
 
-(f) bulk 바의 일괄 버튼(`선택 {bulkLabel} …` Button) 바로 뒤에 추가:
+(f) bulk 바의 일괄 버튼(`선택 {bulkLabel} …` Button) 바로 **앞**에 추가 — 파괴적 버튼은 습관 위치(오른끝)를 피하고, 자주 쓰는 '선택 올리기'가 오른끝을 지킨다(리뷰 반영):
 
 ```tsx
             {onDiscard && (
@@ -3252,6 +3265,30 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
                 변경 취소 ({validChecked.length})
               </Button>
             )}
+```
+
+(f-2) `apps/desktop/src/renderer/src/components/changes-panel.css`의 `.file-list__bulk` 블록을 교체하고 `.file-list__check-all` 블록에 `margin-right: auto;`를 추가한다 — 라벨은 왼쪽, 버튼들은 오른쪽 그룹으로 묶여 두 패널에서 같은 역할 버튼이 같은 자리에 온다(리뷰 실측 반영):
+
+```css
+.file-list__bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+```
+
+```css
+.file-list__check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  margin-right: auto;
+}
 ```
 
 (g) `</Panel>` 닫기 직전(가상 리스트 `</div>` 뒤, `</>` 앞)에 추가:
@@ -3922,6 +3959,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## 후속 노트 (1단계 이관 후보)
 
+- discard 부분 실패(취소 도중 일부만 성공) 시 체크 초기화 방어선(`runDiscard`의 setChecked)은 테스트가 지키지 않는다(변이 미검출 — 성공 경로에선 pruning effect가 대신 정리). 부분 실패 E2E는 플랫폼 의존(권한 조작)이라 보류 — 취소 가능 프로세스(1단계)와 함께.
 - 960px 좁은 폭에서 커밋 diff 제목(`파일명 — 저장 해시`)이 말줄임되며 해시 컨텍스트가 사라지고 diff 배지가 찌그러진다(8d 리뷰 Minor) — 좁은 폭 배지 숨김 또는 접미사를 title 속성으로.
 - '목록으로' 복귀 후 마지막 본 커밋 하이라이트 없음(`selectedHash={null}` — 전환형 설계의 의도적 결정) — 대형 히스토리 탐색이 잦아지면 재고.
 
