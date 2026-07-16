@@ -207,17 +207,22 @@ export function createGitClient(repoPath: string): GitClient {
       async show(hash) {
         const cwd = await topLevel()
         assertFullHash(hash)
-        const metaRaw = await execGitOrThrow(
-          [
-            'show',
-            '-s',
-            '--no-show-signature',
-            '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%P%x1f%s%x1f%b',
-            '--end-of-options',
-            hash,
-          ],
-          { cwd },
-        )
+        const showArgs = [
+          'show',
+          '-s',
+          '--no-show-signature',
+          '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%P%x1f%s%x1f%b',
+          '--end-of-options',
+          hash,
+        ]
+        const metaRaw = await execGit(showArgs, { cwd })
+        if (metaRaw.exitCode !== 0) {
+          // CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 읽히는 메시지로
+          if (metaRaw.stderr.includes('bad object')) {
+            throw new Error('그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.')
+          }
+          throw new GitError(showArgs, metaRaw)
+        }
         const meta = parseCommitMeta(metaRaw.stdout)
         const firstParent = meta.parents[0] ?? null
         // 병합 커밋에 diff-tree 기본 호출은 빈 출력이다(실측) — 부모가 있으면 첫 부모를 명시한다.

@@ -39,7 +39,7 @@ const STATUS_KINDS: Record<string, ChangeKind> = {
 }
 
 /**
- * `git diff --name-status -M -z` 출력을 파싱한다.
+ * `git diff --name-status -M -z` 출력을 파싱한다 (root 커밋 경로의 diff-tree 출력도 동일 형식).
  * 레코드: `M NUL path NUL` / rename·copy: `R100 NUL 원래경로 NUL 새경로 NUL` (원래 경로가 먼저 — 실측 확정).
  * 알 수 없는 상태는 추측하지 않고 건너뛴다.
  */

@@ -221,6 +221,14 @@ describe('GitClient', () => {
     await expect(client.commits.show('a'.repeat(39))).rejects.toThrow()
   })
 
+  it('show — 사라진(존재하지 않는) 커밋은 원시 git 에러 대신 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.commits.show('deadbeef'.repeat(5))).rejects.toThrow(
+      /저장 시점을 찾을 수 없어요/,
+    )
+  })
+
   it('빈 커밋 메시지는 GitError로 거부된다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
