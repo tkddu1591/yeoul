@@ -21,6 +21,9 @@
   font-size: var(--text-sm);
   font-weight: 700;
 }
+.ui-panel__head > .ui-button {
+  margin-left: auto;
+}
 .ui-panel__body {
   flex: 1;
   overflow-y: auto;

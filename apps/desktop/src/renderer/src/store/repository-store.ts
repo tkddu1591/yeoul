@@ -26,6 +26,8 @@ interface RepositoryStore {
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
+  /** diff 선택 해제 — 동기 상태 변경이라 guard 불필요 */
+  clearSelection(): void
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
   commit(message: string): Promise<boolean>
   backup(): Promise<void>
@@ -131,6 +133,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       })
       set({ selected, diffText })
     })
+  },
+
+  clearSelection() {
+    set({ selected: null, diffText: '' })
   },
 
   async commit(message) {

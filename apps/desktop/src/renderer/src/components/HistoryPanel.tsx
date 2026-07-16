@@ -37,7 +37,10 @@ export function HistoryPanel({ history, limit }: HistoryPanelProps) {
           </p>
         </div>
       ) : (
-        <ol className="history-panel__list" data-testid="history-list">
+        <ol
+          className={`history-panel__list${history.length >= limit ? ' history-panel__list--truncated' : ''}`}
+          data-testid="history-list"
+        >
           {history.map((commit) => (
             <li key={commit.hash} className="history-item">
               <span className="history-item__dot" aria-hidden="true" />

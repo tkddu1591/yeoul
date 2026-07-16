@@ -104,7 +104,11 @@ export function App() {
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">
-          <DiffPanel path={store.selected?.change.path ?? null} diffText={store.diffText} />
+          <DiffPanel
+            path={store.selected?.change.path ?? null}
+            diffText={store.diffText}
+            onClose={() => store.clearSelection()}
+          />
           <CommitForm
             stagedCount={stagedCount}
             busy={store.busy}

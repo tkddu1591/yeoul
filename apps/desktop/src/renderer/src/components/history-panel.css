@@ -18,15 +18,25 @@
   padding: var(--space-2) 0;
   position: relative;
 }
-/* 저장 시점을 잇는 세로 선 — 타임라인 픽토그램 언어(commit 파랑)와 동일 */
-.history-panel__list::before {
+/* 커넥터는 항목 단위로 그린다 — 첫 점 위·마지막 점 아래에 선이 남지 않는다 (#5) */
+.history-item:not(:last-child)::after {
   content: '';
   position: absolute;
   left: 16px;
-  top: 25px; /* 첫 점 중심에서 시작 — 최신 시점 "위"로 역사가 이어지는 인상 방지 */
-  bottom: var(--space-3);
+  top: 21px; /* 점 아래에서 시작 */
+  bottom: -12px; /* 다음 항목의 점 위까지 */
   width: 2px;
   background: var(--color-border);
+}
+/* 목록이 상한에 잘렸을 때만: 마지막 점 아래로 흐려지며 이어지는 표시 */
+.history-panel__list--truncated .history-item:last-child::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 21px;
+  height: 16px;
+  width: 2px;
+  background: linear-gradient(var(--color-border), transparent);
 }
 .history-item {
   display: flex;
