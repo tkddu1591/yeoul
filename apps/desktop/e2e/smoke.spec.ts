@@ -21,7 +21,64 @@ async function createRepoWithChange(): Promise<string> {
   return dir
 }
 
-test('저장소 열기 → 변경 확인 → stage → commit', async () => {
+/** GIT_SCENARIOS fixture 원칙 — 로컬 bare remote로 백업(push)을 검증한다 */
+async function addBareRemote(repo: string): Promise<string> {
+  const remote = await mkdtemp(join(tmpdir(), 'git-gui-e2e-remote-'))
+  await execGitOrThrow(['init', '--bare', '--initial-branch=main'], { cwd: remote })
+  await execGitOrThrow(['remote', 'add', 'origin', remote], { cwd: repo })
+  return remote
+}
+
+test('열기 → stage → commit → 역사 반영 → 백업', async () => {
+  const repo = await createRepoWithChange()
+  const remote = await addBareRemote(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+
+    // 변경 파일과 기존 역사(init)가 보인다
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    await window.screenshot({ path: 'test-results/app-initial.png' })
+
+    // stage
+    await window.getByTestId('stage-app.txt').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+
+    // commit (명시 메시지)
+    await window.getByTestId('commit-message').fill('e2e: 첫 저장')
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+
+    // 역사에 반영
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await expect(window.getByTestId('history-list')).toContainText('e2e: 첫 저장')
+
+    // 실제 커밋 검증
+    const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
+    expect(log.stdout.trim()).toBe('e2e: 첫 저장')
+
+    // 백업 — 원격(bare)에 실제로 올라갔는지 + upstream 연결로 ahead/behind 표시
+    await window.getByTestId('backup').click()
+    await expect(window.getByText('↑0 ↓0')).toBeVisible()
+    const remoteLog = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: remote })
+    expect(remoteLog.stdout.trim()).toBe('e2e: 첫 저장')
+
+    await window.screenshot({ path: 'test-results/app-after-commit.png' })
+  } finally {
+    // 단언이 실패해도 Electron 프로세스와 임시 저장소를 정리한다
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
+test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다', async () => {
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
@@ -30,27 +87,22 @@ test('저장소 열기 → 변경 확인 → stage → commit', async () => {
   try {
     const window = await app.firstWindow()
 
-    // 변경 파일이 '지금 바뀐 것' 목록에 보인다
-    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
-    await window.screenshot({ path: 'test-results/app-initial.png' })
-
-    // stage
     await window.getByTestId('stage-app.txt').click()
     await expect(window.getByTestId('staged-count')).toHaveText('1')
-    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
-    // commit
-    await window.getByTestId('commit-message').fill('e2e: 첫 저장')
+    // 제안이 placeholder로 보이고, 빈 채로 저장하면 그 문구로 저장된다는 안내가 뜬다
+    await expect(window.getByTestId('commit-message')).toHaveAttribute(
+      'placeholder',
+      'app.txt 수정',
+    )
+    await expect(window.getByTestId('commit-hint')).toBeVisible()
+
+    // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
     await window.getByTestId('commit-button').click()
     await expect(window.getByTestId('staged-count')).toHaveText('0')
-    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
-    await window.screenshot({ path: 'test-results/app-after-commit.png' })
-
-    // 실제 커밋이 생겼는지 검증
     const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
-    expect(log.stdout.trim()).toBe('e2e: 첫 저장')
+    expect(log.stdout.trim()).toBe('app.txt 수정')
   } finally {
-    // 단언이 실패해도 Electron 프로세스와 임시 저장소를 정리한다
     await app.close()
     await rm(repo, { recursive: true, force: true })
   }

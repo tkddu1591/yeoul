@@ -38,6 +38,12 @@ export function CommitForm({ stagedCount, busy, suggestion, onCommit }: CommitFo
         placeholder={suggestion || '무엇을 바꿨는지 적어 주세요'}
         rows={3}
       />
+      {message.trim().length === 0 && suggestion.length > 0 && (
+        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 저장 문구임을 알린다
+        <p className="commit-form__hint" data-testid="commit-hint">
+          비워 두고 저장하면 위 제안 문구로 저장돼요
+        </p>
+      )}
       <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
         저장하기 — {stagedCount}개 파일
       </Button>

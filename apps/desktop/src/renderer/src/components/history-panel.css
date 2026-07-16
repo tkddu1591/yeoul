@@ -23,7 +23,7 @@
   content: '';
   position: absolute;
   left: 16px;
-  top: var(--space-3);
+  top: 25px; /* 첫 점 중심에서 시작 — 최신 시점 "위"로 역사가 이어지는 인상 방지 */
   bottom: var(--space-3);
   width: 2px;
   background: var(--color-border);
