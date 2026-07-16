@@ -1,8 +1,17 @@
-/* 긴 본문이 diff를 눌러 죽이지 않게 메시지는 상한을 갖고 자체 스크롤한다 (리뷰 실측 반영) */
-.commit-detail__message {
-  padding: var(--space-3) var(--space-4);
+/* 우측 열 전환형(3차 피드백) — 상단 파일 목록(잔여 공간), 하단 메시지(상한 + 자체 스크롤) */
+.commit-detail__files-head {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
-  max-height: 35%;
+}
+.commit-detail__files.virtual-scroll {
+  min-height: 120px;
+}
+.commit-detail__message {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-4);
+  max-height: 40%;
   overflow-y: auto;
 }
 .commit-detail__subject {
@@ -22,26 +31,6 @@
   margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
-}
-.commit-detail__files-head {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  border-bottom: 1px solid var(--color-border);
-}
-/* 파일 목록과 diff가 세로 공간을 나눈다 — 목록은 상한을 갖고 diff가 잔여를 차지한다.
-   .virtual-scroll(flex:1)보다 특이도 높은 복합 선택자로 결정적으로 이긴다 (!important 불요).
-   min-height — 좁은 창에서도 diff(핵심 payload)와 목록이 최소한은 보인다 (리뷰 실측 반영) */
-.commit-detail__files.virtual-scroll {
-  flex: 0 1 220px;
-  min-height: 62px;
-}
-.commit-detail__diff {
-  flex: 1 1 auto;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--color-border);
 }
 .commit-file-row {
   width: 100%;

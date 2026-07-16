@@ -192,7 +192,7 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
   }
 })
 
-test('커밋을 누르면 전체 메시지·바뀐 파일·diff가 보인다', async () => {
+test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데에 뜬다', async () => {
   const repo = await createRepoWithChange()
   // 본문 있는 커밋을 하나 더 쌓는다 — 상세에서 본문 표시를 검증한다
   await execGitOrThrow(['add', '-A'], { cwd: repo })
@@ -207,17 +207,20 @@ test('커밋을 누르면 전체 메시지·바뀐 파일·diff가 보인다', a
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('history-count')).toHaveText('2')
-    // 최신 커밋 클릭 → 상세: 제목·본문·파일 목록
+    // 최신 커밋 클릭 → 우측 열이 타임라인에서 상세로 전환
     await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('history-panel')).toHaveCount(0)
     await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
     await expect(window.getByTestId('commit-detail-body')).toHaveText('자세한 설명 줄')
     await expect(window.getByTestId('commit-detail-file-count')).toHaveText('1')
-    // 파일 클릭 → diff (v1 → v2 수정이 보인다)
+    // 파일 클릭 → 좌측 흐름과 동일하게 중앙 diff에 뜬다 (v1 → v2 수정)
     await window.getByTestId('commit-file-app.txt').click()
     await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
-    // 닫기 → 원래 diff 패널로 복귀
-    await window.getByTestId('commit-detail-close').click()
-    await expect(window.getByTestId('diff-panel')).toBeVisible()
+    await expect(window.getByTestId('diff-panel')).toContainText('저장')
+    // 목록으로 → 타임라인 복귀
+    await window.getByTestId('commit-detail-back').click()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

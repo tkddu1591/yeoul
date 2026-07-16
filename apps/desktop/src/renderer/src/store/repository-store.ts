@@ -50,6 +50,8 @@ interface RepositoryStore {
   selectCommitFile(file: CommitFileChange): Promise<void>
   /** 커밋 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
   clearCommit(): void
+  /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 guard 불필요 */
+  clearCommitFile(): void
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
@@ -218,6 +220,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   clearCommit() {
     set({ commitDetail: null, commitFile: null, diff: null })
+  },
+
+  clearCommitFile() {
+    set({ commitFile: null, diff: null })
   },
 
   async loadMoreHistory() {

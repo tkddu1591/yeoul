@@ -105,23 +105,18 @@ export function App() {
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">
-          {store.commitDetail !== null ? (
-            <CommitDetailPanel
-              detail={store.commitDetail}
-              selectedFile={store.commitFile}
-              diff={store.diff}
-              busy={store.busy}
-              onSelectFile={(file) => void store.selectCommitFile(file)}
-              onClose={() => store.clearCommit()}
-            />
-          ) : (
-            <DiffPanel
-              path={store.selected?.change.path ?? null}
-              diff={store.diff}
-              busy={store.busy}
-              onClose={() => store.clearSelection()}
-            />
-          )}
+          <DiffPanel
+            path={
+              store.commitFile !== null && store.commitDetail !== null
+                ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
+                : store.selected?.change.path ?? null
+            }
+            diff={store.diff}
+            busy={store.busy}
+            onClose={() =>
+              store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
+            }
+          />
           <CommitForm
             stagedCount={stagedCount}
             busy={store.busy}
@@ -129,15 +124,25 @@ export function App() {
             onCommit={(message) => store.commit(message)}
           />
         </div>
-        <HistoryPanel
-          history={store.history}
-          historyLimit={store.historyLimit}
-          currentBranch={status?.branch.name ?? null}
-          selectedHash={store.commitDetail?.hash ?? null}
-          busy={store.busy}
-          onSelect={(hash) => void store.selectCommit(hash)}
-          onLoadMore={() => void store.loadMoreHistory()}
-        />
+        {store.commitDetail !== null ? (
+          <CommitDetailPanel
+            detail={store.commitDetail}
+            selectedFile={store.commitFile}
+            busy={store.busy}
+            onSelectFile={(file) => void store.selectCommitFile(file)}
+            onBack={() => store.clearCommit()}
+          />
+        ) : (
+          <HistoryPanel
+            history={store.history}
+            historyLimit={store.historyLimit}
+            currentBranch={status?.branch.name ?? null}
+            selectedHash={null}
+            busy={store.busy}
+            onSelect={(hash) => void store.selectCommit(hash)}
+            onLoadMore={() => void store.loadMoreHistory()}
+          />
+        )}
       </main>
     </div>
   )
