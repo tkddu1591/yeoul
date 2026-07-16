@@ -48,21 +48,25 @@
 .file-row--selected .file-row__main:hover:not(:disabled) {
   background: transparent;
 }
-/* 변경 종류 = 파일명 색 + 선행 점 (IntelliJ식). 색 단독 금지 원칙은 점+title+aria-label로 충족 */
-.file-row__kind-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 2.5px;
-  background: currentColor;
+/* 변경 종류 = 파일명 색 + 선행 글리프(M/A/D/R/C/T/U/!) — 색약에서도 형태로 구분된다 (스펙 10장) */
+.file-row__kind {
   flex: none;
+  width: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: currentColor;
 }
 .file-row__main--modified,
 .file-row__main--typechange {
   color: var(--change-modified);
 }
-.file-row__main--added,
-.file-row__main--untracked {
+.file-row__main--added {
   color: var(--change-added);
+}
+.file-row__main--untracked {
+  color: var(--change-untracked);
 }
 .file-row__main--deleted {
   color: var(--change-deleted);

@@ -40,12 +40,19 @@ const PAIRS: Array<[string, string, number]> = [
   ['--color-danger', '--color-surface', 4.5],
   ['--color-focus', '--color-surface', 3],
   ['--term-badge', '--term-badge-bg', 4.5],
-  // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요
+  // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요.
+  // 선택 행(selection-bg) 위에서도 읽혀야 한다 — 사용자가 지금 보고 있는 바로 그 행이다.
   ['--change-modified', '--color-surface', 4.5],
   ['--change-added', '--color-surface', 4.5],
   ['--change-deleted', '--color-surface', 4.5],
   ['--change-renamed', '--color-surface', 4.5],
   ['--change-untracked', '--color-surface', 4.5],
+  ['--change-modified', '--color-selection-bg', 4.5],
+  ['--change-added', '--color-selection-bg', 4.5],
+  ['--change-deleted', '--color-selection-bg', 4.5],
+  ['--change-renamed', '--color-selection-bg', 4.5],
+  ['--change-untracked', '--color-selection-bg', 4.5],
+  ['--concept-conflict', '--color-selection-bg', 4.5],
   ['--concept-mine', '--concept-mine-bg', 4.5],
   ['--concept-branch', '--concept-branch-bg', 4.5],
   ['--concept-commit', '--concept-commit-bg', 4.5],

@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import type { ChangeKind } from '@git-gui/domain'
 import './pictogram.css'
 
 export type ConceptKind = 'mine' | 'branch' | 'commit' | 'shelf' | 'backup' | 'conflict'
@@ -66,27 +65,6 @@ export function Pictogram({ kind, size = 18, label }: PictogramProps) {
       >
         {CONCEPT_PATHS[kind]}
       </svg>
-    </span>
-  )
-}
-
-const CHANGE_LABELS: Record<ChangeKind, string> = {
-  modified: '수정됨',
-  added: '추가됨',
-  deleted: '삭제됨',
-  renamed: '이름 변경',
-  copied: '복사됨',
-  typechange: '형식 변경',
-  untracked: '새 파일',
-  conflicted: '충돌',
-}
-
-/** 변경 종류 = 색 점 + 짧은 라벨. 색 단독으로 의미를 전달하지 않는다(접근성) */
-export function ChangeKindBadge({ kind }: { kind: ChangeKind }) {
-  return (
-    <span className={`ui-change-badge ui-change-badge--${kind}`}>
-      <span className="ui-change-badge__dot" aria-hidden="true" />
-      {CHANGE_LABELS[kind]}
     </span>
   )
 }

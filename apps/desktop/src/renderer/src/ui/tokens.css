@@ -71,9 +71,9 @@
   --concept-conflict-bg: #fdeaea;
 
   /* 변경 종류 */
-  --change-modified: #9a6119;
+  --change-modified: #8f5a17;
   --change-added: #0e7a4e;
-  --change-deleted: #d92d20;
+  --change-deleted: #c62a1e;
   --change-renamed: #6d4fc4;
   --change-untracked: #0e7490;
 

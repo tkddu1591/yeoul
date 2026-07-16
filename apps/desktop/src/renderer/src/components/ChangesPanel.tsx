@@ -36,10 +36,27 @@ interface FileRowProps {
   onAction(): void
 }
 
+/** 색과 함께 쓰는 형태 신호 — 색약(적록)에서 modified/added 색이 수렴해도 글자로 구분된다 */
+const KIND_GLYPHS: Record<ChangeKind, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  renamed: 'R',
+  copied: 'C',
+  typechange: 'T',
+  untracked: 'U',
+  conflicted: '!',
+}
+
 function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const actionLabel = staged ? '내리기' : '올리기'
   const kindLabel = kind ? KIND_LABELS[kind] : ''
+  // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
+  const tooltip =
+    kind === 'renamed' && change.origPath !== null
+      ? `${change.origPath} → ${change.path} — ${kindLabel}`
+      : `${change.path} — ${kindLabel}`
   // 좁은 열에서 파일명이 먼저 잘리지 않도록 디렉터리와 파일명을 분리해 디렉터리부터 축소한다
   const slashIndex = change.path.lastIndexOf('/')
   const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex + 1) : ''
@@ -51,11 +68,13 @@ function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileR
         className={`file-row__main file-row__main--${kind ?? 'none'}`}
         disabled={busy}
         onClick={onSelect}
-        title={`${change.path} — ${kindLabel}`}
-        aria-label={`${change.path} (${kindLabel})`}
+        title={tooltip}
+        aria-label={tooltip}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
       >
-        <span className="file-row__kind-dot" aria-hidden="true" />
+        <span className="file-row__kind" aria-hidden="true">
+          {kind ? KIND_GLYPHS[kind] : ''}
+        </span>
         <span className="file-row__name">
           {directory && <span className="file-row__dir">{directory}</span>}
           <span className="file-row__base">{basename}</span>
