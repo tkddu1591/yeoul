@@ -12,7 +12,7 @@
 
 **이번 범위가 아닌 것 (E0-1 후속 노트에서 이관하지 않는 항목 포함):** 히스토리 점진 로딩("더 보기" — 지금은 최근 50개), push 진행률·취소(네트워크 원격은 1단계 취소 가능 프로세스와 함께), AI 메시지 제안(스펙상 선택 옵션 — 후속), 테마 토글, 충돌 마커 시각 처리. **백업 버튼의 위험 표시**: 이번 push는 force가 아니므로 위험 동작 구분 불필요.
 
-**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 첫 번째 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다.
+**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단).
 
 ---
 
@@ -499,6 +499,42 @@ export async function createFixtureRepoWithRemote(): Promise<{ repo: string; rem
     await execGitOrThrow(['checkout', '--detach'], { cwd: repo })
     await expect(createGitClient(repo).sync.push()).rejects.toThrow('브랜치가 아닌 시점')
   })
+
+  it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push() // upstream 연결
+
+    // 다른 브랜치에 원격에 없는 커밋을 만들어 둔다
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', '1\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side-only'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'm.txt', '1\n')
+    await client.changes.stage(['m.txt'])
+    await client.commits.create('main-two')
+
+    // 전역 push.default=matching 시나리오를 저장소 로컬 설정으로 재현
+    await execGitOrThrow(['config', 'push.default', 'matching'], { cwd: repo })
+    await client.sync.push()
+
+    const remoteBranches = await execGitOrThrow(['branch', '--format=%(refname:short)'], {
+      cwd: remote,
+    })
+    expect(remoteBranches.stdout).not.toContain('side')
+    const remoteLog = await execGitOrThrow(['log', '-1', '--format=%s', 'main'], { cwd: remote })
+    expect(remoteLog.stdout.trim()).toBe('main-two')
+  })
+
+  it('push — 커밋이 없는 저장소는 읽히는 에러를 던진다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-push-'))
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
+    const bare = await mkdtemp(join(tmpdir(), 'git-gui-unborn-remote-'))
+    await execGitOrThrow(['init', '--bare'], { cwd: bare })
+    await execGitOrThrow(['remote', 'add', 'origin', bare], { cwd: dir })
+    await expect(createGitClient(dir).sync.push()).rejects.toThrow('아직 저장된 시점이 없어요')
+  })
 ```
 
 - [ ] **Step 3: 실패 확인**
@@ -524,25 +560,37 @@ Expected: FAIL — sync 미정의 (typecheck 에러 또는 런타임 undefined)
       async push() {
         const cwd = await topLevel()
         const remotes = await execGitOrThrow(['remote'], { cwd })
-        const firstRemote = remotes.stdout.trim().split('\n')[0] ?? ''
-        if (firstRemote === '') {
+        const remoteNames = remotes.stdout
+          .trim()
+          .split('\n')
+          .filter((name) => name !== '')
+        if (remoteNames.length === 0) {
           throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
         }
+        // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
+        const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
           { cwd },
         )
         if (upstream.exitCode === 0) {
-          await execGitOrThrow(['push'], { cwd })
+          // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
+          await execGitOrThrow(['-c', 'push.default=simple', 'push'], { cwd })
           return
+        }
+        // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
+        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+        if (head.exitCode !== 0) {
+          throw new Error('아직 저장된 시점이 없어요. 먼저 저장(commit)한 뒤 백업해 주세요.')
         }
         // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
         const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         if (branch.exitCode !== 0) {
           throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
         }
-        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다)
-        await execGitOrThrow(['push', '-u', firstRemote, 'HEAD'], { cwd })
+        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다).
+        // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
+        await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
       },
     },
 ```
@@ -550,7 +598,7 @@ Expected: FAIL — sync 미정의 (typecheck 에러 또는 런타임 undefined)
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: **95 tests**, typecheck 5개 — 전부 exit 0
+Expected: **97 tests**, typecheck 5개 — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -637,7 +685,7 @@ function assertLimit(value: unknown): number {
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 95 tests, typecheck 5개, build — 전부 exit 0
+Expected: 97 tests, typecheck 5개, build — 전부 exit 0
 
 - [ ] **Step 5: Commit**
 
@@ -888,7 +936,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: **100 tests** (95 + 상대 시간 5), typecheck 5개, build — 전부 exit 0
+Expected: **102 tests** (97 + 상대 시간 5), typecheck 5개, build — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -1242,7 +1290,7 @@ git rm apps/desktop/src/renderer/src/components/HistoryPlaceholder.tsx apps/desk
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 100 tests + typecheck 5 + build + E2E 1 passed — 전부 exit 0 (기존 E2E는 역사·백업을 건드리지 않으므로 통과. lucide에 CloudUpload가 없으면 UploadCloud로 대체하고 반드시 보고)
+Expected: 102 tests + typecheck 5 + build + E2E 1 passed — 전부 exit 0 (기존 E2E는 역사·백업을 건드리지 않으므로 통과. lucide에 CloudUpload가 없으면 UploadCloud로 대체하고 반드시 보고)
 
 - [ ] **Step 5: Commit**
 
@@ -1383,7 +1431,7 @@ Expected: **2 passed**, exit 0
 - [ ] **Step 3: 최종 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 100 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
+Expected: 102 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 4: README 갱신**
 
