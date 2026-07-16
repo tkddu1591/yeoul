@@ -164,6 +164,10 @@ describe('GitClient', () => {
 
     const limited = await client.history.list(1)
     expect(limited.map((c) => c.subject)).toEqual(['두 번째 저장'])
+
+    // NaN 같은 비유한수는 기본값(50)으로 동작해야 한다 — --max-count=NaN 방지
+    const withNaN = await client.history.list(Number.NaN)
+    expect(withNaN.map((c) => c.subject)).toEqual(['두 번째 저장', 'init'])
   })
 
   it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {

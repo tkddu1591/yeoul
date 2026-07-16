@@ -117,10 +117,14 @@ export function createGitClient(repoPath: string): GitClient {
     history: {
       async list(limit) {
         const cwd = await topLevel()
-        const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500)
+        // NaN은 min/max를 그대로 통과한다 — 유한수가 아니면 기본값으로
+        const safeLimit = Number.isFinite(limit)
+          ? Math.min(Math.max(Math.trunc(limit), 1), 500)
+          : 50
         const args = [
           'log',
           `--max-count=${safeLimit}`,
+          '--no-show-signature',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',
           '-z',
         ]
