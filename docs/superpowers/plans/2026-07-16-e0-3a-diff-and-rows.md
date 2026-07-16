@@ -1391,7 +1391,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ```tsx
 import { CircleMinus, CirclePlus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChangeKind, FileChange } from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
@@ -1431,6 +1431,14 @@ const KIND_GLYPHS: Record<ChangeKind, string> = {
   typechange: 'T',
   untracked: 'U',
   conflicted: '!',
+}
+
+/** 이름 변경은 새 경로와 원래 경로가 index에 쌍으로 있다 — 함께 넘겨야 반쪽 unstage가 안 된다 */
+function actionPaths(change: FileChange, staged: boolean): string[] {
+  if (staged && change.staged === 'renamed' && change.origPath !== null) {
+    return [change.path, change.origPath]
+  }
+  return [change.path]
 }
 
 interface FileRowProps {
@@ -1542,9 +1550,17 @@ function FileList({
 }: FileListProps) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
   // 목록에서 사라진 경로는 체크에서 자동 제외한다 — stage/unstage 후 잔존 방지
-  const validChecked = changes.filter((c) => checked.has(c.path)).map((c) => c.path)
+  const validChecked = changes.filter((c) => checked.has(c.path))
   const allChecked = changes.length > 0 && validChecked.length === changes.length
   const side = staged ? 'staged' : 'unstaged'
+
+  // 사라졌던 경로가 목록에 돌아와도 저절로 다시 체크되지 않게, 목록 변경 시 stale 경로를 정리한다
+  useEffect(() => {
+    setChecked((prev) => {
+      const valid = new Set(changes.filter((c) => prev.has(c.path)).map((c) => c.path))
+      return valid.size === prev.size ? prev : valid
+    })
+  }, [changes])
 
   const toggle = (path: string) => {
     setChecked((prev) => {
@@ -1558,7 +1574,7 @@ function FileList({
     setChecked(allChecked ? new Set() : new Set(changes.map((c) => c.path)))
   }
   const runBulk = () => {
-    onAction(validChecked)
+    onAction(validChecked.flatMap((change) => actionPaths(change, staged)))
     setChecked(new Set())
   }
 
@@ -1621,7 +1637,7 @@ function FileList({
                 busy={busy}
                 onToggle={() => toggle(change.path)}
                 onSelect={() => onSelect({ change, staged })}
-                onAction={() => onAction([change.path])}
+                onAction={() => onAction(actionPaths(change, staged))}
               />
             ))}
           </ul>
@@ -1773,12 +1789,109 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 5-보완: 리뷰 반영 — 미추적 디렉터리 `-uall`·rename 반쪽 unstage·유령 체크
+
+품질 리뷰 실측 결함 3건: (1) 미추적 디렉터리가 `sub/`로 접혀 와 이름 없는 행 + 클릭 시 원시 git 에러 배너, (2) rename을 내리면 새 경로만 unstage되어 삭제 반쪽이 index에 잔존(그대로 저장하면 rename이 삭제만 커밋됨), (3) 체크했던 파일이 올리기→내리기 왕복 후 체크된 채 부활.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts` (status 인자)
+- Modify: `apps/desktop/src/renderer/src/components/ChangesPanel.tsx` (Task 5 블록이 이미 갱신됨 — byte 재동기화)
+- Test: `packages/git-adapter/test/client.test.ts`, `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: 실패하는 어댑터 테스트 — 미추적 디렉터리는 개별 파일로**
+
+`packages/git-adapter/test/client.test.ts`의 `'untracked 디렉터리 diff는 빈 결과로 위장하지 않고 에러를 던진다'` 테스트 앞에 추가:
+```ts
+  it('status — 미추적 디렉터리는 접히지 않고 개별 파일로 나열된다 (-uall)', async () => {
+    const repo = await createFixtureRepo()
+    await mkdir(join(repo, 'newdir'))
+    await writeFixtureFile(repo, 'newdir/inner.txt', 'x\n')
+    const status = await createGitClient(repo).repo.status()
+    expect(status.changes.map((c) => c.path)).toContain('newdir/inner.txt')
+    // 디렉터리 행(trailing slash)이 오면 이름 없는 행·diff 에러로 이어진다
+    expect(status.changes.some((c) => c.path.endsWith('/'))).toBe(false)
+  })
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run packages/git-adapter/test/client.test.ts --testNamePattern "uall"`
+Expected: FAIL — `newdir/inner.txt`가 없고 `newdir/`만 온다
+
+- [ ] **Step 3: client.ts status에 `-uall`**
+
+`packages/git-adapter/src/client.ts`의 status 실행 행을 다음으로 교체:
+```ts
+        // -uall: 미추적 디렉터리를 접지 않고 파일 단위로 나열한다 — 접힌 `dir/` 행은
+        // 이름 없는 행·diff 에러·stage/unstage 왕복 시 경로 정체성 문제를 만든다.
+        // (알려진 한계: 거대한 미추적 트리는 행이 폭발한다 — E0-3b 가상화에서 흡수)
+        const raw = await execGitOrThrow(['status', '--porcelain=v2', '--branch', '-uall', '-z'], { cwd })
+```
+
+- [ ] **Step 4: 통과 확인**
+
+Run: `pnpm --filter @git-gui/git-adapter test`
+Expected: PASS (기존 포함 전부)
+
+- [ ] **Step 5: 실패하는 E2E — rename을 내려도 반쪽이 남지 않는다**
+
+`apps/desktop/e2e/smoke.spec.ts` 끝에 추가:
+```ts
+test('이름이 바뀐 파일을 내려도 반쪽(삭제)이 남지 않는다', async () => {
+  const repo = await createRepoWithChange()
+  // v2 수정을 되돌려 내용을 HEAD와 같게 만든다 — 그래야 mv가 exact rename(R100)으로 감지된다
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['mv', 'app.txt', 'renamed.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await window.getByTestId('check-all-staged').click()
+    await window.getByTestId('unstage-selected').click()
+    // origPath 없이 내리면 옛 경로의 삭제가 staged에 잔존한다(반쪽 rename 커밋 위험)
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 6: 실패 확인**
+
+Run: `cd apps/desktop && pnpm e2e`
+Expected: 새 테스트 FAIL — staged에 `D app.txt` 1건 잔존(staged-count '1')
+
+- [ ] **Step 7: ChangesPanel.tsx를 갱신된 Task 5 블록에 byte 재동기화**
+
+Task 5 Step 1의 ChangesPanel.tsx 전체 블록이 리뷰 반영으로 갱신되었다(actionPaths 헬퍼, useEffect stale 체크 정리, validChecked가 FileChange[], runBulk/행 onAction이 actionPaths 경유). 해당 블록과 파일을 byte 단위로 다시 일치시킨다.
+
+- [ ] **Step 8: 통과 확인 + 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **133 tests** + typecheck 5 + build + **E2E 4 passed** — 전부 exit 0
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add packages/git-adapter apps/desktop/src/renderer/src/components/ChangesPanel.tsx apps/desktop/e2e/smoke.spec.ts
+git commit -m "fix(desktop): 미추적 디렉터리 -uall·rename 반쪽 unstage·유령 체크 정리
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 6: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 132 tests + typecheck 5 + build + **E2E 3 passed** — 전부 exit 0
+Expected: 133 tests + typecheck 5 + build + **E2E 4 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷**
 
