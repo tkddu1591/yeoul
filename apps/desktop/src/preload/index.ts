@@ -11,11 +11,16 @@ const api: GitApi = {
   changes: {
     stage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesStage, repoPath, paths),
     unstage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesUnstage, repoPath, paths),
+    discard: (repoPath, trackedPaths, untrackedPaths) =>
+      ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, trackedPaths, untrackedPaths),
     diff: (repoPath, path, options: DiffOptions) =>
       ipcRenderer.invoke(CHANNELS.changesDiff, repoPath, path, options),
   },
   commits: {
     create: (repoPath, message) => ipcRenderer.invoke(CHANNELS.commitsCreate, repoPath, message),
+    show: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsShow, repoPath, hash),
+    diffFile: (repoPath, hash, path, origPath) =>
+      ipcRenderer.invoke(CHANNELS.commitsDiffFile, repoPath, hash, path, origPath),
   },
   history: {
     list: (repoPath, limit) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit),

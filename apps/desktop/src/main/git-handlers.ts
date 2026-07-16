@@ -35,19 +35,33 @@ function assertDiffOptions(value: unknown): DiffOptions {
     typeof candidate !== 'object' ||
     candidate === null ||
     typeof candidate.staged !== 'boolean' ||
-    typeof candidate.untracked !== 'boolean'
+    typeof candidate.untracked !== 'boolean' ||
+    (candidate.origPath != null && typeof candidate.origPath !== 'string')
   ) {
     throw new Error('잘못된 요청 형식이에요.')
   }
   // 잉여 필드가 하류로 밀수되지 않도록 알려진 필드만 복사한다
-  return { staged: candidate.staged, untracked: candidate.untracked }
+  return { staged: candidate.staged, untracked: candidate.untracked, origPath: candidate.origPath ?? null }
 }
 
 function assertLimit(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 500) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 10000) {
     throw new Error('잘못된 요청 형식이에요.')
   }
   return value
+}
+
+/** 40자 hex 전체 해시만 통과 — ref 표현식·옵션 문자열 밀수를 IPC 경계에서 차단한다 (adapter의 검증은 심층 방어) */
+function assertHash(value: unknown): string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{40}$/.test(value)) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
+function assertNullableString(value: unknown): string | null {
+  if (value === null) return null
+  return assertString(value)
 }
 
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
@@ -91,6 +105,15 @@ export function registerGitHandlers(): void {
   )
 
   ipcMain.handle(
+    CHANNELS.changesDiscard,
+    (_event, repoPath: unknown, trackedPaths: unknown, untrackedPaths: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).changes.discard(
+        assertStringArray(trackedPaths),
+        assertStringArray(untrackedPaths),
+      ),
+  )
+
+  ipcMain.handle(
     CHANNELS.changesDiff,
     (_event, repoPath: unknown, path: unknown, options: unknown) =>
       createGitClient(assertAllowedRepo(repoPath)).changes.diff(
@@ -101,6 +124,20 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.commitsCreate, (_event, repoPath: unknown, message: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).commits.create(assertString(message)),
+  )
+
+  ipcMain.handle(CHANNELS.commitsShow, (_event, repoPath: unknown, hash: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.show(assertHash(hash)),
+  )
+
+  ipcMain.handle(
+    CHANNELS.commitsDiffFile,
+    (_event, repoPath: unknown, hash: unknown, path: unknown, origPath: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).commits.diffFile(
+        assertHash(hash),
+        assertString(path),
+        assertNullableString(origPath),
+      ),
   )
 
   ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown) =>

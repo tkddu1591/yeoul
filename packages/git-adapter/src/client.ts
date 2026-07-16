@@ -31,7 +31,7 @@ export interface GitClient {
     diff(path: string, options: DiffOptions): Promise<FileDiff>
   }
   history: {
-    /** 최신순 커밋 요약. limit은 1~500으로 잘린다 */
+    /** 최신순 커밋 요약. limit은 1~10000으로 잘린다 */
     list(limit: number): Promise<CommitSummary[]>
   }
   sync: {
@@ -172,7 +172,7 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         // NaN은 min/max를 그대로 통과한다 — 유한수가 아니면 기본값으로
         const safeLimit = Number.isFinite(limit)
-          ? Math.min(Math.max(Math.trunc(limit), 1), 500)
+          ? Math.min(Math.max(Math.trunc(limit), 1), 10000)
           : 50
         const args = [
           'log',
