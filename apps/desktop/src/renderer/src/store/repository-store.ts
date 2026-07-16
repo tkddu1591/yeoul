@@ -3,7 +3,8 @@ import type { CommitSummary, FileChange, RepositoryStatus } from '@git-gui/domai
 
 const git = () => window.gitApi
 
-const HISTORY_LIMIT = 50
+/** 히스토리 조회 상한 — UI가 "잘림" 표기(50+)에 사용한다 */
+export const HISTORY_LIMIT = 50
 
 export interface SelectedFile {
   change: FileChange

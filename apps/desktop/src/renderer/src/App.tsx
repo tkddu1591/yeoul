@@ -1,12 +1,12 @@
-import { RefreshCw } from 'lucide-react'
+import { CloudUpload, RefreshCw } from 'lucide-react'
 import { useEffect } from 'react'
-import type { RepositoryStateKind } from '@git-gui/domain'
+import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { ChangesPanel } from './components/ChangesPanel'
 import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
-import { HistoryPlaceholder } from './components/HistoryPlaceholder'
+import { HistoryPanel } from './components/HistoryPanel'
 import { RepoPicker } from './components/RepoPicker'
-import { useRepositoryStore } from './store/repository-store'
+import { HISTORY_LIMIT, useRepositoryStore } from './store/repository-store'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
@@ -36,6 +36,7 @@ export function App() {
 
   const status = store.status
   const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
+  const suggestion = suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
 
   return (
@@ -69,6 +70,15 @@ export function App() {
         )}
         <div className="app__actions">
           <Button
+            variant="neutral"
+            size="sm"
+            isDisabled={store.busy}
+            onPress={() => void store.backup()}
+            testId="backup"
+          >
+            <CloudUpload size={14} aria-hidden="true" /> 백업 <Badge tone="git">push</Badge>
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             isDisabled={store.busy}
@@ -98,10 +108,11 @@ export function App() {
           <CommitForm
             stagedCount={stagedCount}
             busy={store.busy}
+            suggestion={suggestion}
             onCommit={(message) => store.commit(message)}
           />
         </div>
-        <HistoryPlaceholder />
+        <HistoryPanel history={store.history} limit={HISTORY_LIMIT} />
       </main>
     </div>
   )

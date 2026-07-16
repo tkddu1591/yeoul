@@ -1,0 +1,74 @@
+.history-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+.history-panel__empty p {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  line-height: 1.7;
+}
+.history-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) 0;
+  position: relative;
+}
+/* 저장 시점을 잇는 세로 선 — 타임라인 픽토그램 언어(commit 파랑)와 동일 */
+.history-panel__list::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 2px;
+  background: var(--color-border);
+}
+.history-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  position: relative;
+}
+.history-item__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--concept-commit);
+  background: var(--color-surface);
+  margin-top: 4px;
+  flex: none;
+  position: relative;
+  z-index: 1;
+}
+.history-item:first-child .history-item__dot {
+  background: var(--concept-commit);
+}
+.history-item__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.history-item__subject {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-item__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+.history-item__hash {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  flex: none;
+}
