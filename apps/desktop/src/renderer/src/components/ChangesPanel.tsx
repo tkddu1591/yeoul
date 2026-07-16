@@ -196,6 +196,17 @@ function FileList({
               />
               모두 선택
             </label>
+            {onDiscard && (
+              <Button
+                variant="danger"
+                size="sm"
+                isDisabled={busy || validChecked.length === 0}
+                onPress={() => setConfirmingDiscard(true)}
+                testId="discard-selected"
+              >
+                변경 취소 ({validChecked.length})
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -210,17 +221,6 @@ function FileList({
               )}
               선택 {bulkLabel} ({validChecked.length})
             </Button>
-            {onDiscard && (
-              <Button
-                variant="danger"
-                size="sm"
-                isDisabled={busy || validChecked.length === 0}
-                onPress={() => setConfirmingDiscard(true)}
-                testId="discard-selected"
-              >
-                변경 취소 ({validChecked.length})
-              </Button>
-            )}
           </div>
           <div ref={scrollRef} className="virtual-scroll" data-testid={`file-scroll-${side}`}>
             <ul

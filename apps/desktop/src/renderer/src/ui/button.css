@@ -56,15 +56,16 @@
   cursor: default;
 }
 /* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
-/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다 */
+/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다.
+   hover는 옅은 빨강 틴트 — 흰 다이얼로그 표면 위에서도 구분된다 (리뷰 실측 반영) */
 .ui-button--danger {
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-danger);
 }
 .ui-button--danger[data-hovered] {
-  background: var(--color-surface-sunken);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 .ui-button--danger[data-pressed] {
-  background: var(--color-border);
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
 }

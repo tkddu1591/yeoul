@@ -7,6 +7,18 @@
   justify-content: center;
   z-index: 100;
 }
+/* 앱 전반의 0.12s 모션 톤에 맞춘 진입 페이드 — alertdialog라 퇴장은 즉시 */
+.ui-modal-overlay[data-entering] {
+  animation: ui-fade-in 120ms ease;
+}
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 .ui-modal {
   outline: none;
 }
