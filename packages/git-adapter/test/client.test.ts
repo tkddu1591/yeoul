@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -166,6 +167,47 @@ describe('GitClient', () => {
     const status = await createGitClient(repo).repo.status()
     expect(status.state).toBe('merging')
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('discard — tracked 수정은 마지막 저장 상태로 되돌리고, untracked는 삭제한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await writeFixtureFile(repo, 'new.txt', 'n\n')
+
+    await client.changes.discard(['README.md'], ['new.txt'])
+    const status = await client.repo.status()
+    expect(status.changes).toEqual([])
+    expect(existsSync(join(repo, 'new.txt'))).toBe(false)
+    // tracked 파일은 삭제가 아니라 복원이다
+    expect(existsSync(join(repo, 'README.md'))).toBe(true)
+  })
+
+  it('discard — staged 내용은 건드리지 않는다 (worktree만 되돌린다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# staged\n')
+    await client.changes.stage(['README.md'])
+    await writeFixtureFile(repo, 'README.md', '# worktree\n')
+
+    await client.changes.discard(['README.md'], [])
+    const status = await client.repo.status()
+    // staged 변경은 그대로, unstaged 변경만 사라진다 (worktree = index)
+    expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBe('modified')
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBeNull()
+  })
+
+  it('discard — 둘 다 빈 배열이면 거부한다 (전체 확대 방지)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.changes.discard([], [])).rejects.toThrow()
+  })
+
+  it('discard — 빈 문자열 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.changes.discard([''], [])).rejects.toThrow()
+    await expect(client.changes.discard([], [''])).rejects.toThrow()
   })
 
   it('stage/unstage에 빈 배열을 넘기면 전체 작업으로 확대되지 않고 거부한다', async () => {

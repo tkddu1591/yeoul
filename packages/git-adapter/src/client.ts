@@ -22,6 +22,8 @@ export interface GitClient {
   changes: {
     stage(paths: string[]): Promise<void>
     unstage(paths: string[]): Promise<void>
+    /** 선택 파일의 작업 내용 취소 — tracked는 마지막 저장 상태로 복원, untracked는 삭제. 되돌릴 수 없다 */
+    discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
     diff(path: string, options: DiffOptions): Promise<FileDiff>
   }
   history: {
@@ -108,6 +110,19 @@ export function createGitClient(repoPath: string): GitClient {
       async unstage(paths) {
         const cwd = await topLevel()
         await execGitOrThrow(['restore', '--staged', '--', ...toPathspecs(paths)], { cwd })
+      },
+      async discard(trackedPaths, untrackedPaths) {
+        if (trackedPaths.length === 0 && untrackedPaths.length === 0) {
+          throw new Error('빈 경로 — 전체 작업으로 확대되는 것을 막기 위해 거부한다')
+        }
+        const cwd = await topLevel()
+        // restore는 untracked에 pathspec 불일치 에러를 내므로 tracked/untracked를 나눠 실행한다
+        if (trackedPaths.length > 0) {
+          await execGitOrThrow(['restore', '--', ...toPathspecs(trackedPaths)], { cwd })
+        }
+        if (untrackedPaths.length > 0) {
+          await execGitOrThrow(['clean', '-f', '--', ...toPathspecs(untrackedPaths)], { cwd })
+        }
       },
       async diff(path, options) {
         const cwd = await topLevel()
