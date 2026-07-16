@@ -1,5 +1,11 @@
-import { detectState, type DiffOptions, type RepositoryStatus } from '@git-gui/domain'
+import {
+  detectState,
+  type CommitSummary,
+  type DiffOptions,
+  type RepositoryStatus,
+} from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
+import { parseLog } from './log-parser'
 import { readGitDirMarkers } from './markers'
 import { parseStatusV2 } from './status-parser'
 
@@ -13,6 +19,10 @@ export interface GitClient {
     stage(paths: string[]): Promise<void>
     unstage(paths: string[]): Promise<void>
     diff(path: string, options: DiffOptions): Promise<string>
+  }
+  history: {
+    /** 최신순 커밋 요약. limit은 1~500으로 잘린다 */
+    list(limit: number): Promise<CommitSummary[]>
   }
   commits: {
     create(message: string): Promise<void>
@@ -102,6 +112,25 @@ export function createGitClient(repoPath: string): GitClient {
           ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
           : ['diff', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
         return (await execGitOrThrow(args, { cwd })).stdout
+      },
+    },
+    history: {
+      async list(limit) {
+        const cwd = await topLevel()
+        const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500)
+        const args = [
+          'log',
+          `--max-count=${safeLimit}`,
+          '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s',
+          '-z',
+        ]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          // 아직 커밋이 없는 저장소(unborn HEAD)는 빈 역사다 — 에러로 위장하지 않는다
+          if (result.stderr.includes('does not have any commits')) return []
+          throw new GitError(args, result)
+        }
+        return parseLog(result.stdout)
       },
     },
     commits: {

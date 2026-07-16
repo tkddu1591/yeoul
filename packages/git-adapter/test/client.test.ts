@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
@@ -147,5 +148,28 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# changed\n')
     await client.changes.stage(['README.md'])
     await expect(client.commits.create('')).rejects.toBeInstanceOf(GitError)
+  })
+
+  it('history — 최신순 목록을 반환하고 limit을 지킨다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'a.txt', '1\n')
+    await client.changes.stage(['a.txt'])
+    await client.commits.create('두 번째 저장')
+
+    const all = await client.history.list(50)
+    expect(all.map((c) => c.subject)).toEqual(['두 번째 저장', 'init'])
+    expect(all[0]?.shortHash.length).toBeGreaterThanOrEqual(7)
+    expect(all[0]?.committedAt).toBeGreaterThan(0)
+
+    const limited = await client.history.list(1)
+    expect(limited.map((c) => c.subject)).toEqual(['두 번째 저장'])
+  })
+
+  it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-'))
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
+    const commits = await createGitClient(dir).history.list(50)
+    expect(commits).toEqual([])
   })
 })

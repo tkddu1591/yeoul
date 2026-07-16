@@ -1,3 +1,4 @@
 export * from './status-parser'
 export * from './client'
 export * from './markers'
+export * from './log-parser'
