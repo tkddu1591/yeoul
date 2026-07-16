@@ -13,9 +13,9 @@ function parseTokens(block: string): Map<string, string> {
   return map
 }
 
-const mediaIndex = css.indexOf('@media')
-const lightTokens = parseTokens(css.slice(0, mediaIndex))
-const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(mediaIndex))])
+const darkIndex = css.indexOf(":root[data-theme='dark']")
+const lightTokens = parseTokens(css.slice(0, darkIndex))
+const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(darkIndex))])
 
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {

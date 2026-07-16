@@ -308,3 +308,35 @@ test('우측 열 폭을 드래그로 조절하고 재시작해도 기억한다',
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('테마를 버튼으로 전환하고 재시작해도 기억한다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  let flipped: string | undefined
+  try {
+    const window = await app.firstWindow()
+    // firstWindow는 React 마운트 전(readyState interactive)에 돌아올 수 있다 — 마운트를 기다린다
+    await expect(window.getByTestId('theme-toggle')).toBeVisible()
+    const initial = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(['light', 'dark']).toContain(initial)
+    await window.getByTestId('theme-toggle').click()
+    flipped = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(flipped).not.toBe(initial)
+  } finally {
+    await app.close()
+  }
+  // 재시작 — 같은 userData면 선택한 테마가 초기값이 된다 (파일 영속화)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await expect(window.getByTestId('theme-toggle')).toBeVisible()
+    const restored = await window.evaluate(() => document.documentElement.dataset.theme)
+    expect(restored).toBe(flipped)
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

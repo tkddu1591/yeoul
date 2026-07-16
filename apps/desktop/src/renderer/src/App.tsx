@@ -1,4 +1,4 @@
-import { CloudUpload, RefreshCw } from 'lucide-react'
+import { CloudUpload, Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { ChangesPanel } from './components/ChangesPanel'
@@ -15,6 +15,7 @@ import {
   saveRightWidth,
 } from './ui/column-resize'
 import { useRepositoryStore } from './store/repository-store'
+import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
@@ -31,6 +32,14 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
 
 export function App() {
   const store = useRepositoryStore()
+
+  // 첫 렌더에서 문서에 테마를 새긴다 — 저장값 우선, 없으면 시스템 설정 (⑥)
+  const [theme, setTheme] = useState<Theme>(() => initTheme())
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    applyTheme(next)
+    setTheme(next)
+  }
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
   // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
@@ -114,6 +123,14 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
+          <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
+            {theme === 'dark' ? (
+              <Sun size={13} aria-hidden="true" />
+            ) : (
+              <Moon size={13} aria-hidden="true" />
+            )}
+            {theme === 'dark' ? '밝게' : '어둡게'}
+          </Button>
           <Button
             variant="neutral"
             size="sm"

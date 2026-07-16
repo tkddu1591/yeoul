@@ -86,8 +86,7 @@
   --diff-hunk-text: #4f5ec0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme='dark'] {
     --color-bg: #16181d;
     --color-surface: #1e2128;
     --color-surface-sunken: #191c22;
@@ -135,5 +134,4 @@
 
     --shadow-1: 0 1px 3px rgb(0 0 0 / 0.4);
     --shadow-2: 0 6px 16px rgb(0 0 0 / 0.5);
-  }
 }
