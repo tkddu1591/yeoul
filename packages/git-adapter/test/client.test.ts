@@ -214,8 +214,11 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await client.sync.push() // upstream 연결
 
-    // 다른 브랜치에 원격에 없는 커밋을 만들어 둔다
+    // matching은 "양쪽에 같은 이름이 있는 브랜치"를 전부 올린다 —
+    // 위험을 재현하려면 side가 원격에도 존재해야 한다
     await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await execGitOrThrow(['push', 'origin', 'side'], { cwd: repo })
+    // 원격에 없는 새 커밋을 side에 만들어 둔다
     await writeFixtureFile(repo, 'side.txt', '1\n')
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side-only'], { cwd: repo })
@@ -228,10 +231,11 @@ describe('GitClient', () => {
     await execGitOrThrow(['config', 'push.default', 'matching'], { cwd: repo })
     await client.sync.push()
 
-    const remoteBranches = await execGitOrThrow(['branch', '--format=%(refname:short)'], {
+    // side의 새 커밋은 올라가면 안 된다 — 백업 범위는 현재 브랜치뿐
+    const remoteSideLog = await execGitOrThrow(['log', '-1', '--format=%s', 'side'], {
       cwd: remote,
     })
-    expect(remoteBranches.stdout).not.toContain('side')
+    expect(remoteSideLog.stdout.trim()).toBe('init')
     const remoteLog = await execGitOrThrow(['log', '-1', '--format=%s', 'main'], { cwd: remote })
     expect(remoteLog.stdout.trim()).toBe('main-two')
   })
