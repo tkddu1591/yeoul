@@ -1302,6 +1302,22 @@ Expected: dependencies에 `@tanstack/react-virtual` 추가 (v3.x)
 }
 ```
 
+추가로, 같은 파일의 `.ui-panel__head h2` 블록 **뒤**에 (좁은 폭에서 배지가 먼저 줄어들어 패널 제목이 사라지지 않게 — 리뷰 실측 반영):
+
+```css
+/* 좁은 폭에서는 배지가 먼저 줄어든다 — 제목이 최소 폭을 지킨다 */
+.ui-panel__head h2 {
+  min-width: 72px;
+}
+.ui-panel__head > .ui-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+```
+
 - [ ] **Step 3: 변경 종류 상수 공통화**
 
 Create `apps/desktop/src/renderer/src/components/change-kind.ts` (커밋 상세 파일 행이 재사용한다):
@@ -2492,6 +2508,7 @@ export function HistoryPanel({
                       .join(' ')}
                     disabled={busy}
                     onClick={() => onSelect(commit.hash)}
+                    aria-current={selectedHash === commit.hash ? 'true' : undefined}
                     data-testid={`history-item-${commit.hash}`}
                   >
                     <span className="history-item__dot" aria-hidden="true" />
@@ -2524,6 +2541,11 @@ export function HistoryPanel({
               )
             })}
           </ol>
+          {truncated && (
+            <div className="history-panel__more" aria-hidden="true">
+              이전 기록 불러오는 중…
+            </div>
+          )}
         </div>
       )}
     </Panel>
@@ -2606,10 +2628,13 @@ export function HistoryPanel({
   align-items: baseline;
   gap: var(--space-1);
   min-width: 0;
+  overflow: hidden; /* 배지가 hash 영역으로 새는 것을 차단 — 제목이 최우선 생존자 */
 }
-/* 브랜치/태그 배지 (#7) — 이 커밋이 어느 실험 공간의 끝인지 보여준다 */
+/* 브랜치/태그 배지 (#7) — 이 커밋이 어느 실험 공간의 끝인지 보여준다.
+   좁은 폭에서는 배지가 먼저 줄어들고(flex 0 1) 제목은 min-width 40%를 지킨다 (리뷰 실측 반영) */
 .history-item__ref {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 32px;
   max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2645,7 +2670,8 @@ export function HistoryPanel({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  flex: 1;
+  min-width: 40%;
 }
 .history-item__meta {
   font-size: var(--text-xs);
@@ -2656,6 +2682,13 @@ export function HistoryPanel({
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   flex: none;
+}
+/* 자동 더-불러오기 피드백 — 잘림 상태에서만 목록 끝에 보인다 (⑩) */
+.history-panel__more {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  text-align: center;
 }
 ```
 
@@ -2794,12 +2827,15 @@ export function CommitDetailPanel({
         )}
         <p className="commit-detail__meta">
           {formatRelativeTime(detail.committedAt, Date.now())} · {detail.authorName}
-          {detail.parents.length >= 2 && ' · 병합 (첫 번째 흐름 기준으로 보여드려요)'}
+          {detail.parents.length >= 2 &&
+            ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
         </p>
       </div>
       <div className="commit-detail__files-head">
         바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
-        {detail.files.length > 0 && ' — 파일을 누르면 무엇이 바뀌었는지 보여드려요'}
+        {detail.files.length > 0
+          ? ' — 파일을 누르면 무엇이 바뀌었는지 보여드려요'
+          : ' — 메시지만 남긴 저장이에요'}
       </div>
       <div ref={scrollRef} className="virtual-scroll commit-detail__files">
         <ul
@@ -2843,9 +2879,12 @@ export function CommitDetailPanel({
 Create `apps/desktop/src/renderer/src/components/commit-detail-panel.css`:
 
 ```css
+/* 긴 본문이 diff를 눌러 죽이지 않게 메시지는 상한을 갖고 자체 스크롤한다 (리뷰 실측 반영) */
 .commit-detail__message {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  max-height: 35%;
+  overflow-y: auto;
 }
 .commit-detail__subject {
   margin: 0;
@@ -2872,13 +2911,15 @@ Create `apps/desktop/src/renderer/src/components/commit-detail-panel.css`:
   border-bottom: 1px solid var(--color-border);
 }
 /* 파일 목록과 diff가 세로 공간을 나눈다 — 목록은 상한을 갖고 diff가 잔여를 차지한다.
-   .virtual-scroll(flex:1)보다 특이도 높은 복합 선택자로 결정적으로 이긴다 (!important 불요) */
+   .virtual-scroll(flex:1)보다 특이도 높은 복합 선택자로 결정적으로 이긴다 (!important 불요).
+   min-height — 좁은 창에서도 diff(핵심 payload)와 목록이 최소한은 보인다 (리뷰 실측 반영) */
 .commit-detail__files.virtual-scroll {
   flex: 0 1 220px;
+  min-height: 62px;
 }
 .commit-detail__diff {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 160px;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--color-border);
