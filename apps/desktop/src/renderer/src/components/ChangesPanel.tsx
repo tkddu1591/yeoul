@@ -5,6 +5,7 @@ import type { FileChange } from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import './changes-panel.css'
@@ -17,6 +18,8 @@ interface ChangesPanelProps {
   busy: boolean
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
+  /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
+  onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
   onSelect(selected: SelectedFile): void
 }
 
@@ -95,6 +98,8 @@ interface FileListProps {
   selected: SelectedFile | null
   busy: boolean
   bulkLabel: string
+  /** unstaged 목록에만 있다 — 확인창을 거쳐 선택 파일의 변경을 취소한다 */
+  onDiscard?: (trackedPaths: string[], untrackedPaths: string[]) => void
   onAction(paths: string[]): void
   onSelect(selected: SelectedFile): void
 }
@@ -109,6 +114,7 @@ function FileList({
   selected,
   busy,
   bulkLabel,
+  onDiscard,
   onAction,
   onSelect,
 }: FileListProps) {
@@ -148,6 +154,14 @@ function FileList({
   }
   const runBulk = () => {
     onAction(validChecked.flatMap((change) => actionPaths(change, staged)))
+    setChecked(new Set())
+  }
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const discardTracked = validChecked.filter((c) => c.unstaged !== 'untracked').map((c) => c.path)
+  const discardUntracked = validChecked.filter((c) => c.unstaged === 'untracked').map((c) => c.path)
+  const runDiscard = () => {
+    setConfirmingDiscard(false)
+    onDiscard?.(discardTracked, discardUntracked)
     setChecked(new Set())
   }
 
@@ -196,6 +210,17 @@ function FileList({
               )}
               선택 {bulkLabel} ({validChecked.length})
             </Button>
+            {onDiscard && (
+              <Button
+                variant="danger"
+                size="sm"
+                isDisabled={busy || validChecked.length === 0}
+                onPress={() => setConfirmingDiscard(true)}
+                testId="discard-selected"
+              >
+                변경 취소 ({validChecked.length})
+              </Button>
+            )}
           </div>
           <div ref={scrollRef} className="virtual-scroll" data-testid={`file-scroll-${side}`}>
             <ul
@@ -230,6 +255,20 @@ function FileList({
               })}
             </ul>
           </div>
+          {onDiscard && (
+            <ConfirmDialog
+              isOpen={confirmingDiscard}
+              title="변경 내용을 취소할까요?"
+              confirmLabel="변경 취소"
+              onConfirm={runDiscard}
+              onCancel={() => setConfirmingDiscard(false)}
+            >
+              선택한 파일 {validChecked.length}개의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔
+              (staged) 내용은 남아요.
+              {discardUntracked.length > 0 && ` 새 파일 ${discardUntracked.length}개는 삭제돼요.`} 이
+              동작은 되돌릴 수 없어요.
+            </ConfirmDialog>
+          )}
         </>
       )}
     </Panel>
@@ -242,6 +281,7 @@ export function ChangesPanel({
   busy,
   onStage,
   onUnstage,
+  onDiscard,
   onSelect,
 }: ChangesPanelProps) {
   const stagedChanges = changes.filter((c) => c.staged !== null)
@@ -260,6 +300,7 @@ export function ChangesPanel({
         busy={busy}
         bulkLabel="올리기"
         onAction={onStage}
+        onDiscard={onDiscard}
         onSelect={onSelect}
       />
       <FileList

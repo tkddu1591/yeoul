@@ -102,6 +102,9 @@ export function App() {
           busy={store.busy}
           onStage={(paths) => void store.stage(paths)}
           onUnstage={(paths) => void store.unstage(paths)}
+          onDiscard={(trackedPaths, untrackedPaths) =>
+            void store.discard(trackedPaths, untrackedPaths)
+          }
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">

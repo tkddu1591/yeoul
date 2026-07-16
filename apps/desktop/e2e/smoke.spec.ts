@@ -249,3 +249,28 @@ test('스크롤 끝에서 저장 역사를 더 불러온다 (50개 제한 해제
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('선택한 파일의 변경을 확인창을 거쳐 취소한다 — 새 파일은 삭제된다', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'temp.txt'), 'temp\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    await window.getByTestId('check-all-unstaged').click()
+    await window.getByTestId('discard-selected').click()
+    // 그만두기 — 아무 일도 일어나지 않고 체크는 유지된다
+    await window.getByTestId('confirm-cancel').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    // 다시 열어 변경 취소 — tracked는 복원, untracked(temp.txt)는 삭제
+    await window.getByTestId('discard-selected').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

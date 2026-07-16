@@ -56,3 +56,15 @@
   cursor: default;
 }
 /* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
+/* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다 */
+.ui-button--danger {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-danger);
+}
+.ui-button--danger[data-hovered] {
+  background: var(--color-surface-sunken);
+}
+.ui-button--danger[data-pressed] {
+  background: var(--color-border);
+}
