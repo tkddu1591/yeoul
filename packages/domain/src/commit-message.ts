@@ -25,7 +25,13 @@ export function suggestCommitMessage(changes: FileChange[]): string {
   if (stagedChanges.length === 0) return ''
   const first = stagedChanges[0]!
   const firstVerb = KIND_VERBS[first.staged!]
-  if (stagedChanges.length === 1) return `${basename(first.path)} ${firstVerb}`
+  if (stagedChanges.length === 1) {
+    // 이름 변경은 "무엇이었는지"가 핵심 정보다 — 원래 이름을 함께 보여준다
+    if (first.staged === 'renamed' && first.origPath !== null) {
+      return `${basename(first.origPath)} → ${basename(first.path)} 이름 변경`
+    }
+    return `${basename(first.path)} ${firstVerb}`
+  }
   const allSameKind = stagedChanges.every((change) => change.staged === first.staged)
   const verb = allSameKind ? firstVerb : '변경'
   return `${basename(first.path)} 외 ${stagedChanges.length - 1}개 ${verb}`

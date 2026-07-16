@@ -20,7 +20,24 @@ describe('suggestCommitMessage', () => {
     expect(suggestCommitMessage([staged('app.txt', 'modified')])).toBe('app.txt 수정')
     expect(suggestCommitMessage([staged('login.css', 'added')])).toBe('login.css 추가')
     expect(suggestCommitMessage([staged('old.ts', 'deleted')])).toBe('old.ts 삭제')
+  })
+
+  it('이름 변경 1개는 원래 이름을 함께 보여준다', () => {
+    expect(
+      suggestCommitMessage([
+        { path: 'src/new.ts', origPath: 'src/old.ts', staged: 'renamed', unstaged: null },
+      ]),
+    ).toBe('old.ts → new.ts 이름 변경')
+    // 원래 이름을 알 수 없으면 새 이름만
     expect(suggestCommitMessage([staged('new.ts', 'renamed')])).toBe('new.ts 이름 변경')
+  })
+
+  it('부분 스테이징(staged+unstaged 동시)은 1개로 집계된다', () => {
+    expect(
+      suggestCommitMessage([
+        { path: 'a.ts', origPath: null, staged: 'modified', unstaged: 'modified' },
+      ]),
+    ).toBe('a.ts 수정')
   })
 
   it('중첩 경로는 파일명(basename)만 쓴다', () => {
