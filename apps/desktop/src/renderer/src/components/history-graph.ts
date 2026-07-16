@@ -10,6 +10,8 @@ export interface GraphRow {
   joinLanes: number[]
   /** 점에서 아래로 뻗는 레인들 — 첫 부모 포함, root면 빈 배열 */
   forkLanes: number[]
+  /** 위 행에서 이 점으로 내려오는 선이 있는가 — 목록 첫 행·새 갈래의 머리는 false (점 위 stub 방지) */
+  hasIncoming: boolean
   /** 이 행에서 거터 폭 계산에 쓸 레인 수 */
   laneCount: number
 }
@@ -68,7 +70,14 @@ export function buildGraph(commits: CommitSummary[]): GraphRow[] {
     // 끝의 빈 레인은 다음 행부터 폭을 차지하지 않게 정리한다
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
 
-    rows.push({ nodeLane, passLanes, joinLanes, forkLanes, laneCount })
+    rows.push({
+      nodeLane,
+      passLanes,
+      joinLanes,
+      forkLanes,
+      hasIncoming: waiting.length > 0,
+      laneCount,
+    })
   }
   return rows
 }

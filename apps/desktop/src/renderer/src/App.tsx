@@ -32,8 +32,18 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
 export function App() {
   const store = useRepositoryStore()
 
-  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 상세 모드는 최소 420px을 보장
-  const [rightWidth, setRightWidth] = useState<number>(() => loadRightWidth())
+  // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
+  // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
+  const [rightWidth, setRightWidth] = useState<number>(() =>
+    clampRightWidth(loadRightWidth(), window.innerWidth),
+  )
+  useEffect(() => {
+    const onWindowResize = () => {
+      setRightWidth((width) => clampRightWidth(width, window.innerWidth))
+    }
+    window.addEventListener('resize', onWindowResize)
+    return () => window.removeEventListener('resize', onWindowResize)
+  }, [])
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const onMove = (move: PointerEvent) => {
@@ -42,16 +52,22 @@ export function App() {
     const onUp = (up: PointerEvent) => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
       saveRightWidth(clampRightWidth(window.innerWidth - up.clientX - 20, window.innerWidth))
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
   const resetResize = () => {
     resetRightWidth()
     setRightWidth(RIGHT_COLUMN_DEFAULT)
   }
-  const effectiveRight = store.commitDetail !== null ? Math.max(rightWidth, 420) : rightWidth
+  // 상세 모드 최소폭도 뷰포트 클램프를 통과시킨다 — 좁은 창에서 중앙 diff가 살아남는다
+  const effectiveRight =
+    store.commitDetail !== null
+      ? clampRightWidth(Math.max(rightWidth, 420), window.innerWidth)
+      : rightWidth
 
   useEffect(() => {
     void store.init()

@@ -20,6 +20,8 @@ describe('buildGraph', () => {
     expect(rows.map((r) => r.nodeLane)).toEqual([0, 0, 0])
     expect(rows[2]!.forkLanes).toEqual([]) // root는 아래로 뻗는 선이 없다
     expect(rows.every((r) => r.laneCount === 1)).toBe(true)
+    // 첫 행(HEAD)은 위에서 내려오는 선이 없다 — 점 위 stub 방지
+    expect(rows.map((r) => r.hasIncoming)).toEqual([false, true, true])
   })
 
   it('다이아몬드(분기 후 병합) — 병합 행에서 두 레인이 열리고 공통 조상에서 수렴한다', () => {

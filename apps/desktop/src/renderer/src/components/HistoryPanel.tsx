@@ -66,15 +66,17 @@ function GraphCell({ row, isHead }: { row: GraphRow; isHead: boolean }) {
           strokeWidth={2}
         />
       ))}
-      {/* 점의 레인 자체도 위(수렴 전)와 아래(첫 부모)로 이어진다 — fork에 nodeLane이 있으면 아래로 */}
-      <line
-        x1={nodeX}
-        y1={0}
-        x2={nodeX}
-        y2={NODE_Y}
-        stroke={laneColor(row.nodeLane)}
-        strokeWidth={2}
-      />
+      {/* 점의 레인이 위에서 내려올 때만 위쪽 선을 그린다 — 첫 행·새 갈래 머리의 stub 방지 */}
+      {row.hasIncoming && (
+        <line
+          x1={nodeX}
+          y1={0}
+          x2={nodeX}
+          y2={NODE_Y}
+          stroke={laneColor(row.nodeLane)}
+          strokeWidth={2}
+        />
+      )}
       {row.joinLanes.map((lane) => (
         <path
           key={`join-${lane}`}
