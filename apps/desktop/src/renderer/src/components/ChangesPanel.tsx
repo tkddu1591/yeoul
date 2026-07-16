@@ -1,9 +1,8 @@
 import { CircleMinus, CirclePlus } from 'lucide-react'
-import type { FileChange } from '@git-gui/domain'
+import type { ChangeKind, FileChange } from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
-import { ChangeKindBadge } from '../ui/Pictogram'
 import './changes-panel.css'
 
 interface ChangesPanelProps {
@@ -14,6 +13,18 @@ interface ChangesPanelProps {
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
   onSelect(selected: SelectedFile): void
+}
+
+/** 변경 종류의 한국어 라벨 — 색 단독으로 의미를 전달하지 않기 위해 tooltip/aria에 병행한다 */
+const KIND_LABELS: Record<ChangeKind, string> = {
+  modified: '수정됨',
+  added: '추가됨',
+  deleted: '삭제됨',
+  renamed: '이름 변경',
+  copied: '복사됨',
+  typechange: '형식 변경',
+  untracked: '새 파일',
+  conflicted: '충돌',
 }
 
 interface FileRowProps {
@@ -28,6 +39,7 @@ interface FileRowProps {
 function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const actionLabel = staged ? '내리기' : '올리기'
+  const kindLabel = kind ? KIND_LABELS[kind] : ''
   // 좁은 열에서 파일명이 먼저 잘리지 않도록 디렉터리와 파일명을 분리해 디렉터리부터 축소한다
   const slashIndex = change.path.lastIndexOf('/')
   const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex + 1) : ''
@@ -36,16 +48,18 @@ function FileRow({ change, staged, isSelected, busy, onSelect, onAction }: FileR
     <li className={`file-row${isSelected ? ' file-row--selected' : ''}`}>
       <button
         type="button"
-        className="file-row__main"
+        className={`file-row__main file-row__main--${kind ?? 'none'}`}
         disabled={busy}
         onClick={onSelect}
+        title={`${change.path} — ${kindLabel}`}
+        aria-label={`${change.path} (${kindLabel})`}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
       >
+        <span className="file-row__kind-dot" aria-hidden="true" />
         <span className="file-row__name">
           {directory && <span className="file-row__dir">{directory}</span>}
           <span className="file-row__base">{basename}</span>
         </span>
-        {kind && <ChangeKindBadge kind={kind} />}
       </button>
       <button
         type="button"

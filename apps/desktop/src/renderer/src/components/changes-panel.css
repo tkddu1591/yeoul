@@ -33,8 +33,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: 7px;
   padding: 7px 10px;
   border: none;
   background: none;
@@ -49,23 +48,56 @@
 .file-row--selected .file-row__main:hover:not(:disabled) {
   background: transparent;
 }
+/* 변경 종류 = 파일명 색 + 선행 점 (IntelliJ식). 색 단독 금지 원칙은 점+title+aria-label로 충족 */
+.file-row__kind-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2.5px;
+  background: currentColor;
+  flex: none;
+}
+.file-row__main--modified,
+.file-row__main--typechange {
+  color: var(--change-modified);
+}
+.file-row__main--added,
+.file-row__main--untracked {
+  color: var(--change-added);
+}
+.file-row__main--deleted {
+  color: var(--change-deleted);
+}
+.file-row__main--deleted .file-row__base {
+  text-decoration: line-through;
+}
+.file-row__main--renamed,
+.file-row__main--copied {
+  color: var(--change-renamed);
+}
+.file-row__main--conflicted {
+  color: var(--concept-conflict);
+  font-weight: 700;
+}
 .file-row__name {
   display: flex;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-/* 디렉터리부터 축소 — 파일명(basename)은 항상 보인다 */
+/* 축소 우선순위: 디렉터리(1000)가 먼저 줄고, 그다음 파일명(1) — 액션 버튼은 절대 밀리지 않는다 */
 .file-row__dir {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   color: var(--color-text-muted);
 }
 .file-row__base {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 48px;
 }
 .file-row__action {
   display: inline-flex;
@@ -79,6 +111,7 @@
   font-weight: 600;
   padding: 0 10px;
   border-radius: var(--radius-sm);
+  flex: none;
 }
 .file-row__action:hover:not(:disabled) {
   color: var(--color-accent);

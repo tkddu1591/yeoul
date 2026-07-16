@@ -40,6 +40,12 @@ const PAIRS: Array<[string, string, number]> = [
   ['--color-danger', '--color-surface', 4.5],
   ['--color-focus', '--color-surface', 3],
   ['--term-badge', '--term-badge-bg', 4.5],
+  // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요
+  ['--change-modified', '--color-surface', 4.5],
+  ['--change-added', '--color-surface', 4.5],
+  ['--change-deleted', '--color-surface', 4.5],
+  ['--change-renamed', '--color-surface', 4.5],
+  ['--change-untracked', '--color-surface', 4.5],
   ['--concept-mine', '--concept-mine-bg', 4.5],
   ['--concept-branch', '--concept-branch-bg', 4.5],
   ['--concept-commit', '--concept-commit-bg', 4.5],
