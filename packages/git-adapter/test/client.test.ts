@@ -153,6 +153,74 @@ describe('GitClient', () => {
     expect(status.changes.find((c) => c.path === 'sub/inner.txt')?.staged).toBe('added')
   })
 
+  it('show — 전체 메시지(제목·본문)와 변경 파일 목록을 반환한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await writeFixtureFile(repo, 'new.txt', 'n\n')
+    await client.changes.stage(['README.md', 'new.txt'])
+    await client.commits.create('제목 한 줄\n\n본문 첫 줄\n본문 둘째 줄')
+
+    const head = (await client.history.list(1))[0]!
+    const detail = await client.commits.show(head.hash)
+    expect(detail.subject).toBe('제목 한 줄')
+    expect(detail.body).toBe('본문 첫 줄\n본문 둘째 줄')
+    expect(detail.parents).toHaveLength(1)
+    expect(detail.files).toEqual([
+      { path: 'README.md', origPath: null, kind: 'modified' },
+      { path: 'new.txt', origPath: null, kind: 'added' },
+    ])
+  })
+
+  it('show — rename 커밋은 origPath를 담는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['mv', 'README.md', 'DOCS.md'], { cwd: repo })
+    await client.commits.create('rename')
+
+    const head = (await client.history.list(1))[0]!
+    const detail = await client.commits.show(head.hash)
+    expect(detail.files).toEqual([{ path: 'DOCS.md', origPath: 'README.md', kind: 'renamed' }])
+  })
+
+  it('show — 병합 커밋은 첫 부모 기준의 파일만 나열한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main-side'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'merge', '--no-edit', 'side'], { cwd: repo })
+
+    const merge = (await client.history.list(1))[0]!
+    const detail = await client.commits.show(merge.hash)
+    // 첫 부모(main-side) 기준: side에서 온 파일만 새로 추가로 보인다
+    expect(detail.parents).toHaveLength(2)
+    expect(detail.files).toEqual([{ path: 'side.txt', origPath: null, kind: 'added' }])
+  })
+
+  it('show — root 커밋(부모 없음)도 파일 목록을 반환한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const history = await client.history.list(10)
+    const root = history[history.length - 1]!
+    const detail = await client.commits.show(root.hash)
+    expect(detail.parents).toEqual([])
+    expect(detail.files).toEqual([{ path: 'README.md', origPath: null, kind: 'added' }])
+  })
+
+  it('show — 40자 hex가 아닌 해시를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.commits.show('HEAD')).rejects.toThrow()
+    await expect(client.commits.show('--help')).rejects.toThrow()
+    await expect(client.commits.show('a'.repeat(39))).rejects.toThrow()
+  })
+
   it('빈 커밋 메시지는 GitError로 거부된다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

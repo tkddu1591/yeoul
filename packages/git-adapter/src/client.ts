@@ -1,11 +1,13 @@
 import {
   detectState,
+  type CommitDetail,
   type CommitSummary,
   type DiffOptions,
   type FileDiff,
   type RepositoryStatus,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
+import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
 import { parsePatch } from './diff-parser'
 import { readGitDirMarkers } from './markers'
@@ -32,6 +34,8 @@ export interface GitClient {
   }
   commits: {
     create(message: string): Promise<void>
+    /** 커밋 상세 — 전체 메시지·변경 파일. 병합 커밋은 첫 부모 기준 */
+    show(hash: string): Promise<CommitDetail>
   }
 }
 
@@ -54,6 +58,13 @@ function toPathspecs(paths: string[]): string[] {
 function assertRepoRelative(path: string): void {
   if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
     throw new Error(`저장소 밖 경로는 다룰 수 없다: ${path}`)
+  }
+}
+
+/** renderer가 넘긴 해시는 40자 hex 전체 해시만 신뢰한다 — ref 표현식(HEAD~ 등)·옵션 밀수를 차단 */
+function assertFullHash(hash: string): void {
+  if (!/^[0-9a-f]{40}$/.test(hash)) {
+    throw new Error(`올바른 커밋 해시가 아니에요: ${hash}`)
   }
 }
 
@@ -192,6 +203,30 @@ export function createGitClient(repoPath: string): GitClient {
         // 메시지는 stdin으로 전달해 따옴표·개행 이스케이프 문제를 피한다.
         // 빈 메시지는 git이 exit 1로 거부한다 — GitError로 전파된다.
         await execGitOrThrow(['commit', '-F', '-'], { cwd, stdin: message })
+      },
+      async show(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        const metaRaw = await execGitOrThrow(
+          [
+            'show',
+            '-s',
+            '--no-show-signature',
+            '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%P%x1f%s%x1f%b',
+            '--end-of-options',
+            hash,
+          ],
+          { cwd },
+        )
+        const meta = parseCommitMeta(metaRaw.stdout)
+        const firstParent = meta.parents[0] ?? null
+        // 병합 커밋에 diff-tree 기본 호출은 빈 출력이다(실측) — 부모가 있으면 첫 부모를 명시한다.
+        // root 커밋만 --root diff-tree를 쓴다.
+        const filesArgs = firstParent
+          ? ['diff', '--name-status', '-M', '-z', firstParent, hash]
+          : ['diff-tree', '--no-commit-id', '--root', '-r', '-M', '-z', '--name-status', hash]
+        const filesRaw = await execGitOrThrow(filesArgs, { cwd })
+        return { ...meta, files: parseNameStatus(filesRaw.stdout) }
       },
     },
   }
