@@ -45,6 +45,8 @@ export interface RepositoryStatus {
 export interface DiffOptions {
   staged: boolean
   untracked: boolean
+  /** staged rename일 때 원래 경로 — pathspec에 함께 넣어야 rename으로 표시된다 (없으면 "새 파일 추가"로 위장) */
+  origPath?: string | null
 }
 
 /** 저장된 역사 한 항목 — log의 요약 */

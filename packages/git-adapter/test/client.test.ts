@@ -55,6 +55,66 @@ describe('GitClient', () => {
     expect(untracked.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === 'hello')).toBe(true)
   })
 
+  it('diff — staged rename은 origPath를 함께 주면 rename으로 표시된다 (전체 내용 추가로 위장하지 않는다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['mv', 'README.md', 'DOCS.md'], { cwd: repo })
+
+    const diff = await client.changes.diff('DOCS.md', {
+      staged: true,
+      untracked: false,
+      origPath: 'README.md',
+    })
+    expect(diff.meta.some((line) => line.startsWith('rename from README.md'))).toBe(true)
+    // R100(내용 동일)은 hunks가 없다 — 전체 내용이 add로 나오면 회귀
+    expect(diff.hunks).toEqual([])
+  })
+
+  it('diffFile — 커밋의 단일 파일 diff를 반환한다 (root·rename·병합 첫 부모)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+
+    // root 커밋의 파일
+    const history1 = await client.history.list(10)
+    const root = history1[history1.length - 1]!
+    const rootDiff = await client.commits.diffFile(root.hash, 'README.md', null)
+    expect(
+      rootDiff.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === '# fixture'),
+    ).toBe(true)
+
+    // rename 커밋 — origPath 동봉 시 rename meta
+    await execGitOrThrow(['mv', 'README.md', 'DOCS.md'], { cwd: repo })
+    await client.commits.create('rename')
+    const renameHead = (await client.history.list(1))[0]!
+    const renameDiff = await client.commits.diffFile(renameHead.hash, 'DOCS.md', 'README.md')
+    expect(renameDiff.meta.some((line) => line.startsWith('rename from README.md'))).toBe(true)
+
+    // 병합 커밋 — 첫 부모 기준
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main-side'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'merge', '--no-edit', 'side'], { cwd: repo })
+    const merge = (await client.history.list(1))[0]!
+    const mergeDiff = await client.commits.diffFile(merge.hash, 'side.txt', null)
+    expect(
+      mergeDiff.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === 's'),
+    ).toBe(true)
+  })
+
+  it('diffFile — 잘못된 해시·저장소 밖 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.diffFile('HEAD', 'README.md', null)).rejects.toThrow()
+    await expect(client.commits.diffFile(head.hash, '../out.txt', null)).rejects.toThrow()
+    await expect(client.commits.diffFile(head.hash, 'README.md', '../out.txt')).rejects.toThrow()
+  })
+
   it('commit — stage된 변경으로 커밋을 만들고 changes가 비워진다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

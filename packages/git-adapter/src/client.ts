@@ -36,6 +36,8 @@ export interface GitClient {
     create(message: string): Promise<void>
     /** 커밋 상세 — 전체 메시지·변경 파일. 병합 커밋은 첫 부모 기준 */
     show(hash: string): Promise<CommitDetail>
+    /** 커밋 안 단일 파일의 diff — 첫 부모 기준. rename이면 origPath를 함께 넘긴다 */
+    diffFile(hash: string, path: string, origPath: string | null): Promise<FileDiff>
   }
 }
 
@@ -128,9 +130,16 @@ export function createGitClient(repoPath: string): GitClient {
           }
           return parsePatch(result.stdout)
         }
+        const pathspecs = [`:(literal)${path}`]
+        // staged rename은 원래 경로도 pathspec에 있어야 rename으로 감지된다(실측) —
+        // 없으면 similarity 계산이 깨져 "새 파일 추가"로 위장된다
+        if (options.staged && options.origPath != null) {
+          assertRepoRelative(options.origPath)
+          pathspecs.push(`:(literal)${options.origPath}`)
+        }
         const args = options.staged
-          ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
-          : ['diff', '--no-color', '--no-ext-diff', '--', `:(literal)${path}`]
+          ? ['diff', '--cached', '--no-color', '--no-ext-diff', '--', ...pathspecs]
+          : ['diff', '--no-color', '--no-ext-diff', '--', ...pathspecs]
         return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
       },
     },
@@ -232,6 +241,42 @@ export function createGitClient(repoPath: string): GitClient {
           : ['diff-tree', '--no-commit-id', '--root', '-r', '-M', '-z', '--name-status', hash]
         const filesRaw = await execGitOrThrow(filesArgs, { cwd })
         return { ...meta, files: parseNameStatus(filesRaw.stdout) }
+      },
+      async diffFile(hash, path, origPath) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        assertRepoRelative(path)
+        if (origPath !== null) assertRepoRelative(origPath)
+        const pathspecs =
+          origPath !== null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
+        // 첫 부모 확인 — root 커밋(부모 없음)은 --root diff-tree로 다룬다 (병합 커밋 diff-tree는 빈 출력)
+        const parent = await execGit(['rev-parse', '-q', '--verify', `${hash}^1`], { cwd })
+        const args =
+          parent.exitCode === 0
+            ? [
+                'diff',
+                '-M',
+                '--no-color',
+                '--no-ext-diff',
+                parent.stdout.trim(),
+                hash,
+                '--',
+                ...pathspecs,
+              ]
+            : [
+                'diff-tree',
+                '--no-commit-id',
+                '--root',
+                '-r',
+                '-p',
+                '-M',
+                '--no-color',
+                '--no-ext-diff',
+                hash,
+                '--',
+                ...pathspecs,
+              ]
+        return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
       },
     },
   }
