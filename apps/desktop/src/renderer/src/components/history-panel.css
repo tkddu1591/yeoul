@@ -17,27 +17,12 @@
   margin: 0;
   padding: 0;
 }
-/* 커넥터는 항목 단위로 그린다 — 가상화에서 :last-child가 전체의 끝이 아니므로 JS가 클래스로 판정한다 (#5) */
-.history-item--connected::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  top: 21px; /* 점 아래에서 시작 */
-  bottom: -12px; /* 다음 항목의 점 위까지 */
-  width: 2px;
-  background: var(--color-border);
-}
-/* 목록이 상한에 잘렸을 때만: 마지막 점 아래로 흐려지며 이어지는 표시 */
-.history-item--truncated::after {
-  bottom: auto;
-  height: 16px;
-  background: linear-gradient(var(--color-border), transparent);
-}
 .history-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  height: 100%;
   position: relative;
   width: 100%;
   border: none;
@@ -57,19 +42,10 @@
 .history-item:disabled {
   cursor: default;
 }
-.history-item__dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 2px solid var(--concept-commit);
-  background: var(--color-surface);
-  margin-top: 4px;
+.history-item__graph {
   flex: none;
-  position: relative;
-  z-index: 1;
-}
-.history-item--head .history-item__dot {
-  background: var(--concept-commit);
+  align-self: stretch;
+  height: 100%;
 }
 .history-item__body {
   display: flex;
