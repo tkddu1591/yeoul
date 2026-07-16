@@ -787,7 +787,8 @@ import type { CommitSummary, FileChange, RepositoryStatus } from '@git-gui/domai
 
 const git = () => window.gitApi
 
-const HISTORY_LIMIT = 50
+/** 히스토리 조회 상한 — UI가 "잘림" 표기(50+)에 사용한다 */
+export const HISTORY_LIMIT = 50
 
 export interface SelectedFile {
   change: FileChange
@@ -973,9 +974,11 @@ import './history-panel.css'
 
 interface HistoryPanelProps {
   history: CommitSummary[]
+  /** 조회 상한 — 목록이 상한에 닿으면 "N+"로 표기해 잘렸음을 알린다 */
+  limit: number
 }
 
-export function HistoryPanel({ history }: HistoryPanelProps) {
+export function HistoryPanel({ history, limit }: HistoryPanelProps) {
   return (
     <Panel
       title="저장된 역사"
@@ -983,7 +986,9 @@ export function HistoryPanel({ history }: HistoryPanelProps) {
         <>
           <Badge tone="git">log</Badge>
           <Badge tone="count">
-            <span data-testid="history-count">{history.length}</span>
+            <span data-testid="history-count">
+              {history.length >= limit ? `${limit}+` : history.length}
+            </span>
           </Badge>
         </>
       }
@@ -1163,7 +1168,7 @@ import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { RepoPicker } from './components/RepoPicker'
-import { useRepositoryStore } from './store/repository-store'
+import { HISTORY_LIMIT, useRepositoryStore } from './store/repository-store'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
@@ -1269,7 +1274,7 @@ export function App() {
             onCommit={(message) => store.commit(message)}
           />
         </div>
-        <HistoryPanel history={store.history} />
+        <HistoryPanel history={store.history} limit={HISTORY_LIMIT} />
       </main>
     </div>
   )
