@@ -46,3 +46,13 @@ export interface DiffOptions {
   staged: boolean
   untracked: boolean
 }
+
+/** 저장된 역사 한 항목 — log의 요약 */
+export interface CommitSummary {
+  hash: string
+  shortHash: string
+  subject: string
+  authorName: string
+  /** epoch 초 */
+  committedAt: number
+}
