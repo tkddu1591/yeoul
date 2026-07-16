@@ -463,7 +463,8 @@ export function DiffPanel({ path, diffText, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
-          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close" aria-label="선택 해제">
+          {/* 가시 라벨 "닫기"가 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
+          <Button variant="ghost" size="sm" onPress={onClose} testId="diff-close">
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
@@ -495,10 +496,14 @@ export function DiffPanel({ path, diffText, onClose }: DiffPanelProps) {
           />
 ```
 
-닫기 버튼이 제목 오른쪽 끝에 붙도록 `apps/desktop/src/renderer/src/ui/panel.css`의 `.ui-panel__head`에 한 줄 추가:
+닫기 버튼이 제목 오른쪽 끝에 붙도록 `apps/desktop/src/renderer/src/ui/panel.css`에 추가 (첫 버튼만 밀고, 긴 제목이 버튼 라벨을 두 줄로 꺾지 못하게):
 ```css
-.ui-panel__head > .ui-button {
+.ui-panel__head > .ui-button:first-of-type {
   margin-left: auto;
+}
+.ui-panel__head > .ui-button {
+  flex: none;
+  white-space: nowrap;
 }
 ```
 
@@ -882,14 +887,8 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       accessory={
         <>
           <Badge tone="git">diff</Badge>
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onPress={onClose}
-            testId="diff-close"
-            aria-label="선택 해제"
-          >
+          {/* 가시 라벨 "닫기"가 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
+          <Button variant="ghost" size="sm" isDisabled={busy} onPress={onClose} testId="diff-close">
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
@@ -1196,14 +1195,8 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
             )}
             {view === 'unified' ? '좌우 보기' : '한 줄 보기'}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onPress={onClose}
-            testId="diff-close"
-            aria-label="선택 해제"
-          >
+          {/* 가시 라벨 "닫기"가 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
+          <Button variant="ghost" size="sm" isDisabled={busy} onPress={onClose} testId="diff-close">
             <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
