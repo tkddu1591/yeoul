@@ -3908,6 +3908,71 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8e: 우측 열 폭 — 상세 모드 자동 확장 + 파일명 가로 스크롤 (4차 피드백)
+
+사용자 실사용 스크린샷(11272 파일 실제 저장소): 우측 열 260px 고정이라 상세 모드에서 파일명이 잘린다. 상세가 열리면 우측 열을 확장(중앙이 양보)하고, 파일명은 좌측 목록과 동일하게 가로 스크롤로 전부 보여준다. 열 폭 드래그 조절은 1단계 후보.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/layout.css`, `apps/desktop/src/renderer/src/App.tsx`, `apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx`
+- Test: `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: layout.css — 기본 폭 상향 + 상세 모드 확장**
+
+`.app__main` 블록을 교체:
+
+```css
+.app__main {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr) 300px;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  flex: 1;
+  min-height: 0;
+  transition: grid-template-columns 0.15s ease;
+}
+/* 커밋 상세 모드 — 파일 목록이 주인공이 되도록 우측 열이 넓어지고 중앙이 양보한다 (4차 피드백) */
+.app__main--detail {
+  grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 30%);
+}
+```
+
+- [ ] **Step 2: App.tsx — 모드 클래스**
+
+`<main className="app__main">`을 다음으로 교체:
+
+```tsx
+      <main className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}>
+```
+
+- [ ] **Step 3: CommitDetailPanel — 파일명 가로 스크롤**
+
+파일 목록 li의 `className="virtual-row"`를 `className="virtual-row virtual-row--wide"`로 교체 (좌측 목록과 동일한 가로 스크롤 — 긴 파일명·경로를 잘라내지 않는다).
+
+- [ ] **Step 4: E2E 회귀 방어 한 줄**
+
+`apps/desktop/e2e/smoke.spec.ts`의 '커밋을 누르면 우측이 상세로 바뀌고…' 테스트에서 `await expect(window.getByTestId('commit-detail-panel')).toBeVisible()` 행 **뒤**에 추가:
+
+```ts
+    // 상세 모드에서 우측 열이 확장된다 (4차 피드백)
+    await expect(window.locator('.app__main')).toHaveClass(/app__main--detail/)
+```
+
+- [ ] **Step 5: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: 164 tests + typecheck 5 + build + **E2E 8 passed** — 전부 exit 0
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/e2e/smoke.spec.ts
+git commit -m "feat(desktop): 상세 모드 우측 열 자동 확장 + 파일명 가로 스크롤 (4차 피드백)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
