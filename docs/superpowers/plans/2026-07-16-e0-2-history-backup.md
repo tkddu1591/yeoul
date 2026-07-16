@@ -12,7 +12,7 @@
 
 **이번 범위가 아닌 것 (E0-1 후속 노트에서 이관하지 않는 항목 포함):** 히스토리 점진 로딩("더 보기" — 지금은 최근 50개), push 진행률·취소(네트워크 원격은 1단계 취소 가능 프로세스와 함께), AI 메시지 제안(스펙상 선택 옵션 — 후속), 테마 토글, 충돌 마커 시각 처리. **백업 버튼의 위험 표시**: 이번 push는 force가 아니므로 위험 동작 구분 불필요.
 
-**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단).
+**알려진 한계(의도적):** HistoryPanel의 상대 시간은 렌더 시점 기준이며 자동 갱신되지 않는다(새로고침·작업 시 갱신). 원격이 여러 개면 origin 우선, 없으면 알파벳순 첫 remote로 백업한다. non-fast-forward 거절 시 git 원문 에러가 노출된다 — 최신 받아오기(pull)와 구조화 에러가 생기는 1단계에서 친절한 안내로 교체한다. 네트워크 원격이 행에 걸리면 취소 수단이 없다(1단계 취소 가능 프로세스에서 해결 — 자격증명 프롬프트 행은 GIT_TERMINAL_PROMPT=0으로 이미 차단). 동시 push 재호출은 renderer busy가 1차 방어 — main 쪽 per-repo in-flight dedupe는 1단계 push 진행률 작업과 함께.
 
 ---
 
@@ -634,7 +634,7 @@ import type { CommitSummary, DiffOptions, RepositoryStatus } from '@git-gui/doma
 (b) GitApi의 commits 다음에 추가:
 ```ts
   history: {
-    /** 최신순 커밋 요약 (limit 1~500) */
+    /** 최신순 커밋 요약. limit은 1~500 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어) */
     list(repoPath: string, limit: number): Promise<CommitSummary[]>
   }
   sync: {
