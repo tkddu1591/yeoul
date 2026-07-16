@@ -80,7 +80,24 @@ describe('suggestCommitMessage', () => {
     expect(suggestCommitMessage([staged('app.txt', 'modified')])).toBe('app.txt 수정')
     expect(suggestCommitMessage([staged('login.css', 'added')])).toBe('login.css 추가')
     expect(suggestCommitMessage([staged('old.ts', 'deleted')])).toBe('old.ts 삭제')
+  })
+
+  it('이름 변경 1개는 원래 이름을 함께 보여준다', () => {
+    expect(
+      suggestCommitMessage([
+        { path: 'src/new.ts', origPath: 'src/old.ts', staged: 'renamed', unstaged: null },
+      ]),
+    ).toBe('old.ts → new.ts 이름 변경')
+    // 원래 이름을 알 수 없으면 새 이름만
     expect(suggestCommitMessage([staged('new.ts', 'renamed')])).toBe('new.ts 이름 변경')
+  })
+
+  it('부분 스테이징(staged+unstaged 동시)은 1개로 집계된다', () => {
+    expect(
+      suggestCommitMessage([
+        { path: 'a.ts', origPath: null, staged: 'modified', unstaged: 'modified' },
+      ]),
+    ).toBe('a.ts 수정')
   })
 
   it('중첩 경로는 파일명(basename)만 쓴다', () => {
@@ -160,7 +177,13 @@ export function suggestCommitMessage(changes: FileChange[]): string {
   if (stagedChanges.length === 0) return ''
   const first = stagedChanges[0]!
   const firstVerb = KIND_VERBS[first.staged!]
-  if (stagedChanges.length === 1) return `${basename(first.path)} ${firstVerb}`
+  if (stagedChanges.length === 1) {
+    // 이름 변경은 "무엇이었는지"가 핵심 정보다 — 원래 이름을 함께 보여준다
+    if (first.staged === 'renamed' && first.origPath !== null) {
+      return `${basename(first.origPath)} → ${basename(first.path)} 이름 변경`
+    }
+    return `${basename(first.path)} ${firstVerb}`
+  }
   const allSameKind = stagedChanges.every((change) => change.staged === first.staged)
   const verb = allSameKind ? firstVerb : '변경'
   return `${basename(first.path)} 외 ${stagedChanges.length - 1}개 ${verb}`
@@ -177,7 +200,7 @@ export * from './commit-message'
 - [ ] **Step 4: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: **83 tests** (77 + 6), typecheck 5개 — 전부 exit 0
+Expected: **85 tests** (77 + 8), typecheck 5개 — 전부 exit 0
 
 - [ ] **Step 5: Commit**
 
@@ -381,7 +404,7 @@ export * from './log-parser'
 - [ ] **Step 6: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: **90 tests** (83 + 파서 5 + history 2), typecheck 5개 — 전부 exit 0
+Expected: **92 tests** (85 + 파서 5 + history 2), typecheck 5개 — 전부 exit 0
 
 - [ ] **Step 7: Commit**
 
@@ -491,7 +514,7 @@ Expected: FAIL — sync 미정의 (typecheck 에러 또는 런타임 undefined)
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck`
-Expected: **92 tests**, typecheck 5개 — 전부 exit 0
+Expected: **94 tests**, typecheck 5개 — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -578,7 +601,7 @@ function assertLimit(value: unknown): number {
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 92 tests, typecheck 5개, build — 전부 exit 0
+Expected: 94 tests, typecheck 5개, build — 전부 exit 0
 
 - [ ] **Step 5: Commit**
 
@@ -829,7 +852,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 - [ ] **Step 5: 통과 확인**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: **97 tests** (92 + 상대 시간 5), typecheck 5개, build — 전부 exit 0
+Expected: **99 tests** (94 + 상대 시간 5), typecheck 5개, build — 전부 exit 0
 
 - [ ] **Step 6: Commit**
 
@@ -1183,7 +1206,7 @@ git rm apps/desktop/src/renderer/src/components/HistoryPlaceholder.tsx apps/desk
 - [ ] **Step 4: 검증**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 97 tests + typecheck 5 + build + E2E 1 passed — 전부 exit 0 (기존 E2E는 역사·백업을 건드리지 않으므로 통과. lucide에 CloudUpload가 없으면 UploadCloud로 대체하고 반드시 보고)
+Expected: 99 tests + typecheck 5 + build + E2E 1 passed — 전부 exit 0 (기존 E2E는 역사·백업을 건드리지 않으므로 통과. lucide에 CloudUpload가 없으면 UploadCloud로 대체하고 반드시 보고)
 
 - [ ] **Step 5: Commit**
 
@@ -1324,7 +1347,7 @@ Expected: **2 passed**, exit 0
 - [ ] **Step 3: 최종 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 97 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
+Expected: 99 tests + typecheck 5 + build + E2E 2 passed — 전부 exit 0
 
 - [ ] **Step 4: README 갱신**
 
