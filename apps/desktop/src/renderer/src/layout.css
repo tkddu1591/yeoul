@@ -74,6 +74,14 @@
   font-size: var(--text-sm);
   flex: none;
 }
+.app__notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-5);
+  background: var(--term-badge-bg);
+  color: var(--term-badge);
+  font-size: var(--text-sm);
+  flex: none;
+}
 .app__main {
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (드래그 리사이즈) — 여기 값은 초기 페인트 폴백 */

@@ -1,12 +1,14 @@
 import { CloudUpload, Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
+import { BranchSwitcher } from './components/BranchSwitcher'
 import { ChangesPanel } from './components/ChangesPanel'
 import { CommitDetailPanel } from './components/CommitDetailPanel'
 import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { RepoPicker } from './components/RepoPicker'
+import { ShelfPopover } from './components/ShelfPopover'
 import {
   clampRightWidth,
   loadRightWidth,
@@ -19,6 +21,7 @@ import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
+import { PromptDialog } from './ui/PromptDialog'
 
 /** 일상어 + 원어 병기(스펙 5장 문구 원칙) — 상태를 숨기지 않는다 */
 const STATE_LABELS: Record<RepositoryStateKind, string> = {
@@ -40,6 +43,9 @@ export function App() {
     applyTheme(next)
     setTheme(next)
   }
+
+  // 새 실험 공간 다이얼로그 — fromHash가 있으면 우클릭한 저장 시점에서 갈라진다
+  const [branchPrompt, setBranchPrompt] = useState<{ fromHash: string | null } | null>(null)
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
   // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
@@ -104,10 +110,13 @@ export function App() {
         </div>
         {status && (
           <div className="app__status">
-            <span className="app__branch" data-testid="header-branch">
-              <Pictogram kind="branch" size={13} label="실험 공간 (branch)" />
-              {status.branch.name ?? '(브랜치 없음 — detached HEAD)'}
-            </span>
+            <BranchSwitcher
+              branches={store.branches}
+              currentName={status.branch.name}
+              busy={store.busy}
+              onSwitch={(name) => void store.switchBranch(name)}
+              onCreate={() => setBranchPrompt({ fromHash: null })}
+            />
             {status.state !== 'normal' && (
               <span className="app__state">
                 <Pictogram kind="conflict" size={13} label="진행 중 작업" />
@@ -123,6 +132,13 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
+          <ShelfPopover
+            shelf={store.shelf}
+            busy={store.busy}
+            onSave={() => void store.shelfSave()}
+            onRestore={(ref) => void store.shelfRestore(ref)}
+            onDrop={(ref) => void store.shelfDrop(ref)}
+          />
           <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
             {theme === 'dark' ? (
               <Sun size={13} aria-hidden="true" />
@@ -154,6 +170,11 @@ export function App() {
       {store.error && (
         <p className="app__error" role="alert" data-testid="error">
           {store.error}
+        </p>
+      )}
+      {store.notice && (
+        <p className="app__notice" role="status" data-testid="notice">
+          {store.notice}
         </p>
       )}
       <main
@@ -218,9 +239,28 @@ export function App() {
             busy={store.busy}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
+            onCreateBranchAt={(hash) => setBranchPrompt({ fromHash: hash })}
           />
         )}
       </main>
+      <PromptDialog
+        isOpen={branchPrompt !== null}
+        title="새 실험 공간 만들기"
+        description={
+          branchPrompt?.fromHash != null
+            ? '우클릭한 저장 시점에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.'
+            : '지금 위치에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.'
+        }
+        label="이름"
+        placeholder="예: try-new-design"
+        submitLabel="만들고 이동"
+        onSubmit={(name) => {
+          const fromHash = branchPrompt?.fromHash ?? null
+          setBranchPrompt(null)
+          void store.createBranch(name, fromHash)
+        }}
+        onCancel={() => setBranchPrompt(null)}
+      />
     </div>
   )
 }

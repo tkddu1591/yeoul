@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CommitSummary } from '@git-gui/domain'
+import { ContextMenu } from '../ui/ContextMenu'
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
@@ -19,6 +20,8 @@ interface HistoryPanelProps {
   busy: boolean
   onSelect(hash: string): void
   onLoadMore(): void
+  /** 우클릭 → "여기서 실험 공간 만들기" — 해시를 넘긴다 (⑦) */
+  onCreateBranchAt(hash: string): void
 }
 
 /** 레인 간격·행 높이 — 행 높이는 고정이라 그래프 좌표가 단순해진다 (measureElement 불필요) */
@@ -119,7 +122,9 @@ export function HistoryPanel({
   busy,
   onSelect,
   onLoadMore,
+  onCreateBranchAt,
 }: HistoryPanelProps) {
+  const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
   const truncated = history.length >= historyLimit
   // 수천 커밋에서도 DOM은 가시 범위만 유지한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -189,6 +194,10 @@ export function HistoryPanel({
                       .join(' ')}
                     disabled={busy}
                     onClick={() => onSelect(commit.hash)}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      setMenu({ x: event.clientX, y: event.clientY, commit })
+                    }}
                     title={`${commit.subject}\n${formatAbsoluteTime(commit.committedAt)} · ${commit.authorName}`}
                     aria-current={selectedHash === commit.hash ? 'true' : undefined}
                     data-testid={`history-item-${commit.hash}`}
@@ -232,6 +241,27 @@ export function HistoryPanel({
             </div>
           )}
         </div>
+      )}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            {
+              key: 'branch-here',
+              label: '여기서 실험 공간 만들기…',
+              onSelect: () => onCreateBranchAt(menu.commit.hash),
+            },
+            {
+              key: 'copy-hash',
+              label: `해시 복사 (${menu.commit.shortHash})`,
+              onSelect: () => {
+                void navigator.clipboard.writeText(menu.commit.hash)
+              },
+            },
+          ]}
+          onClose={() => setMenu(null)}
+        />
       )}
     </Panel>
   )
