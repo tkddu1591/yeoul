@@ -188,15 +188,22 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().branches.create(repoPath, name, fromHash)
-      const result = await git().branches.switch(repoPath, name)
-      set({
-        historyLimit: HISTORY_LIMIT,
-        ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
-        notice: result.autoShelved
-          ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
-          : null,
-      })
+      // 전환이 실패해도 브랜치는 이미 생겼다 — finally로 목록을 실제 상태에 맞춰
+      // "만들었는데 안 보이고, 재시도하면 이미 있다"는 혼란을 막는다 (리뷰 반영)
+      try {
+        const result = await git().branches.switch(repoPath, name)
+        set({
+          notice: result.autoShelved
+            ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+            : null,
+        })
+      } finally {
+        set({
+          historyLimit: HISTORY_LIMIT,
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
+        })
+      }
     })
   },
 
