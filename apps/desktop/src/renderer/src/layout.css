@@ -65,6 +65,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: none;
+}
+/* 좁은 폭에서 버튼 라벨이 세로로 꺾이지 않게 — 폭 압박은 스위처 이름 말줄임이 흡수한다 (리뷰 실측) */
+.app__actions .ui-button {
+  white-space: nowrap;
 }
 .app__error {
   margin: 0;

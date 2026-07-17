@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Dialog, Heading, Input, Label, Modal, ModalOverlay, TextField } from 'react-aria-components'
 import { Button } from './Button'
+import { isSubmitEnter } from './keyboard'
 import './confirm-dialog.css'
 import './prompt-dialog.css'
 
@@ -11,11 +12,12 @@ interface PromptDialogProps {
   label: string
   placeholder: string
   submitLabel: string
+  /** 제출 — 실패 시 호출 측이 다이얼로그를 열어 두면 입력이 보존된다 */
   onSubmit(value: string): void
   onCancel(): void
 }
 
-/** 한 줄 입력 다이얼로그 — Enter로 제출, ESC·바깥 클릭은 취소. 닫힐 때 입력을 비운다 */
+/** 한 줄 입력 다이얼로그 — Enter로 제출(IME 조합 중 제외), ESC·바깥 클릭은 취소. 닫힐 때 입력을 비운다 */
 export function PromptDialog({
   isOpen,
   title,
@@ -27,22 +29,21 @@ export function PromptDialog({
   onCancel,
 }: PromptDialogProps) {
   const [value, setValue] = useState('')
+  // 닫힐 때만 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
+  useEffect(() => {
+    if (!isOpen) setValue('')
+  }, [isOpen])
   const submit = () => {
     const trimmed = value.trim()
     if (trimmed === '') return
-    setValue('')
     onSubmit(trimmed)
-  }
-  const cancel = () => {
-    setValue('')
-    onCancel()
   }
   return (
     <ModalOverlay
       className="ui-modal-overlay"
       isOpen={isOpen}
       onOpenChange={(open) => {
-        if (!open) cancel()
+        if (!open) onCancel()
       }}
       isDismissable
     >
@@ -58,14 +59,14 @@ export function PromptDialog({
             onChange={setValue}
             autoFocus
             onKeyDown={(event) => {
-              if (event.key === 'Enter') submit()
+              if (isSubmitEnter(event.key, event.nativeEvent.isComposing)) submit()
             }}
           >
             <Label className="ui-prompt__label">{label}</Label>
             <Input className="ui-prompt__input" placeholder={placeholder} data-testid="prompt-input" />
           </TextField>
           <div className="ui-dialog__actions">
-            <Button variant="ghost" size="sm" onPress={cancel} testId="prompt-cancel">
+            <Button variant="ghost" size="sm" onPress={onCancel} testId="prompt-cancel">
               그만두기
             </Button>
             <Button

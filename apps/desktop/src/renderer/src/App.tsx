@@ -255,9 +255,11 @@ export function App() {
         placeholder="예: try-new-design"
         submitLabel="만들고 이동"
         onSubmit={(name) => {
-          const fromHash = branchPrompt?.fromHash ?? null
-          setBranchPrompt(null)
-          void store.createBranch(name, fromHash)
+          void (async () => {
+            const fromHash = branchPrompt?.fromHash ?? null
+            // 실패하면 다이얼로그를 유지해 입력을 보존한다 — 에러는 상단 배너로 (리뷰 반영)
+            if (await store.createBranch(name, fromHash)) setBranchPrompt(null)
+          })()
         }}
         onCancel={() => setBranchPrompt(null)}
       />

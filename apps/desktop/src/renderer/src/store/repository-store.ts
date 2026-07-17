@@ -47,8 +47,8 @@ interface RepositoryStore {
   refresh(): Promise<void>
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
   switchBranch(name: string): Promise<void>
-  /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서 */
-  createBranch(name: string, fromHash: string | null): Promise<void>
+  /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서. 성공 여부 반환 — 실패 시 다이얼로그를 열어 둬 입력을 보존한다 */
+  createBranch(name: string, fromHash: string | null): Promise<boolean>
   /** 지금 변경을 보관함에 저장한다 */
   shelfSave(): Promise<void>
   shelfRestore(ref: string): Promise<void>
@@ -185,8 +185,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async createBranch(name, fromHash) {
     const { repoPath } = get()
-    if (!repoPath) return
-    await guard(set, get, async () => {
+    if (!repoPath) return false
+    return guard(set, get, async () => {
       await git().branches.create(repoPath, name, fromHash)
       // 전환이 실패해도 브랜치는 이미 생겼다 — finally로 목록을 실제 상태에 맞춰
       // "만들었는데 안 보이고, 재시도하면 이미 있다"는 혼란을 막는다 (리뷰 반영)

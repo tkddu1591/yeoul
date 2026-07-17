@@ -25,11 +25,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
+    // 스크롤하면 메뉴가 행에서 분리되어 엉뚱한 행을 가리키게 된다 — 닫는다 (리뷰 실측)
+    const onWheel = () => onClose()
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('wheel', onWheel, { passive: true })
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('wheel', onWheel)
     }
   }, [onClose])
   // 화면 가장자리에서 잘리지 않게 최소한만 보정한다

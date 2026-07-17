@@ -22,7 +22,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
     <MenuTrigger>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
         <Pictogram kind="branch" size={13} label="실험 공간 (branch)" />
-        {currentName ?? '(브랜치 없음)'}
+        <span className="branch-switcher__current">{currentName ?? '(브랜치 없음)'}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>
       <Popover className="branch-switcher__popover">

@@ -183,6 +183,9 @@ export function createGitClient(repoPath: string): GitClient {
         if (first.stderr.includes('invalid reference')) {
           throw new Error(`"${name}"라는 실험 공간이 없어요.`)
         }
+        if (first.stderr.includes('resolve your current index')) {
+          throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
+        }
         if (!first.stderr.includes('would be overwritten')) {
           throw new GitError(['switch', '--end-of-options', name], first)
         }

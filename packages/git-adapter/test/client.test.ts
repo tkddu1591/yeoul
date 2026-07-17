@@ -546,6 +546,22 @@ describe('GitClient', () => {
     await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
   })
 
+  it('switch — 충돌 정리 중에는 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('elsewhere', null)
+    // 꺼내기 겹침으로 충돌(unmerged index) 상태를 만든다
+    await writeFixtureFile(repo, 'README.md', '# shelved\n')
+    await client.shelf.save('겹침 준비')
+    await writeFixtureFile(repo, 'README.md', '# moved on\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'move on'], { cwd: repo })
+    const shelf = await client.shelf.list()
+    await expect(client.shelf.restore(shelf[0]!.ref)).rejects.toThrow(/겹치는 부분/)
+
+    await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
+  })
+
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
