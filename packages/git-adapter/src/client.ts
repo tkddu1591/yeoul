@@ -1,16 +1,20 @@
 import {
   detectState,
+  type BranchSummary,
   type CommitDetail,
   type CommitSummary,
   type DiffOptions,
   type FileDiff,
   type RepositoryStatus,
+  type ShelfEntry,
+  type SwitchResult,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
 import { parsePatch } from './diff-parser'
 import { readGitDirMarkers } from './markers'
+import { parseBranches, parseShelf } from './refs-parser'
 import { parseStatusV2 } from './status-parser'
 
 export type { DiffOptions } from '@git-gui/domain'
@@ -18,6 +22,28 @@ export type { DiffOptions } from '@git-gui/domain'
 export interface GitClient {
   repo: {
     status(): Promise<RepositoryStatus>
+  }
+  branches: {
+    /** 실험 공간 목록 — 마지막 저장 시점 최신순 */
+    list(): Promise<BranchSummary[]>
+    /** 새 실험 공간 — fromHash가 있으면 그 시점에서, 없으면 지금(HEAD)에서. 만들기만 하고 전환하지 않는다 */
+    create(name: string, fromHash: string | null): Promise<void>
+    /**
+     * 실험 공간 전환. 겹치지 않는 변경은 그대로 들고 간다(git 기본 동작).
+     * 겹쳐서 막히면 스펙 원칙대로 변경을 보관함에 자동 저장하고 전환한다 —
+     * 자동 복원은 하지 않는다(막힌 파일은 대상과 반드시 달라 복원이 거의 확실히 충돌한다).
+     */
+    switch(name: string): Promise<SwitchResult>
+  }
+  shelf: {
+    /** 지금 변경(미추적 포함)을 보관함에 저장한다. 변경이 없으면 거부 */
+    save(message: string): Promise<void>
+    /** 보관함 목록 — 최신이 stash@{0} */
+    list(): Promise<ShelfEntry[]>
+    /** 꺼내기(pop) — 겹치면 충돌 표시로 적용되고 항목은 보관함에 남는다(에러로 알린다) */
+    restore(ref: string): Promise<void>
+    /** 버리기 — 되돌릴 수 없다 (확인창은 renderer 책임) */
+    drop(ref: string): Promise<void>
   }
   changes: {
     stage(paths: string[]): Promise<void>
@@ -79,6 +105,16 @@ function assertFullHash(hash: string): void {
 /** CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 이 문구로 */
 const MISSING_COMMIT_MESSAGE = '그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.'
 
+/** 전환이 막혀 자동 보관할 때의 보관함 메시지 — UI·테스트가 이 문구로 항목을 식별한다 */
+const AUTO_SHELF_MESSAGE = '실험 공간 전환 자동 보관'
+
+/** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
+function assertShelfRef(ref: string): void {
+  if (!/^stash@\{\d{1,6}\}$/.test(ref)) {
+    throw new Error(`올바른 보관함 항목이 아니에요: ${ref}`)
+  }
+}
+
 export function createGitClient(repoPath: string): GitClient {
   // porcelain 출력 경로는 루트 상대, pathspec은 cwd 상대다 —
   // 하위 폴더로 열려도 어긋나지 않도록 cwd를 저장소 루트로 정규화한다.
@@ -104,6 +140,89 @@ export function createGitClient(repoPath: string): GitClient {
         ).stdout.trim()
         const markers = await readGitDirMarkers(gitDir)
         return { state: detectState(markers), branch: parsed.branch, changes: parsed.changes }
+      },
+    },
+    branches: {
+      async list() {
+        const cwd = await topLevel()
+        const raw = await execGitOrThrow(
+          [
+            'for-each-ref',
+            'refs/heads',
+            '--sort=-committerdate',
+            '--format=%(refname:short)\x1f%(HEAD)\x1f%(committerdate:unix)\x1f%(upstream:short)',
+          ],
+          { cwd },
+        )
+        return parseBranches(raw.stdout)
+      },
+      async create(name, fromHash) {
+        const cwd = await topLevel()
+        const valid = await execGit(['check-ref-format', '--branch', name], { cwd })
+        if (valid.exitCode !== 0) {
+          throw new Error(`"${name}"라는 이름으로는 만들 수 없어요. 공백 없이 지어 주세요.`)
+        }
+        if (fromHash !== null) assertFullHash(fromHash)
+        const args =
+          fromHash !== null
+            ? ['branch', '--end-of-options', name, fromHash]
+            : ['branch', '--end-of-options', name]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('already exists')) {
+            throw new Error(`"${name}"는 이미 있는 이름이에요. 다른 이름을 지어 주세요.`)
+          }
+          throw new GitError(args, result)
+        }
+      },
+      async switch(name) {
+        const cwd = await topLevel()
+        // 먼저 그대로 시도한다 — 겹치지 않는 변경은 git이 자연스럽게 들고 간다
+        const first = await execGit(['switch', '--end-of-options', name], { cwd })
+        if (first.exitCode === 0) return { autoShelved: false }
+        if (first.stderr.includes('invalid reference')) {
+          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+        }
+        if (!first.stderr.includes('would be overwritten')) {
+          throw new GitError(['switch', '--end-of-options', name], first)
+        }
+        // 겹쳐서 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다
+        await execGitOrThrow(['stash', 'push', '-u', '-m', AUTO_SHELF_MESSAGE], { cwd })
+        await execGitOrThrow(['switch', '--end-of-options', name], { cwd })
+        return { autoShelved: true }
+      },
+    },
+    shelf: {
+      async save(message) {
+        const cwd = await topLevel()
+        const result = await execGitOrThrow(['stash', 'push', '-u', '-m', message], { cwd })
+        if (result.stdout.includes('No local changes to save')) {
+          throw new Error('보관할 변경이 없어요.')
+        }
+      },
+      async list() {
+        const cwd = await topLevel()
+        const raw = await execGitOrThrow(['stash', 'list', '--format=%gd%x1f%ct%x1f%gs'], { cwd })
+        return parseShelf(raw.stdout)
+      },
+      async restore(ref) {
+        const cwd = await topLevel()
+        assertShelfRef(ref)
+        const result = await execGit(['stash', 'pop', ref], { cwd })
+        if (result.exitCode !== 0) {
+          // 겹침 — git이 충돌 표시로 적용하고 항목을 보관함에 남긴다 (유실 없음)
+          if ((result.stdout + result.stderr).includes('kept in case you need it again')) {
+            throw new Error(
+              '겹치는 부분이 있어 충돌 표시(!)로 남겨뒀어요. 항목은 보관함에도 그대로 있어요.',
+            )
+          }
+          throw new GitError(['stash', 'pop', ref], result)
+        }
+      },
+      async drop(ref) {
+        const cwd = await topLevel()
+        assertShelfRef(ref)
+        await execGitOrThrow(['stash', 'drop', ref], { cwd })
       },
     },
     changes: {

@@ -445,6 +445,120 @@ describe('GitClient', () => {
     }
   })
 
+  it('branches — 목록(현재 표시·최신순)과 만들기, 특정 시점에서 만들기', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('exp-1', null)
+    const root = (await client.history.list(1))[0]!
+    await writeFixtureFile(repo, 'more.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'second'], { cwd: repo })
+    await client.branches.create('exp-old', root.hash)
+
+    const branches = await client.branches.list()
+    expect(branches.map((b) => b.name).sort()).toEqual(['exp-1', 'exp-old', 'main'])
+    expect(branches.find((b) => b.name === 'main')?.isCurrent).toBe(true)
+    expect(branches.find((b) => b.name === 'exp-1')?.isCurrent).toBe(false)
+  })
+
+  it('branches — 잘못된 이름·중복 이름을 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.create('bad name', null)).rejects.toThrow(/이름으로는 만들 수 없어요/)
+    await expect(client.branches.create('-dash', null)).rejects.toThrow(/이름으로는 만들 수 없어요/)
+    await client.branches.create('dup', null)
+    await expect(client.branches.create('dup', null)).rejects.toThrow(/이미 있는 이름/)
+  })
+
+  it('switch — 겹치지 않는 변경은 그대로 들고 전환한다 (자동 보관 없음)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('exp', null)
+    await writeFixtureFile(repo, 'free.txt', 'f\n')
+    const result = await client.branches.switch('exp')
+    expect(result).toEqual({ autoShelved: false })
+    const status = await client.repo.status()
+    expect(status.branch.name).toBe('exp')
+    expect(status.changes.find((c) => c.path === 'free.txt')?.unstaged).toBe('untracked')
+    expect(await client.shelf.list()).toEqual([])
+  })
+
+  it('switch — 겹치는 변경으로 막히면 보관함에 자동 저장하고 전환한다 (복원은 하지 않는다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    // 대상 브랜치의 README가 다르도록 만든다 — 전환이 "would be overwritten"으로 막히는 조건
+    await execGitOrThrow(['checkout', '-b', 'other'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', '# other\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other change'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', '# my work\n')
+
+    const result = await client.branches.switch('other')
+    expect(result).toEqual({ autoShelved: true })
+    const status = await client.repo.status()
+    expect(status.branch.name).toBe('other')
+    // 작업 트리는 깨끗하고(변경은 보관함으로), 항목이 하나 생겼다
+    expect(status.changes).toEqual([])
+    const shelf = await client.shelf.list()
+    expect(shelf).toHaveLength(1)
+    expect(shelf[0]!.message).toContain('실험 공간 전환 자동 보관')
+  })
+
+  it('switch — 없는 실험 공간은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.switch('no-such')).rejects.toThrow(/실험 공간이 없어요/)
+  })
+
+  it('shelf — 보관·목록·꺼내기·버리기 왕복 (untracked 포함)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await writeFixtureFile(repo, 'new.txt', 'n\n')
+    await client.shelf.save('직접 보관')
+
+    let status = await client.repo.status()
+    expect(status.changes).toEqual([])
+    const shelf = await client.shelf.list()
+    expect(shelf).toHaveLength(1)
+    expect(shelf[0]!.message).toContain('직접 보관')
+
+    await client.shelf.restore(shelf[0]!.ref)
+    status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('modified')
+    expect(status.changes.find((c) => c.path === 'new.txt')?.unstaged).toBe('untracked')
+    expect(await client.shelf.list()).toEqual([])
+
+    await client.shelf.save('버릴 항목')
+    const again = await client.shelf.list()
+    await client.shelf.drop(again[0]!.ref)
+    expect(await client.shelf.list()).toEqual([])
+  })
+
+  it('shelf — 깨끗한 트리 보관과 잘못된 ref를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.shelf.save('없는 변경')).rejects.toThrow(/보관할 변경이 없어요/)
+    await expect(client.shelf.restore('HEAD')).rejects.toThrow()
+    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow()
+  })
+
+  it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# shelved\n')
+    await client.shelf.save('겹침 테스트')
+    await writeFixtureFile(repo, 'README.md', '# moved on\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'move on'], { cwd: repo })
+
+    const shelf = await client.shelf.list()
+    await expect(client.shelf.restore(shelf[0]!.ref)).rejects.toThrow(/겹치는 부분/)
+    // 항목은 남아 있다 — 데이터 유실 없음
+    expect(await client.shelf.list()).toHaveLength(1)
+  })
+
   it('history — 커밋이 없는 저장소(unborn)는 빈 목록이다', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-'))
     await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
