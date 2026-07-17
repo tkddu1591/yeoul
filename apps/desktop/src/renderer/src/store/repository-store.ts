@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 import type {
+  BranchSummary,
   CommitDetail,
   CommitFileChange,
   CommitSummary,
   FileChange,
   FileDiff,
   RepositoryStatus,
+  ShelfEntry,
 } from '@git-gui/domain'
 
 const git = () => window.gitApi
@@ -24,6 +26,8 @@ export interface SelectedFile {
 interface RepositoryStore {
   repoPath: string | null
   status: RepositoryStatus | null
+  branches: BranchSummary[]
+  shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
   historyLimit: number
@@ -33,12 +37,22 @@ interface RepositoryStore {
   commitDetail: CommitDetail | null
   /** 커밋 상세 안에서 선택된 파일 — diff는 공용 diff 슬롯을 쓴다 */
   commitFile: CommitFileChange | null
+  /** 안내 배너 — 에러가 아닌 정보(자동 보관 등). 다음 작업 시작 시 지워진다 */
+  notice: string | null
   error: string | null
   busy: boolean
 
   init(): Promise<void>
   openRepository(): Promise<void>
   refresh(): Promise<void>
+  /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
+  switchBranch(name: string): Promise<void>
+  /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서 */
+  createBranch(name: string, fromHash: string | null): Promise<void>
+  /** 지금 변경을 보관함에 저장한다 */
+  shelfSave(): Promise<void>
+  shelfRestore(ref: string): Promise<void>
+  shelfDrop(ref: string): Promise<void>
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
   /** 선택 파일 변경 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 (⑪) */
@@ -65,16 +79,18 @@ function toErrorMessage(cause: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
-/** 상태와 역사를 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
+/** 상태·역사·실험 공간·보관함을 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
 async function fetchSnapshot(
   repoPath: string,
   limit: number,
-): Promise<Pick<RepositoryStore, 'status' | 'history'>> {
-  const [status, history] = await Promise.all([
+): Promise<Pick<RepositoryStore, 'status' | 'history' | 'branches' | 'shelf'>> {
+  const [status, history, branches, shelf] = await Promise.all([
     git().repo.status(repoPath),
     git().history.list(repoPath, limit),
+    git().branches.list(repoPath),
+    git().shelf.list(repoPath),
   ])
-  return { status, history }
+  return { status, history, branches, shelf }
 }
 
 /** 선택 상태 일괄 해제 — 저장소 내용이 바뀌는 모든 지점에서 보던 diff·상세를 무효화한다 */
@@ -91,7 +107,7 @@ type StoreGet = () => RepositoryStore
 /** busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다 */
 async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Promise<boolean> {
   if (get().busy) return false
-  set({ busy: true, error: null })
+  set({ busy: true, error: null, notice: null })
   try {
     await run()
     return true
@@ -107,11 +123,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
   status: null,
   history: [],
+  branches: [],
+  shelf: [],
   historyLimit: HISTORY_LIMIT,
   selected: null,
   diff: null,
   commitDetail: null,
   commitFile: null,
+  notice: null,
   error: null,
   busy: false,
 
@@ -144,6 +163,71 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff·상세도 함께 무효화한다
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async switchBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().branches.switch(repoPath, name)
+      // 다른 공간이다 — 보던 것들을 비우고 역사도 첫 페이지부터
+      set({
+        historyLimit: HISTORY_LIMIT,
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
+        notice: result.autoShelved
+          ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+          : null,
+      })
+    })
+  },
+
+  async createBranch(name, fromHash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().branches.create(repoPath, name, fromHash)
+      const result = await git().branches.switch(repoPath, name)
+      set({
+        historyLimit: HISTORY_LIMIT,
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
+        notice: result.autoShelved
+          ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+          : null,
+      })
+    })
+  },
+
+  async shelfSave() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().shelf.save(repoPath, '직접 보관')
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async shelfRestore(ref) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 겹침 에러가 나도 이미 충돌 표시가 적용됐을 수 있다 — finally로 실제 상태를 다시 읽는다
+      try {
+        await git().shelf.restore(repoPath, ref)
+      } finally {
+        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      }
+    })
+  },
+
+  async shelfDrop(ref) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().shelf.drop(repoPath, ref)
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
