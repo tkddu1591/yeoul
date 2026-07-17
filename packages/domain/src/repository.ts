@@ -84,3 +84,26 @@ export interface CommitDetail {
   parents: string[]
   files: CommitFileChange[]
 }
+
+/** 실험 공간(branch) 하나 — 스위처 목록용 */
+export interface BranchSummary {
+  name: string
+  isCurrent: boolean
+  /** epoch 초 — 이 공간의 마지막 저장 시점 */
+  committedAt: number
+  upstream: string | null
+}
+
+/** 보관함(stash) 항목 하나 */
+export interface ShelfEntry {
+  /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */
+  ref: string
+  /** epoch 초 */
+  savedAt: number
+  message: string
+}
+
+/** 실험 공간 전환 결과 — 자동 보관이 개입했으면 UI가 보관함 위치를 안내한다 */
+export interface SwitchResult {
+  autoShelved: boolean
+}
