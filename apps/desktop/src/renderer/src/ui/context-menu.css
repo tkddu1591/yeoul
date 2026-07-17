@@ -1,0 +1,26 @@
+.ui-context-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 200px;
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+}
+.ui-context-menu__item {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ui-context-menu__item:hover {
+  background: var(--color-surface-sunken);
+}
