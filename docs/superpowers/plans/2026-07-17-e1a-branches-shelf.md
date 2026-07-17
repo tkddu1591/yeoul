@@ -18,7 +18,7 @@
 - `git stash list --format=%gd%x1f%ct%x1f%gs` → `stash@{0}\x1f<epoch>\x1f<On main: msg>` (log 계열이라 %x1f 이스케이프 동작).
 - `git stash pop <ref>` 충돌 시: 겹친 내용이 충돌 표시로 **적용되고** 항목은 보관함에 남는다(`The stash entry is kept in case you need it again.`).
 
-**알려진 한계(의도적):** 전환이 막혀 자동 보관했을 때 **자동 복원은 하지 않는다** — 막힌 파일은 대상 브랜치 내용과 반드시 다르므로 복원은 거의 확실히 충돌 표시를 만든다. 대신 notice로 보관함 위치를 안내한다(사용자가 꺼내는 순간은 스스로 선택). `stash@{n}` ref는 목록이 바뀌면 밀린다 — 모든 변이가 busy 가드로 직렬화되고 매 변이 후 스냅샷을 다시 읽으므로 실사용 레이스는 없다. 삭제(브랜치 지우기)·이름 바꾸기·합치기(merge)는 E1b.
+**알려진 한계(의도적):** 보관·꺼내기는 git stash pop 특성상 staged/unstaged 구분과 staged 중간본을 유지하지 않는다 — **최종 작업물은 온전히 생존**(리뷰 실측). merge 충돌 중 switch·없는 stash index는 git이 막되 원어 에러가 노출된다(정상 플로우에서 도달 어려움 — E1b 충돌 UI에서 정리). 전환이 막혀 자동 보관했을 때 **자동 복원은 하지 않는다** — 막힌 파일은 대상 브랜치 내용과 반드시 다르므로 복원은 거의 확실히 충돌 표시를 만든다. 대신 notice로 보관함 위치를 안내한다(사용자가 꺼내는 순간은 스스로 선택). `stash@{n}` ref는 목록이 바뀌면 밀린다 — 모든 변이가 busy 가드로 직렬화되고 매 변이 후 스냅샷을 다시 읽으므로 실사용 레이스는 없다. 삭제(브랜치 지우기)·이름 바꾸기·합치기(merge)는 E1b.
 
 ---
 
@@ -310,8 +310,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await expect(client.shelf.save('없는 변경')).rejects.toThrow(/보관할 변경이 없어요/)
-    await expect(client.shelf.restore('HEAD')).rejects.toThrow()
-    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow()
+    // 패턴 필수 — 무패턴 toThrow는 가드를 제거해도 git 원시 에러로 통과해 버린다(변이 실증).
+    // 가드가 없으면 '--quiet' 같은 입력이 플래그로 해석돼 엉뚱한 최신 항목이 pop된다.
+    await expect(client.shelf.restore('HEAD')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
+    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
   })
 
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
