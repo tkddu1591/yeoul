@@ -540,8 +540,10 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await expect(client.shelf.save('없는 변경')).rejects.toThrow(/보관할 변경이 없어요/)
-    await expect(client.shelf.restore('HEAD')).rejects.toThrow()
-    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow()
+    // 패턴 필수 — 무패턴 toThrow는 가드를 제거해도 git 원시 에러로 통과해 버린다(변이 실증).
+    // 가드가 없으면 '--quiet' 같은 입력이 플래그로 해석돼 엉뚱한 최신 항목이 pop된다.
+    await expect(client.shelf.restore('HEAD')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
+    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
   })
 
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
