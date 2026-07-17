@@ -340,3 +340,99 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('실험 공간을 만들고 바로 이동한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-new').click()
+    await window.getByTestId('prompt-input').fill('exp-1')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('header-branch')).toContainText('exp-1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('전환이 막히면 변경을 보관함에 자동 보관하고 이동한다', async () => {
+  const repo = await createRepoWithChange()
+  // 대상 브랜치의 app.txt가 다르도록 — 전환이 막히는 조건을 만든다
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'other'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'other\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'other side'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-item-other').click()
+    await expect(window.getByTestId('header-branch')).toContainText('other')
+    await expect(window.getByTestId('notice')).toContainText('보관함')
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('우클릭한 저장 시점에서 실험 공간을 만든다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    // 가장 오래된(root) 커밋에서 갈라진다
+    await window.locator('[data-testid^="history-item-"]').last().click({ button: 'right' })
+    await window.getByTestId('context-branch-here').click()
+    await window.getByTestId('prompt-input').fill('from-root')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('header-branch')).toContainText('from-root')
+    // root 시점으로 이동했으므로 역사는 1개
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('변경을 보관함에 넣었다 꺼낸다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    await window.getByTestId('shelf-open').click()
+    await window.getByTestId('shelf-save').click()
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    // 팝오버는 스냅샷 갱신 후에도 열린 채 유지된다(실측 — underlay가 재클릭을 막는다). 바로 꺼낸다
+    await window.getByTestId('shelf-restore-stash@{0}').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    await expect(window.getByTestId('shelf-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
