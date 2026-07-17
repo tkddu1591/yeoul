@@ -316,6 +316,22 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
     await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
   })
 
+  it('switch — 충돌 정리 중에는 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('elsewhere', null)
+    // 꺼내기 겹침으로 충돌(unmerged index) 상태를 만든다
+    await writeFixtureFile(repo, 'README.md', '# shelved\n')
+    await client.shelf.save('겹침 준비')
+    await writeFixtureFile(repo, 'README.md', '# moved on\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'move on'], { cwd: repo })
+    const shelf = await client.shelf.list()
+    await expect(client.shelf.restore(shelf[0]!.ref)).rejects.toThrow(/겹치는 부분/)
+
+    await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
+  })
+
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
@@ -429,6 +445,9 @@ function assertShelfRef(ref: string): void {
         if (first.exitCode === 0) return { autoShelved: false }
         if (first.stderr.includes('invalid reference')) {
           throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+        }
+        if (first.stderr.includes('resolve your current index')) {
+          throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
         }
         if (!first.stderr.includes('would be overwritten')) {
           throw new GitError(['switch', '--end-of-options', name], first)
@@ -655,8 +674,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```ts
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
   switchBranch(name: string): Promise<void>
-  /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서 */
-  createBranch(name: string, fromHash: string | null): Promise<void>
+  /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서. 성공 여부 반환 — 실패 시 다이얼로그를 열어 둬 입력을 보존한다 */
+  createBranch(name: string, fromHash: string | null): Promise<boolean>
   /** 지금 변경을 보관함에 저장한다 */
   shelfSave(): Promise<void>
   shelfRestore(ref: string): Promise<void>
@@ -707,8 +726,8 @@ async function fetchSnapshot(
 
   async createBranch(name, fromHash) {
     const { repoPath } = get()
-    if (!repoPath) return
-    await guard(set, get, async () => {
+    if (!repoPath) return false
+    return guard(set, get, async () => {
       await git().branches.create(repoPath, name, fromHash)
       // 전환이 실패해도 브랜치는 이미 생겼다 — finally로 목록을 실제 상태에 맞춰
       // "만들었는데 안 보이고, 재시도하면 이미 있다"는 혼란을 막는다 (리뷰 반영)
@@ -787,9 +806,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 Create `apps/desktop/src/renderer/src/ui/PromptDialog.tsx`:
 
 ```tsx
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Dialog, Heading, Input, Label, Modal, ModalOverlay, TextField } from 'react-aria-components'
 import { Button } from './Button'
+import { isSubmitEnter } from './keyboard'
 import './confirm-dialog.css'
 import './prompt-dialog.css'
 
@@ -800,11 +820,12 @@ interface PromptDialogProps {
   label: string
   placeholder: string
   submitLabel: string
+  /** 제출 — 실패 시 호출 측이 다이얼로그를 열어 두면 입력이 보존된다 */
   onSubmit(value: string): void
   onCancel(): void
 }
 
-/** 한 줄 입력 다이얼로그 — Enter로 제출, ESC·바깥 클릭은 취소. 닫힐 때 입력을 비운다 */
+/** 한 줄 입력 다이얼로그 — Enter로 제출(IME 조합 중 제외), ESC·바깥 클릭은 취소. 닫힐 때 입력을 비운다 */
 export function PromptDialog({
   isOpen,
   title,
@@ -816,22 +837,21 @@ export function PromptDialog({
   onCancel,
 }: PromptDialogProps) {
   const [value, setValue] = useState('')
+  // 닫힐 때만 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
+  useEffect(() => {
+    if (!isOpen) setValue('')
+  }, [isOpen])
   const submit = () => {
     const trimmed = value.trim()
     if (trimmed === '') return
-    setValue('')
     onSubmit(trimmed)
-  }
-  const cancel = () => {
-    setValue('')
-    onCancel()
   }
   return (
     <ModalOverlay
       className="ui-modal-overlay"
       isOpen={isOpen}
       onOpenChange={(open) => {
-        if (!open) cancel()
+        if (!open) onCancel()
       }}
       isDismissable
     >
@@ -847,14 +867,14 @@ export function PromptDialog({
             onChange={setValue}
             autoFocus
             onKeyDown={(event) => {
-              if (event.key === 'Enter') submit()
+              if (isSubmitEnter(event.key, event.nativeEvent.isComposing)) submit()
             }}
           >
             <Label className="ui-prompt__label">{label}</Label>
             <Input className="ui-prompt__input" placeholder={placeholder} data-testid="prompt-input" />
           </TextField>
           <div className="ui-dialog__actions">
-            <Button variant="ghost" size="sm" onPress={cancel} testId="prompt-cancel">
+            <Button variant="ghost" size="sm" onPress={onCancel} testId="prompt-cancel">
               그만두기
             </Button>
             <Button
@@ -935,11 +955,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
+    // 스크롤하면 메뉴가 행에서 분리되어 엉뚱한 행을 가리키게 된다 — 닫는다 (리뷰 실측)
+    const onWheel = () => onClose()
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('wheel', onWheel, { passive: true })
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('wheel', onWheel)
     }
   }, [onClose])
   // 화면 가장자리에서 잘리지 않게 최소한만 보정한다
@@ -1047,7 +1071,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
     <MenuTrigger>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
         <Pictogram kind="branch" size={13} label="실험 공간 (branch)" />
-        {currentName ?? '(브랜치 없음)'}
+        <span className="branch-switcher__current">{currentName ?? '(브랜치 없음)'}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>
       <Popover className="branch-switcher__popover">
@@ -1096,6 +1120,13 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
 Create `apps/desktop/src/renderer/src/components/branch-switcher.css`:
 
 ```css
+/* 긴 브랜치 이름이 최소창(960px) 헤더를 무너뜨리지 않게 말줄임한다 (리뷰 실측) */
+.branch-switcher__current {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .branch-switcher__popover {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -1474,9 +1505,11 @@ import { PromptDialog } from './ui/PromptDialog'
         placeholder="예: try-new-design"
         submitLabel="만들고 이동"
         onSubmit={(name) => {
-          const fromHash = branchPrompt?.fromHash ?? null
-          setBranchPrompt(null)
-          void store.createBranch(name, fromHash)
+          void (async () => {
+            const fromHash = branchPrompt?.fromHash ?? null
+            // 실패하면 다이얼로그를 유지해 입력을 보존한다 — 에러는 상단 배너로 (리뷰 반영)
+            if (await store.createBranch(name, fromHash)) setBranchPrompt(null)
+          })()
         }}
         onCancel={() => setBranchPrompt(null)}
       />
@@ -1637,12 +1670,97 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### E1a-보완: UI 품질 리뷰 반영 — 헤더 붕괴·IME·충돌 전환·입력 보존·메뉴 스크롤
+
+품질 리뷰 실측 반영. 관련 정본 블록들이 갱신되었다: Task 2 switch(`resolve your current index` → 친절 에러) + 통합 테스트 1개, Task 4 createBranch(`Promise<boolean>` 반환), Task 5 PromptDialog(isComposing 가드·닫힐 때만 입력 초기화)·ContextMenu(wheel 닫기), Task 6 BranchSwitcher(`__current` 말줄임), Task 7 App(onSubmit 실패 시 다이얼로그 유지).
+
+**Files:**
+- Create: `apps/desktop/src/renderer/src/ui/keyboard.ts`, `apps/desktop/test/keyboard.test.ts`
+- Modify: 위 갱신 블록들의 해당 파일 + `apps/desktop/src/renderer/src/layout.css`
+
+- [ ] **Step 1: 실패하는 keyboard 테스트**
+
+Create `apps/desktop/test/keyboard.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { isSubmitEnter } from '../src/renderer/src/ui/keyboard'
+
+describe('isSubmitEnter', () => {
+  it('조합 중이 아닌 Enter만 제출이다', () => {
+    expect(isSubmitEnter('Enter', false)).toBe(true)
+    expect(isSubmitEnter('Enter', true)).toBe(false)
+  })
+
+  it('다른 키는 제출이 아니다', () => {
+    expect(isSubmitEnter('a', false)).toBe(false)
+    expect(isSubmitEnter('Escape', false)).toBe(false)
+  })
+})
+```
+
+- [ ] **Step 2: keyboard.ts 구현**
+
+Create `apps/desktop/src/renderer/src/ui/keyboard.ts`:
+
+```ts
+/** IME 조합 중의 Enter는 글자 확정이지 제출이 아니다 — 한글 입력 조기 제출 방지 (리뷰 실측) */
+export function isSubmitEnter(key: string, isComposing: boolean): boolean {
+  return key === 'Enter' && !isComposing
+}
+```
+
+- [ ] **Step 3: layout.css — 헤더 붕괴 방지**
+
+`.app__actions` 블록을 교체하고 바로 뒤에 버튼 규칙 추가:
+
+```css
+.app__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+/* 좁은 폭에서 버튼 라벨이 세로로 꺾이지 않게 — 폭 압박은 스위처 이름 말줄임이 흡수한다 (리뷰 실측) */
+.app__actions .ui-button {
+  white-space: nowrap;
+}
+```
+
+- [ ] **Step 4: 갱신 블록 byte 재동기화**
+
+Task 2 switch 분기+통합 테스트('switch — 충돌 정리 중에는…'), Task 4 createBranch(boolean), Task 5 PromptDialog 전체·ContextMenu effect, Task 6 BranchSwitcher `__current` span+css, Task 7 App onSubmit — 각 파일을 갱신 블록에 맞춘다.
+
+- [ ] **Step 5: TDD 확인 + 전체 게이트**
+
+- keyboard 테스트: Step 2 전 Red(모듈 없음) 확인
+- switch 충돌 테스트: 엔진 매핑 추가 전 Red(GitError 원문) 확인 후 Green
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **197 tests** + typecheck 5 + build + **E2E 14 passed** — 전부 exit 0
+
+- [ ] **Step 6: 실렌더 재확인**
+
+(a) 46자 브랜치 이름 + 960px 창 — 헤더 한 줄 유지·스위처 이름 말줄임(boundingBox), (b) PromptDialog에서 isComposing keydown 발사 → 제출 안 됨, (c) 잘못된 이름 제출 → 다이얼로그 유지 + 입력 보존 + 상단 에러 배너, (d) 메뉴 열고 스크롤 → 닫힘 — 스크린샷 확인.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src apps/desktop/test packages/git-adapter
+git commit -m "fix(desktop): 헤더 말줄임·IME Enter 가드·충돌 전환 친절 에러·다이얼로그 입력 보존·메뉴 스크롤 닫기
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 194 tests + typecheck 5 + build + **E2E 14 passed** — 전부 exit 0
+Expected: 197 tests + typecheck 5 + build + **E2E 14 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷 3장** (일회성 스크립트, 커밋 미포함, 1440×900 — **스크린샷 생성 후에는 playwright/e2e를 다시 실행하지 말 것**: test-results/가 비워진다. 사본을 스크래치패드에도 남긴다)
 
@@ -1673,7 +1791,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 2 후 | +8 (branches·shelf 통합) → **194 tests** |
 | Task 7 후 | E2E 10 (기존 회귀 없음) |
 | Task 8 후 | **E2E 14** |
-| 최종 | 194 tests + typecheck 5 + build + E2E 14 — 전부 exit 0 |
+| E1a-보완 후 | +3 (keyboard 2·switch 충돌 1) → **197 tests** |
+| 최종 | 197 tests + typecheck 5 + build + E2E 14 — 전부 exit 0 |
 
 (수치가 어긋나면 커밋 메시지가 아니라 이 표를 갱신한다 — 본질은 "전부 PASS + 신규 테스트 실존".)
 
