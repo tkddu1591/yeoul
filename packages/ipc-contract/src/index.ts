@@ -1,9 +1,12 @@
 import type {
+  BranchSummary,
   CommitDetail,
   CommitSummary,
   DiffOptions,
   FileDiff,
   RepositoryStatus,
+  ShelfEntry,
+  SwitchResult,
 } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
@@ -22,6 +25,18 @@ export interface GitApi {
     /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
     status(repoPath: string): Promise<RepositoryStatus>
+  }
+  branches: {
+    list(repoPath: string): Promise<BranchSummary[]>
+    /** fromHash는 40자 hex 전체 해시 또는 null(지금 위치에서) */
+    create(repoPath: string, name: string, fromHash: string | null): Promise<void>
+    switch(repoPath: string, name: string): Promise<SwitchResult>
+  }
+  shelf: {
+    save(repoPath: string, message: string): Promise<void>
+    list(repoPath: string): Promise<ShelfEntry[]>
+    restore(repoPath: string, ref: string): Promise<void>
+    drop(repoPath: string, ref: string): Promise<void>
   }
   changes: {
     stage(repoPath: string, paths: string[]): Promise<void>
@@ -53,6 +68,13 @@ export const CHANNELS = {
   repoSelect: 'repo:select',
   repoInitialPath: 'repo:initial-path',
   repoStatus: 'repo:status',
+  branchesList: 'branches:list',
+  branchesCreate: 'branches:create',
+  branchesSwitch: 'branches:switch',
+  shelfSave: 'shelf:save',
+  shelfList: 'shelf:list',
+  shelfRestore: 'shelf:restore',
+  shelfDrop: 'shelf:drop',
   changesStage: 'changes:stage',
   changesUnstage: 'changes:unstage',
   changesDiscard: 'changes:discard',

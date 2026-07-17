@@ -8,6 +8,18 @@ const api: GitApi = {
     initialPath: () => ipcRenderer.invoke(CHANNELS.repoInitialPath),
     status: (repoPath) => ipcRenderer.invoke(CHANNELS.repoStatus, repoPath),
   },
+  branches: {
+    list: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesList, repoPath),
+    create: (repoPath, name, fromHash) =>
+      ipcRenderer.invoke(CHANNELS.branchesCreate, repoPath, name, fromHash),
+    switch: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesSwitch, repoPath, name),
+  },
+  shelf: {
+    save: (repoPath, message) => ipcRenderer.invoke(CHANNELS.shelfSave, repoPath, message),
+    list: (repoPath) => ipcRenderer.invoke(CHANNELS.shelfList, repoPath),
+    restore: (repoPath, ref) => ipcRenderer.invoke(CHANNELS.shelfRestore, repoPath, ref),
+    drop: (repoPath, ref) => ipcRenderer.invoke(CHANNELS.shelfDrop, repoPath, ref),
+  },
   changes: {
     stage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesStage, repoPath, paths),
     unstage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesUnstage, repoPath, paths),

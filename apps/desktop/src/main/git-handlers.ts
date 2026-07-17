@@ -64,6 +64,19 @@ function assertNullableString(value: unknown): string | null {
   return assertString(value)
 }
 
+/** stash ref 형식만 통과 — 임의 문자열이 stash 명령 인자로 흘러가는 것을 IPC 경계에서 차단 (adapter 검증은 심층 방어) */
+function assertShelfRef(value: unknown): string {
+  if (typeof value !== 'string' || !/^stash@\{\d{1,6}\}$/.test(value)) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
+function assertNullableHash(value: unknown): string | null {
+  if (value === null) return null
+  return assertHash(value)
+}
+
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다 */
 async function registerRepoPath(path: string): Promise<string> {
   const topLevel = (
@@ -94,6 +107,39 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).repo.status(),
+  )
+
+  ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.list(),
+  )
+
+  ipcMain.handle(
+    CHANNELS.branchesCreate,
+    (_event, repoPath: unknown, name: unknown, fromHash: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).branches.create(
+        assertString(name),
+        assertNullableHash(fromHash),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.branchesSwitch, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.switch(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.shelfSave, (_event, repoPath: unknown, message: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).shelf.save(assertString(message)),
+  )
+
+  ipcMain.handle(CHANNELS.shelfList, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).shelf.list(),
+  )
+
+  ipcMain.handle(CHANNELS.shelfRestore, (_event, repoPath: unknown, ref: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).shelf.restore(assertShelfRef(ref)),
+  )
+
+  ipcMain.handle(CHANNELS.shelfDrop, (_event, repoPath: unknown, ref: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).shelf.drop(assertShelfRef(ref)),
   )
 
   ipcMain.handle(CHANNELS.changesStage, (_event, repoPath: unknown, paths: unknown) =>
