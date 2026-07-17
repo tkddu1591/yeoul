@@ -1607,8 +1607,7 @@ test('변경을 보관함에 넣었다 꺼낸다', async () => {
     await window.getByTestId('shelf-save').click()
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
-    // 스냅샷 갱신으로 팝오버가 닫혔을 수 있다 — 다시 연다
-    await window.getByTestId('shelf-open').click()
+    // 팝오버는 스냅샷 갱신 후에도 열린 채 유지된다(실측 — underlay가 재클릭을 막는다). 바로 꺼낸다
     await window.getByTestId('shelf-restore-stash@{0}').click()
     await expect(window.getByTestId('unstaged-count')).toHaveText('1')
     await expect(window.getByTestId('shelf-count')).toHaveText('0')
