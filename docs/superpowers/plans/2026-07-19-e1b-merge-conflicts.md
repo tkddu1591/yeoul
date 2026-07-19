@@ -562,7 +562,7 @@ branches 블록 **뒤**(shelf 앞)에 추가:
 - [ ] **Step 4: 게이트 + Commit**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 214 tests + 5 Done + build
+Expected: 207 tests + 5 Done + build
 
 ```bash
 git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts
