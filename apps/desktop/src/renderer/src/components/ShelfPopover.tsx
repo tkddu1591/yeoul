@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { formatRelativeTime } from './relative-time'
+import { parseShelfMessage } from './shelf-message'
 import './shelf-popover.css'
 
 interface ShelfPopoverProps {
@@ -48,9 +49,14 @@ export function ShelfPopover({ shelf, busy, onSave, onRestore, onDrop }: ShelfPo
                   <li key={entry.ref} className="shelf-popover__row">
                     <div className="shelf-popover__meta">
                       <span className="shelf-popover__message" title={entry.message}>
-                        {entry.message}
+                        {parseShelfMessage(entry.message).text}
                       </span>
                       <span className="shelf-popover__time">
+                        {parseShelfMessage(entry.message).branch !== null && (
+                          <span className="shelf-popover__branch">
+                            {parseShelfMessage(entry.message).branch}
+                          </span>
+                        )}
                         {formatRelativeTime(entry.savedAt, Date.now())}
                       </span>
                     </div>

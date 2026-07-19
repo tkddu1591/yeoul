@@ -87,6 +87,22 @@
   font-size: var(--text-sm);
   flex: none;
 }
+.app__merge-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-5);
+  background: var(--concept-conflict-bg);
+  color: var(--concept-conflict);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  flex: none;
+}
+.app__merge-bar > span {
+  flex: 1;
+  min-width: 0;
+}
 .app__main {
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (드래그 리사이즈) — 여기 값은 초기 페인트 폴백 */

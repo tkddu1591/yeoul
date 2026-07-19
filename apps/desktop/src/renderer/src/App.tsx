@@ -1,7 +1,8 @@
-import { CloudUpload, Moon, RefreshCw, Sun } from 'lucide-react'
+import { CloudUpload, GitMerge, Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { BranchSwitcher } from './components/BranchSwitcher'
+import { ConflictPanel } from './components/ConflictPanel'
 import { ChangesPanel } from './components/ChangesPanel'
 import { CommitDetailPanel } from './components/CommitDetailPanel'
 import { CommitForm } from './components/CommitForm'
@@ -22,6 +23,8 @@ import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
 import { PromptDialog } from './ui/PromptDialog'
+import { ConfirmDialog } from './ui/ConfirmDialog'
+import { ListDialog } from './ui/ListDialog'
 
 /** 일상어 + 원어 병기(스펙 5장 문구 원칙) — 상태를 숨기지 않는다 */
 const STATE_LABELS: Record<RepositoryStateKind, string> = {
@@ -46,6 +49,10 @@ export function App() {
 
   // 새 실험 공간 다이얼로그 — fromHash가 있으면 우클릭한 저장 시점에서 갈라진다
   const [branchPrompt, setBranchPrompt] = useState<{ fromHash: string | null } | null>(null)
+
+  // 합치기 대상 선택·취소 확인
+  const [mergePicker, setMergePicker] = useState(false)
+  const [confirmingAbort, setConfirmingAbort] = useState(false)
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
   // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
@@ -117,6 +124,15 @@ export function App() {
               onSwitch={(name) => void store.switchBranch(name)}
               onCreate={() => setBranchPrompt({ fromHash: null })}
             />
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={store.busy || status.state === 'merging'}
+              onPress={() => setMergePicker(true)}
+              testId="merge-open"
+            >
+              <GitMerge size={13} aria-hidden="true" /> 합치기 <Badge tone="git">merge</Badge>
+            </Button>
             {status.state !== 'normal' && (
               <span className="app__state">
                 <Pictogram kind="conflict" size={13} label="진행 중 작업" />
@@ -177,6 +193,24 @@ export function App() {
           {store.notice}
         </p>
       )}
+      {status?.state === 'merging' && (
+        <div className="app__merge-bar" data-testid="merge-bar">
+          <Pictogram kind="conflict" size={14} label="합치는 중" />
+          <span data-testid="merge-remaining">
+            실험 공간 합치는 중 — 겹침 {status.changes.filter((c) => c.unstaged === 'conflicted').length}
+            개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.
+          </span>
+          <Button
+            variant="danger"
+            size="sm"
+            isDisabled={store.busy}
+            onPress={() => setConfirmingAbort(true)}
+            testId="merge-abort"
+          >
+            합치기 취소
+          </Button>
+        </div>
+      )}
       <main
         className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}
         style={{ gridTemplateColumns: `340px minmax(0, 1fr) 6px ${effectiveRight}px` }}
@@ -193,18 +227,28 @@ export function App() {
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">
-          <DiffPanel
-            path={
-              store.commitFile !== null && store.commitDetail !== null
-                ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
-                : store.selected?.change.path ?? null
-            }
-            diff={store.diff}
-            busy={store.busy}
-            onClose={() =>
-              store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
-            }
-          />
+          {store.conflictFile !== null ? (
+            <ConflictPanel
+              path={store.conflictFile.path}
+              content={store.conflictFile.content}
+              busy={store.busy}
+              onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
+              onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
+            />
+          ) : (
+            <DiffPanel
+              path={
+                store.commitFile !== null && store.commitDetail !== null
+                  ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
+                  : store.selected?.change.path ?? null
+              }
+              diff={store.diff}
+              busy={store.busy}
+              onClose={() =>
+                store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
+              }
+            />
+          )}
           <CommitForm
             stagedCount={stagedCount}
             busy={store.busy}
@@ -263,6 +307,32 @@ export function App() {
         }}
         onCancel={() => setBranchPrompt(null)}
       />
+      <ListDialog
+        isOpen={mergePicker}
+        title="어느 실험 공간을 합칠까요?"
+        description="고른 공간의 저장 내용을 지금 공간으로 가져와 합쳐요. 저장 안 된 변경이 겹치면 보관함에 넣고 진행해요."
+        options={store.branches
+          .filter((branch) => !branch.isCurrent)
+          .map((branch) => ({ key: branch.name, label: branch.name }))}
+        emptyText="합칠 다른 실험 공간이 없어요."
+        onSelect={(name) => {
+          setMergePicker(false)
+          void store.mergeBranch(name)
+        }}
+        onCancel={() => setMergePicker(false)}
+      />
+      <ConfirmDialog
+        isOpen={confirmingAbort}
+        title="합치기를 취소할까요?"
+        confirmLabel="합치기 취소"
+        onConfirm={() => {
+          setConfirmingAbort(false)
+          void store.abortMerge()
+        }}
+        onCancel={() => setConfirmingAbort(false)}
+      >
+        지금까지 고른 것을 되돌리고 합치기 전 상태로 돌아가요.
+      </ConfirmDialog>
     </div>
   )
 }

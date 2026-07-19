@@ -37,3 +37,7 @@
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
+/* 좁은 창에서 버튼 라벨이 줄바꿈되지 않게 (E1a 이관) — 제출 버튼은 공용 Button이라 전용 클래스가 없다 */
+.commit-form button[type='submit'] {
+  white-space: nowrap;
+}
