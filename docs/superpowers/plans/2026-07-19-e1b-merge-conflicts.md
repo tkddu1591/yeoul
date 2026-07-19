@@ -346,7 +346,7 @@ Expected: FAIL — `client.merge`/`client.conflicts`/`client.files` 미존재, d
 (a) 파일 상단 import에 추가 (`import { execGit, … }` 행 **뒤**):
 
 ```ts
-import { readFile } from 'node:fs/promises'
+import { lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 ```
 
@@ -388,6 +388,12 @@ import { join } from 'node:path'
       async resolve(path, choice) {
         const cwd = await topLevel()
         assertRepoRelative(path)
+        // checkout --ours/--theirs는 충돌이 아닌 파일에서도 조용히 성공하며(exit 0, 실측)
+        // 워크트리의 미저장 편집을 index 버전으로 덮어쓴다 — 충돌(unmerged) 파일만 통과시킨다
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() === '') {
+          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+        }
         const side = choice === 'ours' ? '--ours' : '--theirs'
         await execGitOrThrow(['checkout', side, '--', `:(literal)${path}`], { cwd })
         await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
@@ -402,7 +408,13 @@ import { join } from 'node:path'
       async readText(path) {
         const cwd = await topLevel()
         assertRepoRelative(path)
-        const buffer = await readFile(join(cwd, path))
+        const filePath = join(cwd, path)
+        // 심볼릭 링크는 저장소 밖을 가리킬 수 있다(실측 — 문자열 검증으로는 못 막는다). 링크는 거부한다
+        const stats = await lstat(filePath)
+        if (stats.isSymbolicLink()) {
+          throw new Error('링크 파일이라 내용을 보여드릴 수 없어요.')
+        }
+        const buffer = await readFile(filePath)
         if (buffer.byteLength > 1_000_000) {
           throw new Error('파일이 너무 커요. 외부 편집기로 열어 주세요.')
         }
@@ -442,6 +454,96 @@ Expected: **207 tests** PASS (202 + 5) + 5 Done
 ```bash
 git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
 git commit -m "feat(adapter): 병합 취소·충돌 확정(ours/theirs)·해결 표시·파일 읽기 + 충돌 discard 친절화
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2-보완: 엔진 가드 3건 (스펙 리뷰 실측 반영)
+
+리뷰 실증: (1) `checkout --ours`가 **비충돌 파일에서 조용히 성공하며 미저장 편집을 덮어씀** — resolve에 unmerged 확인 가드, (2) readText가 심링크로 저장소 밖을 읽음 — lstat 거부, (3) 충돌이 남은 채 저장하면 원어 GitError 노출 — commits.create 매핑. Task 2의 resolve·readText 블록과 fs import가 갱신되었다.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: 실패하는 테스트 3개**
+
+Task 2에서 추가한 `'files.readText — …'` 테스트 **뒤**에 추가:
+
+```ts
+  it('conflicts.resolve — 충돌이 아닌 파일은 거부한다 (미저장 편집 덮어쓰기 차단)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# precious edit\n')
+    await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌\) 상태가 아닌/)
+    // 미저장 편집이 살아 있어야 한다
+    expect(await client.files.readText('README.md')).toBe('# precious edit\n')
+  })
+
+  it('files.readText — 저장소 밖을 가리키는 심볼릭 링크를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await symlink('/etc/hosts', join(repo, 'link-out'))
+    await expect(client.files.readText('link-out')).rejects.toThrow(/링크 파일/)
+  })
+
+  it('commit — 겹침이 남아 있으면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.commits.create('아직 안 끝났는데')).rejects.toThrow(/정리해야 저장/)
+  })
+```
+
+그리고 파일 상단 `import { existsSync } from 'node:fs'` 행의 import에 `symlink`를 추가한다 — `import { mkdir, mkdtemp } from 'node:fs/promises'`를 `import { mkdir, mkdtemp, symlink } from 'node:fs/promises'`로 교체.
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `npx vitest run packages/git-adapter/test/client.test.ts --testNamePattern "충돌이 아닌|심볼릭|겹침이 남아"`
+Expected: 3 FAIL — resolve는 조용히 성공(편집 소실), readText는 /etc/hosts 내용 반환, commit은 원어 GitError
+
+- [ ] **Step 3: 구현 — 갱신 블록 byte 재동기화 + commits.create 매핑**
+
+Task 2의 갱신된 resolve·readText 블록과 `lstat` import에 맞추고, `commits.create` 구현을 교체:
+
+```ts
+      async create(message) {
+        const cwd = await topLevel()
+        // 메시지는 stdin으로 전달해 따옴표·개행 이스케이프 문제를 피한다.
+        // 빈 메시지는 git이 거부한다 — GitError로 전파된다.
+        const result = await execGit(['commit', '-F', '-'], { cwd, stdin: message })
+        if (result.exitCode !== 0) {
+          // 겹침이 남은 채 저장(병합 마무리) 시도 — 원어 에러 대신 다음 행동을 안내한다 (리뷰 실측)
+          if (result.stderr.includes('unmerged files')) {
+            throw new Error('겹침(!)을 모두 정리해야 저장할 수 있어요.')
+          }
+          throw new GitError(['commit', '-F', '-'], result)
+        }
+      },
+```
+
+- [ ] **Step 4: 통과 확인 + 게이트**
+
+Run: `pnpm test && pnpm typecheck`
+Expected: **210 tests** PASS + 5 Done
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "fix(adapter): resolve 비충돌 가드·readText 심링크 거부·충돌 중 저장 친절 에러
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -562,7 +664,7 @@ branches 블록 **뒤**(shelf 앞)에 추가:
 - [ ] **Step 4: 게이트 + Commit**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 207 tests + 5 Done + build
+Expected: 210 tests + 5 Done + build
 
 ```bash
 git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts
@@ -870,7 +972,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 2: 게이트 + Commit**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 214 tests + 5 Done + build
+Expected: 217 tests + 5 Done + build
 
 ```bash
 git add apps/desktop/src/renderer/src/store/repository-store.ts
@@ -1193,7 +1295,7 @@ Create `apps/desktop/src/renderer/src/components/conflict-panel.css`:
 - [ ] **Step 3: 게이트 + Commit**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build`
-Expected: 214 tests + 5 Done + build
+Expected: 217 tests + 5 Done + build
 
 ```bash
 git add apps/desktop/src/renderer/src/ui apps/desktop/src/renderer/src/components
@@ -1407,7 +1509,7 @@ import { ListDialog } from './ui/ListDialog'
 - [ ] **Step 4: 게이트 + Commit**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 214 tests + 5 Done + build + **E2E 14 passed** (기존 회귀 없음)
+Expected: 217 tests + 5 Done + build + **E2E 14 passed** (기존 회귀 없음)
 
 ```bash
 git add apps/desktop/src/renderer/src
@@ -1553,7 +1655,7 @@ test('저장 안 된 변경이 겹치면 보관함에 넣고 합친다 (스마�
 검출력: `merge-open` testid 임시 오타 변이 → 첫 테스트 FAIL 확인 후 원복.
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: **214 tests + typecheck 5 + build + E2E 18 passed** — 전부 exit 0
+Expected: **217 tests + typecheck 5 + build + E2E 18 passed** — 전부 exit 0
 
 - [ ] **Step 3: Commit**
 
@@ -1571,7 +1673,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전체 게이트**
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: 214 tests + typecheck 5 + build + **E2E 18 passed** — 전부 exit 0
+Expected: 217 tests + typecheck 5 + build + **E2E 18 passed** — 전부 exit 0
 
 - [ ] **Step 2: 스크린샷 3장** (1440×900, `apps/desktop/test-results/` + scratchpad 사본. **생성 후 playwright/e2e 재실행 금지**)
 
@@ -1599,11 +1701,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | 시점 | 기대치 |
 | --- | --- |
 | Task 1 후 | 202 tests (197 + merge 5) |
-| Task 2 후 | +5 (abort·conflicts·discard·readText) → **207 tests** |
-| Task 4 후 | +7 (markers 4·shelf-message 3) → 214 tests |
+| Task 2 후 | +5 → 207, 보완 +3(가드) → **210 tests** |
+| Task 4 후 | +7 (markers 4·shelf-message 3) → 217 tests |
 | Task 7 후 | E2E 14 (기존 회귀 없음) |
 | Task 8 후 | **E2E 18** |
-| 최종 | 214 tests + typecheck 5 + build + E2E 18 — 전부 exit 0 |
+| 최종 | 217 tests + typecheck 5 + build + E2E 18 — 전부 exit 0 |
 
 (수치가 어긋나면 이 표를 갱신한다 — 본질은 "전부 PASS + 신규 테스트 실존".)
 
