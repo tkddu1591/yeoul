@@ -646,6 +646,94 @@ describe('GitClient', () => {
     await expect(client.branches.merge('no-such')).rejects.toThrow(/실험 공간이 없어요/)
   })
 
+  it('merge.abort — 충돌 상태를 버리고 합치기 전으로 돌아간다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await client.merge.abort()
+    const status = await client.repo.status()
+    expect(status.state).toBe('normal')
+    expect(status.changes).toEqual([])
+  })
+
+  it('merge.abort — 합치는 중이 아니면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.merge.abort()).rejects.toThrow(/합치는 중이 아니에요/)
+  })
+
+  it('conflicts — ours/theirs 확정과 직접 수정 표시가 해소(staged)로 이어진다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await writeFixtureFile(repo, 'second.md', 'r\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await writeFixtureFile(repo, 'second.md', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await client.conflicts.resolve('README.md', 'theirs')
+    let status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).not.toBe('conflicted')
+    expect(await client.files.readText('README.md')).toBe('# rival\n')
+
+    // 직접 수정 후 해결 표시
+    await writeFixtureFile(repo, 'second.md', 'hand-fixed\n')
+    await client.conflicts.markResolved('second.md')
+    status = await client.repo.status()
+    expect(status.changes.some((c) => c.unstaged === 'conflicted')).toBe(false)
+
+    // 저장하기(commit)가 병합을 마무리한다
+    await client.commits.create('합치기 마무리')
+    const head = (await client.history.list(1))[0]!
+    expect(head.parents).toHaveLength(2)
+  })
+
+  it('discard — 충돌 중인 파일은 읽히는 메시지로 거부한다 (이관)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.changes.discard(['README.md'], [])).rejects.toThrow(/충돌 화면에서/)
+  })
+
+  it('files.readText — 저장소 상대 텍스트만, 상한 초과·바이너리·밖 경로 거부', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    expect(await client.files.readText('README.md')).toBe('# fixture\n')
+    await writeFixtureFile(repo, 'big.txt', 'x'.repeat(1_000_001))
+    await expect(client.files.readText('big.txt')).rejects.toThrow(/너무 커요/)
+    await writeFixtureFile(repo, 'bin.dat', 'a\0b')
+    await expect(client.files.readText('bin.dat')).rejects.toThrow(/텍스트가 아닌/)
+    await expect(client.files.readText('../outside.txt')).rejects.toThrow()
+    await expect(client.files.readText('/etc/hosts')).rejects.toThrow()
+  })
+
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

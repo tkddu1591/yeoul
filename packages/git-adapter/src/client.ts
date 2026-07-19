@@ -11,6 +11,8 @@ import {
   type SwitchResult,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
 import { parsePatch } from './diff-parser'
@@ -40,6 +42,20 @@ export interface GitClient {
      * conflict면 충돌 상태를 남긴다 — 마무리는 commits.create(저장하기), 취소는 merge.abort.
      */
     merge(name: string): Promise<MergeResult>
+  }
+  merge: {
+    /** 합치기 취소 — 충돌 상태를 버리고 합치기 전으로 되돌린다 */
+    abort(): Promise<void>
+  }
+  conflicts: {
+    /** 충돌 파일을 한쪽으로 확정한다 — ours=내 것 유지, theirs=가져온 것 사용. 해소(staged)로 표시된다 */
+    resolve(path: string, choice: 'ours' | 'theirs'): Promise<void>
+    /** 직접 수정을 마쳤다고 표시한다(git add) — 마커가 남았는지는 UI가 확인창으로 경고한다 */
+    markResolved(path: string): Promise<void>
+  }
+  files: {
+    /** 워크트리 텍스트 파일 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
+    readText(path: string): Promise<string>
   }
   shelf: {
     /** 지금 변경(미추적 포함)을 보관함에 저장한다. 변경이 없으면 거부 */
@@ -234,6 +250,46 @@ export function createGitClient(repoPath: string): GitClient {
         throw new GitError(['merge', '--no-edit', '--end-of-options', name], second)
       },
     },
+    merge: {
+      async abort() {
+        const cwd = await topLevel()
+        const result = await execGit(['merge', '--abort'], { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('MERGE_HEAD')) {
+            throw new Error('지금은 합치는 중이 아니에요.')
+          }
+          throw new GitError(['merge', '--abort'], result)
+        }
+      },
+    },
+    conflicts: {
+      async resolve(path, choice) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        const side = choice === 'ours' ? '--ours' : '--theirs'
+        await execGitOrThrow(['checkout', side, '--', `:(literal)${path}`], { cwd })
+        await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
+      },
+      async markResolved(path) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
+      },
+    },
+    files: {
+      async readText(path) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        const buffer = await readFile(join(cwd, path))
+        if (buffer.byteLength > 1_000_000) {
+          throw new Error('파일이 너무 커요. 외부 편집기로 열어 주세요.')
+        }
+        if (buffer.includes(0)) {
+          throw new Error('텍스트가 아닌 파일이라 내용을 보여드릴 수 없어요.')
+        }
+        return buffer.toString('utf8')
+      },
+    },
     shelf: {
       async save(message) {
         const cwd = await topLevel()
@@ -283,7 +339,17 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         // restore는 untracked에 pathspec 불일치 에러를 내므로 tracked/untracked를 나눠 실행한다
         if (trackedPaths.length > 0) {
-          await execGitOrThrow(['restore', '--', ...toPathspecs(trackedPaths)], { cwd })
+          const restoreArgs = ['restore', '--', ...toPathspecs(trackedPaths)]
+          const result = await execGit(restoreArgs, { cwd })
+          if (result.exitCode !== 0) {
+            // 충돌 중인 파일은 restore가 거부한다 — 원어 에러 대신 다음 행동을 안내한다 (E1a 이관)
+            if (result.stderr.includes('is unmerged')) {
+              throw new Error(
+                '충돌 중인 파일은 변경 취소로 정리할 수 없어요. 충돌 화면에서 한쪽을 고르거나 병합을 취소해 주세요.',
+              )
+            }
+            throw new GitError(restoreArgs, result)
+          }
         }
         if (untrackedPaths.length > 0) {
           await execGitOrThrow(['clean', '-f', '--', ...toPathspecs(untrackedPaths)], { cwd })
