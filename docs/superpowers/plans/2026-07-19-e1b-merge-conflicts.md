@@ -861,6 +861,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   abortMerge(): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
+  /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
+  reloadConflict(path: string): Promise<string | null>
   /** 충돌을 한쪽으로 확정한다 */
   resolveConflict(path: string, choice: 'ours' | 'theirs'): Promise<void>
   /** 직접 수정을 마쳤다고 표시한다 */
@@ -907,8 +909,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
       const notices: Record<typeof result.outcome, string | null> = {
         'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
         merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
-        conflict:
-          '겹치는 부분이 있어요. 붉은 ! 파일을 눌러 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.',
+        // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
+        conflict: null,
         'up-to-date': '이미 모두 반영되어 있어요.',
       }
       const shelfNotice = result.autoShelved
@@ -948,6 +950,20 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
         commitFile: null,
       })
     })
+  },
+
+  async reloadConflict(path) {
+    const { repoPath } = get()
+    if (!repoPath) return null
+    // 읽기 전용 재조회 — guard(busy)를 잡지 않아 확인 흐름을 막지 않는다
+    try {
+      const content = await git().files.readText(repoPath, path)
+      set({ conflictFile: { path, content } })
+      return content
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+      return null
+    }
   },
 
   async resolveConflict(path, choice) {
@@ -1146,13 +1162,22 @@ interface ConflictPanelProps {
   onResolve(choice: 'ours' | 'theirs'): void
   /** 직접 수정을 마쳤다고 표시 — 마커가 남아 있으면 확인창을 거친다 */
   onMarkResolved(): void
+  /** 최신 파일 내용 재조회 — 외부 편집 후의 stale 마커 검사(거짓 경고)를 막는다. 실패 시 null */
+  onReload(): Promise<string | null>
 }
 
 /**
  * 충돌 해결 화면 (스펙 A안+B) — 파일 단위로 한쪽을 고르거나, 외부에서 직접 수정한 뒤 해결 표시.
  * 초록 구간 = 내 것(HEAD), 보라 구간 = 가져온 것.
  */
-export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }: ConflictPanelProps) {
+export function ConflictPanel({
+  path,
+  content,
+  busy,
+  onResolve,
+  onMarkResolved,
+  onReload,
+}: ConflictPanelProps) {
   const [confirmingMark, setConfirmingMark] = useState(false)
   const rows = parseConflictContent(content)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -1163,46 +1188,19 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
     overscan: 20,
   })
   const markResolved = () => {
-    // 마커가 남은 채 해결 표시하면 마커가 그대로 저장된다 — 경고를 거친다
-    if (hasConflictMarkers(content)) setConfirmingMark(true)
-    else onMarkResolved()
+    void (async () => {
+      // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)
+      const fresh = await onReload()
+      if (fresh === null) return
+      if (hasConflictMarkers(fresh)) setConfirmingMark(true)
+      else onMarkResolved()
+    })()
   }
 
   return (
     <Panel
       title={`${path} — 겹침 해결`}
-      accessory={
-        <>
-          <Badge tone="git">conflict</Badge>
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={busy}
-            onPress={() => onResolve('ours')}
-            testId="conflict-ours"
-          >
-            <User size={13} aria-hidden="true" /> 내 것 유지
-          </Button>
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={busy}
-            onPress={() => onResolve('theirs')}
-            testId="conflict-theirs"
-          >
-            <Download size={13} aria-hidden="true" /> 가져온 것 사용
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onPress={markResolved}
-            testId="conflict-mark"
-          >
-            <Check size={13} aria-hidden="true" /> 직접 수정했어요
-          </Button>
-        </>
-      }
+      accessory={<Badge tone="git">conflict</Badge>}
       testId="conflict-panel"
     >
       <p className="conflict-panel__hint">
@@ -1210,6 +1208,36 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
         고르면 파일 전체가 그쪽으로 정리돼요. 세밀하게 고치려면 편집기에서 직접 수정한 뒤 "직접
         수정했어요"를 눌러 주세요.
       </p>
+      {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
+      <div className="conflict-panel__actions">
+        <Button
+          variant="neutral"
+          size="sm"
+          isDisabled={busy}
+          onPress={() => onResolve('ours')}
+          testId="conflict-ours"
+        >
+          <User size={13} aria-hidden="true" /> 내 것 유지
+        </Button>
+        <Button
+          variant="neutral"
+          size="sm"
+          isDisabled={busy}
+          onPress={() => onResolve('theirs')}
+          testId="conflict-theirs"
+        >
+          <Download size={13} aria-hidden="true" /> 가져온 것 사용
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          isDisabled={busy}
+          onPress={markResolved}
+          testId="conflict-mark"
+        >
+          <Check size={13} aria-hidden="true" /> 직접 수정했어요
+        </Button>
+      </div>
       <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
         <div
           className="conflict-panel__code"
@@ -1235,7 +1263,7 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
       </div>
       <ConfirmDialog
         isOpen={confirmingMark}
-        title="충돌 표시가 아직 남아 있어요"
+        title="겹침 표시가 아직 남아 있어요"
         confirmLabel="그래도 표시"
         onConfirm={() => {
           setConfirmingMark(false)
@@ -1261,6 +1289,14 @@ Create `apps/desktop/src/renderer/src/components/conflict-panel.css`:
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
   line-height: 1.7;
+}
+/* 좁은 폭에서 버튼이 잘리는 대신 줄바꿈된다 */
+.conflict-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
 }
 .conflict-panel__code {
   font-family: var(--font-mono);
@@ -1350,13 +1386,21 @@ import { ListDialog } from './ui/ListDialog'
 
 (d) notice 배너 블록 **뒤**에 머지 바 추가:
 
+그리고 `const stagedCount = …` 행 **뒤**에 계산 추가:
+
+```tsx
+  const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
+```
+
 ```tsx
       {status?.state === 'merging' && (
         <div className="app__merge-bar" data-testid="merge-bar">
           <Pictogram kind="conflict" size={14} label="합치는 중" />
-          <span data-testid="merge-remaining">
-            실험 공간 합치는 중 — 겹침 {status.changes.filter((c) => c.unstaged === 'conflicted').length}
-            개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.
+          {/* 문구는 상태 인지형 — 0개가 되는 전환점에서 다음 행동(저장하기)을 짚어 준다 (리뷰 반영) */}
+          <span className="app__merge-text" data-testid="merge-remaining">
+            {conflictCount > 0
+              ? `실험 공간 합치는 중 — 겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+              : '실험 공간 합치는 중 — 겹침 0개 남음. 이제 저장하기로 마무리해요.'}
           </span>
           <Button
             variant="danger"
@@ -1381,6 +1425,7 @@ import { ListDialog } from './ui/ListDialog'
               busy={store.busy}
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
+              onReload={() => store.reloadConflict(store.conflictFile!.path)}
             />
           ) : (
             <DiffPanel
@@ -1446,9 +1491,19 @@ import { ListDialog } from './ui/ListDialog'
   font-weight: 600;
   flex: none;
 }
-.app__merge-bar > span {
+/* 메시지 span만 — `> span`은 Pictogram 루트(span)까지 잡아 아이콘이 중앙으로 밀린다 (리뷰 실측) */
+.app__merge-text {
   flex: 1;
   min-width: 0;
+}
+```
+
+그리고 `.app__state` 블록에 `white-space: nowrap;` 행을 추가하고, `.app__actions .ui-button` 규칙 **뒤**에 추가 (960px에서 합치기 버튼·상태 라벨 세로 꺾임 방지 — 리뷰 실측):
+
+```css
+.app__status .ui-button {
+  white-space: nowrap;
+  flex: none;
 }
 ```
 
@@ -1660,6 +1715,36 @@ Expected: **217 tests + typecheck 5 + build + E2E 18 passed** — 전부 exit 0
 ```bash
 git add apps/desktop/e2e/smoke.spec.ts
 git commit -m "test(desktop): E2E — 합치기 ff·충돌 한쪽 고르기·취소·스마트 병합
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### E1b-보완: UI 품질 리뷰 반영 — 머지 바 CSS·해결 버튼 줄바꿈·거짓 경고·문구
+
+품질 리뷰 실측 5건 반영. 정본 블록들이 갱신되었다: ConflictPanel(버튼을 헤더→전용 줄로 이동·onReload 최신 검사·확인창 제목 '겹침'), conflict-panel.css(`__actions`), App(conflictCount 계산·상태 인지형 머지 바 문구·`app__merge-text`·onReload 배선), layout.css(`__merge-text`·`.app__state` nowrap·`.app__status .ui-button`), store(conflict notice null — 머지 바가 담당·reloadConflict).
+
+**Files:** 위 갱신 블록들의 해당 파일 (신규 파일·테스트 없음 — 게이트 수치 불변)
+
+- [ ] **Step 1: 갱신 블록 전부 byte 재동기화**
+
+ConflictPanel.tsx 전체, conflict-panel.css, App.tsx(merge 바·conflictCount·onReload), layout.css, repository-store.ts(인터페이스 reloadConflict·구현·notices.conflict null).
+
+- [ ] **Step 2: 전체 게이트**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **217 tests + typecheck 5 + build + E2E 18 passed** — 전부 exit 0 (기존 E2E의 '겹침 1개 남음'·'겹침 0개 남음' 단언은 새 문구에도 포함되어 유지된다)
+
+- [ ] **Step 3: 실렌더 재확인**
+
+(a) 머지 바 — 아이콘 왼쪽 고정·문구 좌측 정렬(› span 파손 해소), (b) 960px 충돌 뷰 — 버튼 3개 전부 보이고 클릭 가능(줄바꿈), (c) 960px 헤더 — 합치기 버튼·상태 라벨 한 줄, (d) 외부에서 마커 지우고 "직접 수정했어요" → 경고 없이 해소, (e) 겹침 0개 문구 전환 — 스크린샷 확인.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src
+git commit -m "fix(desktop): 머지 바 셀렉터·해결 버튼 줄바꿈·직접 수정 최신 검사·상태 인지 문구
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
