@@ -37,6 +37,8 @@ interface RepositoryStore {
   commitDetail: CommitDetail | null
   /** 커밋 상세 안에서 선택된 파일 — diff는 공용 diff 슬롯을 쓴다 */
   commitFile: CommitFileChange | null
+  /** 충돌 뷰 — 열려 있으면 중앙 패널이 충돌 해결 화면이 된다. diff·커밋 상세와 상호 배타 */
+  conflictFile: { path: string; content: string } | null
   /** 안내 배너 — 에러가 아닌 정보(자동 보관 등). 다음 작업 시작 시 지워진다 */
   notice: string | null
   error: string | null
@@ -49,6 +51,16 @@ interface RepositoryStore {
   switchBranch(name: string): Promise<void>
   /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서. 성공 여부 반환 — 실패 시 다이얼로그를 열어 둬 입력을 보존한다 */
   createBranch(name: string, fromHash: string | null): Promise<boolean>
+  /** name 공간을 지금 공간으로 합친다(스마트 병합) — 결과를 notice로 안내한다 */
+  mergeBranch(name: string): Promise<void>
+  /** 합치기 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다 */
+  abortMerge(): Promise<void>
+  /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
+  selectConflict(path: string): Promise<void>
+  /** 충돌을 한쪽으로 확정한다 */
+  resolveConflict(path: string, choice: 'ours' | 'theirs'): Promise<void>
+  /** 직접 수정을 마쳤다고 표시한다 */
+  markConflictResolved(path: string): Promise<void>
   /** 지금 변경을 보관함에 저장한다 */
   shelfSave(): Promise<void>
   shelfRestore(ref: string): Promise<void>
@@ -99,6 +111,7 @@ const CLEAR_SELECTIONS = {
   diff: null,
   commitDetail: null,
   commitFile: null,
+  conflictFile: null,
 } as const
 
 type StoreSet = (partial: Partial<RepositoryStore>) => void
@@ -130,6 +143,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   diff: null,
   commitDetail: null,
   commitFile: null,
+  conflictFile: null,
   notice: null,
   error: null,
   busy: false,
@@ -274,6 +288,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async selectFile(selected) {
     const { repoPath } = get()
     if (!repoPath) return
+    // 충돌 파일은 diff가 아니라 충돌 해결 화면으로 — 한쪽을 고르거나 직접 수정한다
+    if (selected.change.staged === 'conflicted' || selected.change.unstaged === 'conflicted') {
+      await get().selectConflict(selected.change.path)
+      return
+    }
     await guard(set, get, async () => {
       const untracked = selected.change.unstaged === 'untracked'
       const diff = await git().changes.diff(repoPath, selected.change.path, {
@@ -282,8 +301,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         // staged rename은 원래 경로를 동봉해야 rename으로 표시된다 (unstage와 대칭)
         origPath: selected.staged ? selected.change.origPath : null,
       })
-      // 파일 diff와 커밋 상세는 상호 배타 — 중앙 패널이 하나다
-      set({ selected, diff, commitDetail: null, commitFile: null })
+      // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
+      set({ selected, diff, commitDetail: null, commitFile: null, conflictFile: null })
     })
   },
 
@@ -311,6 +330,75 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   clearCommit() {
     set({ commitDetail: null, commitFile: null, diff: null })
+  },
+
+  async mergeBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().branches.merge(repoPath, name)
+      const notices: Record<typeof result.outcome, string | null> = {
+        'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
+        merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
+        conflict:
+          '겹치는 부분이 있어요. 붉은 ! 파일을 눌러 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.',
+        'up-to-date': '이미 모두 반영되어 있어요.',
+      }
+      const shelfNotice = result.autoShelved
+        ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+        : ''
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `${notices[result.outcome] ?? ''}${shelfNotice}` || null,
+      })
+    })
+  },
+
+  async abortMerge() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().merge.abort(repoPath)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '합치기를 취소하고 이전 상태로 돌아왔어요.',
+      })
+    })
+  },
+
+  async selectConflict(path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const content = await git().files.readText(repoPath, path)
+      set({
+        conflictFile: { path, content },
+        selected: null,
+        diff: null,
+        commitDetail: null,
+        commitFile: null,
+      })
+    })
+  },
+
+  async resolveConflict(path, choice) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().conflicts.resolve(repoPath, path, choice)
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async markConflictResolved(path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().conflicts.markResolved(repoPath, path)
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
   },
 
   clearCommitFile() {
