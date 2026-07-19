@@ -562,6 +562,90 @@ describe('GitClient', () => {
     await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
   })
 
+  it('merge — 빨리 감기(fast-forward)와 병합 커밋을 구분해 알려준다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    // ff: main이 뒤처진 상태에서 exp를 합친다
+    await client.branches.create('exp', null)
+    await client.branches.switch('exp')
+    await writeFixtureFile(repo, 'exp.txt', 'e\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'exp work'], { cwd: repo })
+    await client.branches.switch('main')
+    const ff = await client.branches.merge('exp')
+    expect(ff).toEqual({ outcome: 'fast-forward', autoShelved: false })
+
+    // merged: 서로 다른 파일을 바꾼 두 갈래
+    await client.branches.create('exp2', null)
+    await client.branches.switch('exp2')
+    await writeFixtureFile(repo, 'exp2.txt', 'e2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'exp2 work'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main work'], { cwd: repo })
+    const merged = await client.branches.merge('exp2')
+    expect(merged).toEqual({ outcome: 'merged', autoShelved: false })
+    const head = (await client.history.list(1))[0]!
+    expect(head.parents).toHaveLength(2)
+  })
+
+  it('merge — 이미 반영된 공간은 up-to-date를 알려준다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('same', null)
+    const result = await client.branches.merge('same')
+    expect(result).toEqual({ outcome: 'up-to-date', autoShelved: false })
+  })
+
+  it('merge — 같은 줄을 바꾼 두 갈래는 conflict 상태로 남는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival change'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'my change'], { cwd: repo })
+
+    const result = await client.branches.merge('rival')
+    expect(result).toEqual({ outcome: 'conflict', autoShelved: false })
+    const status = await client.repo.status()
+    expect(status.state).toBe('merging')
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('merge — 막힌 변경은 보관함에 자동 저장하고 진행한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    // exp가 README를 바꿨고, main 워크트리에도 커밋 안 된 README 변경이 있다(덮어쓰기 차단 조건)
+    await client.branches.create('exp', null)
+    await client.branches.switch('exp')
+    await writeFixtureFile(repo, 'README.md', '# from exp\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'exp readme'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# uncommitted\n')
+
+    const result = await client.branches.merge('exp')
+    expect(result).toEqual({ outcome: 'fast-forward', autoShelved: true })
+    const shelf = await client.shelf.list()
+    expect(shelf).toHaveLength(1)
+    expect(shelf[0]!.message).toContain('실험 공간 합치기 자동 보관')
+    const status = await client.repo.status()
+    expect(status.changes).toEqual([])
+  })
+
+  it('merge — 없는 실험 공간은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.merge('no-such')).rejects.toThrow(/실험 공간이 없어요/)
+  })
+
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

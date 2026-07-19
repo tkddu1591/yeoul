@@ -107,3 +107,11 @@ export interface ShelfEntry {
 export interface SwitchResult {
   autoShelved: boolean
 }
+
+/** 실험 공간 합치기 결과 */
+export interface MergeResult {
+  /** conflict면 충돌 상태가 남아 있다 — 해소·마무리(commit) 또는 취소(abort)가 필요하다 */
+  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
+  /** 막혀서 변경을 보관함에 자동 저장했는가 (스펙: 덮기 전 자동 보관) */
+  autoShelved: boolean
+}

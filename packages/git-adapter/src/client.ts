@@ -5,6 +5,7 @@ import {
   type CommitSummary,
   type DiffOptions,
   type FileDiff,
+  type MergeResult,
   type RepositoryStatus,
   type ShelfEntry,
   type SwitchResult,
@@ -34,6 +35,11 @@ export interface GitClient {
      * 자동 복원은 하지 않는다(막힌 파일은 대상과 반드시 달라 복원이 거의 확실히 충돌한다).
      */
     switch(name: string): Promise<SwitchResult>
+    /**
+     * name 공간을 지금 공간으로 합친다(스마트 병합). 막히면 변경을 보관함에 자동 저장 후 재시도.
+     * conflict면 충돌 상태를 남긴다 — 마무리는 commits.create(저장하기), 취소는 merge.abort.
+     */
+    merge(name: string): Promise<MergeResult>
   }
   shelf: {
     /** 지금 변경(미추적 포함)을 보관함에 저장한다. 변경이 없으면 거부 */
@@ -107,6 +113,9 @@ const MISSING_COMMIT_MESSAGE = '그 저장 시점을 찾을 수 없어요. 새�
 
 /** 전환이 막혀 자동 보관할 때의 보관함 메시지 — UI·테스트가 이 문구로 항목을 식별한다 */
 const AUTO_SHELF_MESSAGE = '실험 공간 전환 자동 보관'
+
+/** 합치기가 막혀 자동 보관할 때의 보관함 메시지 */
+const MERGE_SHELF_MESSAGE = '실험 공간 합치기 자동 보관'
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
@@ -193,6 +202,36 @@ export function createGitClient(repoPath: string): GitClient {
         await execGitOrThrow(['stash', 'push', '-u', '-m', AUTO_SHELF_MESSAGE], { cwd })
         await execGitOrThrow(['switch', '--end-of-options', name], { cwd })
         return { autoShelved: true }
+      },
+      async merge(name) {
+        const cwd = await topLevel()
+        const classify = (output: string): MergeResult['outcome'] => {
+          if (output.includes('Already up to date')) return 'up-to-date'
+          if (output.includes('Fast-forward')) return 'fast-forward'
+          return 'merged'
+        }
+        const run = () => execGit(['merge', '--no-edit', '--end-of-options', name], { cwd })
+        const first = await run()
+        const firstOut = first.stdout + first.stderr
+        if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
+        if (firstOut.includes('not something we can merge')) {
+          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+        }
+        if (firstOut.includes('CONFLICT') || firstOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: false }
+        }
+        if (!firstOut.includes('would be overwritten')) {
+          throw new GitError(['merge', '--no-edit', '--end-of-options', name], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (E1a switch와 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', MERGE_SHELF_MESSAGE], { cwd })
+        const second = await run()
+        const secondOut = second.stdout + second.stderr
+        if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
+        if (secondOut.includes('CONFLICT') || secondOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: true }
+        }
+        throw new GitError(['merge', '--no-edit', '--end-of-options', name], second)
       },
     },
     shelf: {
