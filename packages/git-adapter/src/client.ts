@@ -11,7 +11,7 @@ import {
   type SwitchResult,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
-import { readFile } from 'node:fs/promises'
+import { lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
@@ -266,6 +266,12 @@ export function createGitClient(repoPath: string): GitClient {
       async resolve(path, choice) {
         const cwd = await topLevel()
         assertRepoRelative(path)
+        // checkout --ours/--theirs는 충돌이 아닌 파일에서도 조용히 성공하며(exit 0, 실측)
+        // 워크트리의 미저장 편집을 index 버전으로 덮어쓴다 — 충돌(unmerged) 파일만 통과시킨다
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() === '') {
+          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+        }
         const side = choice === 'ours' ? '--ours' : '--theirs'
         await execGitOrThrow(['checkout', side, '--', `:(literal)${path}`], { cwd })
         await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
@@ -280,7 +286,13 @@ export function createGitClient(repoPath: string): GitClient {
       async readText(path) {
         const cwd = await topLevel()
         assertRepoRelative(path)
-        const buffer = await readFile(join(cwd, path))
+        const filePath = join(cwd, path)
+        // 심볼릭 링크는 저장소 밖을 가리킬 수 있다(실측 — 문자열 검증으로는 못 막는다). 링크는 거부한다
+        const stats = await lstat(filePath)
+        if (stats.isSymbolicLink()) {
+          throw new Error('링크 파일이라 내용을 보여드릴 수 없어요.')
+        }
+        const buffer = await readFile(filePath)
         if (buffer.byteLength > 1_000_000) {
           throw new Error('파일이 너무 커요. 외부 편집기로 열어 주세요.')
         }
@@ -464,8 +476,15 @@ export function createGitClient(repoPath: string): GitClient {
       async create(message) {
         const cwd = await topLevel()
         // 메시지는 stdin으로 전달해 따옴표·개행 이스케이프 문제를 피한다.
-        // 빈 메시지는 git이 exit 1로 거부한다 — GitError로 전파된다.
-        await execGitOrThrow(['commit', '-F', '-'], { cwd, stdin: message })
+        // 빈 메시지는 git이 거부한다 — GitError로 전파된다.
+        const result = await execGit(['commit', '-F', '-'], { cwd, stdin: message })
+        if (result.exitCode !== 0) {
+          // 겹침이 남은 채 저장(병합 마무리) 시도 — 원어 에러 대신 다음 행동을 안내한다 (리뷰 실측)
+          if (result.stderr.includes('unmerged files')) {
+            throw new Error('겹침(!)을 모두 정리해야 저장할 수 있어요.')
+          }
+          throw new GitError(['commit', '-F', '-'], result)
+        }
       },
       async show(hash) {
         const cwd = await topLevel()

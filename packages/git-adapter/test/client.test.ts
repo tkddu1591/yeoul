@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -732,6 +732,39 @@ describe('GitClient', () => {
     await expect(client.files.readText('bin.dat')).rejects.toThrow(/텍스트가 아닌/)
     await expect(client.files.readText('../outside.txt')).rejects.toThrow()
     await expect(client.files.readText('/etc/hosts')).rejects.toThrow()
+  })
+
+  it('conflicts.resolve — 충돌이 아닌 파일은 거부한다 (미저장 편집 덮어쓰기 차단)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# precious edit\n')
+    await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌\) 상태가 아닌/)
+    // 미저장 편집이 살아 있어야 한다
+    expect(await client.files.readText('README.md')).toBe('# precious edit\n')
+  })
+
+  it('files.readText — 저장소 밖을 가리키는 심볼릭 링크를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await symlink('/etc/hosts', join(repo, 'link-out'))
+    await expect(client.files.readText('link-out')).rejects.toThrow(/링크 파일/)
+  })
+
+  it('commit — 겹침이 남아 있으면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.commits.create('아직 안 끝났는데')).rejects.toThrow(/정리해야 저장/)
   })
 
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
