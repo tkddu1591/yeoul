@@ -767,6 +767,24 @@ describe('GitClient', () => {
     await expect(client.commits.create('아직 안 끝났는데')).rejects.toThrow(/정리해야 저장/)
   })
 
+  it('switch — 합치는 중(merging)에도 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.branches.switch('rival')).rejects.toThrow(/충돌 정리/)
+    await expect(client.shelf.save('합치는 중 보관')).rejects.toThrow(/정리해야 보관/)
+  })
+
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

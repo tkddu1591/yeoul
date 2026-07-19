@@ -317,7 +317,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       const commitDetail = await git().commits.show(repoPath, hash)
-      set({ commitDetail, commitFile: null, selected: null, diff: null })
+      set({ commitDetail, commitFile: null, conflictFile: null, selected: null, diff: null })
     })
   },
 

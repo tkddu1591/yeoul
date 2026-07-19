@@ -208,7 +208,10 @@ export function createGitClient(repoPath: string): GitClient {
         if (first.stderr.includes('invalid reference')) {
           throw new Error(`"${name}"라는 실험 공간이 없어요.`)
         }
-        if (first.stderr.includes('resolve your current index')) {
+        if (
+          first.stderr.includes('resolve your current index') ||
+          first.stderr.includes('cannot switch branch while merging')
+        ) {
           throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
         }
         if (!first.stderr.includes('would be overwritten')) {
@@ -305,7 +308,14 @@ export function createGitClient(repoPath: string): GitClient {
     shelf: {
       async save(message) {
         const cwd = await topLevel()
-        const result = await execGitOrThrow(['stash', 'push', '-u', '-m', message], { cwd })
+        const result = await execGit(['stash', 'push', '-u', '-m', message], { cwd })
+        if (result.exitCode !== 0) {
+          // 충돌(unmerged) 중에는 stash가 index를 쓸 수 없다 — 원어 대신 다음 행동을 안내한다 (통합 리뷰 실측)
+          if (result.stderr.includes('could not write index')) {
+            throw new Error('겹침(!)을 먼저 정리해야 보관할 수 있어요.')
+          }
+          throw new GitError(['stash', 'push', '-u', '-m', message], result)
+        }
         if (result.stdout.includes('No local changes to save')) {
           throw new Error('보관할 변경이 없어요.')
         }
