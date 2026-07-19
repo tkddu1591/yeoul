@@ -436,3 +436,124 @@ test('변경을 보관함에 넣었다 꺼낸다', async () => {
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('다른 실험 공간을 합친다 (빨리 감기)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'exp'], { cwd: repo })
+  await writeFile(join(repo, 'exp.txt'), 'e\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'exp work'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-exp').click()
+    await expect(window.getByTestId('notice')).toContainText('모두 가져왔어요')
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무리한다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'rival\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'rival'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'mine'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    // 충돌 상태 — 머지 바와 ! 파일
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await expect(window.getByTestId('conflict-view')).toContainText('rival')
+    await window.getByTestId('conflict-theirs').click()
+    // 해소 — 머지 바 0개, staged로 이동
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 0개 남음')
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    // 저장하기 = 병합 마무리
+    await window.getByTestId('commit-message').fill('합치기 마무리')
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('history-count')).toHaveText('4')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('합치기를 취소하면 이전 상태로 돌아온다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'rival\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'rival'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'mine'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await expect(window.getByTestId('merge-bar')).toBeVisible()
+    await window.getByTestId('merge-abort').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    await expect(window.getByTestId('notice')).toContainText('취소')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('저장 안 된 변경이 겹치면 보관함에 넣고 합친다 (스마트 병합)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'exp'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'from exp\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'exp change'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'uncommitted\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-exp').click()
+    await expect(window.getByTestId('notice')).toContainText('보관함')
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
