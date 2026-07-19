@@ -1498,13 +1498,11 @@ import { ListDialog } from './ui/ListDialog'
 (b) `apps/desktop/src/renderer/src/components/commit-form.css` 끝에 추가 (960px 이관):
 
 ```css
-/* 좁은 창에서 버튼 라벨이 줄바꿈되지 않게 (E1a 이관) */
-.commit-form__submit {
+/* 좁은 창에서 버튼 라벨이 줄바꿈되지 않게 (E1a 이관) — 제출 버튼은 공용 Button이라 type 셀렉터로 잡는다 */
+.commit-form button[type='submit'] {
   white-space: nowrap;
 }
 ```
-
-(실제 클래스명이 다르면 — commit-form.css를 열어 저장하기 버튼의 클래스에 `white-space: nowrap;` 한 줄을 추가한다. 클래스명 자체가 없으면 CommitForm.tsx의 제출 버튼이 쓰는 셀렉터를 확인해 그 블록에 넣고, 이 플랜 블록을 실제 셀렉터로 갱신 보고한다.)
 
 - [ ] **Step 4: 게이트 + Commit**
 
