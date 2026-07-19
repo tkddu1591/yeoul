@@ -1779,6 +1779,91 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+## Task 9-보완: 통합 리뷰 반영 — merging 상태 원어 에러 2건·상호배타 1줄·README
+
+통합 리뷰 실측: (1) merging 중 브랜치 전환 → `cannot switch branch while merging` 원어 노출(E1a 매핑이 stash pop형 문구만 커버), (2) merging 중 보관하기 → `could not write index` 원어 노출, (3) 충돌 뷰 열린 채 커밋 클릭 → 중앙이 ConflictPanel에 점유된 채 상세 diff 불가(`selectCommit`이 conflictFile 미해제), (4) README 서두·"다음 단계"가 완료 항목을 미래로 나열.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`, `packages/git-adapter/test/client.test.ts`, `apps/desktop/src/renderer/src/store/repository-store.ts`, `README.md`
+
+- [ ] **Step 1: 실패하는 테스트 2개** (client.test.ts — merge 충돌 fixture 재사용, 'commit — 겹침이 남아 있으면…' 테스트 **뒤**)
+
+```ts
+  it('switch — 합치는 중(merging)에도 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.branches.switch('rival')).rejects.toThrow(/충돌 정리/)
+    await expect(client.shelf.save('합치는 중 보관')).rejects.toThrow(/정리해야 보관/)
+  })
+```
+
+- [ ] **Step 2: 실패 확인** — merging에서 switch는 GitError 원문(`cannot switch branch while merging`), save는 `could not write index` 원문으로 FAIL
+
+- [ ] **Step 3: 구현**
+
+(a) client.ts switch의 `resolve your current index` 분기를 두 문구 겸용으로 교체:
+
+```ts
+        if (
+          first.stderr.includes('resolve your current index') ||
+          first.stderr.includes('cannot switch branch while merging')
+        ) {
+          throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
+        }
+```
+
+(b) shelf.save를 에러 매핑 형태로 교체:
+
+```ts
+      async save(message) {
+        const cwd = await topLevel()
+        const result = await execGit(['stash', 'push', '-u', '-m', message], { cwd })
+        if (result.exitCode !== 0) {
+          // 충돌(unmerged) 중에는 stash가 index를 쓸 수 없다 — 원어 대신 다음 행동을 안내한다 (통합 리뷰 실측)
+          if (result.stderr.includes('could not write index')) {
+            throw new Error('겹침(!)을 먼저 정리해야 보관할 수 있어요.')
+          }
+          throw new GitError(['stash', 'push', '-u', '-m', message], result)
+        }
+        if (result.stdout.includes('No local changes to save')) {
+          throw new Error('보관할 변경이 없어요.')
+        }
+      },
+```
+
+(c) store `selectCommit`의 set에 `conflictFile: null,`을 추가한다 (`commitFile: null,` 뒤) — 충돌 뷰·커밋 상세 상호배타 복원.
+
+(d) README: 서두 "0단계(기반)와 E0(쉬운 모드 기초)가 동작합니다"를 "0단계(기반)와 E0·E1(쉬운 모드 — 실험 공간·보관함·합치기)이 동작합니다"로. "다음 단계" 목록에서 이미 완료된 항목(보관함·실험 공간 만들기·합치기, 보관함 UI·스마트 병합)을 제거하거나 완료 표시로 정리한다 — 실제 README를 읽고 반영, 최종 diff 보고.
+
+- [ ] **Step 4: 게이트 + 실렌더 1건**
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **218 tests** + typecheck 5 + build + **E2E 18 passed**
+
+실렌더: 충돌 뷰 열린 채 커밋 클릭 → 중앙이 상세 파일 diff로 정상 전환되는지 확인.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter apps/desktop/src/renderer/src/store/repository-store.ts README.md
+git commit -m "fix: merging 중 전환·보관 친절 에러, 충돌 뷰-커밋 상세 상호배타, README 정리
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -1788,7 +1873,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 4 후 | +7 (markers 4·shelf-message 3) → 217 tests |
 | Task 7 후 | E2E 14 (기존 회귀 없음) |
 | Task 8 후 | **E2E 18** |
-| 최종 | 217 tests + typecheck 5 + build + E2E 18 — 전부 exit 0 |
+| Task 9-보완 후 | +1 (merging 매핑) → 218 |
+| 최종 | 218 tests + typecheck 5 + build + E2E 18 — 전부 exit 0 |
 
 (수치가 어긋나면 이 표를 갱신한다 — 본질은 "전부 PASS + 신규 테스트 실존".)
 
