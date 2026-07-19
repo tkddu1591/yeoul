@@ -53,6 +53,7 @@
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--concept-conflict);
+  white-space: nowrap;
 }
 .app__state-raw {
   font-family: var(--font-mono);
@@ -70,6 +71,10 @@
 /* 좁은 폭에서 버튼 라벨이 세로로 꺾이지 않게 — 폭 압박은 스위처 이름 말줄임이 흡수한다 (리뷰 실측) */
 .app__actions .ui-button {
   white-space: nowrap;
+}
+.app__status .ui-button {
+  white-space: nowrap;
+  flex: none;
 }
 .app__error {
   margin: 0;
@@ -99,7 +104,8 @@
   font-weight: 600;
   flex: none;
 }
-.app__merge-bar > span {
+/* 메시지 span만 — `> span`은 Pictogram 루트(span)까지 잡아 아이콘이 중앙으로 밀린다 (리뷰 실측) */
+.app__merge-text {
   flex: 1;
   min-width: 0;
 }

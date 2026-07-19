@@ -57,6 +57,8 @@ interface RepositoryStore {
   abortMerge(): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
+  /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
+  reloadConflict(path: string): Promise<string | null>
   /** 충돌을 한쪽으로 확정한다 */
   resolveConflict(path: string, choice: 'ours' | 'theirs'): Promise<void>
   /** 직접 수정을 마쳤다고 표시한다 */
@@ -340,8 +342,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const notices: Record<typeof result.outcome, string | null> = {
         'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
         merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
-        conflict:
-          '겹치는 부분이 있어요. 붉은 ! 파일을 눌러 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.',
+        // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
+        conflict: null,
         'up-to-date': '이미 모두 반영되어 있어요.',
       }
       const shelfNotice = result.autoShelved
@@ -381,6 +383,20 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         commitFile: null,
       })
     })
+  },
+
+  async reloadConflict(path) {
+    const { repoPath } = get()
+    if (!repoPath) return null
+    // 읽기 전용 재조회 — guard(busy)를 잡지 않아 확인 흐름을 막지 않는다
+    try {
+      const content = await git().files.readText(repoPath, path)
+      set({ conflictFile: { path, content } })
+      return content
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+      return null
+    }
   },
 
   async resolveConflict(path, choice) {

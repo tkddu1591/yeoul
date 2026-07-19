@@ -103,6 +103,7 @@ export function App() {
 
   const status = store.status
   const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
+  const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
   const suggestion = suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
 
@@ -196,9 +197,11 @@ export function App() {
       {status?.state === 'merging' && (
         <div className="app__merge-bar" data-testid="merge-bar">
           <Pictogram kind="conflict" size={14} label="합치는 중" />
-          <span data-testid="merge-remaining">
-            실험 공간 합치는 중 — 겹침 {status.changes.filter((c) => c.unstaged === 'conflicted').length}
-            개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.
+          {/* 문구는 상태 인지형 — 0개가 되는 전환점에서 다음 행동(저장하기)을 짚어 준다 (리뷰 반영) */}
+          <span className="app__merge-text" data-testid="merge-remaining">
+            {conflictCount > 0
+              ? `실험 공간 합치는 중 — 겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+              : '실험 공간 합치는 중 — 겹침 0개 남음. 이제 저장하기로 마무리해요.'}
           </span>
           <Button
             variant="danger"
@@ -234,6 +237,7 @@ export function App() {
               busy={store.busy}
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
+              onReload={() => store.reloadConflict(store.conflictFile!.path)}
             />
           ) : (
             <DiffPanel

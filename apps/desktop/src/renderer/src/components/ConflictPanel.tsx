@@ -17,13 +17,22 @@ interface ConflictPanelProps {
   onResolve(choice: 'ours' | 'theirs'): void
   /** 직접 수정을 마쳤다고 표시 — 마커가 남아 있으면 확인창을 거친다 */
   onMarkResolved(): void
+  /** 최신 파일 내용 재조회 — 외부 편집 후의 stale 마커 검사(거짓 경고)를 막는다. 실패 시 null */
+  onReload(): Promise<string | null>
 }
 
 /**
  * 충돌 해결 화면 (스펙 A안+B) — 파일 단위로 한쪽을 고르거나, 외부에서 직접 수정한 뒤 해결 표시.
  * 초록 구간 = 내 것(HEAD), 보라 구간 = 가져온 것.
  */
-export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }: ConflictPanelProps) {
+export function ConflictPanel({
+  path,
+  content,
+  busy,
+  onResolve,
+  onMarkResolved,
+  onReload,
+}: ConflictPanelProps) {
   const [confirmingMark, setConfirmingMark] = useState(false)
   const rows = parseConflictContent(content)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -34,46 +43,19 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
     overscan: 20,
   })
   const markResolved = () => {
-    // 마커가 남은 채 해결 표시하면 마커가 그대로 저장된다 — 경고를 거친다
-    if (hasConflictMarkers(content)) setConfirmingMark(true)
-    else onMarkResolved()
+    void (async () => {
+      // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)
+      const fresh = await onReload()
+      if (fresh === null) return
+      if (hasConflictMarkers(fresh)) setConfirmingMark(true)
+      else onMarkResolved()
+    })()
   }
 
   return (
     <Panel
       title={`${path} — 겹침 해결`}
-      accessory={
-        <>
-          <Badge tone="git">conflict</Badge>
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={busy}
-            onPress={() => onResolve('ours')}
-            testId="conflict-ours"
-          >
-            <User size={13} aria-hidden="true" /> 내 것 유지
-          </Button>
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={busy}
-            onPress={() => onResolve('theirs')}
-            testId="conflict-theirs"
-          >
-            <Download size={13} aria-hidden="true" /> 가져온 것 사용
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onPress={markResolved}
-            testId="conflict-mark"
-          >
-            <Check size={13} aria-hidden="true" /> 직접 수정했어요
-          </Button>
-        </>
-      }
+      accessory={<Badge tone="git">conflict</Badge>}
       testId="conflict-panel"
     >
       <p className="conflict-panel__hint">
@@ -81,6 +63,36 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
         고르면 파일 전체가 그쪽으로 정리돼요. 세밀하게 고치려면 편집기에서 직접 수정한 뒤 "직접
         수정했어요"를 눌러 주세요.
       </p>
+      {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
+      <div className="conflict-panel__actions">
+        <Button
+          variant="neutral"
+          size="sm"
+          isDisabled={busy}
+          onPress={() => onResolve('ours')}
+          testId="conflict-ours"
+        >
+          <User size={13} aria-hidden="true" /> 내 것 유지
+        </Button>
+        <Button
+          variant="neutral"
+          size="sm"
+          isDisabled={busy}
+          onPress={() => onResolve('theirs')}
+          testId="conflict-theirs"
+        >
+          <Download size={13} aria-hidden="true" /> 가져온 것 사용
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          isDisabled={busy}
+          onPress={markResolved}
+          testId="conflict-mark"
+        >
+          <Check size={13} aria-hidden="true" /> 직접 수정했어요
+        </Button>
+      </div>
       <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
         <div
           className="conflict-panel__code"
@@ -106,7 +118,7 @@ export function ConflictPanel({ path, content, busy, onResolve, onMarkResolved }
       </div>
       <ConfirmDialog
         isOpen={confirmingMark}
-        title="충돌 표시가 아직 남아 있어요"
+        title="겹침 표시가 아직 남아 있어요"
         confirmLabel="그래도 표시"
         onConfirm={() => {
           setConfirmingMark(false)
