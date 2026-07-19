@@ -72,6 +72,14 @@ function assertShelfRef(value: unknown): string {
   return value
 }
 
+/** 충돌 확정 방향은 두 값만 — 임의 문자열이 checkout 인자로 흘러가는 것을 차단 */
+function assertConflictChoice(value: unknown): 'ours' | 'theirs' {
+  if (value !== 'ours' && value !== 'theirs') {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
 function assertNullableHash(value: unknown): string | null {
   if (value === null) return null
   return assertHash(value)
@@ -124,6 +132,31 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.branchesSwitch, (_event, repoPath: unknown, name: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).branches.switch(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.branchesMerge, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.merge(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.mergeAbort, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).merge.abort(),
+  )
+
+  ipcMain.handle(
+    CHANNELS.conflictsResolve,
+    (_event, repoPath: unknown, path: unknown, choice: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).conflicts.resolve(
+        assertString(path),
+        assertConflictChoice(choice),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.conflictsMarkResolved, (_event, repoPath: unknown, path: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).conflicts.markResolved(assertString(path)),
+  )
+
+  ipcMain.handle(CHANNELS.filesReadText, (_event, repoPath: unknown, path: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).files.readText(assertString(path)),
   )
 
   ipcMain.handle(CHANNELS.shelfSave, (_event, repoPath: unknown, message: unknown) =>

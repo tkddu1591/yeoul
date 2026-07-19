@@ -13,6 +13,19 @@ const api: GitApi = {
     create: (repoPath, name, fromHash) =>
       ipcRenderer.invoke(CHANNELS.branchesCreate, repoPath, name, fromHash),
     switch: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesSwitch, repoPath, name),
+    merge: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesMerge, repoPath, name),
+  },
+  merge: {
+    abort: (repoPath) => ipcRenderer.invoke(CHANNELS.mergeAbort, repoPath),
+  },
+  conflicts: {
+    resolve: (repoPath, path, choice) =>
+      ipcRenderer.invoke(CHANNELS.conflictsResolve, repoPath, path, choice),
+    markResolved: (repoPath, path) =>
+      ipcRenderer.invoke(CHANNELS.conflictsMarkResolved, repoPath, path),
+  },
+  files: {
+    readText: (repoPath, path) => ipcRenderer.invoke(CHANNELS.filesReadText, repoPath, path),
   },
   shelf: {
     save: (repoPath, message) => ipcRenderer.invoke(CHANNELS.shelfSave, repoPath, message),

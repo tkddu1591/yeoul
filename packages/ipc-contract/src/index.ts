@@ -4,6 +4,7 @@ import type {
   CommitSummary,
   DiffOptions,
   FileDiff,
+  MergeResult,
   RepositoryStatus,
   ShelfEntry,
   SwitchResult,
@@ -31,6 +32,20 @@ export interface GitApi {
     /** fromHash는 40자 hex 전체 해시 또는 null(지금 위치에서) */
     create(repoPath: string, name: string, fromHash: string | null): Promise<void>
     switch(repoPath: string, name: string): Promise<SwitchResult>
+    /** name 공간을 지금 공간으로 합친다(스마트 병합) — conflict면 충돌 상태가 남는다 */
+    merge(repoPath: string, name: string): Promise<MergeResult>
+  }
+  merge: {
+    abort(repoPath: string): Promise<void>
+  }
+  conflicts: {
+    /** choice는 'ours'(내 것 유지) | 'theirs'(가져온 것 사용)만 허용된다 */
+    resolve(repoPath: string, path: string, choice: 'ours' | 'theirs'): Promise<void>
+    markResolved(repoPath: string, path: string): Promise<void>
+  }
+  files: {
+    /** 워크트리 텍스트 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
+    readText(repoPath: string, path: string): Promise<string>
   }
   shelf: {
     save(repoPath: string, message: string): Promise<void>
@@ -71,6 +86,11 @@ export const CHANNELS = {
   branchesList: 'branches:list',
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',
+  branchesMerge: 'branches:merge',
+  mergeAbort: 'merge:abort',
+  conflictsResolve: 'conflicts:resolve',
+  conflictsMarkResolved: 'conflicts:mark-resolved',
+  filesReadText: 'files:read-text',
   shelfSave: 'shelf:save',
   shelfList: 'shelf:list',
   shelfRestore: 'shelf:restore',
