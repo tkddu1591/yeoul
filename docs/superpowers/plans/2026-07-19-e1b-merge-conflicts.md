@@ -926,7 +926,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().merge.abort()
+      await git().merge.abort(repoPath)
       set({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
