@@ -21,20 +21,22 @@ describe('parseBranches', () => {
 })
 
 describe('parseShelf', () => {
-  it('stash list 출력에서 ref·시각·메시지를 읽는다', () => {
+  it('stash list 출력에서 ref·시각·해시·메시지를 읽는다', () => {
+    const hashA = 'a'.repeat(40)
+    const hashB = 'b'.repeat(40)
     const raw =
       [
-        `stash@{0}${US}1784279940${US}On main: 전환 자동 보관`,
-        `stash@{1}${US}1784279930${US}WIP on side: abc1234 subject`,
+        `stash@{0}${US}1784279940${US}${hashA}${US}On main: 전환 자동 보관`,
+        `stash@{1}${US}1784279930${US}${hashB}${US}WIP on side: abc1234 subject`,
       ].join('\n') + '\n'
     expect(parseShelf(raw)).toEqual([
-      { ref: 'stash@{0}', savedAt: 1784279940, message: 'On main: 전환 자동 보관' },
-      { ref: 'stash@{1}', savedAt: 1784279930, message: 'WIP on side: abc1234 subject' },
+      { ref: 'stash@{0}', savedAt: 1784279940, hash: hashA, message: 'On main: 전환 자동 보관' },
+      { ref: 'stash@{1}', savedAt: 1784279930, hash: hashB, message: 'WIP on side: abc1234 subject' },
     ])
   })
 
   it('메시지에 구분자가 섞여도 나머지를 메시지로 합친다', () => {
-    const raw = `stash@{0}${US}100${US}메시지${US}에 구분자\n`
+    const raw = `stash@{0}${US}100${US}${'c'.repeat(40)}${US}메시지${US}에 구분자\n`
     expect(parseShelf(raw)[0]?.message).toBe(`메시지${US}에 구분자`)
   })
 

@@ -98,6 +98,8 @@ export interface BranchSummary {
 export interface ShelfEntry {
   /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */
   ref: string
+  /** 보관 항목의 실제 커밋 해시 — 미리보기(커밋 상세 재사용)에 쓴다 (피드백 2) */
+  hash: string
   /** epoch 초 */
   savedAt: number
   message: string

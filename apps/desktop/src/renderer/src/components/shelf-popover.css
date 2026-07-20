@@ -44,6 +44,18 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* 버튼화(미리보기 클릭) — 기본 버튼 모양을 지우고 텍스트 블록처럼 보이게 */
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  color: inherit;
+}
+.shelf-popover__meta:hover {
+  background: var(--color-surface-sunken);
 }
 .shelf-popover__message {
   font-size: var(--text-sm);

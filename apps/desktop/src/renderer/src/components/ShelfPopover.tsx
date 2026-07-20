@@ -13,16 +13,20 @@ interface ShelfPopoverProps {
   shelf: ShelfEntry[]
   busy: boolean
   onSave(): void
+  /** 항목 미리보기 — 커밋 상세(우측)로 보여준다. 팝오버는 닫는다 (피드백 2) */
+  onPreview(hash: string): void
   onRestore(ref: string): void
   onDrop(ref: string): void
 }
 
 /** 보관함 (스펙 E1) — 잠시 치워 둔 변경을 보고 꺼내거나 버린다. 전환 자동 보관도 여기로 온다 */
-export function ShelfPopover({ shelf, busy, onSave, onRestore, onDrop }: ShelfPopoverProps) {
+export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop }: ShelfPopoverProps) {
   const [dropTarget, setDropTarget] = useState<ShelfEntry | null>(null)
+  // 미리보기 클릭 시 닫아야 해서 제어형으로 둔다 — 그 외 동작은 기존과 같다
+  const [open, setOpen] = useState(false)
   return (
     <>
-      <DialogTrigger>
+      <DialogTrigger isOpen={open} onOpenChange={setOpen}>
         <Button variant="ghost" size="sm" testId="shelf-open">
           <Archive size={13} aria-hidden="true" /> 보관함{' '}
           <Badge tone="count">
@@ -47,7 +51,16 @@ export function ShelfPopover({ shelf, busy, onSave, onRestore, onDrop }: ShelfPo
               <ul className="shelf-popover__list">
                 {shelf.map((entry) => (
                   <li key={entry.ref} className="shelf-popover__row">
-                    <div className="shelf-popover__meta">
+                    <button
+                      type="button"
+                      className="shelf-popover__meta"
+                      title="무엇이 담겼는지 미리보기"
+                      onClick={() => {
+                        setOpen(false)
+                        onPreview(entry.hash)
+                      }}
+                      data-testid={`shelf-preview-${entry.ref}`}
+                    >
                       <span className="shelf-popover__message" title={entry.message}>
                         {parseShelfMessage(entry.message).text}
                       </span>
@@ -59,7 +72,7 @@ export function ShelfPopover({ shelf, busy, onSave, onRestore, onDrop }: ShelfPo
                         )}
                         {formatRelativeTime(entry.savedAt, Date.now())}
                       </span>
-                    </div>
+                    </button>
                     <Button
                       variant="ghost"
                       size="sm"

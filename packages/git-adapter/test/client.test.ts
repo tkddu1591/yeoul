@@ -511,6 +511,19 @@ describe('GitClient', () => {
     await expect(client.branches.switch('no-such')).rejects.toThrow(/실험 공간이 없어요/)
   })
 
+  it('shelf — 항목 해시로 커밋 상세(미리보기)를 열 수 있다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await client.shelf.save('미리보기 대상')
+
+    const shelf = await client.shelf.list()
+    expect(shelf[0]!.hash).toMatch(/^[0-9a-f]{40}$/)
+    // stash 항목은 실제 커밋 — 기존 커밋 상세 흐름을 그대로 재사용한다
+    const detail = await client.commits.show(shelf[0]!.hash)
+    expect(detail.files.map((f) => f.path)).toContain('README.md')
+  })
+
   it('shelf — 보관·목록·꺼내기·버리기 왕복 (untracked 포함)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

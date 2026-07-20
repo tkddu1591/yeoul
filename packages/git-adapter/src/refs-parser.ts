@@ -33,14 +33,15 @@ export function parseShelf(rawOutput: string): ShelfEntry[] {
   const entries: ShelfEntry[] = []
   for (const line of lines) {
     const fields = line.split(FIELD_SEPARATOR)
-    if (fields.length < 3) continue
+    if (fields.length < 4) continue
     const savedAt = Number(fields[1])
     if (!Number.isFinite(savedAt)) continue
     entries.push({
       ref: fields[0]!,
+      hash: fields[2]!,
       savedAt,
       // 메시지에 구분자가 섞이는 일은 없지만 방어적으로 나머지를 합친다
-      message: fields.slice(2).join(FIELD_SEPARATOR),
+      message: fields.slice(3).join(FIELD_SEPARATOR),
     })
   }
   return entries

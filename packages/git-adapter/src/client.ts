@@ -375,7 +375,7 @@ export function createGitClient(repoPath: string): GitClient {
       },
       async list() {
         const cwd = await topLevel()
-        const raw = await execGitOrThrow(['stash', 'list', '--format=%gd%x1f%ct%x1f%gs'], { cwd })
+        const raw = await execGitOrThrow(['stash', 'list', '--format=%gd%x1f%ct%x1f%H%x1f%gs'], { cwd })
         return parseShelf(raw.stdout)
       },
       async restore(ref) {

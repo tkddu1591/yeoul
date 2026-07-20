@@ -173,6 +173,7 @@ export function App() {
             shelf={store.shelf}
             busy={store.busy}
             onSave={() => void store.shelfSave()}
+            onPreview={(hash) => void store.selectCommit(hash)}
             onRestore={(ref) => void store.shelfRestore(ref)}
             onDrop={(ref) => void store.shelfDrop(ref)}
           />
