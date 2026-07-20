@@ -55,6 +55,16 @@ interface RepositoryStore {
   mergeBranch(name: string): Promise<void>
   /** 합치기 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다 */
   abortMerge(): Promise<void>
+  /** 원격의 최신 저장을 받아온다 — 결과를 notice로, 충돌은 머지 바가 안내 */
+  pullLatest(): Promise<void>
+  /** 이 저장을 반대로 적용하는 새 저장 — 충돌이면 reverting 상태 바가 안내 */
+  revertCommit(hash: string): Promise<void>
+  /** 되돌리기 취소 — 확인창(UI 책임) 경유 */
+  abortRevert(): Promise<void>
+  /** 실험 공간 지우기. 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
+  removeBranch(name: string, force: boolean): Promise<boolean>
+  /** 이름 바꾸기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
+  renameBranch(oldName: string, newName: string): Promise<boolean>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
   /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
@@ -367,6 +377,80 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: '합치기를 취소하고 이전 상태로 돌아왔어요.',
       })
+    })
+  },
+
+  async pullLatest() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().sync.pull(repoPath)
+      const notices: Record<typeof result.outcome, string | null> = {
+        'fast-forward': '원격의 최신 저장을 받아왔어요.',
+        merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
+        // 충돌 안내는 머지 바가 상주하며 담당한다
+        conflict: null,
+        'up-to-date': '이미 최신이에요.',
+      }
+      const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `${notices[result.outcome] ?? ''}${shelfNotice}` || null,
+      })
+    })
+  },
+
+  async revertCommit(hash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().commits.revert(repoPath, hash)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        // 충돌 안내는 reverting 상태 바가 담당한다
+        notice: result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null,
+      })
+    })
+  },
+
+  async abortRevert() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().commits.revertAbort(repoPath)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '되돌리기를 취소하고 이전 상태로 돌아왔어요.',
+      })
+    })
+  },
+
+  async removeBranch(name, force) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    let needsForce = false
+    await guard(set, get, async () => {
+      const result = await git().branches.remove(repoPath, name, force)
+      needsForce = result.needsForce
+      if (result.removed) {
+        set({
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice: `"${name}" 실험 공간을 지웠어요.`,
+        })
+      }
+    })
+    return needsForce
+  },
+
+  async renameBranch(oldName, newName) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      await git().branches.rename(repoPath, oldName, newName)
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 
