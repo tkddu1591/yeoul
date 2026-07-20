@@ -1314,9 +1314,346 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 5-보완: 품질 리뷰 4건 (실렌더 실측 반영)
+
+품질 리뷰(실렌더)가 잡은 결함을 반영한다. 실측 근거:
+
+- **(Critical) 전량 '내 것 유지' 데드엔드** — 충돌을 전부 ours로 해소하면 index가 HEAD와 같아져 staged 0. 상태 바는 "이제 저장하기로 마무리해요"를 지시하지만 저장하기 버튼은 `stagedCount === 0`으로 영구 비활성. **실측**: merging에서는 staged 0이어도 `git commit -F -`가 성공하며 부모 2개의 병합 커밋을 만든다(합침 사실의 기록 — 다음 합치기가 재충돌하지 않게 하는 의미 있는 저장). reverting에서는 `nothing to commit`으로 실패한다(빈 revert 커밋은 무의미 — 전량 내 것 유지는 곧 "되돌리지 않겠다"와 동치). 따라서 **merging은 저장하기를 활성화**하고, **reverting은 상태 바 문구를 '되돌리기 취소로 마무리'로 분기**한다.
+- **(Important) 스테일 인라인 에러** — 전역 `store.error`를 그대로 `errorText`로 물려줘, 이전 작업의 에러가 무관한 다이얼로그(다른 브랜치 이름 바꾸기·새 실험 공간 프롬프트)에 인라인으로 새어든다. **다이얼로그를 여는 시점에 error를 지운다.**
+- **(Minor) 점프 커서 미리셋** — ConflictPanel이 conditional 재사용이라 파일 A에서 점프한 커서가 파일 B에 남는다 → `key={path}`로 파일마다 리마운트.
+- **(Minor) revert 맥락의 merge 어휘** — "가져온 것"이 revert에서는 "되돌린 결과물"이다 → `mode` prop으로 문구 분기.
+- **(Minor) 강제 삭제 E2E 단언 느슨** — 2차 확인을 제목 텍스트로 단언한다.
+
+**Files:**
+- Test: `packages/git-adapter/test/client.test.ts` (전량 ours 병합 마무리 고정 테스트)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (clearError)
+- Modify: `apps/desktop/src/renderer/src/components/CommitForm.tsx` (allowEmpty)
+- Modify: `apps/desktop/src/renderer/src/components/ConflictPanel.tsx` (mode 어휘 분기)
+- Modify: `apps/desktop/src/renderer/src/components/ManageBranchesDialog.tsx` (onClearError)
+- Modify: `apps/desktop/src/renderer/src/App.tsx` (배선·상태 바 문구 분기·key)
+- Test: `apps/desktop/e2e/smoke.spec.ts` (전량 ours 신규 1건 + 단언 보강 2건)
+
+- [ ] **Step 1: 엔진 고정 테스트** — `client.test.ts`의 `'commit — 겹침이 남아 있으면 읽히는 메시지로 거부한다'` 테스트 **앞**에 추가. 엔진은 이미 지원하므로 즉시 PASS가 기대치다(회귀 고정 — UI가 기대는 전제를 못박는다):
+
+```ts
+  it('conflicts — 전량 ours 해소(변경 0)여도 commit이 병합을 마무리한다 (부모 2개)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await client.conflicts.resolve('README.md', 'ours')
+    // index == HEAD — porcelain 변경 0이지만, 병합 커밋 자체가 의미 있는 저장이다
+    const status = await client.repo.status()
+    expect(status.state).toBe('merging')
+    expect(status.changes).toEqual([])
+    await client.commits.create('합치기 마무리 — 내 것 유지')
+    const head = (await client.history.list(1))[0]!
+    expect(head.parents).toHaveLength(2)
+    expect((await client.repo.status()).state).toBe('normal')
+  })
+```
+
+Run: `pnpm --filter @git-gui/git-adapter test` → PASS (**230 tests 총계**)
+
+- [ ] **Step 2: E2E Red 실증** — `smoke.spec.ts`의 `'겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무리한다'` 테스트 **바로 뒤**에 신규 추가:
+
+```ts
+test('겹침을 전부 내 것으로 정리해도 저장하기로 합치기를 마무리할 수 있다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'rival\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'rival'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'mine'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-ours').click()
+    // 전량 내 것 — 변경 0개지만 병합 커밋으로 마무리할 수 있어야 한다 (데드엔드 방지)
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 0개 남음')
+    await expect(window.getByTestId('commit-button')).toContainText('합치기 마무리')
+    await expect(window.getByTestId('commit-button')).toBeEnabled()
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('history-count')).toHaveText('4')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+Run: `pnpm --filter desktop build && pnpm --filter desktop exec playwright test --grep "전부 내 것으로 정리해도"` → **FAIL 기대**(commit-button 비활성·'0개 파일'). Red 실증 후 진행.
+
+- [ ] **Step 3: store — clearError** (`repository-store.ts`)
+
+인터페이스의 `clearCommitFile(): void` 줄 뒤에:
+
+```ts
+  /** 전역 에러를 지운다 — 다이얼로그를 새로 열 때 이전 작업 에러가 인라인으로 새어들지 않게. 동기라 guard 불필요 */
+  clearError(): void
+```
+
+구현의 `clearCommitFile() { ... },` 블록 뒤에:
+
+```ts
+  clearError() {
+    set({ error: null })
+  },
+```
+
+- [ ] **Step 4: CommitForm — allowEmpty** (`CommitForm.tsx` 전체 교체)
+
+```tsx
+import { useState } from 'react'
+import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
+import './commit-form.css'
+
+interface CommitFormProps {
+  stagedCount: number
+  busy: boolean
+  /** 빈 메시지로 저장하면 대신 들어갈 규칙 기반 제안 (스펙 8장). 없으면 빈 문자열 */
+  suggestion: string
+  /** 합치는 중에는 변경 0개여도 저장(병합 커밋)이 의미 있다 — 전량 ours 데드엔드 방지 (품질 리뷰) */
+  allowEmpty: boolean
+  onCommit(message: string): Promise<boolean>
+}
+
+export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit }: CommitFormProps) {
+  const [message, setMessage] = useState('')
+  const effectiveMessage = message.trim().length > 0 ? message : suggestion
+  const disabled = busy || (stagedCount === 0 && !allowEmpty) || effectiveMessage.trim().length === 0
+
+  return (
+    <form
+      className="commit-form"
+      onSubmit={(event) => {
+        event.preventDefault()
+        // 커밋이 실패하면(훅 거부, 충돌 상태 등) 입력한 메시지를 보존한다
+        void onCommit(effectiveMessage).then((committed) => {
+          if (committed) setMessage('')
+        })
+      }}
+    >
+      <label className="commit-form__label" htmlFor="commit-message">
+        저장 메시지 <Badge tone="git">commit</Badge>
+      </label>
+      <textarea
+        id="commit-message"
+        data-testid="commit-message"
+        value={message}
+        onChange={(event) => setMessage(event.target.value)}
+        placeholder={suggestion || '무엇을 바꿨는지 적어 주세요'}
+        rows={3}
+      />
+      {message.trim().length === 0 && suggestion.length > 0 && (
+        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 저장 문구임을 알린다
+        <p className="commit-form__hint" data-testid="commit-hint">
+          비워 두고 저장하면 위 제안 문구로 저장돼요
+        </p>
+      )}
+      <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
+        저장하기 — {allowEmpty && stagedCount === 0 ? '합치기 마무리' : `${stagedCount}개 파일`}
+      </Button>
+    </form>
+  )
+}
+```
+
+- [ ] **Step 5: ConflictPanel — mode 어휘 분기** (`ConflictPanel.tsx`)
+
+(a) props에 추가(`busy: boolean` 줄 뒤):
+
+```ts
+  /** 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰) */
+  mode: 'merging' | 'reverting'
+```
+
+(b) 함수 시그니처의 구조 분해에 `mode` 추가, 본문 첫 줄(`const [confirmingMark, ...]` 앞)에:
+
+```ts
+  const takenLabel = mode === 'reverting' ? '되돌린 결과물' : '가져온 것'
+```
+
+(c) 힌트 문단 교체:
+
+```tsx
+      <p className="conflict-panel__hint">
+        초록 구간이 <strong>내 것</strong>, 보라 구간이 <strong>{takenLabel}</strong>이에요. 한쪽을
+        고르면 파일 전체가 그쪽으로 정리돼요. 세밀하게 고치려면 편집기에서 직접 수정한 뒤 "직접
+        수정했어요"를 눌러 주세요.
+      </p>
+```
+
+(d) theirs 버튼 라벨 교체:
+
+```tsx
+          <Download size={13} aria-hidden="true" /> {takenLabel} 사용
+```
+
+(e) 주석(파일 상단 doc comment)의 `보라 구간 = 가져온 것.`을 `보라 구간 = 가져온 것(revert에서는 되돌린 결과물).`으로 갱신.
+
+- [ ] **Step 6: ManageBranchesDialog — onClearError** (`ManageBranchesDialog.tsx`)
+
+(a) props에 추가(`onCancel(): void` 줄 앞):
+
+```ts
+  /** 이름 바꾸기 프롬프트를 열 때 이전 에러를 지운다 — 스테일 인라인 에러 방지 (품질 리뷰) */
+  onClearError(): void
+```
+
+(b) 구조 분해에 `onClearError` 추가, 이름 바꾸기 버튼의 onPress 교체:
+
+```tsx
+                    onPress={() => {
+                      onClearError()
+                      setRenameTarget(branch.name)
+                    }}
+```
+
+- [ ] **Step 7: App.tsx 배선**
+
+(a) suggestion 계산 교체 — 합치는 중 변경 0개면 기본 제안을 준다(버튼이 곧바로 활성):
+
+```tsx
+  const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
+  const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
+  // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
+  const suggestion =
+    status?.state === 'merging' && stagedCount === 0
+      ? '실험 공간 합치기'
+      : suggestCommitMessage(status?.changes ?? [])
+```
+
+(b) 상태 바 문구 분기 교체:
+
+```tsx
+            {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
+              conflictCount > 0
+                ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+                : status.state === 'reverting' && stagedCount === 0
+                  ? '겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — 되돌리기 취소를 눌러 마무리해요.'
+                  : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+            }`}
+```
+
+(c) ConflictPanel에 `key`·`mode` 추가:
+
+```tsx
+            <ConflictPanel
+              key={store.conflictFile.path}
+              path={store.conflictFile.path}
+              content={store.conflictFile.content}
+              busy={store.busy}
+              mode={status?.state === 'reverting' ? 'reverting' : 'merging'}
+              onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
+              onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
+              onReload={() => store.reloadConflict(store.conflictFile!.path)}
+            />
+```
+
+(d) CommitForm에 `allowEmpty` 추가:
+
+```tsx
+          <CommitForm
+            stagedCount={stagedCount}
+            busy={store.busy}
+            suggestion={suggestion}
+            allowEmpty={status?.state === 'merging'}
+            onCommit={(message) => store.commit(message)}
+          />
+```
+
+(e) 다이얼로그 열기 시점 clearError 배선 — BranchSwitcher·HistoryPanel·ManageBranchesDialog:
+
+```tsx
+              onCreate={() => {
+                store.clearError()
+                setBranchPrompt({ fromHash: null })
+              }}
+              onManage={() => {
+                store.clearError()
+                setManageOpen(true)
+              }}
+```
+
+```tsx
+            onCreateBranchAt={(hash) => {
+              store.clearError()
+              setBranchPrompt({ fromHash: hash })
+            }}
+```
+
+```tsx
+      <ManageBranchesDialog
+        isOpen={manageOpen}
+        branches={store.branches}
+        busy={store.busy}
+        errorText={store.error}
+        onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
+        onRemove={(name, force) => store.removeBranch(name, force)}
+        onClearError={() => store.clearError()}
+        onCancel={() => setManageOpen(false)}
+      />
+```
+
+- [ ] **Step 8: E2E 단언 보강 2건** (`smoke.spec.ts`)
+
+(a) `'되돌리기가 겹치면 상태 바에서 취소할 수 있다'` — 상태 바 확인과 취소 클릭 사이에 전량 ours 안내 문구 검증을 끼운다:
+
+```ts
+    await expect(window.getByTestId('merge-bar')).toContainText('저장 되돌리는 중')
+    // 전부 내 것을 유지하면 바뀌는 내용이 없다 — 저장하기 대신 취소로 마무리하도록 안내한다
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-ours').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('되돌리기 취소를 눌러 마무리해요')
+    await window.getByTestId('merge-abort').click()
+```
+
+(b) `'합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다'` — 느슨한 2차 확인 단언을 제목 텍스트로 교체:
+
+```ts
+    // 합쳐지지 않은 저장 — 1차와 구분되는 강제 확인창(제목)이 이어진다
+    await expect(window.getByText('아직 합쳐지지 않은 저장이 있어요')).toBeVisible()
+```
+
+- [ ] **Step 9: 게이트** — `pnpm -r test`(**230 tests**) + `pnpm -r typecheck`(5 Done) + `pnpm --filter desktop build` + E2E 전체(**24 passed**) 전부 exit 0
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add packages/git-adapter/test apps/desktop/src/renderer/src apps/desktop/e2e
+git commit -m "fix(desktop): 품질 리뷰 — 전량 ours 데드엔드·스테일 인라인 에러·점프 커서·revert 어휘
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 7: 최종 게이트 + 스크린샷 + README
 
-- [ ] **Step 1: 전체 게이트** — 229 tests + typecheck 5 + build + **E2E 23 passed**
+- [ ] **Step 1: 전체 게이트** — 230 tests + typecheck 5 + build + **E2E 24 passed**
 
 - [ ] **Step 2: 스크린샷 3장** (1440×900, test-results/ + scratchpad 사본, **생성 후 e2e 재실행 금지**)
 
@@ -1345,7 +1682,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 2 후 | +6 → **228 tests**, 4-보완 +1 → 229 |
 | Task 5 후 | E2E 18 (기존 회귀 없음) |
 | Task 6 후 | **E2E 23** |
-| 최종 | 229 tests + typecheck 5 + build + E2E 23 — 전부 exit 0 |
+| Task 5-보완 후 | +1 → **230 tests**, E2E +1 → **24** |
+| 최종 | 230 tests + typecheck 5 + build + E2E 24 — 전부 exit 0 |
 
 (수치가 어긋나면 이 표를 갱신한다.)
 
@@ -1356,3 +1694,4 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - 팝오버 ESC 불응(E1a 잔여), 블록 단위 충돌 선택·앱 내 편집기
 - revert의 revert·빈 revert 안내, 관리 다이얼로그에서 원격 브랜치 표시
 - 현재 브랜치 이름 바꾸기 후 백업(push)이 upstream 불일치 원어 에러로 실패한다(리뷰 실측) — rename 시 upstream 갱신 또는 push 에러 매핑
+- 관리 다이얼로그에서 needsForce 외 사유의 삭제 실패는 상단 배너로만 보인다(오버레이 위로 보이긴 함 — 품질 리뷰 Minor) — 다이얼로그 내 인라인 표시 검토
