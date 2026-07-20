@@ -14,6 +14,9 @@ import type {
 } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
+export type { PullSummary } from '@git-gui/hosting'
+
+import type { PullSummary } from '@git-gui/hosting'
 
 /**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
@@ -124,6 +127,54 @@ export const CHANNELS = {
   historyList: 'history:list',
   syncPush: 'sync:push',
   syncPull: 'sync:pull',
+} as const
+
+/** 호스팅 연결 상태 — 토큰 자체는 절대 renderer로 오지 않는다(login만) */
+export interface HostingStatus {
+  connected: boolean
+  /** 연결된 GitHub 계정 이름 — 미연결이면 null */
+  login: string | null
+  /** origin remote가 GitHub이면 그 좌표, 아니면(비GitHub·remote 없음) null */
+  repo: { owner: string; repo: string } | null
+  /** gh CLI 로그인 토큰을 감지했는가 — 미연결 화면의 [gh로 연결] 노출 여부 */
+  ghAvailable: boolean
+}
+
+/**
+ * 호스팅(리뷰 요청) API 표면 — 네트워크·토큰은 전부 main 프로세스에서만 다룬다.
+ * repoPath 신뢰 규칙은 GitApi와 동일(main의 allowlist).
+ */
+export interface HostingApi {
+  /** 연결 상태 — 저장된 login이 있으면 네트워크 없이 응답한다. 실패해도 던지지 않고 미연결로 응답 */
+  status(repoPath: string): Promise<HostingStatus>
+  connect: {
+    /** gh CLI 토큰으로 연결 — 감지·검증(user.current) 성공 시에만 저장하고 login 반환 */
+    gh(): Promise<string>
+    /** 붙여넣은 토큰으로 연결 — 검증 성공 시에만 저장하고 login 반환 */
+    token(token: string): Promise<string>
+  }
+  /** 연결 해제 — 저장된 토큰을 지운다 */
+  disconnect(): Promise<void>
+  pulls: {
+    /** 열린 리뷰 요청 목록 */
+    list(repoPath: string): Promise<PullSummary[]>
+    /** 리뷰 요청 생성 — main이 브랜치·기본 공간을 검사하고 upstream 없으면 백업(push) 후 생성한다 */
+    create(repoPath: string, input: { title: string; body: string }): Promise<PullSummary>
+    /** 리뷰 요청을 브라우저로 연다 — URL은 main이 보관한 목록에서만 찾는다(임의 URL 열기 금지) */
+    open(repoPath: string, number: number): Promise<void>
+  }
+}
+
+export const HOSTING_API_KEY = 'hostingApi' as const
+
+export const HOSTING_CHANNELS = {
+  status: 'hosting:status',
+  connectGh: 'hosting:connect-gh',
+  connectToken: 'hosting:connect-token',
+  disconnect: 'hosting:disconnect',
+  pullsList: 'hosting:pulls-list',
+  pullCreate: 'hosting:pull-create',
+  pullOpen: 'hosting:pull-open',
 } as const
 
 /**

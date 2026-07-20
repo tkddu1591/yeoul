@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppSettings, DiffOptions, GitApi, SettingsApi } from '@git-gui/ipc-contract'
-import { CHANNELS, GIT_API_KEY, SETTINGS_API_KEY, SETTINGS_CHANNELS } from '@git-gui/ipc-contract'
+import type { AppSettings, DiffOptions, GitApi, HostingApi, SettingsApi } from '@git-gui/ipc-contract'
+import {
+  CHANNELS,
+  GIT_API_KEY,
+  HOSTING_API_KEY,
+  HOSTING_CHANNELS,
+  SETTINGS_API_KEY,
+  SETTINGS_CHANNELS,
+} from '@git-gui/ipc-contract'
 
 const api: GitApi = {
   repo: {
@@ -66,6 +73,22 @@ const api: GitApi = {
 }
 
 contextBridge.exposeInMainWorld(GIT_API_KEY, api)
+
+const hostingApi: HostingApi = {
+  status: (repoPath) => ipcRenderer.invoke(HOSTING_CHANNELS.status, repoPath),
+  connect: {
+    gh: () => ipcRenderer.invoke(HOSTING_CHANNELS.connectGh),
+    token: (token) => ipcRenderer.invoke(HOSTING_CHANNELS.connectToken, token),
+  },
+  disconnect: () => ipcRenderer.invoke(HOSTING_CHANNELS.disconnect),
+  pulls: {
+    list: (repoPath) => ipcRenderer.invoke(HOSTING_CHANNELS.pullsList, repoPath),
+    create: (repoPath, input) => ipcRenderer.invoke(HOSTING_CHANNELS.pullCreate, repoPath, input),
+    open: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullOpen, repoPath, number),
+  },
+}
+
+contextBridge.exposeInMainWorld(HOSTING_API_KEY, hostingApi)
 
 // 시작 시점 설정을 동기로 읽는다 — 첫 렌더 전에 테마·폭이 결정되어 깜빡임이 없다
 const initialSettings = ipcRenderer.sendSync(SETTINGS_CHANNELS.getSync) as AppSettings

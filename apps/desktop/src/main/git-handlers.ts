@@ -7,14 +7,14 @@ import { CHANNELS } from '@git-gui/ipc-contract'
 /** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
 const allowedRepoPaths = new Set<string>()
 
-function assertAllowedRepo(repoPath: unknown): string {
+export function assertAllowedRepo(repoPath: unknown): string {
   if (typeof repoPath !== 'string' || !allowedRepoPaths.has(repoPath)) {
     throw new Error('열려 있지 않은 저장소 경로예요. 저장소를 먼저 열어 주세요.')
   }
   return repoPath
 }
 
-function assertString(value: unknown): string {
+export function assertString(value: unknown): string {
   if (typeof value !== 'string') throw new Error('잘못된 요청 형식이에요.')
   return value
 }

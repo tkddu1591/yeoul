@@ -29,6 +29,9 @@ importers:
       '@git-gui/git-process':
         specifier: workspace:*
         version: link:../../packages/git-process
+      '@git-gui/hosting':
+        specifier: workspace:*
+        version: link:../../packages/hosting
       '@git-gui/ipc-contract':
         specifier: workspace:*
         version: link:../../packages/ipc-contract
@@ -96,6 +99,9 @@ importers:
       '@git-gui/domain':
         specifier: workspace:*
         version: link:../domain
+      '@git-gui/hosting':
+        specifier: workspace:*
+        version: link:../hosting
 
 packages:
 

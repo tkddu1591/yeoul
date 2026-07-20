@@ -13,6 +13,7 @@
     "@git-gui/domain": "workspace:*",
     "@git-gui/git-adapter": "workspace:*",
     "@git-gui/git-process": "workspace:*",
+    "@git-gui/hosting": "workspace:*",
     "@git-gui/ipc-contract": "workspace:*",
     "@tanstack/react-virtual": "^3.14.6",
     "lucide-react": "^1.24.0",
