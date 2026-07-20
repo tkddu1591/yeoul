@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
@@ -27,6 +27,27 @@ async function addBareRemote(repo: string): Promise<string> {
   await execGitOrThrow(['init', '--bare', '--initial-branch=main'], { cwd: remote })
   await execGitOrThrow(['remote', 'add', 'origin', remote], { cwd: repo })
   return remote
+}
+
+/**
+ * 겹침 블록 2개짜리 충돌 픽스처 — 떨어진 두 변경(사이 context 5줄)이어야 블록이 2개 생긴다.
+ * 인접한 변경은 git이 한 블록으로 합쳐 버린다(실측). 합치기 실행은 각 테스트가 앱에서 한다.
+ */
+async function createTwoBlockConflictRepo(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'git-gui-e2e-'))
+  await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: dir })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: dir })
+  await writeFile(join(dir, 'app.txt'), 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n')
+  await execGitOrThrow(['add', '-A'], { cwd: dir })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: dir })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: dir })
+  await writeFile(join(dir, 'app.txt'), 'rival-top\ntwo\nthree\nfour\nfive\nsix\nrival-bottom\n')
+  await execGitOrThrow(['commit', '-am', 'rival'], { cwd: dir })
+  await execGitOrThrow(['checkout', 'main'], { cwd: dir })
+  await writeFile(join(dir, 'app.txt'), 'mine-top\ntwo\nthree\nfour\nfive\nsix\nmine-bottom\n')
+  await execGitOrThrow(['commit', '-am', 'mine'], { cwd: dir })
+  return dir
 }
 
 test('열기 → stage → commit → 역사 반영 → 백업', async () => {
@@ -755,6 +776,134 @@ test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다
       .getByTestId('confirm-accept')
       .click()
     await expect(window.getByTestId('manage-remove-doomed')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('겹침 두 곳을 카드에서 하나씩 골라 확정하고 저장하기로 마무리한다', async () => {
+  const repo = await createTwoBlockConflictRepo()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 1번째')
+    // 1번째 겹침은 내 것 — 반영되면 남은 블록이 파일 기준 다시 0번이 된다
+    await window.getByTestId('conflict-block-ours-0').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 2번째')
+    await window.getByTestId('conflict-block-theirs-0').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('모두 골랐어요')
+    // 확정 전에는 여전히 겹침(unmerged) 파일이다 — add는 확정 버튼에서만
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('conflict-confirm').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 0개 남음')
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    // 저장하기 = 병합 마무리 (부모 2)
+    await window.getByTestId('commit-message').fill('겹침 정리해서 합치기')
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe(
+      'mine-top\ntwo\nthree\nfour\nfive\nsix\nrival-bottom\n',
+    )
+    const parents = await execGitOrThrow(['log', '-1', '--format=%P'], { cwd: repo })
+    expect(parents.stdout.trim().split(' ')).toHaveLength(2)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('선택형 일부 선택 → 자세히 보기 직접 수정 → 선택 유지 (E-004)', async () => {
+  const repo = await createTwoBlockConflictRepo()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-block-ours-0').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 2번째')
+    await window.getByTestId('conflict-detail-toggle').click()
+    // 선택형에서 고른 것이 결과에 유지된 채로 열린다 — 남은 겹침 표시도 그대로 (E-004)
+    await expect(window.getByTestId('conflict-edit-text')).toHaveValue(/mine-top/)
+    await expect(window.getByTestId('conflict-edit-text')).toHaveValue(/<<<<<<</)
+    await window
+      .getByTestId('conflict-edit-text')
+      .fill('mine-top\ntwo\nthree\nfour\nfive\nsix\nhand-merged\n')
+    await window.getByTestId('conflict-edit-save').click()
+    // 선택형으로 복귀 — 직접 수정이 반영되어 남은 겹침이 없다
+    await expect(window.getByTestId('conflict-progress')).toHaveText('모두 골랐어요')
+    await expect(window.getByTestId('conflict-view')).toContainText('hand-merged')
+    await window.getByTestId('conflict-confirm').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe(
+      'mine-top\ntwo\nthree\nfour\nfive\nsix\nhand-merged\n',
+    )
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('일부만 고르고 재시작해도 고른 결과와 남은 겹침이 복원된다', async () => {
+  const repo = await createTwoBlockConflictRepo()
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-block-ours-0').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 2번째')
+  } finally {
+    await app.close()
+  }
+  // 재실행 — 선택은 파일에, 합치는 중 상태는 MERGE_HEAD에 있어 그대로 복원된다 (스펙 §7 공통 원칙)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('file-unstaged-app.txt').click()
+    // 남은 블록 1개부터 이어서 — 앞서 고른 mine-top은 일반 줄로 남아 있다
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 1곳 중 1번째')
+    await expect(window.getByTestId('conflict-view')).toContainText('mine-top')
+    await expect(window.getByTestId('conflict-card-1')).toHaveCount(0)
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('처음부터 다시를 누르면 겹침 표시가 되살아난다', async () => {
+  const repo = await createTwoBlockConflictRepo()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-block-ours-0').click()
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 2번째')
+    await window.getByTestId('conflict-reset').click()
+    await window.getByTestId('confirm-accept').click()
+    // 마커 재생성(실측: 라벨은 ours/theirs) — 카드 2개와 진행 표시가 처음으로 돌아온다
+    await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 1번째')
+    await expect(window.getByTestId('conflict-card-1')).toBeVisible()
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toContain('<<<<<<<')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
