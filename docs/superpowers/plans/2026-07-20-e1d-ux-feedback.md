@@ -880,6 +880,58 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 7-보완: 통합 리뷰 1건 — 혼합 보관 미리보기 안내
+
+통합 리뷰 실측: 추적 수정 + 새 파일이 **섞인** 보관을 미리보면 새 파일이 목록에서 조용히 빠져 파일 수가 틀리게 단언된다("2개 보관인데 바뀐 파일 1개"). 0개 전용 케이스만 문구로 구제했던 것의 잔여 — 파일이 있어도 보관함 미리보기면 안내를 상시 덧붙인다.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx`
+- Test: `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: files-head 삼항 교체** (Task 6-보완 Step 4(c)에서 넣은 블록을 다시 교체)
+
+```tsx
+        {detail.files.length > 0
+          ? shelfPreview
+            ? ' — 누르면 가운데에 비교를 보여드려요. 새로 만든 파일은 이 목록에 안 보여요 — 꺼내면 함께 돌아와요'
+            : ' — 누르면 가운데에 비교를 보여드려요'
+          : shelfPreview
+            ? ' — 새로 만든 파일만 담긴 보관이에요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요'
+            : ' — 메시지만 남긴 저장이에요'}
+```
+
+- [ ] **Step 2: E2E 단언 추가** — 미리보기 테스트의 `'보관 내용'` 단언 **바로 뒤**에:
+
+```ts
+    await expect(window.getByTestId('commit-detail-panel')).toContainText(
+      '새로 만든 파일은 이 목록에 안 보여요',
+    )
+```
+
+- [ ] **Step 3: 게이트** — 루트 `pnpm test`(238) + typecheck(5 Done) + build + E2E 전체(**25 passed**)
+
+- [ ] **Step 4: 공식 스크린샷 3장 복원** — Step 3의 e2e가 test-results/를 비운다. scratchpad 사본에서 되돌린다:
+
+```bash
+cp /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-scrollbar-notice.png \
+   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-branch-folders.png \
+   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-shelf-preview.png \
+   "/Users/sangyeop_kim/git gui/apps/desktop/test-results/"
+```
+
+(e1d-shelf-preview.png는 새 안내 문구가 없는 이전 화면이지만 제목·구성은 유효 — 재촬영하지 않는다.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx apps/desktop/e2e/smoke.spec.ts
+git commit -m "fix(desktop): 통합 리뷰 — 혼합 보관 미리보기에 새 파일 안내 상시 표시
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -896,3 +948,6 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - 보관함 미리보기에서 untracked 전용 변경이 안 보인다(stash 셋째 부모) — 셋째 부모 diff 병합 표시 검토
 - 스위처 폴더 접기/펼치기(현재는 항상 펼침), ManageBranchesDialog에도 같은 그룹핑 적용
 - 알림 자동 사라짐(토스트 타이머) — 현재는 다음 작업까지 유지
+- 미리보기에서 새 파일 목록까지 완성하려면 stash 셋째 부모 diff 병합이 정공법(통합 리뷰) — E1e 후보
+- 오버레이 z-index 서열(배너 40 < 다이얼로그 100 < 메뉴 120)을 `--z-*` 토큰으로 승격(통합 리뷰 권고)
+- 에러로 busy를 거친 뒤 보관함 팝오버 포커스가 body로 빠져 ESC 불응(기존 패턴, E1a 잔여와 동류)
