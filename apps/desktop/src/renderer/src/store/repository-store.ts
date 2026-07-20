@@ -9,6 +9,7 @@ import type {
   RepositoryStatus,
   ShelfEntry,
 } from '@git-gui/domain'
+import { applyBlockChoice } from '../components/conflict-markers'
 
 const git = () => window.gitApi
 
@@ -73,6 +74,12 @@ interface RepositoryStore {
   resolveConflict(path: string, choice: 'ours' | 'theirs'): Promise<void>
   /** 직접 수정을 마쳤다고 표시한다 */
   markConflictResolved(path: string): Promise<void>
+  /** 열린 겹침 파일의 blockIndex번째 블록만 한쪽으로 골라 파일에 즉시 반영한다 — 확정(add) 아님 */
+  chooseConflictBlock(blockIndex: number, choice: 'ours' | 'theirs'): Promise<void>
+  /** 자세히 보기에서 직접 수정한 결과를 파일에 저장한다 — 확정(add) 아님 */
+  saveConflictText(content: string): Promise<void>
+  /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m). 확인창(UI 책임) 경유 */
+  resetConflict(): Promise<void>
   /** 지금 변경을 보관함에 저장한다 */
   shelfSave(): Promise<void>
   shelfRestore(ref: string): Promise<void>
@@ -522,6 +529,55 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       await git().conflicts.markResolved(repoPath, path)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async chooseConflictBlock(blockIndex, choice) {
+    const { repoPath, conflictFile } = get()
+    if (!repoPath || !conflictFile) return
+    await guard(set, get, async () => {
+      // 외부 편집과의 경합 — 열 때 읽어 둔 내용이 아니라 최신 내용에 적용한다
+      const fresh = await git().files.readText(repoPath, conflictFile.path)
+      const next = applyBlockChoice(fresh, blockIndex, choice)
+      if (next === null) {
+        // 그 블록이 더는 없다 — 최신 내용을 보여 주고 다시 고르게 안내한다
+        set({
+          conflictFile: { path: conflictFile.path, content: fresh },
+          notice: '파일이 밖에서 바뀌어 겹침 목록을 새로 불러왔어요. 다시 골라 주세요.',
+        })
+        return
+      }
+      await git().conflicts.saveText(repoPath, conflictFile.path, next)
+      // 충돌 뷰는 연 채로 내용·상태만 갱신한다 — CLEAR_SELECTIONS를 쓰면 뷰가 닫힌다
+      set({
+        conflictFile: { path: conflictFile.path, content: next },
+        status: await git().repo.status(repoPath),
+      })
+    })
+  },
+
+  async saveConflictText(content) {
+    const { repoPath, conflictFile } = get()
+    if (!repoPath || !conflictFile) return
+    await guard(set, get, async () => {
+      await git().conflicts.saveText(repoPath, conflictFile.path, content)
+      set({
+        conflictFile: { path: conflictFile.path, content },
+        status: await git().repo.status(repoPath),
+      })
+    })
+  },
+
+  async resetConflict() {
+    const { repoPath, conflictFile } = get()
+    if (!repoPath || !conflictFile) return
+    await guard(set, get, async () => {
+      await git().conflicts.reset(repoPath, conflictFile.path)
+      const content = await git().files.readText(repoPath, conflictFile.path)
+      set({
+        conflictFile: { path: conflictFile.path, content },
+        status: await git().repo.status(repoPath),
+      })
     })
   },
 
