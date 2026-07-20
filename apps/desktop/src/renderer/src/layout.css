@@ -92,6 +92,22 @@
   font-size: var(--text-sm);
   flex: none;
 }
+/* 알림은 흐름 밖 오버레이로 — 나타나고 사라질 때 본문이 밀리지 않는다 (피드백 3).
+   머지 바는 상주 상태 표시라 흐름에 남긴다 */
+.app__banner-layer {
+  position: relative;
+  height: 0;
+  z-index: 40;
+  flex: none;
+}
+.app__banner-layer .app__error,
+.app__banner-layer .app__notice {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-shadow: var(--shadow-2);
+}
 .app__merge-bar {
   display: flex;
   align-items: center;

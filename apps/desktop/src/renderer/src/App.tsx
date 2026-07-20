@@ -206,15 +206,19 @@ export function App() {
           </Button>
         </div>
       </header>
-      {store.error && (
-        <p className="app__error" role="alert" data-testid="error">
-          {store.error}
-        </p>
-      )}
-      {store.notice && (
-        <p className="app__notice" role="status" data-testid="notice">
-          {store.notice}
-        </p>
+      {(store.error !== null || store.notice !== null) && (
+        <div className="app__banner-layer">
+          {store.error && (
+            <p className="app__error" role="alert" data-testid="error">
+              {store.error}
+            </p>
+          )}
+          {store.notice && (
+            <p className="app__notice" role="status" data-testid="notice">
+              {store.notice}
+            </p>
+          )}
+        </div>
       )}
       {(status?.state === 'merging' || status?.state === 'reverting') && (
         <div className="app__merge-bar" data-testid="merge-bar">
