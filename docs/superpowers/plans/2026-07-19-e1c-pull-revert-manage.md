@@ -1,0 +1,1297 @@
+# E1c 받아오기(pull)·되돌리기(revert)·실험 공간 관리 구현 계획
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 원격의 최신 저장을 받아오고(pull — 겹치면 기존 충돌 흐름 재사용), 히스토리 우클릭으로 특정 저장을 되돌리고(revert), 실험 공간을 지우거나 이름을 바꾸며, 충돌 뷰를 다듬는다(다음 겹침 점프·개념색 버튼·다이얼로그 인라인 에러).
+
+**Architecture:** pull은 merge와 동일 골격(선시도 → `would be overwritten`이면 자동 보관 → 재시도, 충돌이면 MERGE_HEAD가 남아 **기존 머지 바·충돌 뷰가 그대로 동작**). revert는 충돌 시 REVERT_HEAD → 기존 `reverting` 상태 감지에 얹어 상태 바를 merging/reverting 겸용으로 일반화한다(취소는 각각 merge --abort / revert --abort, 마무리는 둘 다 저장하기=commit). 브랜치 관리(지우기·이름 바꾸기)는 스위처의 "관리…" 항목 → ManageBranchesDialog. merge commit revert는 재시도 로직으로 `-m 1`(첫 부모 기준 — 앱 전체 원칙과 일치).
+
+**Tech Stack:** 기존과 동일 (신규 의존성 없음).
+
+**실측으로 확정한 git 명령 (probe — bare remote·revert·branch 관리):**
+- `git pull --no-rebase --no-edit`: up-to-date `Already up to date.` / behind ff `Updating …`+`Fast-forward` / diverged 충돌 exit 1 + `CONFLICT` + **MERGE_HEAD 생성**(→ 기존 merging 흐름 그대로) / dirty 차단 `would be overwritten by merge` / upstream 없음 `There is no tracking information for the current branch.`
+- `git revert --no-edit <hash>`: 성공 시 `Revert "<subject>"` 커밋 생성 / 충돌 시 exit 1 + **REVERT_HEAD 생성**(detectState `reverting` 기존 지원) + `git revert --abort` 복귀 / merge commit이면 `is a merge but no -m option was given` → `-m 1` 재시도로 성공.
+- `git branch -d <name>`: unmerged면 exit 1 `the branch '<name>' is not fully merged` → `-D`로 강제 성공. 현재 브랜치는 `cannot delete branch … used by worktree`. rename은 `git branch -m old new`, 중복이면 `a branch named '<name>' already exists`.
+
+**알려진 한계(의도적):** pull은 merge 방식(--no-rebase) 고정 — rebase형은 다루지 않는다. fetch 단독 버튼은 두지 않는다(받아오기 = fetch+merge 통합, ahead/behind는 백업·받아오기 후 갱신). revert 대상이 이미 되돌려진 경우의 중복 revert는 git 결과 그대로(빈 revert는 git이 안내). 원격 인증(HTTPS 토큰 등) 실패는 GIT_TERMINAL_PROMPT=0으로 즉시 실패하며 원문이 노출될 수 있다 — 인증 UX는 협업 단계(E2).
+
+---
+
+## 파일 구조
+
+```
+packages/domain/src/repository.ts                  # PullResult·RevertResult·RemoveBranchResult (수정)
+packages/git-adapter/src/client.ts                 # sync.pull·commits.revert/revertAbort·branches.remove/rename (수정)
+packages/ipc-contract/src/index.ts                 # 채널 5개 (수정)
+apps/desktop/src/main/git-handlers.ts              # 핸들러 5개 (수정)
+apps/desktop/src/preload/index.ts                  # 브리지 (수정)
+apps/desktop/src/renderer/src/store/repository-store.ts # 액션 5개 (수정)
+apps/desktop/src/renderer/src/App.tsx              # 받아오기 버튼·상태 바 일반화·관리 다이얼로그 배선 (수정)
+apps/desktop/src/renderer/src/components/HistoryPanel.tsx # 우클릭 '되돌리기' (수정)
+apps/desktop/src/renderer/src/components/ManageBranchesDialog.tsx # 관리 다이얼로그 (신규)
+apps/desktop/src/renderer/src/components/manage-branches.css      # (신규)
+apps/desktop/src/renderer/src/components/ConflictPanel.tsx # 다음 겹침 점프·개념색 버튼 (수정)
+apps/desktop/src/renderer/src/ui/Button.tsx        # className 병합 허용 (수정)
+apps/desktop/src/renderer/src/ui/PromptDialog.tsx  # initialValue·errorText (수정)
+```
+
+---
+
+### Task 1: 엔진 — sync.pull (스마트 받아오기)
+
+**Files:**
+- Modify: `packages/domain/src/repository.ts`, `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: domain 타입** — `MergeResult` 블록 **뒤**에 추가:
+
+```ts
+/** 받아오기(pull) 결과 — conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다 */
+export interface PullResult {
+  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
+  autoShelved: boolean
+}
+```
+
+- [ ] **Step 2: 실패하는 통합 테스트** — client.test.ts의 `'push — detached HEAD에서는 읽히는 에러를 던진다'` 테스트 **뒤**에 추가:
+
+```ts
+  it('pull — 원격의 새 저장을 받아온다(ff)와 이미 최신을 구분한다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    expect(await client.sync.pull()).toEqual({ outcome: 'up-to-date', autoShelved: false })
+
+    // 다른 클론이 원격에 새 저장을 올린다
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'from-other.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other work'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+
+    expect(await client.sync.pull()).toEqual({ outcome: 'fast-forward', autoShelved: false })
+    const history = await client.history.list(10)
+    expect(history[0]!.subject).toBe('other work')
+  })
+
+  it('pull — 서로 갈라진 같은 줄 변경은 conflict 상태(merging)로 남는다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'README.md', '# remote\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote change'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await writeFixtureFile(repo, 'README.md', '# local\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local change'], { cwd: repo })
+
+    expect(await client.sync.pull()).toEqual({ outcome: 'conflict', autoShelved: false })
+    const status = await client.repo.status()
+    expect(status.state).toBe('merging')
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('pull — 막힌 변경은 보관함에 자동 저장하고 받아온다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'README.md', '# remote\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote change'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await writeFixtureFile(repo, 'README.md', '# uncommitted\n')
+
+    const result = await client.sync.pull()
+    expect(result).toEqual({ outcome: 'fast-forward', autoShelved: true })
+    const shelf = await client.shelf.list()
+    expect(shelf[0]!.message).toContain('받아오기 자동 보관')
+  })
+
+  it('pull — 원격/upstream이 없으면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.sync.pull()).rejects.toThrow(/원격 저장소가 없어요/)
+
+    const withRemote = await createFixtureRepoWithRemote()
+    const client2 = createGitClient(withRemote.repo)
+    // push(업스트림 연결) 없이 pull — tracking 정보 없음
+    await expect(client2.sync.pull()).rejects.toThrow(/백업.*연결/)
+  })
+```
+
+- [ ] **Step 3: 실패 확인** — `--testNamePattern "pull"` → `client.sync.pull is not a function`
+
+- [ ] **Step 4: 구현** — client.ts:
+
+(a) import 타입에 `type PullResult,` 추가(알파벳 순서).
+
+(b) `GitClient` sync 블록의 `push(): …` 행 **뒤**에:
+
+```ts
+    /**
+     * 원격의 최신 저장을 받아온다(fetch+merge). 막히면 자동 보관 후 재시도.
+     * conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름(머지 바·충돌 뷰·저장하기 마무리)을 그대로 쓴다.
+     */
+    pull(): Promise<PullResult>
+```
+
+(c) `MERGE_SHELF_MESSAGE` 상수 **뒤**에:
+
+```ts
+/** 받아오기가 막혀 자동 보관할 때의 보관함 메시지 */
+const PULL_SHELF_MESSAGE = '받아오기 자동 보관'
+```
+
+(d) sync 구현부 `push` **뒤**에 추가:
+
+```ts
+      async pull() {
+        const cwd = await topLevel()
+        const remotes = await execGitOrThrow(['remote'], { cwd })
+        if (remotes.stdout.trim() === '') {
+          throw new Error('받아올 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+        }
+        const classify = (output: string): PullResult['outcome'] => {
+          if (output.includes('Already up to date')) return 'up-to-date'
+          if (output.includes('Fast-forward')) return 'fast-forward'
+          return 'merged'
+        }
+        const run = () => execGit(['pull', '--no-rebase', '--no-edit'], { cwd })
+        const first = await run()
+        const firstOut = first.stdout + first.stderr
+        if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
+        if (firstOut.includes('no tracking information')) {
+          throw new Error('이 실험 공간은 아직 원격과 연결되지 않았어요. 먼저 백업(push)으로 연결해 주세요.')
+        }
+        if (firstOut.includes('CONFLICT') || firstOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: false }
+        }
+        if (!firstOut.includes('would be overwritten')) {
+          throw new GitError(['pull', '--no-rebase', '--no-edit'], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (merge·switch와 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', PULL_SHELF_MESSAGE], { cwd })
+        const second = await run()
+        const secondOut = second.stdout + second.stderr
+        if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
+        if (secondOut.includes('CONFLICT') || secondOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: true }
+        }
+        throw new GitError(['pull', '--no-rebase', '--no-edit'], second)
+      },
+```
+
+- [ ] **Step 5: 게이트** — `pnpm test && pnpm typecheck` → **222 tests** (218+4) + 5 Done
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "feat(adapter): sync.pull — 스마트 받아오기(막히면 자동 보관, 충돌은 기존 합치기 흐름)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2: 엔진 — commits.revert(+abort)·branches.remove/rename
+
+**Files:**
+- Modify: `packages/domain/src/repository.ts`, `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: domain 타입** — `PullResult` 블록 **뒤**에:
+
+```ts
+/** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */
+export interface RevertResult {
+  outcome: 'reverted' | 'conflict'
+}
+
+/** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */
+export interface RemoveBranchResult {
+  removed: boolean
+  needsForce: boolean
+}
+```
+
+- [ ] **Step 2: 실패하는 테스트** — pull 테스트들 **뒤**에:
+
+```ts
+  it('revert — 저장을 반대로 적용하는 새 저장을 만들고, merge commit은 첫 부모 기준으로 되돌린다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'change'], { cwd: repo })
+    const head = (await client.history.list(1))[0]!
+    expect(await client.commits.revert(head.hash)).toEqual({ outcome: 'reverted' })
+    expect(await client.files.readText('README.md')).toBe('# fixture\n')
+    expect((await client.history.list(1))[0]!.subject).toContain('Revert')
+
+    // merge commit — -m 1 재시도로 성공해야 한다
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main'], { cwd: repo })
+    await client.branches.merge('side')
+    const mergeHead = (await client.history.list(1))[0]!
+    expect(mergeHead.parents).toHaveLength(2)
+    expect(await client.commits.revert(mergeHead.hash)).toEqual({ outcome: 'reverted' })
+    const status = await client.repo.status()
+    expect(status.changes).toEqual([])
+  })
+
+  it('revert — 이후 저장과 겹치면 conflict 상태(reverting)로 남고, 취소로 돌아온다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const target = (await client.history.list(1))[0]!
+    await writeFixtureFile(repo, 'README.md', '# v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+
+    expect(await client.commits.revert(target.hash)).toEqual({ outcome: 'conflict' })
+    let status = await client.repo.status()
+    expect(status.state).toBe('reverting')
+    expect(status.changes.some((c) => c.unstaged === 'conflicted')).toBe(true)
+
+    await client.commits.revertAbort()
+    status = await client.repo.status()
+    expect(status.state).toBe('normal')
+    expect(status.changes).toEqual([])
+  })
+
+  it('revertAbort — 되돌리는 중이 아니면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.commits.revertAbort()).rejects.toThrow(/되돌리는 중이 아니에요/)
+  })
+
+  it('branches.remove — 합쳐진 공간은 지우고, 안 합쳐진 공간은 needsForce로 알리고, force로 지운다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('merged-one', null)
+    expect(await client.branches.remove('merged-one', false)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+
+    await client.branches.create('doomed', null)
+    await client.branches.switch('doomed')
+    await writeFixtureFile(repo, 'd.txt', 'd\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'doomed work'], { cwd: repo })
+    await client.branches.switch('main')
+    expect(await client.branches.remove('doomed', false)).toEqual({
+      removed: false,
+      needsForce: true,
+    })
+    expect(await client.branches.remove('doomed', true)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+    expect((await client.branches.list()).map((b) => b.name)).toEqual(['main'])
+  })
+
+  it('branches.remove — 지금 있는 공간은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.remove('main', false)).rejects.toThrow(/다른 공간으로 이동/)
+  })
+
+  it('branches.rename — 이름을 바꾸고, 중복·잘못된 이름은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('before', null)
+    await client.branches.rename('before', 'after')
+    expect((await client.branches.list()).map((b) => b.name).sort()).toEqual(['after', 'main'])
+    await expect(client.branches.rename('after', 'main')).rejects.toThrow(/이미 있는 이름/)
+    await expect(client.branches.rename('after', 'bad name')).rejects.toThrow(/만들 수 없어요/)
+    await expect(client.branches.rename('no-such', 'x')).rejects.toThrow()
+  })
+```
+
+- [ ] **Step 3: 실패 확인** — `--testNamePattern "revert|remove|rename"` → 미존재 함수들
+
+- [ ] **Step 4: 구현** — client.ts:
+
+(a) import 타입에 `type RemoveBranchResult,`·`type RevertResult,` 추가(알파벳 순서).
+
+(b) 인터페이스 — branches 블록 `merge(...)` 행 **뒤**에:
+
+```ts
+    /** 실험 공간 지우기 — 합쳐지지 않은 저장이 있으면 needsForce로 알린다(확인창은 UI). 현재 공간은 거부 */
+    remove(name: string, force: boolean): Promise<RemoveBranchResult>
+    /** 이름 바꾸기 */
+    rename(oldName: string, newName: string): Promise<void>
+```
+
+commits 블록 `diffFile(...)` 행 **뒤**에:
+
+```ts
+    /** 이 저장이 바꾼 내용을 반대로 적용하는 새 저장을 만든다. merge commit은 첫 부모 기준(-m 1) */
+    revert(hash: string): Promise<RevertResult>
+    /** 되돌리기 취소 — 충돌 상태를 버리고 이전으로 */
+    revertAbort(): Promise<void>
+```
+
+(c) branches 구현부 `merge` **뒤**에:
+
+```ts
+      async remove(name, force) {
+        const cwd = await topLevel()
+        const args = ['branch', force ? '-D' : '-d', '--end-of-options', name]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode === 0) return { removed: true, needsForce: false }
+        if (result.stderr.includes('not fully merged')) {
+          return { removed: false, needsForce: true }
+        }
+        if (result.stderr.includes('used by worktree')) {
+          throw new Error('지금 있는 실험 공간은 지울 수 없어요. 다른 공간으로 이동한 뒤 지워 주세요.')
+        }
+        if (result.stderr.includes('not found')) {
+          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+        }
+        throw new GitError(args, result)
+      },
+      async rename(oldName, newName) {
+        const cwd = await topLevel()
+        const valid = await execGit(['check-ref-format', '--branch', newName], { cwd })
+        if (valid.exitCode !== 0) {
+          throw new Error(`"${newName}"라는 이름으로는 만들 수 없어요. 공백 없이 지어 주세요.`)
+        }
+        const args = ['branch', '-m', '--end-of-options', oldName, newName]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('already exists')) {
+            throw new Error(`"${newName}"는 이미 있는 이름이에요. 다른 이름을 지어 주세요.`)
+          }
+          throw new GitError(args, result)
+        }
+      },
+```
+
+(d) commits 구현부 `diffFile` **뒤**에:
+
+```ts
+      async revert(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        const run = (extra: string[]) =>
+          execGit(['revert', '--no-edit', ...extra, '--end-of-options', hash], { cwd })
+        let result = await run([])
+        // merge commit은 -m 없이는 거부된다(실측) — 앱 원칙대로 첫 부모 기준으로 재시도
+        if (result.exitCode !== 0 && result.stderr.includes('is a merge but no -m option')) {
+          result = await run(['-m', '1'])
+        }
+        if (result.exitCode === 0) return { outcome: 'reverted' }
+        const output = result.stdout + result.stderr
+        if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
+          return { outcome: 'conflict' }
+        }
+        if (output.includes('bad object')) {
+          throw new Error(MISSING_COMMIT_MESSAGE)
+        }
+        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], result)
+      },
+      async revertAbort() {
+        const cwd = await topLevel()
+        const result = await execGit(['revert', '--abort'], { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('no revert in progress') || result.stderr.includes('REVERT_HEAD')) {
+            throw new Error('지금은 되돌리는 중이 아니에요.')
+          }
+          throw new GitError(['revert', '--abort'], result)
+        }
+      },
+```
+
+- [ ] **Step 5: 게이트** — `pnpm test && pnpm typecheck` → **228 tests** (222+6) + 5 Done
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "feat(adapter): revert(첫 부모 기준·취소)·실험 공간 지우기(needsForce)·이름 바꾸기
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: IPC — pull·revert·remove·rename 채널
+
+**Files:**
+- Modify: `packages/ipc-contract/src/index.ts`, `apps/desktop/src/main/git-handlers.ts`, `apps/desktop/src/preload/index.ts`
+
+- [ ] **Step 1: contract** — import 타입에 `PullResult,`·`RemoveBranchResult,`·`RevertResult,` 추가(알파벳 순서). GitApi:
+
+sync 블록 `push(...)` 행 **뒤**:
+
+```ts
+    /** 원격의 최신 저장을 받아온다 — conflict면 기존 합치기 충돌 흐름이 이어진다 */
+    pull(repoPath: string): Promise<PullResult>
+```
+
+branches 블록 `merge(...)` 행 **뒤**:
+
+```ts
+    remove(repoPath: string, name: string, force: boolean): Promise<RemoveBranchResult>
+    rename(repoPath: string, oldName: string, newName: string): Promise<void>
+```
+
+commits 블록 `diffFile(...)` 행 **뒤**:
+
+```ts
+    revert(repoPath: string, hash: string): Promise<RevertResult>
+    revertAbort(repoPath: string): Promise<void>
+```
+
+CHANNELS — `syncPush` 행 뒤 `syncPull: 'sync:pull',`, `branchesMerge` 행 뒤:
+
+```ts
+  branchesRemove: 'branches:remove',
+  branchesRename: 'branches:rename',
+```
+
+`commitsDiffFile` 행 뒤:
+
+```ts
+  commitsRevert: 'commits:revert',
+  commitsRevertAbort: 'commits:revert-abort',
+```
+
+- [ ] **Step 2: 핸들러** — `syncPush` 핸들러 뒤:
+
+```ts
+  ipcMain.handle(CHANNELS.syncPull, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).sync.pull(),
+  )
+```
+
+`branchesMerge` 핸들러 뒤:
+
+```ts
+  ipcMain.handle(
+    CHANNELS.branchesRemove,
+    (_event, repoPath: unknown, name: unknown, force: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).branches.remove(
+        assertString(name),
+        assertBoolean(force),
+      ),
+  )
+
+  ipcMain.handle(
+    CHANNELS.branchesRename,
+    (_event, repoPath: unknown, oldName: unknown, newName: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).branches.rename(
+        assertString(oldName),
+        assertString(newName),
+      ),
+  )
+```
+
+`conflictsMarkResolved` 핸들러 뒤:
+
+```ts
+  ipcMain.handle(CHANNELS.commitsRevert, (_event, repoPath: unknown, hash: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.revert(assertHash(hash)),
+  )
+
+  ipcMain.handle(CHANNELS.commitsRevertAbort, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.revertAbort(),
+  )
+```
+
+그리고 `assertConflictChoice` **뒤**에:
+
+```ts
+function assertBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('잘못된 요청 형식이에요.')
+  return value
+}
+```
+
+- [ ] **Step 3: preload** — sync 블록에 `pull: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPull, repoPath),`, branches 블록에:
+
+```ts
+    remove: (repoPath, name, force) =>
+      ipcRenderer.invoke(CHANNELS.branchesRemove, repoPath, name, force),
+    rename: (repoPath, oldName, newName) =>
+      ipcRenderer.invoke(CHANNELS.branchesRename, repoPath, oldName, newName),
+```
+
+commits 블록에:
+
+```ts
+    revert: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsRevert, repoPath, hash),
+    revertAbort: (repoPath) => ipcRenderer.invoke(CHANNELS.commitsRevertAbort, repoPath),
+```
+
+- [ ] **Step 4: 게이트 + Commit** — 228 tests + 5 Done + build
+
+```bash
+git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts
+git commit -m "feat(ipc): pull·revert·remove·rename 채널
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: store — pull·revert·관리 액션 + 상태 바 일반화 배선 준비
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+
+- [ ] **Step 1: store 수정 (부분 삽입)**
+
+(a) 인터페이스 액션 — `abortMerge(): Promise<void>` 행 **뒤**에:
+
+```ts
+  /** 원격의 최신 저장을 받아온다 — 결과를 notice로, 충돌은 머지 바가 안내 */
+  pullLatest(): Promise<void>
+  /** 이 저장을 반대로 적용하는 새 저장 — 충돌이면 reverting 상태 바가 안내 */
+  revertCommit(hash: string): Promise<void>
+  /** 되돌리기 취소 — 확인창(UI 책임) 경유 */
+  abortRevert(): Promise<void>
+  /** 실험 공간 지우기. 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
+  removeBranch(name: string, force: boolean): Promise<boolean>
+  /** 이름 바꾸기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
+  renameBranch(oldName: string, newName: string): Promise<boolean>
+```
+
+(b) 구현 — `abortMerge` 블록 **뒤**에:
+
+```ts
+  async pullLatest() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().sync.pull(repoPath)
+      const notices: Record<typeof result.outcome, string | null> = {
+        'fast-forward': '원격의 최신 저장을 받아왔어요.',
+        merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
+        // 충돌 안내는 머지 바가 상주하며 담당한다
+        conflict: null,
+        'up-to-date': '이미 최신이에요.',
+      }
+      const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `${notices[result.outcome] ?? ''}${shelfNotice}` || null,
+      })
+    })
+  },
+
+  async revertCommit(hash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().commits.revert(repoPath, hash)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        // 충돌 안내는 reverting 상태 바가 담당한다
+        notice: result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null,
+      })
+    })
+  },
+
+  async abortRevert() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().commits.revertAbort(repoPath)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '되돌리기를 취소하고 이전 상태로 돌아왔어요.',
+      })
+    })
+  },
+
+  async removeBranch(name, force) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    let needsForce = false
+    await guard(set, get, async () => {
+      const result = await git().branches.remove(repoPath, name, force)
+      needsForce = result.needsForce
+      if (result.removed) {
+        set({
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice: `"${name}" 실험 공간을 지웠어요.`,
+        })
+      }
+    })
+    return needsForce
+  },
+
+  async renameBranch(oldName, newName) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      await git().branches.rename(repoPath, oldName, newName)
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+```
+
+- [ ] **Step 2: 게이트 + Commit** — 228 tests + 5 Done + build
+
+```bash
+git add apps/desktop/src/renderer/src/store/repository-store.ts
+git commit -m "feat(desktop): store — 받아오기·되돌리기(취소)·실험 공간 지우기/이름 바꾸기
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: UI — 받아오기 버튼·우클릭 되돌리기·관리 다이얼로그·충돌 뷰 다듬기
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/ui/Button.tsx`, `apps/desktop/src/renderer/src/ui/PromptDialog.tsx`, `apps/desktop/src/renderer/src/ui/prompt-dialog.css`, `apps/desktop/src/renderer/src/components/BranchSwitcher.tsx`, `apps/desktop/src/renderer/src/components/HistoryPanel.tsx`, `apps/desktop/src/renderer/src/components/ConflictPanel.tsx`, `apps/desktop/src/renderer/src/components/conflict-panel.css`, `apps/desktop/src/renderer/src/App.tsx`
+- Create: `apps/desktop/src/renderer/src/components/ManageBranchesDialog.tsx`, `apps/desktop/src/renderer/src/components/manage-branches.css`
+
+- [ ] **Step 1: Button className 허용**
+
+`Button.tsx`의 interface에 `className?: string` 추가(`testId?: string` 행 뒤, doc `/** 추가 클래스 — 개념색 틴트 등 */`), 함수 시그니처 구조 분해에 `className,` 추가, `className={...}`을 다음으로 교체:
+
+```tsx
+      className={['ui-button', `ui-button--${variant}`, `ui-button--${size}`, className]
+        .filter(Boolean)
+        .join(' ')}
+```
+
+- [ ] **Step 2: PromptDialog — initialValue·errorText**
+
+(a) props에 추가(`submitLabel: string` 행 뒤):
+
+```tsx
+  /** 열릴 때 채워 둘 값 — 이름 바꾸기 등. 기본은 빈 값 */
+  initialValue?: string
+  /** 인라인 에러 — 실패 시 다이얼로그 안에서 바로 보인다 (상단 배너와 병행) */
+  errorText?: string | null
+```
+
+(b) 구조 분해에 `initialValue,`·`errorText,` 추가. 초기화 effect를 교체:
+
+```tsx
+  // 열릴 때 초기값으로 채우고, 닫힐 때 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
+  useEffect(() => {
+    setValue(isOpen ? (initialValue ?? '') : '')
+  }, [isOpen, initialValue])
+```
+
+(c) `<div className="ui-dialog__actions">` **앞**에:
+
+```tsx
+          {errorText && (
+            <p className="ui-prompt__error" role="alert" data-testid="prompt-error">
+              {errorText}
+            </p>
+          )}
+```
+
+(d) `prompt-dialog.css` 끝에:
+
+```css
+.ui-prompt__error {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+```
+
+- [ ] **Step 3: BranchSwitcher — 관리 항목**
+
+(a) props에 `onManage(): void` 추가(`onCreate(): void` 행 뒤), 구조 분해에 `onManage,` 추가.
+
+(b) `NEW_KEY` 상수 뒤에 `const MANAGE_KEY = '__manage__'` 추가, `onAction`을 교체:
+
+```tsx
+          onAction={(key) => {
+            if (key === NEW_KEY) onCreate()
+            else if (key === MANAGE_KEY) onManage()
+            else if (key !== currentName) onSwitch(String(key))
+          }}
+```
+
+(c) '새 실험 공간 만들기…' MenuItem **뒤**에:
+
+```tsx
+          <MenuItem
+            id={MANAGE_KEY}
+            className="branch-switcher__item branch-switcher__item--new"
+            textValue="실험 공간 관리"
+            data-testid="branch-manage"
+          >
+            <span className="branch-switcher__check" aria-hidden="true" />
+            <span className="branch-switcher__name">실험 공간 관리…</span>
+          </MenuItem>
+```
+
+- [ ] **Step 4: ManageBranchesDialog**
+
+Create `apps/desktop/src/renderer/src/components/ManageBranchesDialog.tsx`:
+
+```tsx
+import { Pencil, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
+import type { BranchSummary } from '@git-gui/domain'
+import { Button } from '../ui/Button'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { PromptDialog } from '../ui/PromptDialog'
+import './manage-branches.css'
+import '../ui/confirm-dialog.css'
+
+interface ManageBranchesDialogProps {
+  isOpen: boolean
+  branches: BranchSummary[]
+  busy: boolean
+  errorText: string | null
+  /** 성공 여부 반환 — 실패 시 이름 다이얼로그를 유지한다 */
+  onRename(oldName: string, newName: string): Promise<boolean>
+  /** 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
+  onRemove(name: string, force: boolean): Promise<boolean>
+  onCancel(): void
+}
+
+/** 실험 공간 관리 — 이름 바꾸기·지우기. 현재 공간은 지울 수 없다(이동 후 삭제 안내) */
+export function ManageBranchesDialog({
+  isOpen,
+  branches,
+  busy,
+  errorText,
+  onRename,
+  onRemove,
+  onCancel,
+}: ManageBranchesDialogProps) {
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+  const [forceTarget, setForceTarget] = useState<string | null>(null)
+
+  return (
+    <>
+      <ModalOverlay
+        className="ui-modal-overlay"
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) onCancel()
+        }}
+        isDismissable
+      >
+        <Modal className="ui-modal">
+          <Dialog className="ui-dialog manage-branches">
+            <Heading slot="title" className="ui-dialog__title">
+              실험 공간 관리
+            </Heading>
+            <p className="ui-dialog__body">
+              이름을 바꾸거나 다 쓴 실험 공간을 지워요. 지금 있는 공간은 지울 수 없어요.
+            </p>
+            <ul className="manage-branches__list">
+              {branches.map((branch) => (
+                <li key={branch.name} className="manage-branches__row">
+                  <span className="manage-branches__name" title={branch.name}>
+                    {branch.name}
+                    {branch.isCurrent && <span className="manage-branches__here">지금 여기</span>}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    isDisabled={busy}
+                    onPress={() => setRenameTarget(branch.name)}
+                    testId={`manage-rename-${branch.name}`}
+                  >
+                    <Pencil size={13} aria-hidden="true" /> 이름 바꾸기
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    isDisabled={busy || branch.isCurrent}
+                    onPress={() => setRemoveTarget(branch.name)}
+                    testId={`manage-remove-${branch.name}`}
+                  >
+                    <Trash2 size={13} aria-hidden="true" /> 지우기
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <div className="ui-dialog__actions">
+              <Button variant="ghost" size="sm" onPress={onCancel} testId="manage-close">
+                닫기
+              </Button>
+            </div>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+      <PromptDialog
+        isOpen={renameTarget !== null}
+        title="이름 바꾸기"
+        description="이 실험 공간의 새 이름을 지어 주세요."
+        label="새 이름"
+        placeholder="예: better-name"
+        submitLabel="바꾸기"
+        initialValue={renameTarget ?? ''}
+        errorText={errorText}
+        onSubmit={(name) => {
+          void (async () => {
+            if (renameTarget !== null && (await onRename(renameTarget, name))) {
+              setRenameTarget(null)
+            }
+          })()
+        }}
+        onCancel={() => setRenameTarget(null)}
+      />
+      <ConfirmDialog
+        isOpen={removeTarget !== null}
+        title="실험 공간을 지울까요?"
+        confirmLabel="지우기"
+        onConfirm={() => {
+          void (async () => {
+            const name = removeTarget
+            setRemoveTarget(null)
+            if (name !== null && (await onRemove(name, false))) {
+              // 합쳐지지 않은 저장이 있다 — 강제 삭제는 별도 확인을 거친다
+              setForceTarget(name)
+            }
+          })()
+        }}
+        onCancel={() => setRemoveTarget(null)}
+      >
+        "{removeTarget}" 실험 공간을 지워요. 다른 공간에 합쳐진 내용은 그대로 남아요.
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={forceTarget !== null}
+        title="아직 합쳐지지 않은 저장이 있어요"
+        confirmLabel="그래도 지우기"
+        onConfirm={() => {
+          const name = forceTarget
+          setForceTarget(null)
+          if (name !== null) void onRemove(name, true)
+        }}
+        onCancel={() => setForceTarget(null)}
+      >
+        "{forceTarget}"에는 다른 곳에 합쳐지지 않은 저장이 있어요. 지우면 그 저장들은 사라지고
+        되돌릴 수 없어요.
+      </ConfirmDialog>
+    </>
+  )
+}
+```
+
+Create `apps/desktop/src/renderer/src/components/manage-branches.css`:
+
+```css
+.manage-branches {
+  width: 420px;
+}
+.manage-branches__list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.manage-branches__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.manage-branches__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.manage-branches__here {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+```
+
+- [ ] **Step 5: HistoryPanel — 우클릭 '되돌리기'**
+
+(a) props에 `onRevert(hash: string): void` 추가(`onCreateBranchAt(...)` 행 뒤, doc `/** 우클릭 → "이 저장 되돌리기" (revert) */`), 구조 분해에 `onRevert,` 추가.
+
+(b) ContextMenu items의 'copy-hash' 항목 **앞**에:
+
+```tsx
+            {
+              key: 'revert',
+              label: '이 저장 되돌리기 (revert)',
+              onSelect: () => onRevert(menu.commit.hash),
+            },
+```
+
+- [ ] **Step 6: ConflictPanel — 다음 겹침·개념색 버튼**
+
+(a) import에 `useState` 이미 있음 — `ArrowDown` lucide 추가(`Check, Download, User` → `ArrowDown, Check, Download, User`).
+
+(b) `const markResolved = …` **앞**에 추가:
+
+```tsx
+  // 겹침 블록 시작 인덱스 — "다음 겹침"으로 순환 점프한다
+  const markerIndexes = rows.reduce<number[]>((acc, row, index) => {
+    if (row.kind === 'marker-ours') acc.push(index)
+    return acc
+  }, [])
+  const [jumpCursor, setJumpCursor] = useState(0)
+  const jumpNext = () => {
+    if (markerIndexes.length === 0) return
+    virtualizer.scrollToIndex(markerIndexes[jumpCursor % markerIndexes.length]!, { align: 'center' })
+    setJumpCursor(jumpCursor + 1)
+  }
+```
+
+(c) `conflict-panel__actions`의 ours 버튼에 `className="conflict-panel__btn--mine"`, theirs 버튼에 `className="conflict-panel__btn--branch"` prop 추가(variant 행 뒤). '직접 수정했어요' 버튼 **뒤**에:
+
+```tsx
+        <Button
+          variant="ghost"
+          size="sm"
+          isDisabled={busy || markerIndexes.length === 0}
+          onPress={jumpNext}
+          testId="conflict-next"
+        >
+          <ArrowDown size={13} aria-hidden="true" /> 다음 겹침 ({markerIndexes.length})
+        </Button>
+```
+
+(d) `conflict-panel.css` 끝에:
+
+```css
+/* 버튼과 구간 색을 연결한다 — 초록=내 것, 보라=가져온 것 (스펙 개념색) */
+.conflict-panel__btn--mine {
+  border-color: var(--concept-mine);
+  color: var(--concept-mine);
+}
+.conflict-panel__btn--branch {
+  border-color: var(--concept-branch);
+  color: var(--concept-branch);
+}
+```
+
+- [ ] **Step 7: App 배선**
+
+(a) import: `GitMerge` 옆에 `DownloadCloud` 추가(알파벳 순서 — `CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun`), `import { ManageBranchesDialog } from './components/ManageBranchesDialog'` 추가(`import { HistoryPanel } …` 행 뒤).
+
+(b) 상태 추가(`mergePicker` 행 뒤):
+
+```tsx
+  const [manageOpen, setManageOpen] = useState(false)
+```
+
+(c) 헤더 `app__actions`의 보관함(ShelfPopover) **앞**에 받아오기 버튼:
+
+```tsx
+          <Button
+            variant="neutral"
+            size="sm"
+            isDisabled={store.busy}
+            onPress={() => void store.pullLatest()}
+            testId="pull"
+          >
+            <DownloadCloud size={14} aria-hidden="true" /> 받아오기 <Badge tone="git">pull</Badge>
+          </Button>
+```
+
+(d) 상태 바 블록을 merging/reverting 겸용으로 교체:
+
+```tsx
+      {(status?.state === 'merging' || status?.state === 'reverting') && (
+        <div className="app__merge-bar" data-testid="merge-bar">
+          <Pictogram
+            kind="conflict"
+            size={14}
+            label={status.state === 'merging' ? '합치는 중' : '되돌리는 중'}
+          />
+          <span className="app__merge-text" data-testid="merge-remaining">
+            {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
+              conflictCount > 0
+                ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+                : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+            }`}
+          </span>
+          <Button
+            variant="danger"
+            size="sm"
+            isDisabled={store.busy}
+            onPress={() => setConfirmingAbort(true)}
+            testId="merge-abort"
+          >
+            {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
+          </Button>
+        </div>
+      )}
+```
+
+(e) 합치기 버튼 비활성 조건을 `status.state !== 'normal'` 겸용으로 교체(`isDisabled={store.busy || status.state !== 'normal'}`).
+
+(f) 취소 ConfirmDialog를 겸용으로 교체:
+
+```tsx
+      <ConfirmDialog
+        isOpen={confirmingAbort}
+        title={status?.state === 'reverting' ? '되돌리기를 취소할까요?' : '합치기를 취소할까요?'}
+        confirmLabel={status?.state === 'reverting' ? '되돌리기 취소' : '합치기 취소'}
+        onConfirm={() => {
+          setConfirmingAbort(false)
+          if (status?.state === 'reverting') void store.abortRevert()
+          else void store.abortMerge()
+        }}
+        onCancel={() => setConfirmingAbort(false)}
+      >
+        지금까지 고른 것을 되돌리고 이전 상태로 돌아가요.
+      </ConfirmDialog>
+```
+
+(g) BranchSwitcher에 `onManage={() => setManageOpen(true)}` prop 추가, HistoryPanel에 `onRevert={(hash) => void store.revertCommit(hash)}` prop 추가, PromptDialog(새 실험 공간)에 `errorText={branchPrompt !== null ? store.error : null}` prop 추가, ManageBranchesDialog를 ListDialog **뒤**에 추가:
+
+```tsx
+      <ManageBranchesDialog
+        isOpen={manageOpen}
+        branches={store.branches}
+        busy={store.busy}
+        errorText={store.error}
+        onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
+        onRemove={(name, force) => store.removeBranch(name, force)}
+        onCancel={() => setManageOpen(false)}
+      />
+```
+
+- [ ] **Step 8: 게이트 + Commit** — 228 tests + 5 Done + build + **E2E 23은 아직 아님, 기존 E2E 18 회귀 없음**
+
+```bash
+git add apps/desktop/src/renderer/src
+git commit -m "feat(desktop): 받아오기 버튼·우클릭 되돌리기·실험 공간 관리·충돌 뷰 다듬기
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: E2E 5종
+
+**Files:**
+- Test: `apps/desktop/e2e/smoke.spec.ts`
+
+- [ ] **Step 1: 추가** (`smoke.spec.ts` 끝)
+
+```ts
+test('원격의 새 저장을 받아온다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  const other = await mkdtemp(join(tmpdir(), 'git-gui-e2e-other-'))
+  await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+  await execGitOrThrow(['config', 'user.name', 'Other'], { cwd: other })
+  await execGitOrThrow(['config', 'user.email', 'o@test.local'], { cwd: other })
+  await writeFile(join(other, 'from-other.txt'), 'o\n')
+  await execGitOrThrow(['add', '-A'], { cwd: other })
+  await execGitOrThrow(['commit', '-m', '원격 저장'], { cwd: other })
+  await execGitOrThrow(['push'], { cwd: other })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    await window.getByTestId('pull').click()
+    await expect(window.getByTestId('notice')).toContainText('받아왔어요')
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(other, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
+test('저장을 되돌리는 새 저장을 만든다 (revert)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-revert').click()
+    await expect(window.getByTestId('notice')).toContainText('되돌리는 새 저장')
+    await expect(window.getByTestId('history-count')).toHaveText('3')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'v2'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v3\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'v3'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // v2(가운데 저장)를 되돌리면 v3와 겹친다
+    await window.locator('[data-testid^="history-item-"]').nth(1).click({ button: 'right' })
+    await window.getByTestId('context-revert').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('저장 되돌리는 중')
+    await window.getByTestId('merge-abort').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('notice')).toContainText('되돌리기를 취소')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 이름을 바꾼다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['branch', 'old-name'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-manage').click()
+    await window.getByTestId('manage-rename-old-name').click()
+    await window.getByTestId('prompt-input').fill('new-name')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('manage-rename-new-name')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'doomed'], { cwd: repo })
+  await writeFile(join(repo, 'd.txt'), 'd\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'doomed work'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-manage').click()
+    await window.getByTestId('manage-remove-doomed').click()
+    await window.getByTestId('confirm-accept').click()
+    // 합쳐지지 않은 저장 — 강제 확인창이 이어진다
+    await expect(window.getByTestId('confirm-accept')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('manage-remove-doomed')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+```
+
+- [ ] **Step 2: 검출력 실증 → 전체 게이트** — `pull` testid 오타 변이로 첫 테스트 FAIL 확인 후 원복.
+
+Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
+Expected: **228 tests + typecheck 5 + build + E2E 23 passed** — 전부 exit 0
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/desktop/e2e/smoke.spec.ts
+git commit -m "test(desktop): E2E — 받아오기·되돌리기(충돌 취소)·이름 바꾸기·강제 삭제 2중 확인
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: 최종 게이트 + 스크린샷 + README
+
+- [ ] **Step 1: 전체 게이트** — 228 tests + typecheck 5 + build + **E2E 23 passed**
+
+- [ ] **Step 2: 스크린샷 3장** (1440×900, test-results/ + scratchpad 사본, **생성 후 e2e 재실행 금지**)
+
+- (a) `e1c-manage.png` — 실험 공간 관리 다이얼로그(지금 여기 표시·이름 바꾸기/지우기)
+- (b) `e1c-revert-bar.png` — "저장 되돌리는 중 — 겹침 1개 남음" 상태 바 + 충돌 뷰(다음 겹침 버튼·개념색 버튼)
+- (c) `e1c-pull.png` — 받아오기 직후 notice("원격의 최신 저장을 받아왔어요") + 히스토리 갱신, 다크 모드
+
+- [ ] **Step 3: README** — 나열의 "실험 공간 합치기(…), " 뒤에 "최신 받아오기(pull — 겹치면 같은 충돌 흐름), 저장 되돌리기(revert), 실험 공간 관리(이름 바꾸기·지우기), "를 추가하고, "다음 단계"의 `최신 받아오기(pull/fetch)·되돌리기(revert)` 항목을 제거하고 남은 항목 번호를 정리한다.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: README — E1c 받아오기·되돌리기·실험 공간 관리 반영
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+## 검증 게이트 요약
+
+| 시점 | 기대치 |
+| --- | --- |
+| Task 1 후 | 222 tests (218 + pull 4) |
+| Task 2 후 | +6 (revert·remove·rename) → **228 tests** |
+| Task 5 후 | E2E 18 (기존 회귀 없음) |
+| Task 6 후 | **E2E 23** |
+| 최종 | 228 tests + typecheck 5 + build + E2E 23 — 전부 exit 0 |
+
+(수치가 어긋나면 이 표를 갱신한다.)
+
+## 후속 노트 (E2 이관 후보)
+
+- 원격 인증(HTTPS 토큰·SSH 키) 실패 UX — GIT_TERMINAL_PROMPT=0으로 즉시 실패, 원문 노출 가능(협업 단계에서)
+- rebase형 pull, upstream 자동 연결 제안(받아오기 시 no-tracking이면 "백업으로 연결" 버튼)
+- 팝오버 ESC 불응(E1a 잔여), 블록 단위 충돌 선택·앱 내 편집기
+- revert의 revert·빈 revert 안내, 관리 다이얼로그에서 원격 브랜치 표시
