@@ -1,8 +1,9 @@
-import { Check, ChevronDown, Plus } from 'lucide-react'
-import { Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components'
+import { Check, ChevronDown, Folder, Plus } from 'lucide-react'
+import { Header, Menu, MenuItem, MenuSection, MenuTrigger, Popover } from 'react-aria-components'
 import type { BranchSummary } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { Pictogram } from '../ui/Pictogram'
+import { branchDisplayName, groupBranches } from './branch-groups'
 import { formatRelativeTime } from './relative-time'
 import './branch-switcher.css'
 
@@ -18,8 +19,28 @@ interface BranchSwitcherProps {
 const NEW_KEY = '__new__'
 const MANAGE_KEY = '__manage__'
 
-/** 헤더 실험 공간 스위처 (⑧) — 목록에서 전환하거나 새로 만든다 */
+/** 헤더 실험 공간 스위처 (⑧) — 목록에서 전환하거나 새로 만든다. '/' 접두사는 폴더로 묶는다 (피드백 5) */
 export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate, onManage }: BranchSwitcherProps) {
+  const grouped = groupBranches(branches)
+  const renderItem = (branch: BranchSummary, display: string) => (
+    <MenuItem
+      key={branch.name}
+      id={branch.name}
+      className="branch-switcher__item"
+      textValue={branch.name}
+      data-testid={`branch-item-${branch.name}`}
+    >
+      <span className="branch-switcher__check" aria-hidden="true">
+        {branch.isCurrent ? <Check size={12} /> : null}
+      </span>
+      <span className="branch-switcher__name" title={branch.name}>
+        {display}
+      </span>
+      <span className="branch-switcher__time">
+        {formatRelativeTime(branch.committedAt, Date.now())}
+      </span>
+    </MenuItem>
+  )
   return (
     <MenuTrigger>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
@@ -36,22 +57,14 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
             else if (key !== currentName) onSwitch(String(key))
           }}
         >
-          {branches.map((branch) => (
-            <MenuItem
-              key={branch.name}
-              id={branch.name}
-              className="branch-switcher__item"
-              textValue={branch.name}
-              data-testid={`branch-item-${branch.name}`}
-            >
-              <span className="branch-switcher__check" aria-hidden="true">
-                {branch.isCurrent ? <Check size={12} /> : null}
-              </span>
-              <span className="branch-switcher__name">{branch.name}</span>
-              <span className="branch-switcher__time">
-                {formatRelativeTime(branch.committedAt, Date.now())}
-              </span>
-            </MenuItem>
+          {grouped.loose.map((branch) => renderItem(branch, branch.name))}
+          {grouped.folders.map((folder) => (
+            <MenuSection key={folder.name} className="branch-switcher__section">
+              <Header className="branch-switcher__folder">
+                <Folder size={11} aria-hidden="true" /> {folder.name}/
+              </Header>
+              {folder.branches.map((branch) => renderItem(branch, branchDisplayName(branch.name)))}
+            </MenuSection>
           ))}
           <MenuItem
             id={NEW_KEY}

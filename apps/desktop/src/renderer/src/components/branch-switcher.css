@@ -55,3 +55,16 @@
   color: var(--color-accent);
   font-weight: 600;
 }
+/* '/' 접두사 폴더 섹션 — IntelliJ식 그룹핑 (피드백 5) */
+.branch-switcher__folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 3px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-faint);
+}
+.branch-switcher__section .branch-switcher__item {
+  padding-left: 24px;
+}
