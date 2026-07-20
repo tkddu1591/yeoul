@@ -5,7 +5,10 @@ import type {
   DiffOptions,
   FileDiff,
   MergeResult,
+  PullResult,
+  RemoveBranchResult,
   RepositoryStatus,
+  RevertResult,
   ShelfEntry,
   SwitchResult,
 } from '@git-gui/domain'
@@ -34,6 +37,8 @@ export interface GitApi {
     switch(repoPath: string, name: string): Promise<SwitchResult>
     /** name 공간을 지금 공간으로 합친다(스마트 병합) — conflict면 충돌 상태가 남는다 */
     merge(repoPath: string, name: string): Promise<MergeResult>
+    remove(repoPath: string, name: string, force: boolean): Promise<RemoveBranchResult>
+    rename(repoPath: string, oldName: string, newName: string): Promise<void>
   }
   merge: {
     abort(repoPath: string): Promise<void>
@@ -66,6 +71,8 @@ export interface GitApi {
     show(repoPath: string, hash: string): Promise<CommitDetail>
     /** 커밋 안 단일 파일 diff — 첫 부모 기준. rename이면 origPath 동봉 */
     diffFile(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    revert(repoPath: string, hash: string): Promise<RevertResult>
+    revertAbort(repoPath: string): Promise<void>
   }
   history: {
     /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어) */
@@ -74,6 +81,8 @@ export interface GitApi {
   sync: {
     /** 현재 브랜치를 원격으로 백업(push). 원격이 없으면 에러 */
     push(repoPath: string): Promise<void>
+    /** 원격의 최신 저장을 받아온다 — conflict면 기존 합치기 충돌 흐름이 이어진다 */
+    pull(repoPath: string): Promise<PullResult>
   }
 }
 
@@ -87,6 +96,8 @@ export const CHANNELS = {
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',
   branchesMerge: 'branches:merge',
+  branchesRemove: 'branches:remove',
+  branchesRename: 'branches:rename',
   mergeAbort: 'merge:abort',
   conflictsResolve: 'conflicts:resolve',
   conflictsMarkResolved: 'conflicts:mark-resolved',
@@ -102,8 +113,11 @@ export const CHANNELS = {
   commitsCreate: 'commits:create',
   commitsShow: 'commits:show',
   commitsDiffFile: 'commits:diff-file',
+  commitsRevert: 'commits:revert',
+  commitsRevertAbort: 'commits:revert-abort',
   historyList: 'history:list',
   syncPush: 'sync:push',
+  syncPull: 'sync:pull',
 } as const
 
 /**

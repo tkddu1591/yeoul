@@ -80,6 +80,11 @@ function assertConflictChoice(value: unknown): 'ours' | 'theirs' {
   return value
 }
 
+function assertBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('잘못된 요청 형식이에요.')
+  return value
+}
+
 function assertNullableHash(value: unknown): string | null {
   if (value === null) return null
   return assertHash(value)
@@ -138,6 +143,24 @@ export function registerGitHandlers(): void {
     createGitClient(assertAllowedRepo(repoPath)).branches.merge(assertString(name)),
   )
 
+  ipcMain.handle(
+    CHANNELS.branchesRemove,
+    (_event, repoPath: unknown, name: unknown, force: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).branches.remove(
+        assertString(name),
+        assertBoolean(force),
+      ),
+  )
+
+  ipcMain.handle(
+    CHANNELS.branchesRename,
+    (_event, repoPath: unknown, oldName: unknown, newName: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).branches.rename(
+        assertString(oldName),
+        assertString(newName),
+      ),
+  )
+
   ipcMain.handle(CHANNELS.mergeAbort, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).merge.abort(),
   )
@@ -153,6 +176,14 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.conflictsMarkResolved, (_event, repoPath: unknown, path: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).conflicts.markResolved(assertString(path)),
+  )
+
+  ipcMain.handle(CHANNELS.commitsRevert, (_event, repoPath: unknown, hash: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.revert(assertHash(hash)),
+  )
+
+  ipcMain.handle(CHANNELS.commitsRevertAbort, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.revertAbort(),
   )
 
   ipcMain.handle(CHANNELS.filesReadText, (_event, repoPath: unknown, path: unknown) =>
@@ -225,5 +256,9 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).sync.push(),
+  )
+
+  ipcMain.handle(CHANNELS.syncPull, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).sync.pull(),
   )
 }

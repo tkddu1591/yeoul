@@ -14,6 +14,10 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.branchesCreate, repoPath, name, fromHash),
     switch: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesSwitch, repoPath, name),
     merge: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesMerge, repoPath, name),
+    remove: (repoPath, name, force) =>
+      ipcRenderer.invoke(CHANNELS.branchesRemove, repoPath, name, force),
+    rename: (repoPath, oldName, newName) =>
+      ipcRenderer.invoke(CHANNELS.branchesRename, repoPath, oldName, newName),
   },
   merge: {
     abort: (repoPath) => ipcRenderer.invoke(CHANNELS.mergeAbort, repoPath),
@@ -46,12 +50,15 @@ const api: GitApi = {
     show: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsShow, repoPath, hash),
     diffFile: (repoPath, hash, path, origPath) =>
       ipcRenderer.invoke(CHANNELS.commitsDiffFile, repoPath, hash, path, origPath),
+    revert: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsRevert, repoPath, hash),
+    revertAbort: (repoPath) => ipcRenderer.invoke(CHANNELS.commitsRevertAbort, repoPath),
   },
   history: {
     list: (repoPath, limit) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit),
   },
   sync: {
     push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),
+    pull: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPull, repoPath),
   },
 }
 
