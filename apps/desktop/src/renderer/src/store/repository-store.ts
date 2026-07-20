@@ -9,9 +9,11 @@ import type {
   RepositoryStatus,
   ShelfEntry,
 } from '@git-gui/domain'
+import type { HostingStatus, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 
 const git = () => window.gitApi
+const hosting = () => window.hostingApi
 
 /** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
@@ -40,6 +42,10 @@ interface RepositoryStore {
   commitFile: CommitFileChange | null
   /** 충돌 뷰 — 열려 있으면 중앙 패널이 충돌 해결 화면이 된다. diff·커밋 상세와 상호 배타 */
   conflictFile: { path: string; content: string } | null
+  /** GitHub 연결 상태 — git 스냅샷과 독립된 네트워크 상태. 토큰은 오지 않는다(login만) */
+  hostingStatus: HostingStatus | null
+  /** 열린 리뷰 요청 목록 — 리뷰 팝오버를 열 때·생성 후 갱신된다 */
+  pulls: PullSummary[]
   /** 안내 배너 — 에러가 아닌 정보(자동 보관 등). 다음 작업 시작 시 지워진다 */
   notice: string | null
   error: string | null
@@ -104,6 +110,18 @@ interface RepositoryStore {
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
   commit(message: string): Promise<boolean>
   backup(): Promise<void>
+  /** 열린 리뷰 요청 목록 갱신 — 팝오버를 열 때. 미연결·비GitHub이면 조용히 무시 */
+  refreshPulls(): Promise<void>
+  /** gh CLI 토큰으로 연결 — 성공 여부 반환 */
+  connectGh(): Promise<boolean>
+  /** 붙여넣은 토큰으로 연결 — 실패 시 다이얼로그 유지·입력 보존을 위해 성공 여부 반환 */
+  connectToken(token: string): Promise<boolean>
+  /** GitHub 연결 해제 — 저장된 토큰을 지운다 */
+  disconnectHosting(): Promise<void>
+  /** 리뷰 요청 생성(빈 본문) — 성공 시 notice 안내 + 목록·스냅샷 갱신. 성공 여부 반환 */
+  createPull(title: string): Promise<boolean>
+  /** 리뷰 요청을 브라우저로 연다 — 주소는 main이 보관한 목록에서만 */
+  openPull(number: number): Promise<void>
 }
 
 /** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함) */
@@ -168,12 +186,18 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   notice: null,
   error: null,
   busy: false,
+  hostingStatus: null,
+  pulls: [],
 
   async init() {
     await guard(set, get, async () => {
       const initial = await git().repo.initialPath()
       if (!initial) return
-      set({ repoPath: initial, ...(await fetchSnapshot(initial, get().historyLimit)) })
+      set({
+        repoPath: initial,
+        hostingStatus: await hosting().status(initial),
+        ...(await fetchSnapshot(initial, get().historyLimit)),
+      })
     })
   },
 
@@ -186,6 +210,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         repoPath: path,
         historyLimit: HISTORY_LIMIT,
+        hostingStatus: await hosting().status(path),
+        pulls: [],
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(path, HISTORY_LIMIT)),
       })
@@ -197,7 +223,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff·상세도 함께 무효화한다
-      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      set({
+        ...CLEAR_SELECTIONS,
+        hostingStatus: await hosting().status(repoPath),
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+      })
     })
   },
 
@@ -616,6 +646,75 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await git().sync.push(repoPath)
       // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신
       set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async refreshPulls() {
+    const { repoPath, hostingStatus } = get()
+    if (!repoPath || hostingStatus === null || !hostingStatus.connected || hostingStatus.repo === null) {
+      return
+    }
+    await guard(set, get, async () => {
+      set({ pulls: await hosting().pulls.list(repoPath) })
+    })
+  },
+
+  async connectGh() {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      const login = await hosting().connect.gh()
+      set({
+        hostingStatus: await hosting().status(repoPath),
+        notice: `@${login} 계정으로 GitHub와 연결했어요.`,
+      })
+    })
+  },
+
+  async connectToken(token) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      const login = await hosting().connect.token(token)
+      set({
+        hostingStatus: await hosting().status(repoPath),
+        notice: `@${login} 계정으로 GitHub와 연결했어요.`,
+      })
+    })
+  },
+
+  async disconnectHosting() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await hosting().disconnect()
+      set({
+        hostingStatus: await hosting().status(repoPath),
+        pulls: [],
+        notice: 'GitHub 연결을 해제했어요.',
+      })
+    })
+  },
+
+  async createPull(title) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      const pull = await hosting().pulls.create(repoPath, { title, body: '' })
+      // 백업(push)이 함께 일어났을 수 있다 — 리뷰 목록과 git 스냅샷(ahead/behind)을 함께 갱신한다
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        pulls: await hosting().pulls.list(repoPath),
+        notice: `리뷰 요청 #${pull.number}을 만들었어요. 리뷰 팝오버에서 볼 수 있어요.`,
+      })
+    })
+  },
+
+  async openPull(number) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await hosting().pulls.open(repoPath, number)
     })
   },
 }))
