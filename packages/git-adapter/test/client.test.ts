@@ -839,6 +839,74 @@ describe('GitClient', () => {
     await expect(createGitClient(repo).sync.push()).rejects.toThrow('브랜치가 아닌 시점')
   })
 
+  it('pull — 원격의 새 저장을 받아온다(ff)와 이미 최신을 구분한다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    expect(await client.sync.pull()).toEqual({ outcome: 'up-to-date', autoShelved: false })
+
+    // 다른 클론이 원격에 새 저장을 올린다
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'from-other.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other work'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+
+    expect(await client.sync.pull()).toEqual({ outcome: 'fast-forward', autoShelved: false })
+    const history = await client.history.list(10)
+    expect(history[0]!.subject).toBe('other work')
+  })
+
+  it('pull — 서로 갈라진 같은 줄 변경은 conflict 상태(merging)로 남는다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'README.md', '# remote\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote change'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await writeFixtureFile(repo, 'README.md', '# local\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local change'], { cwd: repo })
+
+    expect(await client.sync.pull()).toEqual({ outcome: 'conflict', autoShelved: false })
+    const status = await client.repo.status()
+    expect(status.state).toBe('merging')
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('pull — 막힌 변경은 보관함에 자동 저장하고 받아온다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'README.md', '# remote\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote change'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await writeFixtureFile(repo, 'README.md', '# uncommitted\n')
+
+    const result = await client.sync.pull()
+    expect(result).toEqual({ outcome: 'fast-forward', autoShelved: true })
+    const shelf = await client.shelf.list()
+    expect(shelf[0]!.message).toContain('받아오기 자동 보관')
+  })
+
+  it('pull — 원격/upstream이 없으면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.sync.pull()).rejects.toThrow(/원격 저장소가 없어요/)
+
+    const withRemote = await createFixtureRepoWithRemote()
+    const client2 = createGitClient(withRemote.repo)
+    // push(업스트림 연결) 없이 pull — tracking 정보 없음
+    await expect(client2.sync.pull()).rejects.toThrow(/백업.*연결/)
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

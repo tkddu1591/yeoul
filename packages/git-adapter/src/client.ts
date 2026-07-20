@@ -6,6 +6,7 @@ import {
   type DiffOptions,
   type FileDiff,
   type MergeResult,
+  type PullResult,
   type RepositoryStatus,
   type ShelfEntry,
   type SwitchResult,
@@ -85,6 +86,11 @@ export interface GitClient {
   sync: {
     /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 */
     push(): Promise<void>
+    /**
+     * 원격의 최신 저장을 받아온다(fetch+merge). 막히면 자동 보관 후 재시도.
+     * conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름(머지 바·충돌 뷰·저장하기 마무리)을 그대로 쓴다.
+     */
+    pull(): Promise<PullResult>
   }
   commits: {
     create(message: string): Promise<void>
@@ -132,6 +138,9 @@ const AUTO_SHELF_MESSAGE = '실험 공간 전환 자동 보관'
 
 /** 합치기가 막혀 자동 보관할 때의 보관함 메시지 */
 const MERGE_SHELF_MESSAGE = '실험 공간 합치기 자동 보관'
+
+/** 받아오기가 막혀 자동 보관할 때의 보관함 메시지 */
+const PULL_SHELF_MESSAGE = '받아오기 자동 보관'
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
@@ -480,6 +489,40 @@ export function createGitClient(repoPath: string): GitClient {
         // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다).
         // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
         await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
+      },
+      async pull() {
+        const cwd = await topLevel()
+        const remotes = await execGitOrThrow(['remote'], { cwd })
+        if (remotes.stdout.trim() === '') {
+          throw new Error('받아올 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+        }
+        const classify = (output: string): PullResult['outcome'] => {
+          if (output.includes('Already up to date')) return 'up-to-date'
+          if (output.includes('Fast-forward')) return 'fast-forward'
+          return 'merged'
+        }
+        const run = () => execGit(['pull', '--no-rebase', '--no-edit'], { cwd })
+        const first = await run()
+        const firstOut = first.stdout + first.stderr
+        if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
+        if (firstOut.includes('no tracking information')) {
+          throw new Error('이 실험 공간은 아직 원격과 연결되지 않았어요. 먼저 백업(push)으로 연결해 주세요.')
+        }
+        if (firstOut.includes('CONFLICT') || firstOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: false }
+        }
+        if (!firstOut.includes('would be overwritten')) {
+          throw new GitError(['pull', '--no-rebase', '--no-edit'], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (merge·switch와 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', PULL_SHELF_MESSAGE], { cwd })
+        const second = await run()
+        const secondOut = second.stdout + second.stderr
+        if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
+        if (secondOut.includes('CONFLICT') || secondOut.includes('Automatic merge failed')) {
+          return { outcome: 'conflict', autoShelved: true }
+        }
+        throw new GitError(['pull', '--no-rebase', '--no-edit'], second)
       },
     },
     commits: {

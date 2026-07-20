@@ -115,3 +115,9 @@ export interface MergeResult {
   /** 막혀서 변경을 보관함에 자동 저장했는가 (스펙: 덮기 전 자동 보관) */
   autoShelved: boolean
 }
+
+/** 받아오기(pull) 결과 — conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다 */
+export interface PullResult {
+  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
+  autoShelved: boolean
+}
