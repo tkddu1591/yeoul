@@ -14,7 +14,7 @@ import {
   type SwitchResult,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
-import { lstat, readFile } from 'node:fs/promises'
+import { lstat, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
@@ -59,6 +59,13 @@ export interface GitClient {
     resolve(path: string, choice: 'ours' | 'theirs'): Promise<void>
     /** 직접 수정을 마쳤다고 표시한다(git add) — 마커가 남았는지는 UI가 확인창으로 경고한다 */
     markResolved(path: string): Promise<void>
+    /**
+     * 충돌 파일의 워크트리 내용을 통째로 바꾼다(블록 선택·자세히 보기 저장) — add하지 않는다.
+     * 확정은 markResolved가 담당한다. 비충돌 파일은 resolve와 동일 문구로 거부한다(조용한 유실 차단)
+     */
+    saveText(path: string, content: string): Promise<void>
+    /** 처음부터 다시 — 부분 해소를 버리고 겹침 표시를 되살린다(git checkout -m). index는 UU 그대로다 */
+    reset(path: string): Promise<void>
   }
   files: {
     /** 워크트리 텍스트 파일 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
@@ -336,6 +343,38 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         assertRepoRelative(path)
         await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
+      },
+      async saveText(path, content) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        // resolve와 동일 가드·동일 문구 — 비충돌 파일 쓰기는 미저장 편집의 조용한 유실 경로다
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() === '') {
+          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // readText와 대칭 상한 — 이보다 큰 파일은 애초에 뷰로 열리지 않는다 (심층 방어)
+        if (Buffer.byteLength(content, 'utf8') > 1_000_000) {
+          throw new Error('파일이 너무 커요. 외부 편집기로 열어 주세요.')
+        }
+        const filePath = join(cwd, path)
+        // 심볼릭 링크는 저장소 밖에 쓸 수 있다 — readText와 동일하게 거부.
+        // 파일이 없으면(삭제형 충돌) 새로 만드는 것이 맞으니 lstat 실패는 통과시킨다
+        const stats = await lstat(filePath).catch(() => null)
+        if (stats !== null && stats.isSymbolicLink()) {
+          throw new Error('링크 파일이라 내용을 저장할 수 없어요.')
+        }
+        await writeFile(filePath, content, 'utf8')
+      },
+      async reset(path) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() === '') {
+          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // 실측: 부분 해소(일부 블록만 고쳐 쓴) 상태에서도 exit 0으로 전체 마커를 재생성한다.
+        // 라벨은 브랜치명 대신 ours/theirs로 바뀌지만 파서는 접두사 기반이라 무관. index는 UU 유지
+        await execGitOrThrow(['checkout', '-m', '--', `:(literal)${path}`], { cwd })
       },
     },
     files: {

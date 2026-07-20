@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -753,6 +753,92 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
     await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌\) 상태가 아닌/)
     // 미저장 편집이 살아 있어야 한다
+    expect(await client.files.readText('README.md')).toBe('# precious edit\n')
+  })
+
+  it('conflicts.saveText — 겹침 파일에 add 없이 내용을 쓴다 (블록 선택 반영)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await client.conflicts.saveText('README.md', '# mine\n')
+    expect(await client.files.readText('README.md')).toBe('# mine\n')
+    // add하지 않았다 — 여전히 충돌(unmerged)이어야 확정 전 전환 유지·복원이 성립한다
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('conflicts.saveText — 충돌이 아닌 파일은 거부한다 (조용한 유실 차단)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# precious edit\n')
+    await expect(client.conflicts.saveText('README.md', '덮어쓰기')).rejects.toThrow(
+      /충돌\) 상태가 아닌/,
+    )
+    expect(await client.files.readText('README.md')).toBe('# precious edit\n')
+  })
+
+  it('conflicts.saveText — 1MB 초과와 심볼릭 링크를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(
+      client.conflicts.saveText('README.md', 'x'.repeat(1_000_001)),
+    ).rejects.toThrow(/너무 커요/)
+    // 워크트리 파일을 링크로 바꿔치기해도(index는 여전히 UU) 링크 너머로 쓰지 않는다
+    await unlink(join(repo, 'README.md'))
+    await symlink('/etc/hosts', join(repo, 'README.md'))
+    await expect(client.conflicts.saveText('README.md', '덮어쓰기')).rejects.toThrow(/링크 파일/)
+  })
+
+  it('conflicts.reset — 부분 해소를 버리고 겹침 표시를 되살린다 (index는 UU 유지)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+    // 블록 선택을 흉내 — 마커 없이 한쪽으로 고쳐 쓴다 (add는 하지 않는다)
+    await client.conflicts.saveText('README.md', '# mine\n')
+    expect(await client.files.readText('README.md')).not.toContain('<<<<<<<')
+
+    await client.conflicts.reset('README.md')
+    // 실측: 라벨은 ours/theirs로 재생성된다 — 접두사(<<<<<<<) 기준으로 확인한다
+    expect(await client.files.readText('README.md')).toContain('<<<<<<<')
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('conflicted')
+  })
+
+  it('conflicts.reset — 충돌이 아닌 파일은 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# precious edit\n')
+    await expect(client.conflicts.reset('README.md')).rejects.toThrow(/충돌\) 상태가 아닌/)
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
 
