@@ -1631,12 +1631,19 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
     await window.getByTestId('merge-abort').click()
 ```
 
-(b) `'합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다'` — 느슨한 2차 확인 단언을 제목 텍스트로 교체:
+(b) `'합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다'` — 느슨한 2차 확인 단언을 제목 텍스트로 교체하고, 2차 클릭을 강제 확인창으로 스코프한다. 오버레이 퇴장 애니메이션(120ms) 동안 1차(퇴장 중)·2차 다이얼로그가 DOM에 공존해, 전역 `confirm-accept` 클릭은 strict mode 2개 매치로 결정적으로 실패한다(실측):
 
 ```ts
     // 합쳐지지 않은 저장 — 1차와 구분되는 강제 확인창(제목)이 이어진다
     await expect(window.getByText('아직 합쳐지지 않은 저장이 있어요')).toBeVisible()
+    // 1차 다이얼로그가 퇴장 애니메이션 동안 공존한다 — 강제 확인창으로 스코프해 클릭
+    await window
+      .getByRole('alertdialog', { name: '아직 합쳐지지 않은 저장이 있어요' })
+      .getByTestId('confirm-accept')
+      .click()
 ```
+
+(기존의 두 번째 `await window.getByTestId('confirm-accept').click()` 줄은 위 스코프 클릭으로 대체한다.)
 
 - [ ] **Step 9: 게이트** — `pnpm -r test`(**230 tests**) + `pnpm -r typecheck`(5 Done) + `pnpm --filter desktop build` + E2E 전체(**24 passed**) 전부 exit 0
 
