@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizeSettings } from '../src/index'
+import { sanitizePersistedSettings, sanitizeSettings } from '../src/index'
 
 describe('sanitizeSettings', () => {
   it('알려진 필드만, 올바른 타입만 통과시킨다', () => {
@@ -17,5 +17,28 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings(null)).toEqual({})
     expect(sanitizeSettings('{}')).toEqual({})
     expect(sanitizeSettings([1, 2])).toEqual({})
+  })
+})
+
+describe('sanitizePersistedSettings', () => {
+  it('renderer 필드에 더해 hosting.github(token·login)을 통과시킨다', () => {
+    expect(
+      sanitizePersistedSettings({
+        theme: 'dark',
+        hosting: { github: { token: 'enc-base64', login: 'octocat', evil: 'x' } },
+      }),
+    ).toEqual({ theme: 'dark', hosting: { github: { token: 'enc-base64', login: 'octocat' } } })
+  })
+
+  it('hosting이 잘못된 형태면 조용히 버린다', () => {
+    expect(sanitizePersistedSettings({ hosting: 'yes' })).toEqual({})
+    expect(sanitizePersistedSettings({ hosting: { github: { token: 42 } } })).toEqual({})
+    expect(sanitizePersistedSettings({ hosting: { github: [] } })).toEqual({})
+  })
+
+  it('sanitizeSettings(renderer 표면)는 hosting을 걷어낸다 — 토큰은 renderer로 가지 않는다', () => {
+    expect(sanitizeSettings({ theme: 'light', hosting: { github: { token: 'enc' } } })).toEqual({
+      theme: 'light',
+    })
   })
 })

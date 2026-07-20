@@ -147,6 +147,31 @@ export function sanitizeSettings(value: unknown): AppSettings {
   return settings
 }
 
+/**
+ * 디스크(settings.json)에만 존재하는 확장 설정 — main 전용.
+ * hosting.github.token은 safeStorage 암호문(base64)이며, getSync 응답은 sanitizeSettings로
+ * renderer 표면 필드만 추리므로 renderer에는 토큰이 절대 전달되지 않는다.
+ */
+export interface PersistedSettings extends AppSettings {
+  hosting?: { github?: { token?: string; login?: string } }
+}
+
+/** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)을 더한다 */
+export function sanitizePersistedSettings(value: unknown): PersistedSettings {
+  const settings: PersistedSettings = sanitizeSettings(value)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
+  const hosting = (value as { hosting?: unknown }).hosting
+  if (typeof hosting !== 'object' || hosting === null || Array.isArray(hosting)) return settings
+  const github = (hosting as { github?: unknown }).github
+  if (typeof github !== 'object' || github === null || Array.isArray(github)) return settings
+  const candidate = github as { token?: unknown; login?: unknown }
+  const clean: { token?: string; login?: string } = {}
+  if (typeof candidate.token === 'string') clean.token = candidate.token
+  if (typeof candidate.login === 'string') clean.login = candidate.login
+  if (clean.token !== undefined || clean.login !== undefined) settings.hosting = { github: clean }
+  return settings
+}
+
 /** preload가 노출하는 설정 표면 — initial은 시작 시점 스냅샷(동기), set은 부분 갱신 */
 export interface SettingsApi {
   initial: AppSettings
