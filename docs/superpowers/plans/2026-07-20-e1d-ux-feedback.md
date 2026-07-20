@@ -707,6 +707,156 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6-보완: 품질 리뷰 4건 (실렌더 실측 반영)
+
+품질 리뷰(실기동·elementFromPoint 실측)가 잡은 결함:
+
+- **(Important 1) merging 중 에러 배너가 머지 바를 가림** — banner-layer가 merge-bar보다 앞(JSX 순서)이라 같은 y에 겹치고, 배경색까지 같아 머지 바가 사라진 듯 보이며 **'합치기 취소'가 클릭 불가**(elementFromPoint = 배너). → 배너 레이어를 머지 바 **뒤**로 옮겨 본문 위로만 덮게 한다.
+- **(Important 2) 미리보기 중 '버리기' 시 stale 상세** — `shelfDrop`만 `CLEAR_SELECTIONS`가 없어 지운 항목의 상세가 우측에 남는다. → restore와 대칭으로 클리어.
+- **(Important 3·Minor 5) 미리보기 정체성·오정보** — untracked 전용 항목이 "메시지만 남긴 저장이에요"로 표기(실제로는 파일이 담김 — stash 셋째 부모 한계), 제목이 "저장 내용 commit"에 "병합된 저장 —" 내부 설명까지 붙는다. → 보관함 미리보기면 제목 "보관 내용 stash"·빈 목록 문구·병합 노트 억제로 분기.
+- **(Important 4) 360px 상세에서 긴 경로 가로 오버플로** — 상세 파일 행이 좌측과 같은 `virtual-row--wide`(가로 스크롤 설계)를 써서 좁은 우측 열에서 잘림+가로 스크롤. → 상세만 말줄임으로 흡수(좌측 변경 목록의 가로 스크롤 ③은 그대로).
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/App.tsx` (배너 순서·shelfPreview 계산·prop)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (shelfDrop)
+- Modify: `apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx` (+`commit-detail-panel.css`)
+- Test: `apps/desktop/e2e/smoke.spec.ts` (미리보기 정체성 단언)
+
+- [ ] **Step 1: App.tsx — 배너 레이어를 머지 바 뒤로** — Task 2에서 넣은 `app__banner-layer` 블록을 잘라내 merge-bar 블록 **바로 뒤**에 붙인다. 최종 순서:
+
+```tsx
+      {(status?.state === 'merging' || status?.state === 'reverting') && (
+        <div className="app__merge-bar" data-testid="merge-bar">
+          …(기존 그대로)…
+        </div>
+      )}
+      {/* 배너는 머지 바 '뒤' — 머지 바(상주 상태·취소 버튼)를 가리면 취소가 클릭 불가가 된다 (품질 리뷰 실측) */}
+      {(store.error !== null || store.notice !== null) && (
+        <div className="app__banner-layer">
+          {store.error && (
+            <p className="app__error" role="alert" data-testid="error">
+              {store.error}
+            </p>
+          )}
+          {store.notice && (
+            <p className="app__notice" role="status" data-testid="notice">
+              {store.notice}
+            </p>
+          )}
+        </div>
+      )}
+```
+
+- [ ] **Step 2: store — shelfDrop 클리어** (`shelfDrop` 전체 교체)
+
+```ts
+  async shelfDrop(ref) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().shelf.drop(repoPath, ref)
+      // 지운 항목을 미리보기로 열어 둔 채면 stale 상세가 남는다 — restore와 대칭으로 선택을 지운다 (품질 리뷰)
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+```
+
+- [ ] **Step 3: App.tsx — shelfPreview 계산 + prop** — `repoName` 선언 뒤에 추가:
+
+```tsx
+  // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
+  const openDetail = store.commitDetail
+  const shelfPreview =
+    openDetail !== null && store.shelf.some((entry) => entry.hash === openDetail.hash)
+```
+
+CommitDetailPanel 호출에 prop 추가(`detail=` 줄 뒤):
+
+```tsx
+            shelfPreview={shelfPreview}
+```
+
+- [ ] **Step 4: CommitDetailPanel — 보관함 맥락 분기 + 말줄임**
+
+(a) props에 추가(`detail: CommitDetail` 줄 뒤):
+
+```ts
+  /** 보관함 미리보기로 열렸는가 — 제목·문구를 보관함 맥락으로 분기한다 (품질 리뷰) */
+  shelfPreview: boolean
+```
+
+(b) 구조 분해에 `shelfPreview` 추가, Panel 제목·배지 교체:
+
+```tsx
+      title={shelfPreview ? '보관 내용' : '저장 내용'}
+```
+
+```tsx
+          <Badge tone="git">{shelfPreview ? 'stash' : 'commit'}</Badge>
+```
+
+(c) 빈 목록 문구 분기 — files-head 삼항 교체:
+
+```tsx
+        {detail.files.length > 0
+          ? ' — 누르면 가운데에 비교를 보여드려요'
+          : shelfPreview
+            ? ' — 새로 만든 파일만 담긴 보관이에요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요'
+            : ' — 메시지만 남긴 저장이에요'}
+```
+
+(d) 병합 노트 억제 — meta의 병합 조건 교체:
+
+```tsx
+          {!shelfPreview &&
+            detail.parents.length >= 2 &&
+            ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
+```
+
+(e) 파일 행 `<li>`의 className에서 `virtual-row--wide` 제거(가로 스크롤 → 말줄임):
+
+```tsx
+                className="virtual-row"
+```
+
+(f) `commit-detail-panel.css` 끝에 추가:
+
+```css
+/* 좁은 우측 열에서 긴 경로가 가로 스크롤을 만들지 않게 — 상세는 말줄임으로 흡수한다 (품질 리뷰).
+   좌측 변경 목록의 가로 스크롤(③)은 그대로 — 이 규칙은 상세 행에만 적용된다 */
+.commit-file-row .file-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.commit-file-row .file-row__dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+```
+
+- [ ] **Step 5: E2E 정체성 단언** — Task 6의 미리보기 테스트에서 `commit-detail-panel` 가시성 단언 **바로 뒤**에 추가:
+
+```ts
+    await expect(window.getByTestId('commit-detail-panel')).toContainText('보관 내용')
+```
+
+- [ ] **Step 6: 실렌더 확인 4건** — (1) merge 충돌 + 에러 배너 상태에서 '합치기 취소' 실클릭 성공, (2) 미리보기 열고 버리기 → 상세가 닫히고 타임라인 복귀, (3) untracked 전용 보관 미리보기 → "보관 내용 stash" 제목 + 새 문구·병합 노트 없음, (4) 360px 상세에서 긴 경로(`src/components/deep/nested/VeryLongComponentName.tsx`) 말줄임·가로 스크롤 없음.
+
+- [ ] **Step 7: 게이트** — 루트 `pnpm test`(**238**) + typecheck(5 Done) + build + E2E 전체(**25 passed**)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src apps/desktop/e2e
+git commit -m "fix(desktop): 품질 리뷰 — 배너가 머지 바 가림·보관함 미리보기 정체성·stale 상세·상세 말줄임
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 7: 최종 게이트 + 스크린샷 + README
 
 - [ ] **Step 1: 전체 게이트** — 루트 `pnpm test`(**238 tests**: 233 + branch-groups 4 + shelf 해시 1) + `pnpm typecheck`(5 Done) + `pnpm --filter @git-gui/desktop build` + E2E **25 passed** — 전부 exit 0
