@@ -557,3 +557,131 @@ test('저장 안 된 변경이 겹치면 보관함에 넣고 합친다 (스마�
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('원격의 새 저장을 받아온다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  const other = await mkdtemp(join(tmpdir(), 'git-gui-e2e-other-'))
+  await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+  await execGitOrThrow(['config', 'user.name', 'Other'], { cwd: other })
+  await execGitOrThrow(['config', 'user.email', 'o@test.local'], { cwd: other })
+  await writeFile(join(other, 'from-other.txt'), 'o\n')
+  await execGitOrThrow(['add', '-A'], { cwd: other })
+  await execGitOrThrow(['commit', '-m', '원격 저장'], { cwd: other })
+  await execGitOrThrow(['push'], { cwd: other })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    await window.getByTestId('pull').click()
+    await expect(window.getByTestId('notice')).toContainText('받아왔어요')
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(other, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
+test('저장을 되돌리는 새 저장을 만든다 (revert)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-revert').click()
+    await expect(window.getByTestId('notice')).toContainText('되돌리는 새 저장')
+    await expect(window.getByTestId('history-count')).toHaveText('3')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'v2'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v3\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'v3'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // v2(가운데 저장)를 되돌리면 v3와 겹친다
+    await window.locator('[data-testid^="history-item-"]').nth(1).click({ button: 'right' })
+    await window.getByTestId('context-revert').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('저장 되돌리는 중')
+    await window.getByTestId('merge-abort').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('notice')).toContainText('되돌리기를 취소')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 이름을 바꾼다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['branch', 'old-name'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-manage').click()
+    await window.getByTestId('manage-rename-old-name').click()
+    await window.getByTestId('prompt-input').fill('new-name')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('manage-rename-new-name')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'doomed'], { cwd: repo })
+  await writeFile(join(repo, 'd.txt'), 'd\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'doomed work'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-manage').click()
+    await window.getByTestId('manage-remove-doomed').click()
+    await window.getByTestId('confirm-accept').click()
+    // 합쳐지지 않은 저장 — 강제 확인창이 이어진다
+    await expect(window.getByTestId('confirm-accept')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('manage-remove-doomed')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
