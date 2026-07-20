@@ -22,3 +22,8 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 1px;
 }
+.ui-prompt__error {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}

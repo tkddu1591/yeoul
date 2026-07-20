@@ -1,4 +1,4 @@
-import { CloudUpload, GitMerge, Moon, RefreshCw, Sun } from 'lucide-react'
+import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { BranchSwitcher } from './components/BranchSwitcher'
@@ -8,6 +8,7 @@ import { CommitDetailPanel } from './components/CommitDetailPanel'
 import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
+import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
 import { ShelfPopover } from './components/ShelfPopover'
 import {
@@ -52,6 +53,7 @@ export function App() {
 
   // 합치기 대상 선택·취소 확인
   const [mergePicker, setMergePicker] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
   const [confirmingAbort, setConfirmingAbort] = useState(false)
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
@@ -124,11 +126,12 @@ export function App() {
               busy={store.busy}
               onSwitch={(name) => void store.switchBranch(name)}
               onCreate={() => setBranchPrompt({ fromHash: null })}
+              onManage={() => setManageOpen(true)}
             />
             <Button
               variant="ghost"
               size="sm"
-              isDisabled={store.busy || status.state === 'merging'}
+              isDisabled={store.busy || status.state !== 'normal'}
               onPress={() => setMergePicker(true)}
               testId="merge-open"
             >
@@ -149,6 +152,15 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
+          <Button
+            variant="neutral"
+            size="sm"
+            isDisabled={store.busy || status?.state !== 'normal'}
+            onPress={() => void store.pullLatest()}
+            testId="pull"
+          >
+            <DownloadCloud size={14} aria-hidden="true" /> 받아오기 <Badge tone="git">pull</Badge>
+          </Button>
           <ShelfPopover
             shelf={store.shelf}
             busy={store.busy}
@@ -194,14 +206,19 @@ export function App() {
           {store.notice}
         </p>
       )}
-      {status?.state === 'merging' && (
+      {(status?.state === 'merging' || status?.state === 'reverting') && (
         <div className="app__merge-bar" data-testid="merge-bar">
-          <Pictogram kind="conflict" size={14} label="합치는 중" />
-          {/* 문구는 상태 인지형 — 0개가 되는 전환점에서 다음 행동(저장하기)을 짚어 준다 (리뷰 반영) */}
+          <Pictogram
+            kind="conflict"
+            size={14}
+            label={status.state === 'merging' ? '합치는 중' : '되돌리는 중'}
+          />
           <span className="app__merge-text" data-testid="merge-remaining">
-            {conflictCount > 0
-              ? `실험 공간 합치는 중 — 겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
-              : '실험 공간 합치는 중 — 겹침 0개 남음. 이제 저장하기로 마무리해요.'}
+            {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
+              conflictCount > 0
+                ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+                : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+            }`}
           </span>
           <Button
             variant="danger"
@@ -210,7 +227,7 @@ export function App() {
             onPress={() => setConfirmingAbort(true)}
             testId="merge-abort"
           >
-            합치기 취소
+            {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
           </Button>
         </div>
       )}
@@ -288,6 +305,7 @@ export function App() {
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
             onCreateBranchAt={(hash) => setBranchPrompt({ fromHash: hash })}
+            onRevert={(hash) => void store.revertCommit(hash)}
           />
         )}
       </main>
@@ -302,6 +320,7 @@ export function App() {
         label="이름"
         placeholder="예: try-new-design"
         submitLabel="만들고 이동"
+        errorText={branchPrompt !== null ? store.error : null}
         onSubmit={(name) => {
           void (async () => {
             const fromHash = branchPrompt?.fromHash ?? null
@@ -325,17 +344,27 @@ export function App() {
         }}
         onCancel={() => setMergePicker(false)}
       />
+      <ManageBranchesDialog
+        isOpen={manageOpen}
+        branches={store.branches}
+        busy={store.busy}
+        errorText={store.error}
+        onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
+        onRemove={(name, force) => store.removeBranch(name, force)}
+        onCancel={() => setManageOpen(false)}
+      />
       <ConfirmDialog
         isOpen={confirmingAbort}
-        title="합치기를 취소할까요?"
-        confirmLabel="합치기 취소"
+        title={status?.state === 'reverting' ? '되돌리기를 취소할까요?' : '합치기를 취소할까요?'}
+        confirmLabel={status?.state === 'reverting' ? '되돌리기 취소' : '합치기 취소'}
         onConfirm={() => {
           setConfirmingAbort(false)
-          void store.abortMerge()
+          if (status?.state === 'reverting') void store.abortRevert()
+          else void store.abortMerge()
         }}
         onCancel={() => setConfirmingAbort(false)}
       >
-        지금까지 고른 것을 되돌리고 합치기 전 상태로 돌아가요.
+        지금까지 고른 것을 되돌리고 이전 상태로 돌아가요.
       </ConfirmDialog>
     </div>
   )

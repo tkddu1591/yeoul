@@ -12,12 +12,14 @@ interface BranchSwitcherProps {
   busy: boolean
   onSwitch(name: string): void
   onCreate(): void
+  onManage(): void
 }
 
 const NEW_KEY = '__new__'
+const MANAGE_KEY = '__manage__'
 
 /** 헤더 실험 공간 스위처 (⑧) — 목록에서 전환하거나 새로 만든다 */
-export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate }: BranchSwitcherProps) {
+export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate, onManage }: BranchSwitcherProps) {
   return (
     <MenuTrigger>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
@@ -30,6 +32,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
           className="branch-switcher__menu"
           onAction={(key) => {
             if (key === NEW_KEY) onCreate()
+            else if (key === MANAGE_KEY) onManage()
             else if (key !== currentName) onSwitch(String(key))
           }}
         >
@@ -60,6 +63,15 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
               <Plus size={12} />
             </span>
             <span className="branch-switcher__name">새 실험 공간 만들기…</span>
+          </MenuItem>
+          <MenuItem
+            id={MANAGE_KEY}
+            className="branch-switcher__item branch-switcher__item--new"
+            textValue="실험 공간 관리"
+            data-testid="branch-manage"
+          >
+            <span className="branch-switcher__check" aria-hidden="true" />
+            <span className="branch-switcher__name">실험 공간 관리…</span>
           </MenuItem>
         </Menu>
       </Popover>

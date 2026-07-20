@@ -10,14 +10,22 @@ interface ButtonProps extends Omit<AriaButtonProps, 'className' | 'children' | '
   size?: Size
   /** E2E용 data-testid */
   testId?: string
+  /** 추가 클래스 — 개념색 틴트 등 */
+  className?: string
   children: ReactNode
 }
 
-export function Button({ variant = 'neutral', size = 'md', testId, children, ...rest }: ButtonProps) {
+export function Button({ variant = 'neutral', size = 'md', testId, className, children, ...rest }: ButtonProps) {
   // data-* 속성은 컴포넌트 props 타입에 없으므로 스프레드로 전달한다
   const testProps = testId ? { 'data-testid': testId } : {}
   return (
-    <AriaButton {...rest} {...testProps} className={`ui-button ui-button--${variant} ui-button--${size}`}>
+    <AriaButton
+      {...rest}
+      {...testProps}
+      className={['ui-button', `ui-button--${variant}`, `ui-button--${size}`, className]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {children}
     </AriaButton>
   )

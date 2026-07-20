@@ -22,6 +22,8 @@ interface HistoryPanelProps {
   onLoadMore(): void
   /** 우클릭 → "여기서 실험 공간 만들기" — 해시를 넘긴다 (⑦) */
   onCreateBranchAt(hash: string): void
+  /** 우클릭 → "이 저장 되돌리기" (revert) */
+  onRevert(hash: string): void
 }
 
 /** 레인 간격·행 높이 — 행 높이는 고정이라 그래프 좌표가 단순해진다 (measureElement 불필요) */
@@ -123,6 +125,7 @@ export function HistoryPanel({
   onSelect,
   onLoadMore,
   onCreateBranchAt,
+  onRevert,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
   const truncated = history.length >= historyLimit
@@ -251,6 +254,11 @@ export function HistoryPanel({
               key: 'branch-here',
               label: '여기서 실험 공간 만들기…',
               onSelect: () => onCreateBranchAt(menu.commit.hash),
+            },
+            {
+              key: 'revert',
+              label: '이 저장 되돌리기 (revert)',
+              onSelect: () => onRevert(menu.commit.hash),
             },
             {
               key: 'copy-hash',

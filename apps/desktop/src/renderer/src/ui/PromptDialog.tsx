@@ -12,6 +12,10 @@ interface PromptDialogProps {
   label: string
   placeholder: string
   submitLabel: string
+  /** 열릴 때 채워 둘 값 — 이름 바꾸기 등. 기본은 빈 값 */
+  initialValue?: string
+  /** 인라인 에러 — 실패 시 다이얼로그 안에서 바로 보인다 (상단 배너와 병행) */
+  errorText?: string | null
   /** 제출 — 실패 시 호출 측이 다이얼로그를 열어 두면 입력이 보존된다 */
   onSubmit(value: string): void
   onCancel(): void
@@ -25,14 +29,16 @@ export function PromptDialog({
   label,
   placeholder,
   submitLabel,
+  initialValue,
+  errorText,
   onSubmit,
   onCancel,
 }: PromptDialogProps) {
   const [value, setValue] = useState('')
-  // 닫힐 때만 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
+  // 열릴 때 초기값으로 채우고, 닫힐 때 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
   useEffect(() => {
-    if (!isOpen) setValue('')
-  }, [isOpen])
+    setValue(isOpen ? (initialValue ?? '') : '')
+  }, [isOpen, initialValue])
   const submit = () => {
     const trimmed = value.trim()
     if (trimmed === '') return
@@ -65,6 +71,11 @@ export function PromptDialog({
             <Label className="ui-prompt__label">{label}</Label>
             <Input className="ui-prompt__input" placeholder={placeholder} data-testid="prompt-input" />
           </TextField>
+          {errorText && (
+            <p className="ui-prompt__error" role="alert" data-testid="prompt-error">
+              {errorText}
+            </p>
+          )}
           <div className="ui-dialog__actions">
             <Button variant="ghost" size="sm" onPress={onCancel} testId="prompt-cancel">
               그만두기

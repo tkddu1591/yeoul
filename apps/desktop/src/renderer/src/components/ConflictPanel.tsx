@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Check, Download, User } from 'lucide-react'
+import { ArrowDown, Check, Download, User } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -42,6 +42,17 @@ export function ConflictPanel({
     estimateSize: () => 21,
     overscan: 20,
   })
+  // 겹침 블록 시작 인덱스 — "다음 겹침"으로 순환 점프한다
+  const markerIndexes = rows.reduce<number[]>((acc, row, index) => {
+    if (row.kind === 'marker-ours') acc.push(index)
+    return acc
+  }, [])
+  const [jumpCursor, setJumpCursor] = useState(0)
+  const jumpNext = () => {
+    if (markerIndexes.length === 0) return
+    virtualizer.scrollToIndex(markerIndexes[jumpCursor % markerIndexes.length]!, { align: 'center' })
+    setJumpCursor(jumpCursor + 1)
+  }
   const markResolved = () => {
     void (async () => {
       // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)
@@ -67,6 +78,7 @@ export function ConflictPanel({
       <div className="conflict-panel__actions">
         <Button
           variant="neutral"
+          className="conflict-panel__btn--mine"
           size="sm"
           isDisabled={busy}
           onPress={() => onResolve('ours')}
@@ -76,6 +88,7 @@ export function ConflictPanel({
         </Button>
         <Button
           variant="neutral"
+          className="conflict-panel__btn--branch"
           size="sm"
           isDisabled={busy}
           onPress={() => onResolve('theirs')}
@@ -91,6 +104,15 @@ export function ConflictPanel({
           testId="conflict-mark"
         >
           <Check size={13} aria-hidden="true" /> 직접 수정했어요
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          isDisabled={busy || markerIndexes.length === 0}
+          onPress={jumpNext}
+          testId="conflict-next"
+        >
+          <ArrowDown size={13} aria-hidden="true" /> 다음 겹침 ({markerIndexes.length})
         </Button>
       </div>
       <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
