@@ -38,3 +38,15 @@
 .commit-file-row--selected {
   background: var(--color-selection-bg);
 }
+/* 좁은 우측 열에서 긴 경로가 가로 스크롤을 만들지 않게 — 상세는 말줄임으로 흡수한다 (품질 리뷰).
+   좌측 변경 목록의 가로 스크롤(③)은 그대로 — 이 규칙은 상세 행에만 적용된다 */
+.commit-file-row .file-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.commit-file-row .file-row__dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

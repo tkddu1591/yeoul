@@ -262,7 +262,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().shelf.drop(repoPath, ref)
-      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      // 지운 항목을 미리보기로 열어 둔 채면 stale 상세가 남는다 — restore와 대칭으로 선택을 지운다 (품질 리뷰)
+      set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
 

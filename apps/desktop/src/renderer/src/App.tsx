@@ -110,6 +110,10 @@ export function App() {
       ? '실험 공간 합치기'
       : suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
+  // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
+  const openDetail = store.commitDetail
+  const shelfPreview =
+    openDetail !== null && store.shelf.some((entry) => entry.hash === openDetail.hash)
 
   return (
     <div className="app">
@@ -205,20 +209,6 @@ export function App() {
           </Button>
         </div>
       </header>
-      {(store.error !== null || store.notice !== null) && (
-        <div className="app__banner-layer">
-          {store.error && (
-            <p className="app__error" role="alert" data-testid="error">
-              {store.error}
-            </p>
-          )}
-          {store.notice && (
-            <p className="app__notice" role="status" data-testid="notice">
-              {store.notice}
-            </p>
-          )}
-        </div>
-      )}
       {(status?.state === 'merging' || status?.state === 'reverting') && (
         <div className="app__merge-bar" data-testid="merge-bar">
           <Pictogram
@@ -244,6 +234,21 @@ export function App() {
           >
             {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
           </Button>
+        </div>
+      )}
+      {/* 배너는 머지 바 '뒤' — 머지 바(상주 상태·취소 버튼)를 가리면 취소가 클릭 불가가 된다 (품질 리뷰 실측) */}
+      {(store.error !== null || store.notice !== null) && (
+        <div className="app__banner-layer">
+          {store.error && (
+            <p className="app__error" role="alert" data-testid="error">
+              {store.error}
+            </p>
+          )}
+          {store.notice && (
+            <p className="app__notice" role="status" data-testid="notice">
+              {store.notice}
+            </p>
+          )}
         </div>
       )}
       <main
@@ -308,6 +313,7 @@ export function App() {
         {store.commitDetail !== null ? (
           <CommitDetailPanel
             detail={store.commitDetail}
+            shelfPreview={shelfPreview}
             selectedFile={store.commitFile}
             busy={store.busy}
             onSelectFile={(file) => void store.selectCommitFile(file)}

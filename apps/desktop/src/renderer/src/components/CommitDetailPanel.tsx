@@ -12,6 +12,8 @@ import './virtual.css'
 
 interface CommitDetailPanelProps {
   detail: CommitDetail
+  /** 보관함 미리보기로 열렸는가 — 제목·문구를 보관함 맥락으로 분기한다 (품질 리뷰) */
+  shelfPreview: boolean
   /** 상세 안에서 선택된 파일 — diff는 좌측 흐름과 동일하게 중앙 패널(공용 diff 슬롯)에 뜬다 */
   selectedFile: CommitFileChange | null
   busy: boolean
@@ -67,6 +69,7 @@ function CommitFileRow({
  */
 export function CommitDetailPanel({
   detail,
+  shelfPreview,
   selectedFile,
   busy,
   onSelectFile,
@@ -83,11 +86,11 @@ export function CommitDetailPanel({
 
   return (
     <Panel
-      title="저장 내용"
+      title={shelfPreview ? '보관 내용' : '저장 내용'}
       accessory={
         <>
           {/* 해시 배지는 좁은 우측 열에서 잘려 겹친다(실측) — 해시는 아래 메시지 meta로 */}
-          <Badge tone="git">commit</Badge>
+          <Badge tone="git">{shelfPreview ? 'stash' : 'commit'}</Badge>
           <Button
             variant="ghost"
             size="sm"
@@ -105,7 +108,9 @@ export function CommitDetailPanel({
         바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
         {detail.files.length > 0
           ? ' — 누르면 가운데에 비교를 보여드려요'
-          : ' — 메시지만 남긴 저장이에요'}
+          : shelfPreview
+            ? ' — 새로 만든 파일만 담긴 보관이에요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요'
+            : ' — 메시지만 남긴 저장이에요'}
       </div>
       <div ref={scrollRef} className="virtual-scroll commit-detail__files">
         <ul
@@ -119,7 +124,7 @@ export function CommitDetailPanel({
                 key={file.path}
                 ref={virtualizer.measureElement}
                 data-index={item.index}
-                className="virtual-row virtual-row--wide"
+                className="virtual-row"
                 style={{ transform: `translateY(${item.start}px)` }}
               >
                 <CommitFileRow
@@ -145,7 +150,8 @@ export function CommitDetailPanel({
         <p className="commit-detail__meta">
           {detail.shortHash} · {formatRelativeTime(detail.committedAt, Date.now())} ·{' '}
           {detail.authorName}
-          {detail.parents.length >= 2 &&
+          {!shelfPreview &&
+            detail.parents.length >= 2 &&
             ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
         </p>
       </div>
