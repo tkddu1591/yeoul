@@ -142,4 +142,6 @@ export interface SyncBranchStatus {
   /** detached HEAD면 null */
   branch: string | null
   hasUpstream: boolean
+  /** upstream 짧은 이름(예: origin/feature) — rename 뒤 옛 이름 잔존 감지에 쓴다. 없으면 null */
+  upstream: string | null
 }

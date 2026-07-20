@@ -1236,10 +1236,10 @@ describe('GitClient', () => {
   it('sync.branchStatus — 현재 브랜치와 upstream 유무를 알려준다', async () => {
     const { repo } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
-    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: false })
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: false, upstream: null })
     // 첫 백업(push -u) 뒤에는 upstream이 생긴다 — 로컬 bare remote로 실왕복
     await client.sync.push()
-    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: true })
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: true, upstream: 'origin/main' })
   })
 
   it('sync.branchStatus — detached HEAD면 branch null이다', async () => {
@@ -1249,7 +1249,43 @@ describe('GitClient', () => {
     expect(await createGitClient(repo).sync.branchStatus()).toEqual({
       branch: null,
       hasUpstream: false,
+      upstream: null,
     })
+  })
+
+  it('branchStatus — 이름 바꾼 브랜치는 옛 upstream 이름이 그대로 남는다 (잔존 감지용)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('feature', null)
+    await client.branches.switch('feature')
+    await client.sync.push()
+    await client.branches.rename('feature', 'feature-2')
+    // git branch -m은 merge ref(옛 이름)를 유지한다 — upstream이 여전히 옛 이름으로 해석된다 (통합 리뷰 실측)
+    expect(await client.sync.branchStatus()).toEqual({
+      branch: 'feature-2',
+      hasUpstream: true,
+      upstream: 'origin/feature',
+    })
+  })
+
+  it('push — 이름 바꾼 브랜치는 옛 upstream을 무시하고 새 이름으로 다시 연결하며 올린다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('feature', null)
+    await client.branches.switch('feature')
+    await client.sync.push()
+    await client.branches.rename('feature', 'feature-2')
+
+    await client.sync.push()
+    const upstream = await execGitOrThrow(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      { cwd: repo },
+    )
+    expect(upstream.stdout.trim()).toBe('origin/feature-2')
+    const remoteBranches = await execGitOrThrow(['branch', '--format=%(refname:short)'], {
+      cwd: remote,
+    })
+    expect(remoteBranches.stdout).toContain('feature-2')
   })
 
   it('sync.remoteUrl — 백업 대상 remote(origin 우선)의 URL을 돌려준다', async () => {

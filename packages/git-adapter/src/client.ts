@@ -555,11 +555,19 @@ export function createGitClient(repoPath: string): GitClient {
         }
         // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
         const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
           { cwd },
         )
-        if (upstream.exitCode === 0) {
+        // upstream이 "현재 이름과 같은" 원격 브랜치일 때만 평범한 push —
+        // rename 뒤에는 옛 이름의 upstream이 남아(git branch -m이 merge ref 유지 — 통합 리뷰 실측)
+        // 평범한 push가 원어 에러로 죽는다. 그 경우 아래의 -u 재연결 경로로 태운다
+        if (
+          upstream.exitCode === 0 &&
+          branch.exitCode === 0 &&
+          upstream.stdout.trim().endsWith(`/${branch.stdout.trim()}`)
+        ) {
           // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
           await execGitOrThrow(['-c', 'push.default=simple', 'push'], { cwd })
           return
@@ -570,11 +578,10 @@ export function createGitClient(repoPath: string): GitClient {
           throw new Error('아직 저장된 시점이 없어요. 먼저 저장(commit)한 뒤 백업해 주세요.')
         }
         // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
-        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         if (branch.exitCode !== 0) {
           throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
         }
-        // 첫 백업 — 현재 브랜치를 remote에 연결하며 올린다 (이후 ahead/behind가 표시된다).
+        // 첫 백업(또는 이름이 어긋난 upstream 재연결) — 현재 브랜치를 remote에 연결하며 올린다.
         // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
         await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
       },
@@ -618,14 +625,19 @@ export function createGitClient(repoPath: string): GitClient {
       async branchStatus() {
         const cwd = await topLevel()
         const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
-        if (branch.exitCode !== 0) return { branch: null, hasUpstream: false }
+        if (branch.exitCode !== 0) return { branch: null, hasUpstream: false, upstream: null }
         // 실측: branch.<name>.remote/merge 설정만으로는 해석되지 않고, remote-tracking ref까지
         // 있어야 exit 0이다 — "원격에 실제로 올라간 적 있음"을 뜻해 리뷰 요청 전 검사에 맞다
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
           { cwd },
         )
-        return { branch: branch.stdout.trim(), hasUpstream: upstream.exitCode === 0 }
+        const upstreamName = upstream.exitCode === 0 ? upstream.stdout.trim() : null
+        return {
+          branch: branch.stdout.trim(),
+          hasUpstream: upstreamName !== null,
+          upstream: upstreamName,
+        }
       },
       async remoteUrl() {
         const cwd = await topLevel()

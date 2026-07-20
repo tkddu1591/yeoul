@@ -190,8 +190,11 @@ export function registerHostingHandlers(): void {
         `"${base}"는 모두가 함께 쓰는 기본 공간이에요. 실험 공간(branch)을 만들어 요청해 주세요.`,
       )
     }
-    // 원격에 이 실험 공간이 없으면 리뷰 대상이 없다 — 기존 백업(push) 흐름으로 먼저 올린다
-    if (!branch.hasUpstream) await client.sync.push()
+    // 원격에 이 실험 공간이 없으면 리뷰 대상이 없다 — 기존 백업(push) 흐름으로 먼저 올린다.
+    // rename 뒤에는 옛 이름의 upstream이 남는다(통합 리뷰 실측) — 이름이 같을 때만 건너뛴다
+    const upstreamMatches =
+      branch.upstream !== null && branch.upstream.endsWith(`/${branch.branch}`)
+    if (!upstreamMatches) await client.sync.push()
     const pull = await api.pulls.create(repo.owner, repo.repo, {
       title,
       head: branch.branch,
