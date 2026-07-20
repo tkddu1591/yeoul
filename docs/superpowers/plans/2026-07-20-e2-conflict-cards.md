@@ -1761,3 +1761,6 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - 카드 밖 원본 마커 줄 보기(디버그용 raw 뷰) — 필요 시 토글로.
 - **앱 레이아웃 반응형 개편**(품질 리뷰 Important 1의 근본): 고정 340px 좌열·360px 우열이 960px 창에서 중앙을 ~200px로 짜부라뜨린다 — 좁은 창에서 열 폭 축소/접힘 설계 필요(리뷰어가 별도 태스크 칩 생성).
 - 자세히 보기 IME 한글 입력은 Playwright로 실측 불가(표준 controlled textarea라 위험 낮음 — 미실측 항목으로 기록).
+- (통합 리뷰 Minor) 부분 선택 후 파일 전체 버튼(내 것 유지/가져온 것 사용)이 이미 고른 블록을 무통보 폐기 — "지금까지 고른 N곳 선택이 사라져요" 확인창 검토.
+- (통합 리뷰 Minor) stash pop형 충돌은 상주 바가 없어 마무리 안내가 파일 `!` 하나뿐 — 반응형 개편 태스크와 함께 안내 강화 검토.
+- (통합 리뷰 Minor) chooseConflictBlock 실패 시 pendingScrollRef 미해제로 다음 content 변화 때 스크롤 1회 오발(코스메틱).
