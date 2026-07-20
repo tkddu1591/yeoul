@@ -26,3 +26,27 @@ select {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+
+/* 스크롤바 — OS 기본은 다크 모드에서 이질적이다(피드백 1). 토큰 기반 얇은 스타일로
+   두 테마 모두 통일한다. 트랙은 투명 — 콘텐츠 배경이 그대로 비친다 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
