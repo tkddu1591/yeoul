@@ -136,3 +136,10 @@ export interface RemoveBranchResult {
   removed: boolean
   needsForce: boolean
 }
+
+/** 리뷰 요청(PR) 전 검사용 — 현재 브랜치와 원격 연결(upstream) 여부 */
+export interface SyncBranchStatus {
+  /** detached HEAD면 null */
+  branch: string | null
+  hasUpstream: boolean
+}

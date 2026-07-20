@@ -12,6 +12,7 @@ import {
   type RevertResult,
   type ShelfEntry,
   type SwitchResult,
+  type SyncBranchStatus,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
 import { lstat, readFile, writeFile } from 'node:fs/promises'
@@ -104,6 +105,10 @@ export interface GitClient {
      * conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름(머지 바·충돌 뷰·저장하기 마무리)을 그대로 쓴다.
      */
     pull(): Promise<PullResult>
+    /** 현재 브랜치 이름과 upstream 유무 — 리뷰 요청(PR) 전 검사용. detached면 branch null */
+    branchStatus(): Promise<SyncBranchStatus>
+    /** 백업 대상 remote(origin 우선 — push와 동일 규칙)의 URL. remote가 없으면 null */
+    remoteUrl(): Promise<string | null>
   }
   commits: {
     create(message: string): Promise<void>
@@ -609,6 +614,31 @@ export function createGitClient(repoPath: string): GitClient {
           return { outcome: 'conflict', autoShelved: true }
         }
         throw new GitError(['pull', '--no-rebase', '--no-edit'], second)
+      },
+      async branchStatus() {
+        const cwd = await topLevel()
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        if (branch.exitCode !== 0) return { branch: null, hasUpstream: false }
+        // 실측: branch.<name>.remote/merge 설정만으로는 해석되지 않고, remote-tracking ref까지
+        // 있어야 exit 0이다 — "원격에 실제로 올라간 적 있음"을 뜻해 리뷰 요청 전 검사에 맞다
+        const upstream = await execGit(
+          ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          { cwd },
+        )
+        return { branch: branch.stdout.trim(), hasUpstream: upstream.exitCode === 0 }
+      },
+      async remoteUrl() {
+        const cwd = await topLevel()
+        const remotes = await execGitOrThrow(['remote'], { cwd })
+        const remoteNames = remotes.stdout
+          .trim()
+          .split('\n')
+          .filter((name) => name !== '')
+        if (remoteNames.length === 0) return null
+        // push와 동일 규칙 — origin 우선, 없으면 (git remote 출력 = 알파벳순) 첫 remote
+        const target = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
+        const url = await execGit(['remote', 'get-url', target], { cwd })
+        return url.exitCode === 0 ? url.stdout.trim() : null
       },
     },
     commits: {

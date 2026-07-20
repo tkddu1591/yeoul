@@ -1233,6 +1233,35 @@ describe('GitClient', () => {
     expect(remoteLog.stdout.trim()).toBe('main-two')
   })
 
+  it('sync.branchStatus — 현재 브랜치와 upstream 유무를 알려준다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: false })
+    // 첫 백업(push -u) 뒤에는 upstream이 생긴다 — 로컬 bare remote로 실왕복
+    await client.sync.push()
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: true })
+  })
+
+  it('sync.branchStatus — detached HEAD면 branch null이다', async () => {
+    const repo = await createFixtureRepo()
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await execGitOrThrow(['checkout', '--detach', head], { cwd: repo })
+    expect(await createGitClient(repo).sync.branchStatus()).toEqual({
+      branch: null,
+      hasUpstream: false,
+    })
+  })
+
+  it('sync.remoteUrl — 백업 대상 remote(origin 우선)의 URL을 돌려준다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    expect(await createGitClient(repo).sync.remoteUrl()).toBe(remote)
+  })
+
+  it('sync.remoteUrl — remote가 없으면 null이다', async () => {
+    const repo = await createFixtureRepo()
+    expect(await createGitClient(repo).sync.remoteUrl()).toBeNull()
+  })
+
   it('push — 커밋이 없는 저장소는 읽히는 에러를 던진다', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'git-gui-unborn-push-'))
     await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
