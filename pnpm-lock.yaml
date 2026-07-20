@@ -89,6 +89,8 @@ importers:
 
   packages/git-process: {}
 
+  packages/hosting: {}
+
   packages/ipc-contract:
     dependencies:
       '@git-gui/domain':
