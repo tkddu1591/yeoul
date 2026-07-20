@@ -1435,6 +1435,184 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6-보완: 품질 리뷰 5건 (실렌더 실측 반영)
+
+품질 리뷰(실기동)가 잡은 결함:
+
+- **(Important 2) 순서 건너뛴 선택 시 스크롤이 맨 위로** — 중간 카드를 먼저 고르면 `findIndex`가 "전체 첫 미해결"로 스크롤(실측 43484→838). 고른 위치 **이후**의 첫 미해결로 가야 한다. 남은 블록은 0부터 재번호되므로 옛 인덱스 k를 고르면 다음 미해결의 새 인덱스가 곧 k다.
+- **(Important 1) 960px 최소 창에서 충돌 뷰 붕괴** — conflict-view가 0px 높이(실측). 힌트·버튼 줄이 좁은 폭에서 세로로 커지며 목록을 짜부라뜨리고, 카드 세로 스택 media query는 창 폭 기준이라 좁은 '중앙 열'에 반응하지 못한다. → 컨테이너 쿼리 전환 + 목록 최소 높이. (근본인 고정 340/360 열 반응형 개편은 별도 태스크 — 후속 노트.)
+- **(Minor 3) 열 때 첫 겹침이 화면 밖** — 진행 표시 "1번째"와 어긋난다 → mount 시 첫 블록으로 점프.
+- **(Minor 4) 자세히 보기 저장 실패 시 초안 유실** — 저장 거부(외부 비충돌화·용량 초과)여도 무조건 선택형 복귀 → 성공 시에만 복귀.
+- **(Minor 5) 카드 라벨이 모노스페이스** — `.conflict-card{font-family:inherit}`가 조상 `.conflict-panel__code`의 mono를 상속 → 라벨은 산세리프, 코드(`__code`)만 mono.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/ConflictPanel.tsx`
+- Modify: `apps/desktop/src/renderer/src/components/conflict-panel.css`
+- Modify: `apps/desktop/src/renderer/src/layout.css`
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/src/renderer/src/App.tsx`
+
+- [ ] **Step 1: 960px 진단 실측** — electron 960×800, 블록 2개 충돌에서 충돌 뷰를 열고 `.conflict-panel__hint`·`.conflict-panel__actions`·`[data-testid="conflict-view"]`의 boundingBox 높이를 기록한다. 전제(힌트·버튼 줄이 커져 목록이 0으로 짜부라짐)가 어긋나면 **NEEDS_CONTEXT로 멈춰라**.
+
+- [ ] **Step 2: ConflictPanel.tsx**
+
+(a) 선택 후 스크롤 블록 교체 — 기존:
+
+```tsx
+  // 블록을 고르면 반영된 내용이 prop으로 돌아온 뒤 첫 미해결 블록으로 스크롤한다
+  const pendingScrollRef = useRef(false)
+  const chooseBlock = (blockIndex: number, choice: 'ours' | 'theirs') => {
+    pendingScrollRef.current = true
+    onChooseBlock(blockIndex, choice)
+  }
+  useEffect(() => {
+    if (!pendingScrollRef.current) return
+    pendingScrollRef.current = false
+    const nextIndex = items.findIndex((item) => item.type === 'block')
+    if (nextIndex >= 0) virtualizer.scrollToIndex(nextIndex, { align: 'center' })
+    // 선택이 반영된 content 변화 시점에만 — items·virtualizer는 content에서 파생된다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content])
+```
+
+교체:
+
+```tsx
+  // 블록을 고르면 반영된 내용이 prop으로 돌아온 뒤, 고른 위치 "이후"의 첫 미해결 블록으로
+  // 스크롤한다 — 중간부터 골라도 맨 위로 끌려가지 않는다 (품질 리뷰). 남은 블록은 0부터
+  // 재번호되므로, 옛 인덱스 k를 고르면 다음 미해결의 새 인덱스가 곧 k다
+  const pendingScrollRef = useRef<number | null>(null)
+  const chooseBlock = (blockIndex: number, choice: 'ours' | 'theirs') => {
+    pendingScrollRef.current = blockIndex
+    onChooseBlock(blockIndex, choice)
+  }
+  useEffect(() => {
+    const from = pendingScrollRef.current
+    if (from === null) return
+    pendingScrollRef.current = null
+    const after = items.findIndex((item) => item.type === 'block' && item.block.index >= from)
+    const nextIndex = after >= 0 ? after : items.findIndex((item) => item.type === 'block')
+    if (nextIndex >= 0) virtualizer.scrollToIndex(nextIndex, { align: 'center' })
+    // 선택이 반영된 content 변화 시점에만 — items·virtualizer는 content에서 파생된다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content])
+  // 열 때 첫 겹침으로 — 진행 표시("1번째")와 화면이 어긋나지 않게 한다 (품질 리뷰).
+  // key={path}로 파일마다 리마운트되므로 mount 1회면 충분하다
+  useEffect(() => {
+    const first = items.findIndex((item) => item.type === 'block')
+    if (first >= 0) virtualizer.scrollToIndex(first, { align: 'center' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+```
+
+(b) props의 `onSaveText` 교체:
+
+```tsx
+  /** 자세히 보기에서 직접 수정한 결과 저장(확정 아님). 성공 여부를 반환한다 — 실패 시 초안 보존 */
+  onSaveText(content: string): Promise<boolean>
+```
+
+(c) "저장하고 선택형으로" 버튼의 onPress 교체:
+
+```tsx
+              onPress={() => {
+                void (async () => {
+                  // 저장이 거부되면(외부 비충돌화·용량 초과) 초안을 잃지 않게 편집 화면을 유지한다 (품질 리뷰)
+                  if (await onSaveText(draft)) setView('cards')
+                })()
+              }}
+```
+
+(d) 충돌 목록 컨테이너에 스코프 클래스 추가 — `className="virtual-scroll"`을:
+
+```tsx
+          <div ref={scrollRef} className="virtual-scroll conflict-panel__scroll" data-testid="conflict-view">
+```
+
+- [ ] **Step 3: store — saveConflictText 성공 여부 반환**
+
+인터페이스 교체(`saveConflictText(content: string): Promise<void>` →):
+
+```ts
+  /** 자세히 보기 저장 — 성공 여부를 반환한다(실패 시 편집 화면·초안 보존) */
+  saveConflictText(content: string): Promise<boolean>
+```
+
+구현 교체:
+
+```ts
+  async saveConflictText(content) {
+    const { repoPath, conflictFile } = get()
+    if (!repoPath || !conflictFile) return false
+    return await guard(set, get, async () => {
+      await git().conflicts.saveText(repoPath, conflictFile.path, content)
+      set({
+        conflictFile: { path: conflictFile.path, content },
+        status: await git().repo.status(repoPath),
+      })
+    })
+  },
+```
+
+- [ ] **Step 4: App.tsx** — `onSaveText={(content) => void store.saveConflictText(content)}`를 다음으로 교체:
+
+```tsx
+              onSaveText={(content) => store.saveConflictText(content)}
+```
+
+- [ ] **Step 5: CSS**
+
+(a) `conflict-panel.css`의 `.conflict-card` 블록에서 `font-family: inherit;`를 교체:
+
+```css
+  /* 라벨·제목은 산세리프 — 조상(.conflict-panel__code)의 mono 상속을 끊는다. 코드는 __code가 mono (품질 리뷰) */
+  font-family: var(--font-sans);
+```
+
+(b) `conflict-panel.css`의 `@media (max-width: 960px)` 블록(주석 포함) 교체:
+
+```css
+/* 좁은 '중앙 열'에서는 위아래로 쌓인다 — 창 폭이 아니라 실제 열 폭 기준 (품질 리뷰 실측:
+   960px 창에서 media query는 무력했다. 열을 컨테이너로 선언한 layout.css와 짝) */
+@container center (max-width: 720px) {
+  .conflict-card__sides {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+(c) `conflict-panel.css` 끝에 추가:
+
+```css
+/* 힌트·버튼 줄이 좁은 폭에서 여러 줄로 커져도 목록이 0px로 짜부라지지 않게 (품질 리뷰 실측) */
+.conflict-panel__scroll {
+  min-height: 220px;
+}
+```
+
+(d) `layout.css`의 `.app__center` 블록에 추가(`min-height: 0;` 줄 뒤):
+
+```css
+  /* 중앙 열을 컨테이너로 — 충돌 카드가 창 폭이 아니라 실제 열 폭에 반응한다 (품질 리뷰) */
+  container-type: inline-size;
+  container-name: center;
+```
+
+- [ ] **Step 6: 실렌더 확인 5건** — (1) 960×800에서 충돌 뷰 높이 ≥ 200px·카드 세로 스택·"이쪽 사용" 실클릭 성공, (2) 1200px에서 나란히 유지, (3) 블록 5개+에서 중간(3번째) 카드 선택 → 스크롤이 그 아래 미해결로(맨 위로 튀지 않음), (4) 열 때 첫 카드가 화면 안, (5) 카드 제목·라벨 산세리프·코드 mono.
+
+- [ ] **Step 7: 게이트** — 루트 `pnpm test`(**253**) + typecheck(5 Done) + build + E2E 전체(**29 passed**)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src
+git commit -m "fix(desktop): 품질 리뷰 — 스크롤 목적지·첫 겹침 점프·저장 실패 초안 보존·컨테이너 쿼리·카드 폰트
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 7: 최종 게이트 + 공식 스크린샷 3장 + README
 
 - [ ] **Step 1: 전체 게이트**
@@ -1577,3 +1755,5 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - 진행 표시 분모의 세션 경계: 재시작하면 총 N이 남은 블록 수로 재산정된다(해소 블록은 파일에서 사라짐). 세션 간 유지가 필요하면 `.git` 밖 부수 상태가 필요해 이번 범위에서 제외했다.
 - `conflicts.reset`은 stash pop형 충돌(unmerged인데 MERGE_HEAD 없음)에서도 동작한다(ls-files -u 기반) — 머지 바 부재 상태의 안내 문구는 E1b 후속 노트와 동일하게 미해결.
 - 카드 밖 원본 마커 줄 보기(디버그용 raw 뷰) — 필요 시 토글로.
+- **앱 레이아웃 반응형 개편**(품질 리뷰 Important 1의 근본): 고정 340px 좌열·360px 우열이 960px 창에서 중앙을 ~200px로 짜부라뜨린다 — 좁은 창에서 열 폭 축소/접힘 설계 필요(리뷰어가 별도 태스크 칩 생성).
+- 자세히 보기 IME 한글 입력은 Playwright로 실측 불가(표준 controlled textarea라 위험 낮음 — 미실측 항목으로 기록).
