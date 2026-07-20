@@ -1681,6 +1681,352 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6-보완: 최종 통합 리뷰 2건 (크로스 기능 실측 반영)
+
+통합 리뷰(실기동·CLI 재현)가 잡은 결함을 반영한다:
+
+- **(Important 1) merging/reverting 중 revert 무가드** — 우클릭 되돌리기에 상태 가드가 전혀 없다. 실측: (a) 충돌 미해결 중이면 원어 에러(`Reverting is not possible because you have unmerged files…`) 노출, (b) 전량 해소 후 MERGE_HEAD가 남은 상태면 **revert가 실제로 실행되어 MERGE_HEAD를 소비, 병합이 "Revert …" 제목의 거짓 메시지로 조용히 완결**되거나 병합 중간에 revert 커밋이 삽입된다, (c) 해소 직후 재충돌하면 에러도 notice도 없이 해소가 재오염된다. → **이중 방어**: 어댑터 `commits.revert` 선두 상태 가드(친절 에러) + 우클릭 메뉴 항목 비활성.
+- **(Important 2) dirty 겹침 revert 원어 에러** — 저장 안 된 수정이 revert 대상과 겹치면 `Your local changes … would be overwritten by merge` 원문 노출. switch·merge·pull은 같은 상황에서 자동 보관 후 재시도하는 것이 앱 원칙 — revert만 예외라 일관성이 깨진다. → **스마트 되돌리기**(자동 보관 후 재시도, `autoShelved` 반환·notice 안내).
+- **(Minor 4) pullLatest·mergeBranch·revertCommit 스냅샷 미보장** — 자동 보관까지 간 뒤 2차 시도가 GitError로 던져지면 보관함 카운트가 낡는다. → discard와 같은 try/finally 스냅샷 패턴으로 통일.
+
+**Files:**
+- Modify: `packages/domain/src/repository.ts` (RevertResult.autoShelved)
+- Modify: `packages/git-adapter/src/client.ts` (REVERT_SHELF_MESSAGE·revert 가드+자동 보관)
+- Test: `packages/git-adapter/test/client.test.ts` (신규 3건 + 기존 단언 2곳 갱신)
+- Modify: `apps/desktop/src/renderer/src/ui/ContextMenu.tsx` (+`context-menu.css`) (disabled 지원)
+- Modify: `apps/desktop/src/renderer/src/components/HistoryPanel.tsx` (revertDisabled prop)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (try/finally 3곳·shelfNotice)
+- Modify: `apps/desktop/src/renderer/src/App.tsx` (revertDisabled 배선)
+- Test: `apps/desktop/e2e/smoke.spec.ts` (되돌리는 중 메뉴 비활성 단언)
+
+- [ ] **Step 1: 어댑터 Red** — `client.test.ts`의 `'revertAbort — 되돌리는 중이 아니면 읽히는 메시지로 거부한다'` 테스트 **앞**에 3건 추가:
+
+```ts
+  it('revert — 합치는 중(merging)에는 읽히는 메시지로 거부한다 (거짓 병합 완결 차단)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.revert(head.hash)).rejects.toThrow(/먼저 마무리하거나 취소/)
+    // 병합 상태가 소비되지 않고 그대로 남아 있어야 한다
+    expect((await client.repo.status()).state).toBe('merging')
+  })
+
+  it('revert — 되돌리는 중(reverting)에도 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', 'v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+    const middle = (await client.history.list(2))[1]!
+    expect((await client.commits.revert(middle.hash)).outcome).toBe('conflict')
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.revert(head.hash)).rejects.toThrow(/먼저 마무리하거나 취소/)
+  })
+
+  it('revert — 저장 안 된 변경이 겹치면 보관함에 넣고 되돌린다 (스마트 되돌리기)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', 'editing\n')
+
+    const head = (await client.history.list(1))[0]!
+    const result = await client.commits.revert(head.hash)
+    expect(result).toEqual({ outcome: 'reverted', autoShelved: true })
+    const shelf = await client.shelf.list()
+    expect(shelf[0]?.message).toContain('저장 되돌리기 자동 보관')
+    // 되돌린 결과가 워킹 트리에 반영됐다
+    expect(await client.files.readText('README.md')).toBe('# fixture\n')
+  })
+```
+
+Run: `pnpm --filter @git-gui/git-adapter test` → **3건 FAIL 확인**(가드 없음·autoShelved 없음). Red 실증 후 진행.
+
+- [ ] **Step 2: domain — RevertResult** (`packages/domain/src/repository.ts`)
+
+```ts
+/** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */
+export interface RevertResult {
+  outcome: 'reverted' | 'conflict'
+  /** 막혀서 변경을 보관함에 자동 저장했는가 (스펙: 덮기 전 자동 보관) */
+  autoShelved: boolean
+}
+```
+
+- [ ] **Step 3: 어댑터 — 가드 + 스마트 되돌리기** (`packages/git-adapter/src/client.ts`)
+
+(a) 상수(`PULL_SHELF_MESSAGE` 선언 뒤):
+
+```ts
+/** 되돌리기가 막혀 자동 보관할 때의 보관함 메시지 */
+const REVERT_SHELF_MESSAGE = '저장 되돌리기 자동 보관'
+```
+
+(b) `async revert(hash)` 전체 교체 (import에 `type GitResult`를 `@git-gui/git-process`에서 추가):
+
+```ts
+      async revert(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        // merging·reverting 도중의 revert는 MERGE_HEAD를 소비해 병합을 거짓 메시지로
+        // 완결시키거나, 해소된 충돌을 무통보로 재오염시킨다(통합 리뷰 실측) — 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 되돌릴 수 있어요.')
+        }
+        const runOnce = async (): Promise<GitResult> => {
+          const run = (extra: string[]) =>
+            execGit(['revert', '--no-edit', ...extra, '--end-of-options', hash], { cwd })
+          let result = await run([])
+          // merge commit은 -m 없이는 거부된다(실측) — 앱 원칙대로 첫 부모 기준으로 재시도
+          if (result.exitCode !== 0 && result.stderr.includes('is a merge but no -m option')) {
+            result = await run(['-m', '1'])
+          }
+          return result
+        }
+        const classify = (result: GitResult, autoShelved: boolean): RevertResult | null => {
+          if (result.exitCode === 0) return { outcome: 'reverted', autoShelved }
+          const output = result.stdout + result.stderr
+          if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
+            return { outcome: 'conflict', autoShelved }
+          }
+          if (output.includes('bad object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          return null
+        }
+        const first = await runOnce()
+        const classified = classify(first, false)
+        if (classified !== null) return classified
+        if (!(first.stdout + first.stderr).includes('would be overwritten')) {
+          throw new GitError(['revert', '--no-edit', '--end-of-options', hash], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch·merge·pull과 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', REVERT_SHELF_MESSAGE], { cwd })
+        const second = await runOnce()
+        const secondClassified = classify(second, true)
+        if (secondClassified !== null) return secondClassified
+        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], second)
+      },
+```
+
+(c) 기존 테스트 단언 2곳 갱신 — `'revert — 저장을 반대로 적용하는…'`의 `toEqual({ outcome: 'reverted' })` 2곳을 `toEqual({ outcome: 'reverted', autoShelved: false })`로, `'revert — 이후 저장과 겹치면 conflict…'`의 `toEqual({ outcome: 'conflict' })`를 `toEqual({ outcome: 'conflict', autoShelved: false })`로.
+
+- [ ] **Step 4: 어댑터 Green** — `pnpm --filter @git-gui/git-adapter test` → **114 passed** (모노레포 총 233)
+
+- [ ] **Step 5: ContextMenu — disabled 지원** (`ContextMenu.tsx`)
+
+(a) 아이템 타입:
+
+```ts
+export interface ContextMenuItem {
+  key: string
+  label: string
+  /** 지금 상태에서 실행할 수 없는 항목 — 숨기지 않고 비활성으로 보여준다 (상태를 숨기지 않는다) */
+  disabled?: boolean
+  onSelect(): void
+}
+```
+
+(b) 버튼 렌더 교체:
+
+```tsx
+        <button
+          key={item.key}
+          type="button"
+          role="menuitem"
+          className="ui-context-menu__item"
+          disabled={item.disabled === true}
+          onClick={() => {
+            item.onSelect()
+            onClose()
+          }}
+          data-testid={`context-${item.key}`}
+        >
+          {item.label}
+        </button>
+```
+
+(c) `context-menu.css`의 `.ui-context-menu__item:hover` 블록 **앞**에:
+
+```css
+.ui-context-menu__item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+```
+
+(hover 블록은 `.ui-context-menu__item:hover:not(:disabled)`로 셀렉터를 교체해 비활성 항목에 hover 배경이 들지 않게 한다.)
+
+- [ ] **Step 6: HistoryPanel — revertDisabled** (`HistoryPanel.tsx`)
+
+(a) props에 추가(`onRevert(hash: string): void` 줄 앞):
+
+```ts
+  /** merging/reverting 중에는 되돌리기를 비활성 — 진행 중 작업을 먼저 마무리해야 한다 (통합 리뷰) */
+  revertDisabled: boolean
+```
+
+(b) 구조 분해에 `revertDisabled` 추가, revert 메뉴 항목 교체:
+
+```ts
+            {
+              key: 'revert',
+              label: '이 저장 되돌리기 (revert)',
+              disabled: revertDisabled,
+              onSelect: () => onRevert(menu.commit.hash),
+            },
+```
+
+- [ ] **Step 7: store — shelfNotice·try/finally 3곳** (`repository-store.ts`)
+
+(a) `mergeBranch` 전체 교체:
+
+```ts
+  async mergeBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().branches.merge(repoPath, name)
+        const notices: Record<typeof result.outcome, string | null> = {
+          'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
+          merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
+          // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
+          conflict: null,
+          'up-to-date': '이미 모두 반영되어 있어요.',
+        }
+        const shelfNotice = result.autoShelved
+          ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+          : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+```
+
+(b) `pullLatest` 전체 교체:
+
+```ts
+  async pullLatest() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().sync.pull(repoPath)
+        const notices: Record<typeof result.outcome, string | null> = {
+          'fast-forward': '원격의 최신 저장을 받아왔어요.',
+          merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
+          // 충돌 안내는 머지 바가 상주하며 담당한다
+          conflict: null,
+          'up-to-date': '이미 최신이에요.',
+        }
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+```
+
+(c) `revertCommit` 전체 교체:
+
+```ts
+  async revertCommit(hash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().commits.revert(repoPath, hash)
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다
+        notice =
+          `${result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : ''}${shelfNotice}` ||
+          null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+```
+
+- [ ] **Step 8: App 배선** (`App.tsx`) — HistoryPanel에 추가:
+
+```tsx
+            revertDisabled={status?.state !== 'normal'}
+```
+
+(`onCreateBranchAt` prop 줄 바로 앞에.)
+
+- [ ] **Step 9: E2E 보강** (`smoke.spec.ts`) — `'되돌리기가 겹치면 상태 바에서 취소할 수 있다'`의 `되돌리기 취소를 눌러 마무리해요` 단언 **뒤**, `merge-abort` 클릭 **앞**에:
+
+```ts
+    // 되돌리는 중에는 우클릭 되돌리기가 비활성 — 이중 실행을 막는다 (통합 리뷰)
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await expect(window.getByTestId('context-revert')).toBeDisabled()
+    await window.keyboard.press('Escape')
+```
+
+- [ ] **Step 10: 게이트** — 루트 `pnpm test`(**233 passed**) + `pnpm typecheck`(5 Done) + `pnpm --filter @git-gui/desktop build` + E2E 전체(**24 passed**) 전부 exit 0
+
+- [ ] **Step 11: 공식 스크린샷 복원** — Step 10의 e2e 실행이 test-results/를 비운다. scratchpad 사본에서 3장을 되돌린다:
+
+```bash
+cp /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-manage.png \
+   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-revert-bar.png \
+   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-pull.png \
+   "/Users/sangyeop_kim/git gui/apps/desktop/test-results/"
+```
+
+(참고: e1c-revert-bar.png는 가드 추가 후에도 유효하다 — 화면은 reverting 상태 바·충돌 뷰로, 이번 변경은 우클릭 메뉴 항목만 비활성화한다.)
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add packages/domain/src packages/git-adapter/src packages/git-adapter/test apps/desktop/src/renderer/src apps/desktop/e2e
+git commit -m "fix: 통합 리뷰 — 진행 중 revert 이중 방어·스마트 되돌리기(자동 보관)·스냅샷 finally 보장
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -1690,7 +2036,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 5 후 | E2E 18 (기존 회귀 없음) |
 | Task 6 후 | **E2E 23** |
 | Task 5-보완 후 | +1 → **230 tests**, E2E +1 → **24** |
-| 최종 | 230 tests + typecheck 5 + build + E2E 24 — 전부 exit 0 |
+| Task 6-보완 후 | +3 → **233 tests** (E2E 24 유지) |
+| 최종 | 233 tests + typecheck 5 + build + E2E 24 — 전부 exit 0 |
 
 (수치가 어긋나면 이 표를 갱신한다.)
 
@@ -1702,3 +2049,4 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - revert의 revert·빈 revert 안내, 관리 다이얼로그에서 원격 브랜치 표시
 - 현재 브랜치 이름 바꾸기 후 백업(push)이 upstream 불일치 원어 에러로 실패한다(리뷰 실측) — rename 시 upstream 갱신 또는 push 에러 매핑
 - 관리 다이얼로그에서 needsForce 외 사유의 삭제 실패는 상단 배너로만 보인다(오버레이 위로 보이긴 함 — 품질 리뷰 Minor) — 다이얼로그 내 인라인 표시 검토
+- pull 유래 충돌의 머지 바·기본 커밋 메시지가 "실험 공간 합치는 중/합치기"로 표기된다(통합 리뷰 Minor — MERGE_HEAD만으로는 출처 구분 불가) — "가져온 내용과 합치는 중" 같은 중립 문구 검토
