@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron'
+import { app, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import {
   createGitHubHosting,
@@ -16,14 +16,17 @@ import {
   saveGitHubConnection,
 } from './settings'
 
-/** 개발·E2E에서 mock 서버로 바꿔 끼운다 — 프로덕션 기본은 GitHub 공식 API */
+/** 개발·E2E에서 mock 서버로 바꿔 끼운다 — 패키징된 앱에서는 env 주입을 무시한다
+    (env로 baseUrl을 바꾸면 저장된 토큰이 임의 서버로 전송된다 — 품질 리뷰) */
 function baseUrl(): string {
-  return process.env.GIT_GUI_GITHUB_API || 'https://api.github.com'
+  if (!app.isPackaged && process.env.GIT_GUI_GITHUB_API) return process.env.GIT_GUI_GITHUB_API
+  return 'https://api.github.com'
 }
 
-/** E2E 토큰 사전 주입 — 연결 다이얼로그 없이 로그인 상태로 시작한다 (GIT_GUI_E2E_REPO와 동일 관례) */
+/** E2E 토큰 사전 주입 — 패키징된 앱에서는 무시한다 (GIT_GUI_E2E_REPO와 동일 관례) */
 function currentToken(): string | null {
-  return process.env.GIT_GUI_E2E_GH_TOKEN || readGitHubToken()
+  if (!app.isPackaged && process.env.GIT_GUI_E2E_GH_TOKEN) return process.env.GIT_GUI_E2E_GH_TOKEN
+  return readGitHubToken()
 }
 
 function hosting(token: string): GitHubHosting {
@@ -117,7 +120,17 @@ export function registerHostingHandlers(): void {
     if (token === null) {
       throw new Error('gh CLI 로그인을 찾지 못했어요. 토큰으로 연결해 주세요.')
     }
-    return verifyAndSave(token)
+    try {
+      return await verifyAndSave(token)
+    } catch (cause) {
+      // 첫 연결의 401은 "만료"가 아니다 — gh 토큰이 더는 유효하지 않은 상황 (품질 리뷰)
+      if (cause instanceof Error && cause.message.includes('연결이 만료됐어요')) {
+        throw new Error(
+          'gh 로그인이 더는 유효하지 않아요. 터미널에서 gh auth login 후 다시 시도해 주세요.',
+        )
+      }
+      throw cause
+    }
   })
 
   ipcMain.handle(HOSTING_CHANNELS.connectToken, async (_event, token: unknown) => {
@@ -137,6 +150,8 @@ export function registerHostingHandlers(): void {
   ipcMain.handle(HOSTING_CHANNELS.disconnect, () => {
     clearGitHubConnection()
     memoLogin = null
+    // 해제 후 이전 목록의 주소가 남지 않게 — 재연결하면 목록에서 다시 채운다 (품질 리뷰)
+    knownPullUrls.clear()
   })
 
   ipcMain.handle(HOSTING_CHANNELS.pullsList, async (_event, repoPath: unknown) => {
@@ -161,6 +176,11 @@ export function registerHostingHandlers(): void {
     const branch = await client.sync.branchStatus()
     if (branch.branch === null) {
       throw new Error('지금은 실험 공간이 아닌 시점에 있어요. 실험 공간으로 이동한 뒤 요청해 주세요.')
+    }
+    // 전환·받아오기와 같은 기준 — 진행 중 작업(merging·reverting) 중에는 요청을 받지 않는다 (품질 리뷰)
+    const repoStatus = await client.repo.status()
+    if (repoStatus.state !== 'normal') {
+      throw new Error('지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청해 주세요.')
     }
     const api = hosting(token)
     // 기본 공간 판정은 GitHub의 default_branch가 정본 — UI의 main·master 추정은 빠른 안내일 뿐

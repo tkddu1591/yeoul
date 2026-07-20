@@ -8,10 +8,13 @@ import './review-popover.css'
 
 interface ReviewPopoverProps {
   status: HostingStatus | null
-  pulls: PullSummary[]
+  /** 열린 리뷰 요청 — null이면 마지막 조회 실패(빈 목록으로 위장하지 않는다 — 품질 리뷰) */
+  pulls: PullSummary[] | null
   busy: boolean
   /** 현재 실험 공간 이름 — 기본 공간(main·master) 추정 비활성에 쓴다. 확정 검사는 main 프로세스 */
   currentBranch: string | null
+  /** 진행 중 작업(merging·reverting) — 요청 버튼을 비활성하고 사유를 보여준다 (품질 리뷰) */
+  stateBlocked: boolean
   /** 팝오버를 열 때 — 목록을 새로 불러온다 */
   onOpen(): void
   onConnectGh(): void
@@ -30,6 +33,7 @@ export function ReviewPopover({
   pulls,
   busy,
   currentBranch,
+  stateBlocked,
   onOpen,
   onConnectGh,
   onConnectToken,
@@ -53,7 +57,7 @@ export function ReviewPopover({
         if (next) onOpen()
       }}
     >
-      <Button variant="ghost" size="sm" testId="review-open">
+      <Button variant="ghost" size="sm" className="review-popover__trigger" testId="review-open">
         <GitPullRequest size={13} aria-hidden="true" /> 리뷰 <Badge tone="git">PR</Badge>
       </Button>
       <Popover className="review-popover">
@@ -110,7 +114,7 @@ export function ReviewPopover({
                   <Button
                     variant="primary"
                     size="sm"
-                    isDisabled={busy || isDefaultBranch}
+                    isDisabled={busy || isDefaultBranch || stateBlocked}
                     onPress={() => openDialog(onCreate)}
                     testId="review-create"
                   >
@@ -122,7 +126,16 @@ export function ReviewPopover({
                       만들어 요청해 주세요.
                     </p>
                   )}
-                  {pulls.length === 0 ? (
+                  {stateBlocked && (
+                    <p className="review-popover__reason" data-testid="review-create-blocked">
+                      지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청할 수 있어요.
+                    </p>
+                  )}
+                  {pulls === null ? (
+                    <p className="review-popover__empty">
+                      리뷰 요청 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.
+                    </p>
+                  ) : pulls.length === 0 ? (
                     <p className="review-popover__empty">열린 리뷰 요청이 없어요.</p>
                   ) : (
                     <ul className="review-popover__list">

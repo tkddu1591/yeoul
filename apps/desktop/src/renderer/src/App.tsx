@@ -191,6 +191,7 @@ export function App() {
             pulls={store.pulls}
             busy={store.busy}
             currentBranch={status?.branch.name ?? null}
+            stateBlocked={status?.state !== 'normal'}
             onOpen={() => void store.refreshPulls()}
             onConnectGh={() => void store.connectGh()}
             onConnectToken={() => {

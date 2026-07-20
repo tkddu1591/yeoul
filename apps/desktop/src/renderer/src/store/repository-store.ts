@@ -44,8 +44,8 @@ interface RepositoryStore {
   conflictFile: { path: string; content: string } | null
   /** GitHub 연결 상태 — git 스냅샷과 독립된 네트워크 상태. 토큰은 오지 않는다(login만) */
   hostingStatus: HostingStatus | null
-  /** 열린 리뷰 요청 목록 — 리뷰 팝오버를 열 때·생성 후 갱신된다 */
-  pulls: PullSummary[]
+  /** 열린 리뷰 요청 — null이면 마지막 조회 실패(빈 목록으로 위장하지 않는다 — 품질 리뷰) */
+  pulls: PullSummary[] | null
   /** 안내 배너 — 에러가 아닌 정보(자동 보관 등). 다음 작업 시작 시 지워진다 */
   notice: string | null
   error: string | null
@@ -655,7 +655,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       return
     }
     await guard(set, get, async () => {
-      set({ pulls: await hosting().pulls.list(repoPath) })
+      try {
+        set({ pulls: await hosting().pulls.list(repoPath) })
+      } catch (cause) {
+        // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰)
+        set({ pulls: null })
+        throw cause
+      }
     })
   },
 
