@@ -1661,6 +1661,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `apps/desktop/src/renderer/src/components/ReviewPopover.tsx`, `apps/desktop/src/renderer/src/components/review-popover.css`
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
+- Modify: `apps/desktop/electron.vite.config.ts` (구현 중 실측 추기 — 누락 시 main이 hosting을 external로 두고 ESM 해석하다 `ERR_MODULE_NOT_FOUND`로 창이 안 떠 E2E 전멸)
+
+**Step 0 (추기): electron-vite exclude** — main의 externalizeDepsPlugin exclude에 `'@git-gui/hosting'`을 기존 워크스페이스 패키지들과 같은 자리에 추가한다:
+
+```ts
+  main: { plugins: [externalizeDepsPlugin({ exclude: ['@git-gui/domain', '@git-gui/git-adapter', '@git-gui/git-process', '@git-gui/hosting', '@git-gui/ipc-contract'] })] },
+```
 
 - [ ] **Step 1: ReviewPopover.tsx 생성**
 
