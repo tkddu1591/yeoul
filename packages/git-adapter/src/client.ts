@@ -229,7 +229,7 @@ export function createGitClient(repoPath: string): GitClient {
         }
         if (
           first.stderr.includes('resolve your current index') ||
-          first.stderr.includes('cannot switch branch while merging')
+          first.stderr.includes('cannot switch branch while')
         ) {
           throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
         }
@@ -546,6 +546,9 @@ export function createGitClient(repoPath: string): GitClient {
         const first = await run()
         const firstOut = first.stdout + first.stderr
         if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
+        if (firstOut.includes('you have unmerged files')) {
+          throw new Error('겹침(!)을 모두 정리해야 받아올 수 있어요.')
+        }
         if (firstOut.includes('no tracking information')) {
           throw new Error('이 실험 공간은 아직 원격과 연결되지 않았어요. 먼저 백업(push)으로 연결해 주세요.')
         }

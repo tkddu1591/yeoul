@@ -964,6 +964,25 @@ describe('GitClient', () => {
     await expect(client.commits.revertAbort()).rejects.toThrow(/되돌리는 중이 아니에요/)
   })
 
+  it('reverting 중에는 전환·받아오기도 읽히는 메시지로 거부한다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('elsewhere', null)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const target = (await client.history.list(1))[0]!
+    await writeFixtureFile(repo, 'README.md', '# v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+    await client.commits.revert(target.hash)
+
+    await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
+    await expect(client.sync.pull()).rejects.toThrow(/정리해야 받아올/)
+    await client.commits.revertAbort()
+  })
+
   it('branches.remove — 합쳐진 공간은 지우고, 안 합쳐진 공간은 needsForce로 알리고, force로 지운다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
