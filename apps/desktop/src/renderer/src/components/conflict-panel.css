@@ -47,7 +47,8 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
   padding: var(--space-2) var(--space-3) var(--space-3);
-  font-family: inherit;
+  /* 라벨·제목은 산세리프 — 조상(.conflict-panel__code)의 mono 상속을 끊는다. 코드는 __code가 mono (품질 리뷰) */
+  font-family: var(--font-sans);
 }
 .conflict-card__title {
   margin: 0 0 var(--space-2);
@@ -60,8 +61,9 @@
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
 }
-/* 좁은 폭에서는 위아래로 쌓인다 — 코드가 잘리는 것보다 낫다 */
-@media (max-width: 960px) {
+/* 좁은 '중앙 열'에서는 위아래로 쌓인다 — 창 폭이 아니라 실제 열 폭 기준 (품질 리뷰 실측:
+   960px 창에서 media query는 무력했다. 열을 컨테이너로 선언한 layout.css와 짝) */
+@container center (max-width: 400px) {
   .conflict-card__sides {
     grid-template-columns: 1fr;
   }
@@ -131,4 +133,8 @@
   resize: none;
   white-space: pre;
   overflow: auto;
+}
+/* 힌트·버튼 줄이 좁은 폭에서 여러 줄로 커져도 목록이 0px로 짜부라지지 않게 (품질 리뷰 실측) */
+.virtual-scroll.conflict-panel__scroll {
+  min-height: 220px;
 }

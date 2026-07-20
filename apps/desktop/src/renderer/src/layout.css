@@ -147,6 +147,9 @@
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
+  /* 중앙 열을 컨테이너로 — 충돌 카드가 창 폭이 아니라 실제 열 폭에 반응한다 (품질 리뷰) */
+  container-type: inline-size;
+  container-name: center;
 }
 .app__center > .ui-panel {
   flex: 1;

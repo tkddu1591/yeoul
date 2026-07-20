@@ -76,8 +76,8 @@ interface RepositoryStore {
   markConflictResolved(path: string): Promise<void>
   /** 열린 겹침 파일의 blockIndex번째 블록만 한쪽으로 골라 파일에 즉시 반영한다 — 확정(add) 아님 */
   chooseConflictBlock(blockIndex: number, choice: 'ours' | 'theirs'): Promise<void>
-  /** 자세히 보기에서 직접 수정한 결과를 파일에 저장한다 — 확정(add) 아님 */
-  saveConflictText(content: string): Promise<void>
+  /** 자세히 보기 저장 — 성공 여부를 반환한다(실패 시 편집 화면·초안 보존) */
+  saveConflictText(content: string): Promise<boolean>
   /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m). 확인창(UI 책임) 경유 */
   resetConflict(): Promise<void>
   /** 지금 변경을 보관함에 저장한다 */
@@ -558,8 +558,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async saveConflictText(content) {
     const { repoPath, conflictFile } = get()
-    if (!repoPath || !conflictFile) return
-    await guard(set, get, async () => {
+    if (!repoPath || !conflictFile) return false
+    return await guard(set, get, async () => {
       await git().conflicts.saveText(repoPath, conflictFile.path, content)
       set({
         conflictFile: { path: conflictFile.path, content },

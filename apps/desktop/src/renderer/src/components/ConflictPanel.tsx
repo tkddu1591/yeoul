@@ -23,8 +23,8 @@ interface ConflictPanelProps {
   onReload(): Promise<string | null>
   /** 블록 하나를 한쪽으로 — 파일에 즉시 반영된다(확정 아님, add하지 않는다) */
   onChooseBlock(blockIndex: number, choice: 'ours' | 'theirs'): void
-  /** 자세히 보기에서 직접 수정한 결과 저장(확정 아님) */
-  onSaveText(content: string): void
+  /** 자세히 보기에서 직접 수정한 결과 저장(확정 아님). 성공 여부를 반환한다 — 실패 시 초안 보존 */
+  onSaveText(content: string): Promise<boolean>
   /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m). 확인창은 이 컴포넌트가 담당한다 */
   onReset(): void
 }
@@ -79,20 +79,31 @@ export function ConflictPanel({
     })
     setJumpCursor(jumpCursor + 1)
   }
-  // 블록을 고르면 반영된 내용이 prop으로 돌아온 뒤 첫 미해결 블록으로 스크롤한다
-  const pendingScrollRef = useRef(false)
+  // 블록을 고르면 반영된 내용이 prop으로 돌아온 뒤, 고른 위치 "이후"의 첫 미해결 블록으로
+  // 스크롤한다 — 중간부터 골라도 맨 위로 끌려가지 않는다 (품질 리뷰). 남은 블록은 0부터
+  // 재번호되므로, 옛 인덱스 k를 고르면 다음 미해결의 새 인덱스가 곧 k다
+  const pendingScrollRef = useRef<number | null>(null)
   const chooseBlock = (blockIndex: number, choice: 'ours' | 'theirs') => {
-    pendingScrollRef.current = true
+    pendingScrollRef.current = blockIndex
     onChooseBlock(blockIndex, choice)
   }
   useEffect(() => {
-    if (!pendingScrollRef.current) return
-    pendingScrollRef.current = false
-    const nextIndex = items.findIndex((item) => item.type === 'block')
+    const from = pendingScrollRef.current
+    if (from === null) return
+    pendingScrollRef.current = null
+    const after = items.findIndex((item) => item.type === 'block' && item.block.index >= from)
+    const nextIndex = after >= 0 ? after : items.findIndex((item) => item.type === 'block')
     if (nextIndex >= 0) virtualizer.scrollToIndex(nextIndex, { align: 'center' })
     // 선택이 반영된 content 변화 시점에만 — items·virtualizer는 content에서 파생된다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content])
+  // 열 때 첫 겹침으로 — 진행 표시("1번째")와 화면이 어긋나지 않게 한다 (품질 리뷰).
+  // key={path}로 파일마다 리마운트되므로 mount 1회면 충분하다
+  useEffect(() => {
+    const first = items.findIndex((item) => item.type === 'block')
+    if (first >= 0) virtualizer.scrollToIndex(first, { align: 'center' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const markResolved = () => {
     void (async () => {
       // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)
@@ -208,7 +219,7 @@ export function ConflictPanel({
               <RotateCcw size={13} aria-hidden="true" /> 처음부터 다시
             </Button>
           </div>
-          <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
+          <div ref={scrollRef} className="virtual-scroll conflict-panel__scroll" data-testid="conflict-view">
             <div
               className="conflict-panel__code"
               style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
@@ -291,8 +302,10 @@ export function ConflictPanel({
               size="sm"
               isDisabled={busy}
               onPress={() => {
-                onSaveText(draft)
-                setView('cards')
+                void (async () => {
+                  // 저장이 거부되면(외부 비충돌화·용량 초과) 초안을 잃지 않게 편집 화면을 유지한다 (품질 리뷰)
+                  if (await onSaveText(draft)) setView('cards')
+                })()
               }}
               testId="conflict-edit-save"
             >

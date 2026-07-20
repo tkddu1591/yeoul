@@ -280,7 +280,7 @@ export function App() {
               onChooseBlock={(blockIndex, choice) =>
                 void store.chooseConflictBlock(blockIndex, choice)
               }
-              onSaveText={(content) => void store.saveConflictText(content)}
+              onSaveText={(content) => store.saveConflictText(content)}
               onReset={() => void store.resetConflict()}
             />
           ) : (
