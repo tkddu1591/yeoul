@@ -5,6 +5,8 @@ import './context-menu.css'
 export interface ContextMenuItem {
   key: string
   label: string
+  /** 지금 상태에서 실행할 수 없는 항목 — 숨기지 않고 비활성으로 보여준다 (상태를 숨기지 않는다) */
+  disabled?: boolean
   onSelect(): void
 }
 
@@ -47,6 +49,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
           type="button"
           role="menuitem"
           className="ui-context-menu__item"
+          disabled={item.disabled === true}
           onClick={() => {
             item.onSelect()
             onClose()

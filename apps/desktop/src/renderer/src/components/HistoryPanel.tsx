@@ -22,6 +22,8 @@ interface HistoryPanelProps {
   onLoadMore(): void
   /** 우클릭 → "여기서 실험 공간 만들기" — 해시를 넘긴다 (⑦) */
   onCreateBranchAt(hash: string): void
+  /** merging/reverting 중에는 되돌리기를 비활성 — 진행 중 작업을 먼저 마무리해야 한다 (통합 리뷰) */
+  revertDisabled: boolean
   /** 우클릭 → "이 저장 되돌리기" (revert) */
   onRevert(hash: string): void
 }
@@ -125,6 +127,7 @@ export function HistoryPanel({
   onSelect,
   onLoadMore,
   onCreateBranchAt,
+  revertDisabled,
   onRevert,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
@@ -258,6 +261,7 @@ export function HistoryPanel({
             {
               key: 'revert',
               label: '이 저장 되돌리기 (revert)',
+              disabled: revertDisabled,
               onSelect: () => onRevert(menu.commit.hash),
             },
             {

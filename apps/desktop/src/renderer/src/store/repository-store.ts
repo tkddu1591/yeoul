@@ -350,22 +350,28 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      const result = await git().branches.merge(repoPath, name)
-      const notices: Record<typeof result.outcome, string | null> = {
-        'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
-        merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
-        // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
-        conflict: null,
-        'up-to-date': '이미 모두 반영되어 있어요.',
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().branches.merge(repoPath, name)
+        const notices: Record<typeof result.outcome, string | null> = {
+          'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
+          merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
+          // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
+          conflict: null,
+          'up-to-date': '이미 모두 반영되어 있어요.',
+        }
+        const shelfNotice = result.autoShelved
+          ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+          : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
       }
-      const shelfNotice = result.autoShelved
-        ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
-        : ''
-      set({
-        ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: `${notices[result.outcome] ?? ''}${shelfNotice}` || null,
-      })
     })
   },
 
@@ -386,20 +392,26 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      const result = await git().sync.pull(repoPath)
-      const notices: Record<typeof result.outcome, string | null> = {
-        'fast-forward': '원격의 최신 저장을 받아왔어요.',
-        merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
-        // 충돌 안내는 머지 바가 상주하며 담당한다
-        conflict: null,
-        'up-to-date': '이미 최신이에요.',
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().sync.pull(repoPath)
+        const notices: Record<typeof result.outcome, string | null> = {
+          'fast-forward': '원격의 최신 저장을 받아왔어요.',
+          merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
+          // 충돌 안내는 머지 바가 상주하며 담당한다
+          conflict: null,
+          'up-to-date': '이미 최신이에요.',
+        }
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
       }
-      const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
-      set({
-        ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: `${notices[result.outcome] ?? ''}${shelfNotice}` || null,
-      })
     })
   },
 
@@ -407,13 +419,22 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      const result = await git().commits.revert(repoPath, hash)
-      set({
-        ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        // 충돌 안내는 reverting 상태 바가 담당한다
-        notice: result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null,
-      })
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
+      let notice: string | null = null
+      try {
+        const result = await git().commits.revert(repoPath, hash)
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다
+        notice =
+          `${result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : ''}${shelfNotice}` ||
+          null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
     })
   },
 

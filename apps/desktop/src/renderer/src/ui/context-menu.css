@@ -21,6 +21,10 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.ui-context-menu__item:hover {
+.ui-context-menu__item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ui-context-menu__item:hover:not(:disabled) {
   background: var(--color-surface-sunken);
 }

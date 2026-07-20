@@ -13,7 +13,7 @@ import {
   type ShelfEntry,
   type SwitchResult,
 } from '@git-gui/domain'
-import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
+import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
 import { lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
@@ -151,6 +151,9 @@ const MERGE_SHELF_MESSAGE = '실험 공간 합치기 자동 보관'
 
 /** 받아오기가 막혀 자동 보관할 때의 보관함 메시지 */
 const PULL_SHELF_MESSAGE = '받아오기 자동 보관'
+
+/** 되돌리기가 막혀 자동 보관할 때의 보관함 메시지 */
+const REVERT_SHELF_MESSAGE = '저장 되돌리기 자동 보관'
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
@@ -659,22 +662,45 @@ export function createGitClient(repoPath: string): GitClient {
       async revert(hash) {
         const cwd = await topLevel()
         assertFullHash(hash)
-        const run = (extra: string[]) =>
-          execGit(['revert', '--no-edit', ...extra, '--end-of-options', hash], { cwd })
-        let result = await run([])
-        // merge commit은 -m 없이는 거부된다(실측) — 앱 원칙대로 첫 부모 기준으로 재시도
-        if (result.exitCode !== 0 && result.stderr.includes('is a merge but no -m option')) {
-          result = await run(['-m', '1'])
+        // merging·reverting 도중의 revert는 MERGE_HEAD를 소비해 병합을 거짓 메시지로
+        // 완결시키거나, 해소된 충돌을 무통보로 재오염시킨다(통합 리뷰 실측) — 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 되돌릴 수 있어요.')
         }
-        if (result.exitCode === 0) return { outcome: 'reverted' }
-        const output = result.stdout + result.stderr
-        if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
-          return { outcome: 'conflict' }
+        const runOnce = async (): Promise<GitResult> => {
+          const run = (extra: string[]) =>
+            execGit(['revert', '--no-edit', ...extra, '--end-of-options', hash], { cwd })
+          let result = await run([])
+          // merge commit은 -m 없이는 거부된다(실측) — 앱 원칙대로 첫 부모 기준으로 재시도
+          if (result.exitCode !== 0 && result.stderr.includes('is a merge but no -m option')) {
+            result = await run(['-m', '1'])
+          }
+          return result
         }
-        if (output.includes('bad object')) {
-          throw new Error(MISSING_COMMIT_MESSAGE)
+        const classify = (result: GitResult, autoShelved: boolean): RevertResult | null => {
+          if (result.exitCode === 0) return { outcome: 'reverted', autoShelved }
+          const output = result.stdout + result.stderr
+          if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
+            return { outcome: 'conflict', autoShelved }
+          }
+          if (output.includes('bad object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          return null
         }
-        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], result)
+        const first = await runOnce()
+        const classified = classify(first, false)
+        if (classified !== null) return classified
+        if (!(first.stdout + first.stderr).includes('would be overwritten')) {
+          throw new GitError(['revert', '--no-edit', '--end-of-options', hash], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch·merge·pull과 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', REVERT_SHELF_MESSAGE], { cwd })
+        const second = await runOnce()
+        const secondClassified = classify(second, true)
+        if (secondClassified !== null) return secondClassified
+        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], second)
       },
       async revertAbort() {
         const cwd = await topLevel()

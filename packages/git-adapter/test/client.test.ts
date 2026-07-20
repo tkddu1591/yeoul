@@ -939,7 +939,7 @@ describe('GitClient', () => {
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'change'], { cwd: repo })
     const head = (await client.history.list(1))[0]!
-    expect(await client.commits.revert(head.hash)).toEqual({ outcome: 'reverted' })
+    expect(await client.commits.revert(head.hash)).toEqual({ outcome: 'reverted', autoShelved: false })
     expect(await client.files.readText('README.md')).toBe('# fixture\n')
     expect((await client.history.list(1))[0]!.subject).toContain('Revert')
 
@@ -956,7 +956,7 @@ describe('GitClient', () => {
     await client.branches.merge('side')
     const mergeHead = (await client.history.list(1))[0]!
     expect(mergeHead.parents).toHaveLength(2)
-    expect(await client.commits.revert(mergeHead.hash)).toEqual({ outcome: 'reverted' })
+    expect(await client.commits.revert(mergeHead.hash)).toEqual({ outcome: 'reverted', autoShelved: false })
     const status = await client.repo.status()
     expect(status.changes).toEqual([])
   })
@@ -972,7 +972,7 @@ describe('GitClient', () => {
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
 
-    expect(await client.commits.revert(target.hash)).toEqual({ outcome: 'conflict' })
+    expect(await client.commits.revert(target.hash)).toEqual({ outcome: 'conflict', autoShelved: false })
     let status = await client.repo.status()
     expect(status.state).toBe('reverting')
     expect(status.changes.some((c) => c.unstaged === 'conflicted')).toBe(true)
@@ -981,6 +981,58 @@ describe('GitClient', () => {
     status = await client.repo.status()
     expect(status.state).toBe('normal')
     expect(status.changes).toEqual([])
+  })
+
+  it('revert — 합치는 중(merging)에는 읽히는 메시지로 거부한다 (거짓 병합 완결 차단)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.revert(head.hash)).rejects.toThrow(/먼저 마무리하거나 취소/)
+    // 병합 상태가 소비되지 않고 그대로 남아 있어야 한다
+    expect((await client.repo.status()).state).toBe('merging')
+  })
+
+  it('revert — 되돌리는 중(reverting)에도 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', 'v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+    const middle = (await client.history.list(2))[1]!
+    expect((await client.commits.revert(middle.hash)).outcome).toBe('conflict')
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.revert(head.hash)).rejects.toThrow(/먼저 마무리하거나 취소/)
+  })
+
+  it('revert — 저장 안 된 변경이 겹치면 보관함에 넣고 되돌린다 (스마트 되돌리기)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', 'editing\n')
+
+    const head = (await client.history.list(1))[0]!
+    const result = await client.commits.revert(head.hash)
+    expect(result).toEqual({ outcome: 'reverted', autoShelved: true })
+    const shelf = await client.shelf.list()
+    expect(shelf[0]?.message).toContain('저장 되돌리기 자동 보관')
+    // 되돌린 결과가 워킹 트리에 반영됐다
+    expect(await client.files.readText('README.md')).toBe('# fixture\n')
   })
 
   it('revertAbort — 되돌리는 중이 아니면 읽히는 메시지로 거부한다', async () => {

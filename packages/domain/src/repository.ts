@@ -125,6 +125,8 @@ export interface PullResult {
 /** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */
 export interface RevertResult {
   outcome: 'reverted' | 'conflict'
+  /** 막혀서 변경을 보관함에 자동 저장했는가 (스펙: 덮기 전 자동 보관) */
+  autoShelved: boolean
 }
 
 /** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */

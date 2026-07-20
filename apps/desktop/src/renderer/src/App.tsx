@@ -319,6 +319,7 @@ export function App() {
             busy={store.busy}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
+            revertDisabled={status?.state !== 'normal'}
             onCreateBranchAt={(hash) => {
               store.clearError()
               setBranchPrompt({ fromHash: hash })
