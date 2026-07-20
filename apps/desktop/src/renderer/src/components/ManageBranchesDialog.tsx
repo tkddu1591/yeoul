@@ -17,6 +17,8 @@ interface ManageBranchesDialogProps {
   onRename(oldName: string, newName: string): Promise<boolean>
   /** 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
   onRemove(name: string, force: boolean): Promise<boolean>
+  /** 이름 바꾸기 프롬프트를 열 때 이전 에러를 지운다 — 스테일 인라인 에러 방지 (품질 리뷰) */
+  onClearError(): void
   onCancel(): void
 }
 
@@ -28,6 +30,7 @@ export function ManageBranchesDialog({
   errorText,
   onRename,
   onRemove,
+  onClearError,
   onCancel,
 }: ManageBranchesDialogProps) {
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
@@ -63,7 +66,10 @@ export function ManageBranchesDialog({
                     variant="ghost"
                     size="sm"
                     isDisabled={busy}
-                    onPress={() => setRenameTarget(branch.name)}
+                    onPress={() => {
+                      onClearError()
+                      setRenameTarget(branch.name)
+                    }}
                     testId={`manage-rename-${branch.name}`}
                   >
                     <Pencil size={13} aria-hidden="true" /> 이름 바꾸기

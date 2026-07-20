@@ -8,13 +8,15 @@ interface CommitFormProps {
   busy: boolean
   /** 빈 메시지로 저장하면 대신 들어갈 규칙 기반 제안 (스펙 8장). 없으면 빈 문자열 */
   suggestion: string
+  /** 합치는 중에는 변경 0개여도 저장(병합 커밋)이 의미 있다 — 전량 ours 데드엔드 방지 (품질 리뷰) */
+  allowEmpty: boolean
   onCommit(message: string): Promise<boolean>
 }
 
-export function CommitForm({ stagedCount, busy, suggestion, onCommit }: CommitFormProps) {
+export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit }: CommitFormProps) {
   const [message, setMessage] = useState('')
   const effectiveMessage = message.trim().length > 0 ? message : suggestion
-  const disabled = busy || stagedCount === 0 || effectiveMessage.trim().length === 0
+  const disabled = busy || (stagedCount === 0 && !allowEmpty) || effectiveMessage.trim().length === 0
 
   return (
     <form
@@ -45,7 +47,7 @@ export function CommitForm({ stagedCount, busy, suggestion, onCommit }: CommitFo
         </p>
       )}
       <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
-        저장하기 — {stagedCount}개 파일
+        저장하기 — {allowEmpty && stagedCount === 0 ? '합치기 마무리' : `${stagedCount}개 파일`}
       </Button>
     </form>
   )

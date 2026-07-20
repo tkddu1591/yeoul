@@ -750,6 +750,31 @@ describe('GitClient', () => {
     await expect(client.files.readText('link-out')).rejects.toThrow(/링크 파일/)
   })
 
+  it('conflicts — 전량 ours 해소(변경 0)여도 commit이 병합을 마무리한다 (부모 2개)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await client.conflicts.resolve('README.md', 'ours')
+    // index == HEAD — porcelain 변경 0이지만, 병합 커밋 자체가 의미 있는 저장이다
+    const status = await client.repo.status()
+    expect(status.state).toBe('merging')
+    expect(status.changes).toEqual([])
+    await client.commits.create('합치기 마무리 — 내 것 유지')
+    const head = (await client.history.list(1))[0]!
+    expect(head.parents).toHaveLength(2)
+    expect((await client.repo.status()).state).toBe('normal')
+  })
+
   it('commit — 겹침이 남아 있으면 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

@@ -90,6 +90,8 @@ interface RepositoryStore {
   clearCommit(): void
   /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 guard 불필요 */
   clearCommitFile(): void
+  /** 전역 에러를 지운다 — 다이얼로그를 새로 열 때 이전 작업 에러가 인라인으로 새어들지 않게. 동기라 guard 불필요 */
+  clearError(): void
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
@@ -503,6 +505,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   clearCommitFile() {
     set({ commitFile: null, diff: null })
+  },
+
+  clearError() {
+    set({ error: null })
   },
 
   async loadMoreHistory() {

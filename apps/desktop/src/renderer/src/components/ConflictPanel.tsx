@@ -13,6 +13,8 @@ interface ConflictPanelProps {
   path: string
   content: string
   busy: boolean
+  /** 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰) */
+  mode: 'merging' | 'reverting'
   /** 한쪽 확정 — ours=내 것 유지, theirs=가져온 것 사용 */
   onResolve(choice: 'ours' | 'theirs'): void
   /** 직접 수정을 마쳤다고 표시 — 마커가 남아 있으면 확인창을 거친다 */
@@ -23,16 +25,18 @@ interface ConflictPanelProps {
 
 /**
  * 충돌 해결 화면 (스펙 A안+B) — 파일 단위로 한쪽을 고르거나, 외부에서 직접 수정한 뒤 해결 표시.
- * 초록 구간 = 내 것(HEAD), 보라 구간 = 가져온 것.
+ * 초록 구간 = 내 것(HEAD), 보라 구간 = 가져온 것(revert에서는 되돌린 결과물).
  */
 export function ConflictPanel({
   path,
   content,
   busy,
+  mode,
   onResolve,
   onMarkResolved,
   onReload,
 }: ConflictPanelProps) {
+  const takenLabel = mode === 'reverting' ? '되돌린 결과물' : '가져온 것'
   const [confirmingMark, setConfirmingMark] = useState(false)
   const rows = parseConflictContent(content)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -70,7 +74,7 @@ export function ConflictPanel({
       testId="conflict-panel"
     >
       <p className="conflict-panel__hint">
-        초록 구간이 <strong>내 것</strong>, 보라 구간이 <strong>가져온 것</strong>이에요. 한쪽을
+        초록 구간이 <strong>내 것</strong>, 보라 구간이 <strong>{takenLabel}</strong>이에요. 한쪽을
         고르면 파일 전체가 그쪽으로 정리돼요. 세밀하게 고치려면 편집기에서 직접 수정한 뒤 "직접
         수정했어요"를 눌러 주세요.
       </p>
@@ -94,7 +98,7 @@ export function ConflictPanel({
           onPress={() => onResolve('theirs')}
           testId="conflict-theirs"
         >
-          <Download size={13} aria-hidden="true" /> 가져온 것 사용
+          <Download size={13} aria-hidden="true" /> {takenLabel} 사용
         </Button>
         <Button
           variant="ghost"

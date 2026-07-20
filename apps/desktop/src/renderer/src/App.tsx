@@ -106,7 +106,11 @@ export function App() {
   const status = store.status
   const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
   const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
-  const suggestion = suggestCommitMessage(status?.changes ?? [])
+  // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
+  const suggestion =
+    status?.state === 'merging' && stagedCount === 0
+      ? '실험 공간 합치기'
+      : suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
 
   return (
@@ -125,8 +129,14 @@ export function App() {
               currentName={status.branch.name}
               busy={store.busy}
               onSwitch={(name) => void store.switchBranch(name)}
-              onCreate={() => setBranchPrompt({ fromHash: null })}
-              onManage={() => setManageOpen(true)}
+              onCreate={() => {
+                store.clearError()
+                setBranchPrompt({ fromHash: null })
+              }}
+              onManage={() => {
+                store.clearError()
+                setManageOpen(true)
+              }}
             />
             <Button
               variant="ghost"
@@ -217,7 +227,9 @@ export function App() {
             {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
               conflictCount > 0
                 ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
-                : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+                : status.state === 'reverting' && stagedCount === 0
+                  ? '겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — 되돌리기 취소를 눌러 마무리해요.'
+                  : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
             }`}
           </span>
           <Button
@@ -249,9 +261,11 @@ export function App() {
         <div className="app__center">
           {store.conflictFile !== null ? (
             <ConflictPanel
+              key={store.conflictFile.path}
               path={store.conflictFile.path}
               content={store.conflictFile.content}
               busy={store.busy}
+              mode={status?.state === 'reverting' ? 'reverting' : 'merging'}
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
               onReload={() => store.reloadConflict(store.conflictFile!.path)}
@@ -274,6 +288,7 @@ export function App() {
             stagedCount={stagedCount}
             busy={store.busy}
             suggestion={suggestion}
+            allowEmpty={status?.state === 'merging'}
             onCommit={(message) => store.commit(message)}
           />
         </div>
@@ -304,7 +319,10 @@ export function App() {
             busy={store.busy}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
-            onCreateBranchAt={(hash) => setBranchPrompt({ fromHash: hash })}
+            onCreateBranchAt={(hash) => {
+              store.clearError()
+              setBranchPrompt({ fromHash: hash })
+            }}
             onRevert={(hash) => void store.revertCommit(hash)}
           />
         )}
@@ -351,6 +369,7 @@ export function App() {
         errorText={store.error}
         onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
         onRemove={(name, force) => store.removeBranch(name, force)}
+        onClearError={() => store.clearError()}
         onCancel={() => setManageOpen(false)}
       />
       <ConfirmDialog

@@ -500,6 +500,41 @@ test('겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무�
   }
 })
 
+test('겹침을 전부 내 것으로 정리해도 저장하기로 합치기를 마무리할 수 있다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'rival\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'rival'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'mine'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('merge-open').click()
+    await window.getByTestId('list-option-rival').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 1개 남음')
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-ours').click()
+    // 전량 내 것 — 변경 0개지만 병합 커밋으로 마무리할 수 있어야 한다 (데드엔드 방지)
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 0개 남음')
+    await expect(window.getByTestId('commit-button')).toContainText('합치기 마무리')
+    await expect(window.getByTestId('commit-button')).toBeEnabled()
+    await window.getByTestId('commit-button').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('history-count')).toHaveText('4')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
 test('합치기를 취소하면 이전 상태로 돌아온다', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
@@ -627,6 +662,10 @@ test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async ()
     await window.locator('[data-testid^="history-item-"]').nth(1).click({ button: 'right' })
     await window.getByTestId('context-revert').click()
     await expect(window.getByTestId('merge-bar')).toContainText('저장 되돌리는 중')
+    // 전부 내 것을 유지하면 바뀌는 내용이 없다 — 저장하기 대신 취소로 마무리하도록 안내한다
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByTestId('conflict-ours').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('되돌리기 취소를 눌러 마무리해요')
     await window.getByTestId('merge-abort').click()
     await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('merge-bar')).toHaveCount(0)
@@ -676,9 +715,13 @@ test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다
     await window.getByTestId('branch-manage').click()
     await window.getByTestId('manage-remove-doomed').click()
     await window.getByTestId('confirm-accept').click()
-    // 합쳐지지 않은 저장 — 강제 확인창이 이어진다
-    await expect(window.getByTestId('confirm-accept')).toBeVisible()
-    await window.getByTestId('confirm-accept').click()
+    // 합쳐지지 않은 저장 — 1차와 구분되는 강제 확인창(제목)이 이어진다
+    await expect(window.getByText('아직 합쳐지지 않은 저장이 있어요')).toBeVisible()
+    // 1차 다이얼로그가 퇴장 애니메이션 동안 공존한다 — 강제 확인창으로 스코프해 클릭
+    await window
+      .getByRole('alertdialog', { name: '아직 합쳐지지 않은 저장이 있어요' })
+      .getByTestId('confirm-accept')
+      .click()
     await expect(window.getByTestId('manage-remove-doomed')).toHaveCount(0)
   } finally {
     await app.close()
