@@ -47,6 +47,10 @@ export interface GitApi {
     /** choice는 'ours'(내 것 유지) | 'theirs'(가져온 것 사용)만 허용된다 */
     resolve(repoPath: string, path: string, choice: 'ours' | 'theirs'): Promise<void>
     markResolved(repoPath: string, path: string): Promise<void>
+    /** 충돌 파일 내용 통째 저장(블록 선택·자세히 보기 직접 수정) — add하지 않는다. 비충돌 파일은 거부된다 */
+    saveText(repoPath: string, path: string, content: string): Promise<void>
+    /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m) */
+    reset(repoPath: string, path: string): Promise<void>
   }
   files: {
     /** 워크트리 텍스트 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
@@ -101,6 +105,8 @@ export const CHANNELS = {
   mergeAbort: 'merge:abort',
   conflictsResolve: 'conflicts:resolve',
   conflictsMarkResolved: 'conflicts:mark-resolved',
+  conflictsSaveText: 'conflicts:save-text',
+  conflictsReset: 'conflicts:reset',
   filesReadText: 'files:read-text',
   shelfSave: 'shelf:save',
   shelfList: 'shelf:list',

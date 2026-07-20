@@ -27,6 +27,9 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.conflictsResolve, repoPath, path, choice),
     markResolved: (repoPath, path) =>
       ipcRenderer.invoke(CHANNELS.conflictsMarkResolved, repoPath, path),
+    saveText: (repoPath, path, content) =>
+      ipcRenderer.invoke(CHANNELS.conflictsSaveText, repoPath, path, content),
+    reset: (repoPath, path) => ipcRenderer.invoke(CHANNELS.conflictsReset, repoPath, path),
   },
   files: {
     readText: (repoPath, path) => ipcRenderer.invoke(CHANNELS.filesReadText, repoPath, path),

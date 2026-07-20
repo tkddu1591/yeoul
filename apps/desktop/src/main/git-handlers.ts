@@ -178,6 +178,19 @@ export function registerGitHandlers(): void {
     createGitClient(assertAllowedRepo(repoPath)).conflicts.markResolved(assertString(path)),
   )
 
+  ipcMain.handle(
+    CHANNELS.conflictsSaveText,
+    (_event, repoPath: unknown, path: unknown, content: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).conflicts.saveText(
+        assertString(path),
+        assertString(content),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.conflictsReset, (_event, repoPath: unknown, path: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).conflicts.reset(assertString(path)),
+  )
+
   ipcMain.handle(CHANNELS.commitsRevert, (_event, repoPath: unknown, hash: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).commits.revert(assertHash(hash)),
   )
