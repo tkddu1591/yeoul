@@ -121,3 +121,14 @@ export interface PullResult {
   outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
   autoShelved: boolean
 }
+
+/** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */
+export interface RevertResult {
+  outcome: 'reverted' | 'conflict'
+}
+
+/** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */
+export interface RemoveBranchResult {
+  removed: boolean
+  needsForce: boolean
+}

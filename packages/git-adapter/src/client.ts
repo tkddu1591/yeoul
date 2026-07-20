@@ -7,7 +7,9 @@ import {
   type FileDiff,
   type MergeResult,
   type PullResult,
+  type RemoveBranchResult,
   type RepositoryStatus,
+  type RevertResult,
   type ShelfEntry,
   type SwitchResult,
 } from '@git-gui/domain'
@@ -43,6 +45,10 @@ export interface GitClient {
      * conflict면 충돌 상태를 남긴다 — 마무리는 commits.create(저장하기), 취소는 merge.abort.
      */
     merge(name: string): Promise<MergeResult>
+    /** 실험 공간 지우기 — 합쳐지지 않은 저장이 있으면 needsForce로 알린다(확인창은 UI). 현재 공간은 거부 */
+    remove(name: string, force: boolean): Promise<RemoveBranchResult>
+    /** 이름 바꾸기 */
+    rename(oldName: string, newName: string): Promise<void>
   }
   merge: {
     /** 합치기 취소 — 충돌 상태를 버리고 합치기 전으로 되돌린다 */
@@ -98,6 +104,10 @@ export interface GitClient {
     show(hash: string): Promise<CommitDetail>
     /** 커밋 안 단일 파일의 diff — 첫 부모 기준. rename이면 origPath를 함께 넘긴다 */
     diffFile(hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    /** 이 저장이 바꾼 내용을 반대로 적용하는 새 저장을 만든다. merge commit은 첫 부모 기준(-m 1) */
+    revert(hash: string): Promise<RevertResult>
+    /** 되돌리기 취소 — 충돌 상태를 버리고 이전으로 */
+    revertAbort(): Promise<void>
   }
 }
 
@@ -260,6 +270,37 @@ export function createGitClient(repoPath: string): GitClient {
           return { outcome: 'conflict', autoShelved: true }
         }
         throw new GitError(['merge', '--no-edit', '--end-of-options', name], second)
+      },
+      async remove(name, force) {
+        const cwd = await topLevel()
+        const args = ['branch', force ? '-D' : '-d', '--end-of-options', name]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode === 0) return { removed: true, needsForce: false }
+        if (result.stderr.includes('not fully merged')) {
+          return { removed: false, needsForce: true }
+        }
+        if (result.stderr.includes('used by worktree')) {
+          throw new Error('지금 있는 실험 공간은 지울 수 없어요. 다른 공간으로 이동한 뒤 지워 주세요.')
+        }
+        if (result.stderr.includes('not found')) {
+          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+        }
+        throw new GitError(args, result)
+      },
+      async rename(oldName, newName) {
+        const cwd = await topLevel()
+        const valid = await execGit(['check-ref-format', '--branch', newName], { cwd })
+        if (valid.exitCode !== 0) {
+          throw new Error(`"${newName}"라는 이름으로는 만들 수 없어요. 공백 없이 지어 주세요.`)
+        }
+        const args = ['branch', '-m', '--end-of-options', oldName, newName]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('already exists')) {
+            throw new Error(`"${newName}"는 이미 있는 이름이에요. 다른 이름을 지어 주세요.`)
+          }
+          throw new GitError(args, result)
+        }
       },
     },
     merge: {
@@ -611,6 +652,37 @@ export function createGitClient(repoPath: string): GitClient {
                 ...pathspecs,
               ]
         return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
+      },
+      async revert(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        const run = (extra: string[]) =>
+          execGit(['revert', '--no-edit', ...extra, '--end-of-options', hash], { cwd })
+        let result = await run([])
+        // merge commit은 -m 없이는 거부된다(실측) — 앱 원칙대로 첫 부모 기준으로 재시도
+        if (result.exitCode !== 0 && result.stderr.includes('is a merge but no -m option')) {
+          result = await run(['-m', '1'])
+        }
+        if (result.exitCode === 0) return { outcome: 'reverted' }
+        const output = result.stdout + result.stderr
+        if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
+          return { outcome: 'conflict' }
+        }
+        if (output.includes('bad object')) {
+          throw new Error(MISSING_COMMIT_MESSAGE)
+        }
+        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], result)
+      },
+      async revertAbort() {
+        const cwd = await topLevel()
+        const result = await execGit(['revert', '--abort'], { cwd })
+        if (result.exitCode !== 0) {
+          // 실측 stderr: "error: no cherry-pick or revert in progress" — 부분 문구로 잡는다
+          if (result.stderr.includes('revert in progress')) {
+            throw new Error('지금은 되돌리는 중이 아니에요.')
+          }
+          throw new GitError(['revert', '--abort'], result)
+        }
       },
     },
   }

@@ -907,6 +907,106 @@ describe('GitClient', () => {
     await expect(client2.sync.pull()).rejects.toThrow(/백업.*연결/)
   })
 
+  it('revert — 저장을 반대로 적용하는 새 저장을 만들고, merge commit은 첫 부모 기준으로 되돌린다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# changed\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'change'], { cwd: repo })
+    const head = (await client.history.list(1))[0]!
+    expect(await client.commits.revert(head.hash)).toEqual({ outcome: 'reverted' })
+    expect(await client.files.readText('README.md')).toBe('# fixture\n')
+    expect((await client.history.list(1))[0]!.subject).toContain('Revert')
+
+    // merge commit — -m 1 재시도로 성공해야 한다
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main'], { cwd: repo })
+    await client.branches.merge('side')
+    const mergeHead = (await client.history.list(1))[0]!
+    expect(mergeHead.parents).toHaveLength(2)
+    expect(await client.commits.revert(mergeHead.hash)).toEqual({ outcome: 'reverted' })
+    const status = await client.repo.status()
+    expect(status.changes).toEqual([])
+  })
+
+  it('revert — 이후 저장과 겹치면 conflict 상태(reverting)로 남고, 취소로 돌아온다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const target = (await client.history.list(1))[0]!
+    await writeFixtureFile(repo, 'README.md', '# v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+
+    expect(await client.commits.revert(target.hash)).toEqual({ outcome: 'conflict' })
+    let status = await client.repo.status()
+    expect(status.state).toBe('reverting')
+    expect(status.changes.some((c) => c.unstaged === 'conflicted')).toBe(true)
+
+    await client.commits.revertAbort()
+    status = await client.repo.status()
+    expect(status.state).toBe('normal')
+    expect(status.changes).toEqual([])
+  })
+
+  it('revertAbort — 되돌리는 중이 아니면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.commits.revertAbort()).rejects.toThrow(/되돌리는 중이 아니에요/)
+  })
+
+  it('branches.remove — 합쳐진 공간은 지우고, 안 합쳐진 공간은 needsForce로 알리고, force로 지운다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('merged-one', null)
+    expect(await client.branches.remove('merged-one', false)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+
+    await client.branches.create('doomed', null)
+    await client.branches.switch('doomed')
+    await writeFixtureFile(repo, 'd.txt', 'd\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'doomed work'], { cwd: repo })
+    await client.branches.switch('main')
+    expect(await client.branches.remove('doomed', false)).toEqual({
+      removed: false,
+      needsForce: true,
+    })
+    expect(await client.branches.remove('doomed', true)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+    expect((await client.branches.list()).map((b) => b.name)).toEqual(['main'])
+  })
+
+  it('branches.remove — 지금 있는 공간은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.remove('main', false)).rejects.toThrow(/다른 공간으로 이동/)
+  })
+
+  it('branches.rename — 이름을 바꾸고, 중복·잘못된 이름은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('before', null)
+    await client.branches.rename('before', 'after')
+    expect((await client.branches.list()).map((b) => b.name).sort()).toEqual(['after', 'main'])
+    await expect(client.branches.rename('after', 'main')).rejects.toThrow(/이미 있는 이름/)
+    await expect(client.branches.rename('after', 'bad name')).rejects.toThrow(/만들 수 없어요/)
+    await expect(client.branches.rename('no-such', 'x')).rejects.toThrow()
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
