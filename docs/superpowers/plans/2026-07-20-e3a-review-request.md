@@ -2311,6 +2311,203 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 9-보완: 품질 리뷰 5건 (실측 반영)
+
+품질 리뷰(실렌더·보안 실측)가 잡은 결함:
+
+- **(Important 2) 패키징 앱 env 토큰 유출 경로** — `baseUrl()`이 `app.isPackaged` 게이트 없이 env를 신뢰해, 패키징 앱을 `GIT_GUI_GITHUB_API=http://attacker`로 실행하면 저장 토큰이 복호화되어 공격자 서버로 전송된다. `GIT_GUI_E2E_GH_TOKEN`도 동일 게이트 대상. → `!app.isPackaged` 조건.
+- **(Important 1) 960px 헤더 36px 가로 오버플로** — 리뷰 버튼(99px)이 단독 원인(실측). → 좁은 창에서 원어 배지(리뷰 PR·받아오기 pull·백업 push)를 접는다.
+- **(Minor 3) 오프라인 목록 실패가 "없어요"로 위장** — 실패와 빈 목록을 구분(null 상태).
+- **(Minor 4) merging/reverting 중 리뷰 요청 무가드** — 전환·받아오기와 같은 기준으로 UI 비활성+사유 + 핸들러 친절 거부(이중 방어).
+- **(Minor 6) disconnect가 knownPullUrls 미정리 + connectGh 첫 연결 401이 "만료" 문구** — 정리·재문구.
+
+**Files:**
+- Modify: `apps/desktop/src/main/hosting-handlers.ts`
+- Modify: `apps/desktop/src/renderer/src/components/ReviewPopover.tsx` (+`review-popover.css`)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/src/renderer/src/App.tsx`
+
+- [ ] **Step 1: hosting-handlers.ts**
+
+(a) import 교체 — `import { ipcMain, shell } from 'electron'` →
+
+```ts
+import { app, ipcMain, shell } from 'electron'
+```
+
+(b) baseUrl·currentToken 블록 교체 — 기존:
+
+```ts
+/** 개발·E2E에서 mock 서버로 바꿔 끼운다 — 프로덕션 기본은 GitHub 공식 API */
+function baseUrl(): string {
+  return process.env.GIT_GUI_GITHUB_API || 'https://api.github.com'
+}
+
+/** E2E 토큰 사전 주입 — 연결 다이얼로그 없이 로그인 상태로 시작한다 (GIT_GUI_E2E_REPO와 동일 관례) */
+function currentToken(): string | null {
+  return process.env.GIT_GUI_E2E_GH_TOKEN || readGitHubToken()
+}
+```
+
+교체:
+
+```ts
+/** 개발·E2E에서 mock 서버로 바꿔 끼운다 — 패키징된 앱에서는 env 주입을 무시한다
+    (env로 baseUrl을 바꾸면 저장된 토큰이 임의 서버로 전송된다 — 품질 리뷰) */
+function baseUrl(): string {
+  if (!app.isPackaged && process.env.GIT_GUI_GITHUB_API) return process.env.GIT_GUI_GITHUB_API
+  return 'https://api.github.com'
+}
+
+/** E2E 토큰 사전 주입 — 패키징된 앱에서는 무시한다 (GIT_GUI_E2E_REPO와 동일 관례) */
+function currentToken(): string | null {
+  if (!app.isPackaged && process.env.GIT_GUI_E2E_GH_TOKEN) return process.env.GIT_GUI_E2E_GH_TOKEN
+  return readGitHubToken()
+}
+```
+
+(c) disconnect 핸들러 교체:
+
+```ts
+  ipcMain.handle(HOSTING_CHANNELS.disconnect, () => {
+    clearGitHubConnection()
+    memoLogin = null
+    // 해제 후 이전 목록의 주소가 남지 않게 — 재연결하면 목록에서 다시 채운다 (품질 리뷰)
+    knownPullUrls.clear()
+  })
+```
+
+(d) connectGh의 `return verifyAndSave(token)` 줄 교체:
+
+```ts
+    try {
+      return await verifyAndSave(token)
+    } catch (cause) {
+      // 첫 연결의 401은 "만료"가 아니다 — gh 토큰이 더는 유효하지 않은 상황 (품질 리뷰)
+      if (cause instanceof Error && cause.message.includes('연결이 만료됐어요')) {
+        throw new Error(
+          'gh 로그인이 더는 유효하지 않아요. 터미널에서 gh auth login 후 다시 시도해 주세요.',
+        )
+      }
+      throw cause
+    }
+```
+
+(e) pullCreate 핸들러의 `branch.branch === null` 거부 블록 **바로 뒤**에 추가:
+
+```ts
+    // 전환·받아오기와 같은 기준 — 진행 중 작업(merging·reverting) 중에는 요청을 받지 않는다 (품질 리뷰)
+    const repoStatus = await client.repo.status()
+    if (repoStatus.state !== 'normal') {
+      throw new Error('지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청해 주세요.')
+    }
+```
+
+- [ ] **Step 2: ReviewPopover.tsx**
+
+(a) props에 추가(`currentBranch` 항목 뒤):
+
+```ts
+  /** 진행 중 작업(merging·reverting) — 요청 버튼을 비활성하고 사유를 보여준다 (품질 리뷰) */
+  stateBlocked: boolean
+```
+
+(b) `pulls` prop 타입 교체:
+
+```ts
+  /** 열린 리뷰 요청 — null이면 마지막 조회 실패(빈 목록으로 위장하지 않는다 — 품질 리뷰) */
+  pulls: PullSummary[] | null
+```
+
+(c) 구조 분해에 `stateBlocked` 추가, 트리거 버튼에 className:
+
+```tsx
+      <Button variant="ghost" size="sm" className="review-popover__trigger" testId="review-open">
+        <GitPullRequest size={13} aria-hidden="true" /> 리뷰 <Badge tone="git">PR</Badge>
+      </Button>
+```
+
+(d) 요청 버튼·사유 교체 — `isDisabled={busy || isDefaultBranch}`를 `isDisabled={busy || isDefaultBranch || stateBlocked}`로, `isDefaultBranch && (…)` 사유 블록 **뒤**에 추가:
+
+```tsx
+                  {stateBlocked && (
+                    <p className="review-popover__reason" data-testid="review-create-blocked">
+                      지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청할 수 있어요.
+                    </p>
+                  )}
+```
+
+(e) 목록 분기 교체 — `{pulls.length === 0 ? (` 삼항을:
+
+```tsx
+                  {pulls === null ? (
+                    <p className="review-popover__empty">
+                      리뷰 요청 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.
+                    </p>
+                  ) : pulls.length === 0 ? (
+                    <p className="review-popover__empty">열린 리뷰 요청이 없어요.</p>
+                  ) : (
+```
+
+(기존 `<ul>` 블록과 닫는 `)}`는 그대로.)
+
+- [ ] **Step 3: review-popover.css 끝에 추가**
+
+```css
+/* 960px 최소 창에서 헤더 한 줄 보장(E1c) — 좁은 창에서는 원어 배지를 접는다
+   (품질 리뷰 실측: 리뷰 버튼 추가로 36px 가로 오버플로) */
+@media (max-width: 1180px) {
+  .review-popover__trigger .ui-badge,
+  .app__actions .ui-badge--git {
+    display: none;
+  }
+}
+```
+
+- [ ] **Step 4: store**
+
+(a) 상태 타입 교체 — `pulls: PullSummary[]` 인터페이스 항목을:
+
+```ts
+  /** 열린 리뷰 요청 — null이면 마지막 조회 실패(빈 목록으로 위장하지 않는다 — 품질 리뷰) */
+  pulls: PullSummary[] | null
+```
+
+(b) refreshPulls의 guard 내부 교체:
+
+```ts
+    await guard(set, get, async () => {
+      try {
+        set({ pulls: await hosting().pulls.list(repoPath) })
+      } catch (cause) {
+        // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰)
+        set({ pulls: null })
+        throw cause
+      }
+    })
+```
+
+- [ ] **Step 5: App.tsx** — ReviewPopover 호출의 `currentBranch=` 줄 뒤에 추가:
+
+```tsx
+            stateBlocked={status?.state !== 'normal'}
+```
+
+- [ ] **Step 6: 실렌더·검증 5건** — (1) 960×800 `document.documentElement.scrollWidth === 960`(오버플로 0)·헤더 한 줄, (2) merging(충돌) 중 요청 버튼 비활성+사유 표시, (3) mock 서버 내린 상태에서 팝오버 → "목록을 불러오지 못했어요" (빈 목록 문구 아님), (4) 연결 해제 직후 이전 목록 항목 열기 시 친절 거부(재현 가능하면 — 목록이 비어 있으면 코드 검토로 갈음), (5) isPackaged 게이트는 dev에서 `app.isPackaged === false`라 기존 E2E 경로가 유지됨을 게이트로 검증(코드 검토 + E2E 32 통과가 곧 증명). (1)이 배지 접기로도 오버플로가 남으면 **NEEDS_CONTEXT**.
+
+- [ ] **Step 7: 게이트** — 루트 `pnpm test`(**278**) + typecheck(6 Done) + build + E2E 전체(**32 passed**) 전부 exit 0
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/desktop/src
+git commit -m "fix(desktop): 품질 리뷰 — env 게이트(isPackaged)·960px 배지 접기·목록 실패 구분·진행 중 가드·해제 정리
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 10: 최종 게이트 + 공식 스크린샷 3장 + README
 
 - [ ] **Step 1: 전체 게이트**
