@@ -2726,6 +2726,194 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 10-보완: 통합 리뷰 1건 — rename 뒤 옛 upstream 잔존
+
+통합 리뷰 실측: `git branch -m`은 config의 merge ref(옛 이름)를 유지해, push된 브랜치를 rename하면 `@{upstream}`이 **옛 이름으로 여전히 해석**된다. 그 결과 ① pull-create가 push를 건너뛰고 원격에 없는 head로 PR을 시도(실 GitHub 422 — 비개발자 회복 불가), ② 백업(push)도 평범한 push가 원어 에러로 죽는다(E1 후속 노트로 이관했던 기존 문제 — 같은 뿌리). **수정: upstream "이름"을 노출하고, 현재 브랜치명과 어긋나면 push를 `-u <remote> HEAD` 재연결 경로로 태운다** — 두 문제가 한 번에 닫힌다.
+
+**Files:**
+- Modify: `packages/domain/src/repository.ts` (SyncBranchStatus.upstream)
+- Modify: `packages/git-adapter/src/client.ts` (branchStatus·push)
+- Test: `packages/git-adapter/test/client.test.ts` (신규 2건 + 기존 단언 3곳 갱신)
+- Modify: `apps/desktop/src/main/hosting-handlers.ts` (pull-create 건너뛰기 조건)
+
+- [ ] **Step 1: 테스트 Red** — `client.test.ts`:
+
+(a) 기존 `'sync.branchStatus — 현재 브랜치와 upstream 유무를 알려준다'`의 단언 2곳 교체:
+
+```ts
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: false, upstream: null })
+```
+
+```ts
+    expect(await client.sync.branchStatus()).toEqual({ branch: 'main', hasUpstream: true, upstream: 'origin/main' })
+```
+
+(b) 기존 `'sync.branchStatus — detached HEAD면 branch null이다'`의 단언 교체:
+
+```ts
+    expect(await createGitClient(repo).sync.branchStatus()).toEqual({
+      branch: null,
+      hasUpstream: false,
+      upstream: null,
+    })
+```
+
+(c) detached 테스트 **뒤**에 신규 2건 추가:
+
+```ts
+  it('branchStatus — 이름 바꾼 브랜치는 옛 upstream 이름이 그대로 남는다 (잔존 감지용)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('feature', null)
+    await client.branches.switch('feature')
+    await client.sync.push()
+    await client.branches.rename('feature', 'feature-2')
+    // git branch -m은 merge ref(옛 이름)를 유지한다 — upstream이 여전히 옛 이름으로 해석된다 (통합 리뷰 실측)
+    expect(await client.sync.branchStatus()).toEqual({
+      branch: 'feature-2',
+      hasUpstream: true,
+      upstream: 'origin/feature',
+    })
+  })
+
+  it('push — 이름 바꾼 브랜치는 옛 upstream을 무시하고 새 이름으로 다시 연결하며 올린다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('feature', null)
+    await client.branches.switch('feature')
+    await client.sync.push()
+    await client.branches.rename('feature', 'feature-2')
+
+    await client.sync.push()
+    const upstream = await execGitOrThrow(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      { cwd: repo },
+    )
+    expect(upstream.stdout.trim()).toBe('origin/feature-2')
+    const remoteBranches = await execGitOrThrow(['branch', '--format=%(refname:short)'], {
+      cwd: remote,
+    })
+    expect(remoteBranches.stdout).toContain('feature-2')
+  })
+```
+
+Run: `pnpm --filter @git-gui/git-adapter test` → **수정 2건 + 신규 2건 FAIL 확인**(upstream 필드 부재·rename 후 push 원어 에러).
+
+- [ ] **Step 2: domain** — `SyncBranchStatus` 교체:
+
+```ts
+export interface SyncBranchStatus {
+  /** detached HEAD면 null */
+  branch: string | null
+  hasUpstream: boolean
+  /** upstream 짧은 이름(예: origin/feature) — rename 뒤 옛 이름 잔존 감지에 쓴다. 없으면 null */
+  upstream: string | null
+}
+```
+
+- [ ] **Step 3: 어댑터**
+
+(a) `branchStatus` 전체 교체:
+
+```ts
+      async branchStatus() {
+        const cwd = await topLevel()
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        if (branch.exitCode !== 0) return { branch: null, hasUpstream: false, upstream: null }
+        // 실측: branch.<name>.remote/merge 설정만으로는 해석되지 않고, remote-tracking ref까지
+        // 있어야 exit 0이다 — "원격에 실제로 올라간 적 있음"을 뜻해 리뷰 요청 전 검사에 맞다
+        const upstream = await execGit(
+          ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          { cwd },
+        )
+        const upstreamName = upstream.exitCode === 0 ? upstream.stdout.trim() : null
+        return {
+          branch: branch.stdout.trim(),
+          hasUpstream: upstreamName !== null,
+          upstream: upstreamName,
+        }
+      },
+```
+
+(b) `push` 전체 교체:
+
+```ts
+      async push() {
+        const cwd = await topLevel()
+        const remotes = await execGitOrThrow(['remote'], { cwd })
+        const remoteNames = remotes.stdout
+          .trim()
+          .split('\n')
+          .filter((name) => name !== '')
+        if (remoteNames.length === 0) {
+          throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+        }
+        // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
+        const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        const upstream = await execGit(
+          ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          { cwd },
+        )
+        // upstream이 "현재 이름과 같은" 원격 브랜치일 때만 평범한 push —
+        // rename 뒤에는 옛 이름의 upstream이 남아(git branch -m이 merge ref 유지 — 통합 리뷰 실측)
+        // 평범한 push가 원어 에러로 죽는다. 그 경우 아래의 -u 재연결 경로로 태운다
+        if (
+          upstream.exitCode === 0 &&
+          branch.exitCode === 0 &&
+          upstream.stdout.trim().endsWith(`/${branch.stdout.trim()}`)
+        ) {
+          // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
+          await execGitOrThrow(['-c', 'push.default=simple', 'push'], { cwd })
+          return
+        }
+        // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
+        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+        if (head.exitCode !== 0) {
+          throw new Error('아직 저장된 시점이 없어요. 먼저 저장(commit)한 뒤 백업해 주세요.')
+        }
+        // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
+        if (branch.exitCode !== 0) {
+          throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
+        }
+        // 첫 백업(또는 이름이 어긋난 upstream 재연결) — 현재 브랜치를 remote에 연결하며 올린다.
+        // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
+        await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
+      },
+```
+
+- [ ] **Step 4: hosting-handlers** — pull-create의 push 건너뛰기 블록 교체. 기존:
+
+```ts
+    // 원격에 이 실험 공간이 없으면 리뷰 대상이 없다 — 기존 백업(push) 흐름으로 먼저 올린다
+    if (!branch.hasUpstream) await client.sync.push()
+```
+
+교체:
+
+```ts
+    // 원격에 이 실험 공간이 없으면 리뷰 대상이 없다 — 기존 백업(push) 흐름으로 먼저 올린다.
+    // rename 뒤에는 옛 이름의 upstream이 남는다(통합 리뷰 실측) — 이름이 같을 때만 건너뛴다
+    const upstreamMatches =
+      branch.upstream !== null && branch.upstream.endsWith(`/${branch.branch}`)
+    if (!upstreamMatches) await client.sync.push()
+```
+
+- [ ] **Step 5: Green + 게이트** — `pnpm --filter @git-gui/git-adapter test` 전체 PASS → 루트 `pnpm test`(**280**: 278+2) + typecheck(6 Done) + build + E2E 전체(**32 passed**)
+
+- [ ] **Step 6: 실기동 확인** — mock 서버 + 로컬 bare pushurl 픽스처: push된 브랜치 rename → ① 리뷰 요청 → bare에 새 이름 브랜치 push 도달 + mock PR의 head=새 이름, ② 백업 버튼 → 성공(원어 에러 없음 — E1 이관 항목 해소 확인).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/domain/src packages/git-adapter apps/desktop/src/main/hosting-handlers.ts
+git commit -m "fix: 통합 리뷰 — rename 뒤 옛 upstream 무시(push -u 재연결·리뷰 요청 head 정합)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -2776,4 +2964,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - **pulls 페이지네이션:** per_page=50 초과 목록은 잘린다 — E3b에서 페이징.
 - **GitHub Enterprise:** parseRemoteUrl은 host를 이미 돌려준다 — 사용자 지정 호스트 + baseUrl 설정 UI가 생기면 판정만 바꾸면 된다.
 - **disconnect와 GIT_GUI_E2E_GH_TOKEN:** env 주입 토큰은 해제로 지워지지 않는다(E2E 전용 경로 — 프로덕션 무관).
-- **gh 감지 시점:** ghAvailable은 프로세스당 1회 메모(연결 시도 시 재감지) — 앱 실행 중 gh login한 경우 status 표시가 낡을 수 있다(연결 버튼은 재감지하므로 동작은 정상).
+- **gh 감지 시점:** ghAvailable은 프로세스당 1회 메모(연결 시도 시 재감지) — 앱 실행 중 gh login한 경우 status 표시가 낡을 수 있다(연결 버튼은 재감지하므로 동작은 정상). (통합 리뷰 Minor 2 동일 지적)
+- (통합 리뷰 Minor) 연결 상태에서 첫 팝오버 열기 순간 목록 도착 전 "없어요"가 잠깐 보인다 — 로딩 상태 구분 검토.
+- (통합 리뷰 Minor) refreshPulls가 guard 경유라 팝오버 열기만으로 기존 배너가 지워진다 — 앱 전반 guard 관례와 일관되나 기록.
+- (해소 기록) E1c 후속 노트의 "현재 브랜치 rename 후 백업 upstream 불일치 원어 에러"는 Task 10-보완의 push `-u` 재연결로 해소됐다.
