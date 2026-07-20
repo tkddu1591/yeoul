@@ -10,6 +10,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
+import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
 import {
   clampRightWidth,
@@ -55,6 +56,10 @@ export function App() {
   const [mergePicker, setMergePicker] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [confirmingAbort, setConfirmingAbort] = useState(false)
+
+  // 리뷰(호스팅) 다이얼로그 — 토큰 붙여넣기·리뷰 요청 제목 (팝오버는 닫고 연다)
+  const [tokenPrompt, setTokenPrompt] = useState(false)
+  const [pullPrompt, setPullPrompt] = useState(false)
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
   // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
@@ -180,6 +185,24 @@ export function App() {
             onPreview={(hash) => void store.selectCommit(hash)}
             onRestore={(ref) => void store.shelfRestore(ref)}
             onDrop={(ref) => void store.shelfDrop(ref)}
+          />
+          <ReviewPopover
+            status={store.hostingStatus}
+            pulls={store.pulls}
+            busy={store.busy}
+            currentBranch={status?.branch.name ?? null}
+            onOpen={() => void store.refreshPulls()}
+            onConnectGh={() => void store.connectGh()}
+            onConnectToken={() => {
+              store.clearError()
+              setTokenPrompt(true)
+            }}
+            onDisconnect={() => void store.disconnectHosting()}
+            onCreate={() => {
+              store.clearError()
+              setPullPrompt(true)
+            }}
+            onOpenPull={(number) => void store.openPull(number)}
           />
           <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
             {theme === 'dark' ? (
@@ -386,6 +409,38 @@ export function App() {
         onRemove={(name, force) => store.removeBranch(name, force)}
         onClearError={() => store.clearError()}
         onCancel={() => setManageOpen(false)}
+      />
+      <PromptDialog
+        isOpen={tokenPrompt}
+        title="GitHub 토큰으로 연결"
+        description="github.com → Settings → Developer settings → Personal access tokens에서 만들 수 있어요. 만든 토큰을 붙여넣어 주세요."
+        label="토큰"
+        placeholder="ghp_..."
+        submitLabel="연결"
+        errorText={tokenPrompt ? store.error : null}
+        onSubmit={(token) => {
+          void (async () => {
+            // 실패하면 다이얼로그를 유지해 입력을 보존한다 — 에러는 인라인으로 (branchPrompt 관례)
+            if (await store.connectToken(token)) setTokenPrompt(false)
+          })()
+        }}
+        onCancel={() => setTokenPrompt(false)}
+      />
+      <PromptDialog
+        isOpen={pullPrompt}
+        title="리뷰 요청 만들기"
+        description="지금 실험 공간의 저장 내용을 검토해 달라고 요청해요. 아직 백업(push) 전이면 백업부터 자동으로 해요."
+        label="제목"
+        placeholder="예: 로그인 버튼 색 실험"
+        submitLabel="요청 만들기"
+        initialValue={store.history[0]?.subject ?? ''}
+        errorText={pullPrompt ? store.error : null}
+        onSubmit={(title) => {
+          void (async () => {
+            if (await store.createPull(title)) setPullPrompt(false)
+          })()
+        }}
+        onCancel={() => setPullPrompt(false)}
       />
       <ConfirmDialog
         isOpen={confirmingAbort}
