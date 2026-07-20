@@ -87,11 +87,9 @@ export function App() {
     resetRightWidth()
     setRightWidth(RIGHT_COLUMN_DEFAULT)
   }
-  // 상세 모드 최소폭도 뷰포트 클램프를 통과시킨다 — 좁은 창에서 중앙 diff가 살아남는다
-  const effectiveRight =
-    store.commitDetail !== null
-      ? clampRightWidth(Math.max(rightWidth, 420), window.innerWidth)
-      : rightWidth
+  // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) —
+  // 사용자가 정한 폭을 그대로 유지한다. 좁으면 손잡이로 넓히면 되고, 폭은 기억된다
+  const effectiveRight = rightWidth
 
   useEffect(() => {
     void store.init()
