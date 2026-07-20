@@ -452,6 +452,9 @@ test('보관함 항목을 클릭하면 담긴 내용을 미리 보여준다', as
     // 팝오버가 닫히고 우측이 커밋 상세로 전환된다 — 담긴 파일이 보인다
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
     await expect(window.getByTestId('commit-detail-panel')).toContainText('보관 내용')
+    await expect(window.getByTestId('commit-detail-panel')).toContainText(
+      '새로 만든 파일은 이 목록에 안 보여요',
+    )
     await expect(window.getByTestId('commit-file-app.txt')).toBeVisible()
     // 뒤로 가면 타임라인으로 복귀
     await window.getByTestId('commit-detail-back').click()

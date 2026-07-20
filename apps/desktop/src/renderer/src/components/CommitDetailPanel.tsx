@@ -107,7 +107,9 @@ export function CommitDetailPanel({
       <div className="commit-detail__files-head">
         바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
         {detail.files.length > 0
-          ? ' — 누르면 가운데에 비교를 보여드려요'
+          ? shelfPreview
+            ? ' — 누르면 가운데에 비교를 보여드려요. 새로 만든 파일은 이 목록에 안 보여요 — 꺼내면 함께 돌아와요'
+            : ' — 누르면 가운데에 비교를 보여드려요'
           : shelfPreview
             ? ' — 새로 만든 파일만 담긴 보관이에요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요'
             : ' — 메시지만 남긴 저장이에요'}
