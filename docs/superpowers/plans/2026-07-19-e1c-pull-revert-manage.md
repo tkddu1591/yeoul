@@ -412,7 +412,8 @@ commits 블록 `diffFile(...)` 행 **뒤**에:
         const cwd = await topLevel()
         const result = await execGit(['revert', '--abort'], { cwd })
         if (result.exitCode !== 0) {
-          if (result.stderr.includes('no revert in progress') || result.stderr.includes('REVERT_HEAD')) {
+          // 실측 stderr: "error: no cherry-pick or revert in progress" — 부분 문구로 잡는다
+          if (result.stderr.includes('revert in progress')) {
             throw new Error('지금은 되돌리는 중이 아니에요.')
           }
           throw new GitError(['revert', '--abort'], result)
