@@ -437,6 +437,30 @@ test('변경을 보관함에 넣었다 꺼낸다', async () => {
   }
 })
 
+test('보관함 항목을 클릭하면 담긴 내용을 미리 보여준다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('shelf-open').click()
+    await window.getByTestId('shelf-save').click()
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await window.getByTestId('shelf-preview-stash@{0}').click()
+    // 팝오버가 닫히고 우측이 커밋 상세로 전환된다 — 담긴 파일이 보인다
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('commit-file-app.txt')).toBeVisible()
+    // 뒤로 가면 타임라인으로 복귀
+    await window.getByTestId('commit-detail-back').click()
+    await expect(window.getByTestId('commit-detail-panel')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
 test('다른 실험 공간을 합친다 (빨리 감기)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
