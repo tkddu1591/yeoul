@@ -1573,8 +1573,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ```css
 /* 좁은 '중앙 열'에서는 위아래로 쌓인다 — 창 폭이 아니라 실제 열 폭 기준 (품질 리뷰 실측:
-   960px 창에서 media query는 무력했다. 열을 컨테이너로 선언한 layout.css와 짝) */
-@container center (max-width: 720px) {
+   960px 창에서 media query는 무력했다. 열을 컨테이너로 선언한 layout.css와 짝).
+   임계값은 실측 기반 — 중앙 열 폭: 960창 156px / 1200창 406px / 1440창 646px.
+   400px면 960은 스택·1200부터 나란히가 성립한다 */
+@container center (max-width: 400px) {
   .conflict-card__sides {
     grid-template-columns: 1fr;
   }
@@ -1584,8 +1586,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 (c) `conflict-panel.css` 끝에 추가:
 
 ```css
-/* 힌트·버튼 줄이 좁은 폭에서 여러 줄로 커져도 목록이 0px로 짜부라지지 않게 (품질 리뷰 실측) */
-.conflict-panel__scroll {
+/* 힌트·버튼 줄이 좁은 폭에서 여러 줄로 커져도 목록이 0px로 짜부라지지 않게 (품질 리뷰 실측).
+   virtual.css의 .virtual-scroll { min-height: 0 }과 특이도 동률이면 번들 순서에 밀린다(실측) —
+   복합 셀렉터(0,2,0)로 확정적으로 이긴다 */
+.virtual-scroll.conflict-panel__scroll {
   min-height: 220px;
 }
 ```
