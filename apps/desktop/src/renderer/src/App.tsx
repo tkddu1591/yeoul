@@ -277,6 +277,11 @@ export function App() {
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
               onReload={() => store.reloadConflict(store.conflictFile!.path)}
+              onChooseBlock={(blockIndex, choice) =>
+                void store.chooseConflictBlock(blockIndex, choice)
+              }
+              onSaveText={(content) => void store.saveConflictText(content)}
+              onReset={() => void store.resetConflict()}
             />
           ) : (
             <DiffPanel

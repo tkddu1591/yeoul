@@ -1,11 +1,11 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDown, Check, Download, User } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { ArrowDown, Check, CheckCheck, Download, PenLine, RotateCcw, User } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Panel } from '../ui/Panel'
-import { hasConflictMarkers, parseConflictContent } from './conflict-markers'
+import { buildConflictView, hasConflictMarkers } from './conflict-markers'
 import './conflict-panel.css'
 import './virtual.css'
 
@@ -15,17 +15,25 @@ interface ConflictPanelProps {
   busy: boolean
   /** 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰) */
   mode: 'merging' | 'reverting'
-  /** 한쪽 확정 — ours=내 것 유지, theirs=가져온 것 사용 */
+  /** 파일 전체 한쪽 확정 — ours=내 것 유지, theirs=가져온 것 사용 (빠른 길) */
   onResolve(choice: 'ours' | 'theirs'): void
-  /** 직접 수정을 마쳤다고 표시 — 마커가 남아 있으면 확인창을 거친다 */
+  /** 확정(git add) — "고른 대로 확정"과 "직접 수정했어요"가 공유한다. 마커가 남아 있으면 확인창을 거친다 */
   onMarkResolved(): void
-  /** 최신 파일 내용 재조회 — 외부 편집 후의 stale 마커 검사(거짓 경고)를 막는다. 실패 시 null */
+  /** 최신 파일 내용 재조회 — 외부 편집 후의 stale 검사(거짓 경고)를 막는다. 실패 시 null */
   onReload(): Promise<string | null>
+  /** 블록 하나를 한쪽으로 — 파일에 즉시 반영된다(확정 아님, add하지 않는다) */
+  onChooseBlock(blockIndex: number, choice: 'ours' | 'theirs'): void
+  /** 자세히 보기에서 직접 수정한 결과 저장(확정 아님) */
+  onSaveText(content: string): void
+  /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m). 확인창은 이 컴포넌트가 담당한다 */
+  onReset(): void
 }
 
 /**
- * 충돌 해결 화면 (스펙 A안+B) — 파일 단위로 한쪽을 고르거나, 외부에서 직접 수정한 뒤 해결 표시.
- * 초록 구간 = 내 것(HEAD), 보라 구간 = 가져온 것(revert에서는 되돌린 결과물).
+ * 충돌 해결 화면 (스펙 §7 2단 구조) — 기본은 하나씩 선택형: 겹침 블록마다 카드로
+ * 양쪽을 나란히 보여 주고 한쪽을 고르면 파일에 즉시 반영된다(확정은 "고른 대로 확정"에서만).
+ * "자세히 보기"는 합쳐진 결과(남은 마커 포함)를 직접 수정하는 상세 뷰의 단순화 버전이다.
+ * 초록 = 내 것(HEAD), 보라 = 가져온 것(revert에서는 되돌린 결과물).
  */
 export function ConflictPanel({
   path,
@@ -35,28 +43,56 @@ export function ConflictPanel({
   onResolve,
   onMarkResolved,
   onReload,
+  onChooseBlock,
+  onSaveText,
+  onReset,
 }: ConflictPanelProps) {
   const takenLabel = mode === 'reverting' ? '되돌린 결과물' : '가져온 것'
   const [confirmingMark, setConfirmingMark] = useState(false)
-  const rows = parseConflictContent(content)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 21,
-    overscan: 20,
-  })
-  // 겹침 블록 시작 인덱스 — "다음 겹침"으로 순환 점프한다
-  const markerIndexes = rows.reduce<number[]>((acc, row, index) => {
-    if (row.kind === 'marker-ours') acc.push(index)
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [view, setView] = useState<'cards' | 'edit'>('cards')
+  const [draft, setDraft] = useState('')
+  const items = buildConflictView(content)
+  // 블록 카드의 아이템 위치 — "다음 겹침" 순환 점프·선택 후 자동 스크롤에 쓴다
+  const blockItemIndexes = items.reduce<number[]>((acc, item, index) => {
+    if (item.type === 'block') acc.push(index)
     return acc
   }, [])
+  const blockCount = blockItemIndexes.length
+  // 진행 표시 분모 — 연 시점의 블록 수. "처음부터 다시"·외부 편집으로 늘면 렌더 중 보정한다
+  const [total, setTotal] = useState(blockCount)
+  if (blockCount > total) setTotal(blockCount)
+  const done = total - blockCount
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    // 카드(블록)는 줄보다 크게 추정한다 — 실제 높이는 measureElement가 잡는다
+    estimateSize: (index) => (items[index]!.type === 'block' ? 132 : 21),
+    overscan: 20,
+  })
   const [jumpCursor, setJumpCursor] = useState(0)
   const jumpNext = () => {
-    if (markerIndexes.length === 0) return
-    virtualizer.scrollToIndex(markerIndexes[jumpCursor % markerIndexes.length]!, { align: 'center' })
+    if (blockItemIndexes.length === 0) return
+    virtualizer.scrollToIndex(blockItemIndexes[jumpCursor % blockItemIndexes.length]!, {
+      align: 'center',
+    })
     setJumpCursor(jumpCursor + 1)
   }
+  // 블록을 고르면 반영된 내용이 prop으로 돌아온 뒤 첫 미해결 블록으로 스크롤한다
+  const pendingScrollRef = useRef(false)
+  const chooseBlock = (blockIndex: number, choice: 'ours' | 'theirs') => {
+    pendingScrollRef.current = true
+    onChooseBlock(blockIndex, choice)
+  }
+  useEffect(() => {
+    if (!pendingScrollRef.current) return
+    pendingScrollRef.current = false
+    const nextIndex = items.findIndex((item) => item.type === 'block')
+    if (nextIndex >= 0) virtualizer.scrollToIndex(nextIndex, { align: 'center' })
+    // 선택이 반영된 content 변화 시점에만 — items·virtualizer는 content에서 파생된다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content])
   const markResolved = () => {
     void (async () => {
       // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)
@@ -66,6 +102,15 @@ export function ConflictPanel({
       else onMarkResolved()
     })()
   }
+  const openDetail = () => {
+    void (async () => {
+      // 외부 편집이 있었을 수 있다 — 최신 내용으로 편집을 시작한다 (markResolved와 동일 원칙)
+      const fresh = await onReload()
+      if (fresh === null) return
+      setDraft(fresh)
+      setView('edit')
+    })()
+  }
 
   return (
     <Panel
@@ -73,75 +118,206 @@ export function ConflictPanel({
       accessory={<Badge tone="git">conflict</Badge>}
       testId="conflict-panel"
     >
-      <p className="conflict-panel__hint">
-        초록 구간이 <strong>내 것</strong>, 보라 구간이 <strong>{takenLabel}</strong>이에요. 한쪽을
-        고르면 파일 전체가 그쪽으로 정리돼요. 세밀하게 고치려면 편집기에서 직접 수정한 뒤 "직접
-        수정했어요"를 눌러 주세요.
-      </p>
-      {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
-      <div className="conflict-panel__actions">
-        <Button
-          variant="neutral"
-          className="conflict-panel__btn--mine"
-          size="sm"
-          isDisabled={busy}
-          onPress={() => onResolve('ours')}
-          testId="conflict-ours"
-        >
-          <User size={13} aria-hidden="true" /> 내 것 유지
-        </Button>
-        <Button
-          variant="neutral"
-          className="conflict-panel__btn--branch"
-          size="sm"
-          isDisabled={busy}
-          onPress={() => onResolve('theirs')}
-          testId="conflict-theirs"
-        >
-          <Download size={13} aria-hidden="true" /> {takenLabel} 사용
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          isDisabled={busy}
-          onPress={markResolved}
-          testId="conflict-mark"
-        >
-          <Check size={13} aria-hidden="true" /> 직접 수정했어요
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          isDisabled={busy || markerIndexes.length === 0}
-          onPress={jumpNext}
-          testId="conflict-next"
-        >
-          <ArrowDown size={13} aria-hidden="true" /> 다음 겹침 ({markerIndexes.length})
-        </Button>
-      </div>
-      <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
-        <div
-          className="conflict-panel__code"
-          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
-        >
-          {virtualizer.getVirtualItems().map((item) => {
-            const row = rows[item.index]!
-            return (
-              <div
-                key={item.index}
-                ref={virtualizer.measureElement}
-                data-index={item.index}
-                className="virtual-row"
-                style={{ transform: `translateY(${item.start}px)` }}
+      {view === 'cards' ? (
+        <>
+          <p className="conflict-panel__hint">
+            두 버전이 같은 곳을 다르게 고쳤어요. 겹침마다 카드에서 한쪽을 골라 주세요 — 초록이{' '}
+            <strong>내 것</strong>, 보라가 <strong>{takenLabel}</strong>이에요. 고르면 파일에 바로
+            반영되지만, "고른 대로 확정"을 누르기 전에는 아무것도 확정되지 않아요. 선택하지 않은
+            쪽도 사라지지 않고 저장된 역사에 남아 있어요.
+          </p>
+          {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
+          <div className="conflict-panel__actions">
+            {blockCount > 0 ? (
+              <span className="conflict-panel__progress" data-testid="conflict-progress">
+                겹침 {total}곳 중 {done + 1}번째
+              </span>
+            ) : (
+              <span
+                className="conflict-panel__progress conflict-panel__progress--done"
+                data-testid="conflict-progress"
               >
-                <div className={`conflict-line conflict-line--${row.kind}`}>
-                  <span className="conflict-line__text">{row.text || ' '}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+                모두 골랐어요
+              </span>
+            )}
+            {blockCount === 0 && (
+              <Button
+                variant="primary"
+                size="sm"
+                isDisabled={busy}
+                onPress={markResolved}
+                testId="conflict-confirm"
+              >
+                <CheckCheck size={13} aria-hidden="true" /> 고른 대로 확정
+              </Button>
+            )}
+            <Button
+              variant="neutral"
+              className="conflict-panel__btn--mine"
+              size="sm"
+              isDisabled={busy}
+              onPress={() => onResolve('ours')}
+              testId="conflict-ours"
+            >
+              <User size={13} aria-hidden="true" /> 내 것 유지
+            </Button>
+            <Button
+              variant="neutral"
+              className="conflict-panel__btn--branch"
+              size="sm"
+              isDisabled={busy}
+              onPress={() => onResolve('theirs')}
+              testId="conflict-theirs"
+            >
+              <Download size={13} aria-hidden="true" /> {takenLabel} 사용
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy}
+              onPress={markResolved}
+              testId="conflict-mark"
+            >
+              <Check size={13} aria-hidden="true" /> 직접 수정했어요
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy || blockCount === 0}
+              onPress={jumpNext}
+              testId="conflict-next"
+            >
+              <ArrowDown size={13} aria-hidden="true" /> 다음 겹침 ({blockCount})
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy}
+              onPress={openDetail}
+              testId="conflict-detail-toggle"
+            >
+              <PenLine size={13} aria-hidden="true" /> 자세히 보기
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy}
+              onPress={() => setConfirmingReset(true)}
+              testId="conflict-reset"
+            >
+              <RotateCcw size={13} aria-hidden="true" /> 처음부터 다시
+            </Button>
+          </div>
+          <div ref={scrollRef} className="virtual-scroll" data-testid="conflict-view">
+            <div
+              className="conflict-panel__code"
+              style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+            >
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const item = items[virtualItem.index]!
+                return (
+                  <div
+                    key={virtualItem.index}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualItem.index}
+                    className="virtual-row"
+                    style={{ transform: `translateY(${virtualItem.start}px)` }}
+                  >
+                    {item.type === 'line' ? (
+                      <div className="conflict-line conflict-line--context">
+                        <span className="conflict-line__text">{item.text || ' '}</span>
+                      </div>
+                    ) : (
+                      <div className="conflict-card" data-testid={`conflict-card-${item.block.index}`}>
+                        <p className="conflict-card__title">
+                          {done + item.block.index + 1}번째 겹침 — 어느 쪽을 쓸까요?
+                        </p>
+                        <div className="conflict-card__sides">
+                          <div className="conflict-card__side conflict-card__side--mine">
+                            <span className="conflict-card__side-label">
+                              <User size={12} aria-hidden="true" /> 내 것
+                            </span>
+                            <pre className="conflict-card__code">
+                              {item.block.ours.join('\n') || '(비어 있음)'}
+                            </pre>
+                            <Button
+                              variant="neutral"
+                              className="conflict-panel__btn--mine"
+                              size="sm"
+                              isDisabled={busy}
+                              onPress={() => chooseBlock(item.block.index, 'ours')}
+                              testId={`conflict-block-ours-${item.block.index}`}
+                            >
+                              이쪽 사용
+                            </Button>
+                          </div>
+                          <div className="conflict-card__side conflict-card__side--branch">
+                            <span className="conflict-card__side-label">
+                              <Download size={12} aria-hidden="true" /> {takenLabel}
+                            </span>
+                            <pre className="conflict-card__code">
+                              {item.block.theirs.join('\n') || '(비어 있음)'}
+                            </pre>
+                            <Button
+                              variant="neutral"
+                              className="conflict-panel__btn--branch"
+                              size="sm"
+                              isDisabled={busy}
+                              onPress={() => chooseBlock(item.block.index, 'theirs')}
+                              testId={`conflict-block-theirs-${item.block.index}`}
+                            >
+                              이쪽 사용
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="conflict-panel__hint">
+            합쳐진 결과를 직접 고칠 수 있어요. 남은 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)도
+            그대로 보여요 — 표시 줄까지 지우고 원하는 내용만 남긴 뒤 저장해 주세요. 저장해도 확정은
+            아니에요.
+          </p>
+          <div className="conflict-panel__actions">
+            <Button
+              variant="primary"
+              size="sm"
+              isDisabled={busy}
+              onPress={() => {
+                onSaveText(draft)
+                setView('cards')
+              }}
+              testId="conflict-edit-save"
+            >
+              <Check size={13} aria-hidden="true" /> 저장하고 선택형으로
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy}
+              onPress={() => setView('cards')}
+              testId="conflict-edit-cancel"
+            >
+              저장 없이 돌아가기
+            </Button>
+          </div>
+          <textarea
+            className="conflict-panel__editor"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            spellCheck={false}
+            aria-label="합쳐진 결과 직접 수정"
+            data-testid="conflict-edit-text"
+          />
+        </>
+      )}
       <ConfirmDialog
         isOpen={confirmingMark}
         title="겹침 표시가 아직 남아 있어요"
@@ -154,6 +330,19 @@ export function ConflictPanel({
       >
         파일에 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)가 그대로 있어요. 이대로 해결 표시하면 표시
         줄까지 저장돼요. 편집기에서 정리한 뒤 다시 시도하는 것을 권해요.
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmingReset}
+        title="처음부터 다시 고를까요?"
+        confirmLabel="처음부터 다시"
+        onConfirm={() => {
+          setConfirmingReset(false)
+          onReset()
+        }}
+        onCancel={() => setConfirmingReset(false)}
+      >
+        이 파일에서 지금까지 고른 것을 버리고 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)를 되살려요.
+        저장된 역사와 다른 파일은 그대로예요.
       </ConfirmDialog>
     </Panel>
   )
