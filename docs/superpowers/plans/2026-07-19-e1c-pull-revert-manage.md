@@ -665,6 +665,65 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 4-보완: 엔진 가드 2건 (스펙 리뷰 실측 반영)
+
+리뷰 실측: (1) reverting 중 브랜치 전환 시 `cannot switch branch while reverting` 원어 노출 — E1b의 merging 매핑이 못 덮는다, (2) 충돌(unmerged) 중 받아오기 클릭 시 `Pulling is not possible because you have unmerged files` 원어 노출.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts`
+- Test: `packages/git-adapter/test/client.test.ts`
+
+- [ ] **Step 1: 실패하는 테스트 2개** — 'revertAbort — 되돌리는 중이 아니면…' 테스트 **뒤**에:
+
+```ts
+  it('reverting 중에는 전환·받아오기도 읽히는 메시지로 거부한다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('elsewhere', null)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const target = (await client.history.list(1))[0]!
+    await writeFixtureFile(repo, 'README.md', '# v3\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v3'], { cwd: repo })
+    await client.commits.revert(target.hash)
+
+    await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
+    await expect(client.sync.pull()).rejects.toThrow(/정리해야 받아올/)
+    await client.commits.revertAbort()
+  })
+```
+
+- [ ] **Step 2: 실패 확인** — 두 단언 모두 원어 GitError로 FAIL
+
+- [ ] **Step 3: 구현**
+
+(a) client.ts switch 가드의 `'cannot switch branch while merging'`을 `'cannot switch branch while'`로 넓힌다 (merging·reverting 겸용 — 실측 stderr `cannot switch branch while reverting`).
+
+(b) pull의 첫 시도 분기(`no tracking information` 앞)에 추가:
+
+```ts
+        if (firstOut.includes('you have unmerged files')) {
+          throw new Error('겹침(!)을 모두 정리해야 받아올 수 있어요.')
+        }
+```
+
+- [ ] **Step 4: 게이트** — `pnpm test && pnpm typecheck` → **229 tests** + 5 Done
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
+git commit -m "fix(adapter): reverting 중 전환·충돌 중 받아오기 친절 에러
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+
 ### Task 5: UI — 받아오기 버튼·우클릭 되돌리기·관리 다이얼로그·충돌 뷰 다듬기
 
 **Files:**
@@ -1019,7 +1078,7 @@ Create `apps/desktop/src/renderer/src/components/manage-branches.css`:
           <Button
             variant="neutral"
             size="sm"
-            isDisabled={store.busy}
+            isDisabled={store.busy || status?.state !== 'normal'}
             onPress={() => void store.pullLatest()}
             testId="pull"
           >
@@ -1091,7 +1150,7 @@ Create `apps/desktop/src/renderer/src/components/manage-branches.css`:
       />
 ```
 
-- [ ] **Step 8: 게이트 + Commit** — 228 tests + 5 Done + build + **E2E 23은 아직 아님, 기존 E2E 18 회귀 없음**
+- [ ] **Step 8: 게이트 + Commit** — 229 tests + 5 Done + build + **E2E 23은 아직 아님, 기존 E2E 18 회귀 없음**
 
 ```bash
 git add apps/desktop/src/renderer/src
@@ -1242,7 +1301,7 @@ test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다
 - [ ] **Step 2: 검출력 실증 → 전체 게이트** — `pull` testid 오타 변이로 첫 테스트 FAIL 확인 후 원복.
 
 Run: `pnpm test && pnpm typecheck && pnpm --filter @git-gui/desktop build && (cd apps/desktop && pnpm e2e)`
-Expected: **228 tests + typecheck 5 + build + E2E 23 passed** — 전부 exit 0
+Expected: **229 tests + typecheck 5 + build + E2E 23 passed** — 전부 exit 0
 
 - [ ] **Step 3: Commit**
 
@@ -1257,7 +1316,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 7: 최종 게이트 + 스크린샷 + README
 
-- [ ] **Step 1: 전체 게이트** — 228 tests + typecheck 5 + build + **E2E 23 passed**
+- [ ] **Step 1: 전체 게이트** — 229 tests + typecheck 5 + build + **E2E 23 passed**
 
 - [ ] **Step 2: 스크린샷 3장** (1440×900, test-results/ + scratchpad 사본, **생성 후 e2e 재실행 금지**)
 
@@ -1283,10 +1342,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | 시점 | 기대치 |
 | --- | --- |
 | Task 1 후 | 222 tests (218 + pull 4) |
-| Task 2 후 | +6 (revert·remove·rename) → **228 tests** |
+| Task 2 후 | +6 → **228 tests**, 4-보완 +1 → 229 |
 | Task 5 후 | E2E 18 (기존 회귀 없음) |
 | Task 6 후 | **E2E 23** |
-| 최종 | 228 tests + typecheck 5 + build + E2E 23 — 전부 exit 0 |
+| 최종 | 229 tests + typecheck 5 + build + E2E 23 — 전부 exit 0 |
 
 (수치가 어긋나면 이 표를 갱신한다.)
 
@@ -1296,3 +1355,4 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - rebase형 pull, upstream 자동 연결 제안(받아오기 시 no-tracking이면 "백업으로 연결" 버튼)
 - 팝오버 ESC 불응(E1a 잔여), 블록 단위 충돌 선택·앱 내 편집기
 - revert의 revert·빈 revert 안내, 관리 다이얼로그에서 원격 브랜치 표시
+- 현재 브랜치 이름 바꾸기 후 백업(push)이 upstream 불일치 원어 에러로 실패한다(리뷰 실측) — rename 시 upstream 갱신 또는 push 에러 매핑
