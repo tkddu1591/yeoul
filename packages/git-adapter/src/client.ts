@@ -9,6 +9,7 @@ import {
   type PullResult,
   type RemoveBranchResult,
   type RepositoryStatus,
+  type RestoreFileResult,
   type RevertResult,
   type ShelfEntry,
   type SwitchResult,
@@ -116,6 +117,12 @@ export interface GitClient {
     show(hash: string): Promise<CommitDetail>
     /** 커밋 안 단일 파일의 diff — 첫 부모 기준. rename이면 origPath를 함께 넘긴다 */
     diffFile(hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    /**
+     * 이 파일만 그 시점(hash) 내용으로 적용한다(checkout — index·워크트리 동시 갱신, 실측).
+     * 파일에 미저장 변경이 있으면 먼저 파일 단위로 보관함에 자동 보관한다(§6 — staged-only도 담긴다, 실측).
+     * 보관함 항목의 커밋 해시로도 동작한다(파일 단위 꺼내기). 충돌 파일·그 시점에 없는 파일은 거부
+     */
+    restoreFile(hash: string, path: string): Promise<RestoreFileResult>
     /** 이 저장이 바꾼 내용을 반대로 적용하는 새 저장을 만든다. merge commit은 첫 부모 기준(-m 1) */
     revert(hash: string): Promise<RevertResult>
     /** 되돌리기 취소 — 충돌 상태를 버리고 이전으로 */
@@ -166,6 +173,9 @@ const PULL_SHELF_MESSAGE = '받아오기 자동 보관'
 
 /** 되돌리기가 막혀 자동 보관할 때의 보관함 메시지 */
 const REVERT_SHELF_MESSAGE = '저장 되돌리기 자동 보관'
+
+/** 파일 단위 적용이 미저장 변경을 덮기 전 자동 보관할 때의 보관함 메시지 */
+const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
@@ -739,6 +749,49 @@ export function createGitClient(repoPath: string): GitClient {
                 ...pathspecs,
               ]
         return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
+      },
+      async restoreFile(hash, path) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        assertRepoRelative(path)
+        // 충돌(unmerged) 파일 가드 — checkout이 index를 덮어 충돌이 해소된 것처럼 위장된다 (discard 가드와 동일 계열)
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() !== '') {
+          throw new Error(
+            '충돌 중인 파일은 다른 시점 내용으로 덮을 수 없어요. 충돌 화면에서 한쪽을 고르거나 병합을 취소해 주세요.',
+          )
+        }
+        // 사전 검사 — stash 후 checkout이 실패하면 사용자 변경만 보관함으로 사라진다.
+        // 그 시점에 파일이 있는지(ls-tree)와 해시 존재를 먼저 확인한다 (실측: 없는 해시는 'not a tree object')
+        const treeArgs = ['ls-tree', '-r', '--end-of-options', hash, '--', `:(literal)${path}`]
+        const tree = await execGit(treeArgs, { cwd })
+        if (tree.exitCode !== 0) {
+          if (tree.stderr.includes('not a tree object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          throw new GitError(treeArgs, tree)
+        }
+        if (tree.stdout.trim() === '') {
+          throw new Error('그 시점에는 이 파일이 없어요.')
+        }
+        // dirty 판정 — staged/unstaged/untracked 어느 쪽이든 status가 이 파일 행을 낸다.
+        // 파일 단위 stash push는 staged-only 변경도 함께 보관한다 (플랜 서두 실측 기록 1)
+        const dirty = await execGitOrThrow(
+          ['status', '--porcelain=v2', '-uall', '-z', '--', `:(literal)${path}`],
+          { cwd },
+        )
+        const autoShelved = dirty.stdout.trim() !== ''
+        if (autoShelved) {
+          // 스펙 원칙(§6): 덮기 전 자동 보관 — switch/merge/pull/revert와 동일 패턴의 파일 단위 판
+          await execGitOrThrow(
+            ['stash', 'push', '-u', '-m', RESTORE_FILE_SHELF_MESSAGE, '--', `:(literal)${path}`],
+            { cwd },
+          )
+        }
+        await execGitOrThrow(['checkout', '--end-of-options', hash, '--', `:(literal)${path}`], {
+          cwd,
+        })
+        return { autoShelved }
       },
       async revert(hash) {
         const cwd = await topLevel()

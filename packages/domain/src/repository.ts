@@ -110,6 +110,11 @@ export interface SwitchResult {
   autoShelved: boolean
 }
 
+/** 파일 하나를 특정 시점 내용으로 적용한 결과 — 자동 보관이 개입했으면 UI가 보관함 위치를 안내한다 */
+export interface RestoreFileResult {
+  autoShelved: boolean
+}
+
 /** 실험 공간 합치기 결과 */
 export interface MergeResult {
   /** conflict면 충돌 상태가 남아 있다 — 해소·마무리(commit) 또는 취소(abort)가 필요하다 */

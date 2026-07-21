@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, symlink, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -716,6 +716,137 @@ describe('GitClient', () => {
     await client.commits.create('합치기 마무리')
     const head = (await client.history.list(1))[0]!
     expect(head.parents).toHaveLength(2)
+  })
+
+  it('restoreFile — 깨끗한 파일에 그 시점 내용을 적용한다 (적용 결과는 staged로 보인다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const initHash = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+
+    const result = await client.commits.restoreFile(initHash, 'README.md')
+    expect(result).toEqual({ autoShelved: false })
+    // 디스크 실측 — 그 시점(init) 내용으로 바뀌었다
+    expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# fixture\n')
+    // checkout은 index도 함께 갱신한다(실측) — 적용 결과가 staged로 보인다
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBe('modified')
+    expect(await client.shelf.list()).toEqual([])
+  })
+
+  it('restoreFile — 미저장(unstaged) 변경이 있으면 보관함에 자동 보관 후 적용한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const initHash = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    await writeFixtureFile(repo, 'README.md', '# 작업 중\n')
+
+    const result = await client.commits.restoreFile(initHash, 'README.md')
+    expect(result).toEqual({ autoShelved: true })
+    expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# fixture\n')
+    const shelf = await client.shelf.list()
+    expect(shelf).toHaveLength(1)
+    expect(shelf[0]!.message).toContain('파일 적용 자동 보관')
+    // 사라질 뻔한 내용이 보관 항목에 실제로 담겨 있다 (커밋 상세 재사용으로 검증)
+    const detail = await client.commits.show(shelf[0]!.hash)
+    expect(detail.files.map((f) => f.path)).toContain('README.md')
+  })
+
+  it('restoreFile — staged-only 변경도 파일 단위 자동 보관에 담긴다 (실측 근거 고정)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const initHash = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    // staged-only 상태(1 M.) — 워크트리·index 모두 새 내용, 커밋만 안 됨
+    await writeFixtureFile(repo, 'README.md', '# staged 작업\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+
+    const result = await client.commits.restoreFile(initHash, 'README.md')
+    expect(result).toEqual({ autoShelved: true })
+    expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# fixture\n')
+    // 파일 단위 stash push가 staged 내용을 담았다(실측: 사전 프로브와 동일)
+    const shown = await execGitOrThrow(['stash', 'show', '-p', 'stash@{0}'], { cwd: repo })
+    expect(shown.stdout).toContain('+# staged 작업')
+  })
+
+  it('restoreFile — 그 시점에 없는 파일은 친절 에러, dirty 변경이 보관함으로 사라지지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const initHash = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    await writeFixtureFile(repo, 'new.txt', 'work\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'add new'], { cwd: repo })
+    await writeFixtureFile(repo, 'new.txt', 'dirty\n')
+
+    await expect(client.commits.restoreFile(initHash, 'new.txt')).rejects.toThrow(
+      /그 시점에는 이 파일이 없어요/,
+    )
+    // 사전 검사 순서 보장 — 실패했는데 변경만 보관함으로 사라지면 안 된다
+    expect(await client.shelf.list()).toEqual([])
+    expect(await readFile(join(repo, 'new.txt'), 'utf8')).toBe('dirty\n')
+  })
+
+  it('restoreFile — 사라진 커밋·잘못된 해시·저장소 밖 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.restoreFile('0123456789012345678901234567890123456789', 'README.md'),
+    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    // 패턴 필수 — 가드가 없으면 'HEAD~' 같은 ref 표현식이 checkout 인자로 흘러간다
+    await expect(client.commits.restoreFile('HEAD', 'README.md')).rejects.toThrow(
+      /올바른 커밋 해시가 아니에요/,
+    )
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await expect(client.commits.restoreFile(head, '../outside.txt')).rejects.toThrow(
+      /저장소 밖 경로/,
+    )
+  })
+
+  it('restoreFile — 충돌 중인 파일은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    // checkout이 index를 덮어 충돌이 "해소된 것처럼" 위장되는 것을 막는다 (discard 가드와 동일 계열)
+    await expect(client.commits.restoreFile(head, 'README.md')).rejects.toThrow(/충돌 화면에서/)
+  })
+
+  it('restoreFile — 보관함 항목 해시로 그 파일만 꺼내 적용한다 (항목은 보관함에 남는다)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# shelved\n')
+    await client.shelf.save('부분 꺼내기 대상')
+    const shelf = await client.shelf.list()
+
+    const result = await client.commits.restoreFile(shelf[0]!.hash, 'README.md')
+    expect(result).toEqual({ autoShelved: false })
+    expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# shelved\n')
+    // pop이 아니라 파일 단위 적용 — 항목은 그대로 남는다
+    expect(await client.shelf.list()).toHaveLength(1)
   })
 
   it('discard — 충돌 중인 파일은 읽히는 메시지로 거부한다 (이관)', async () => {
