@@ -106,6 +106,16 @@ describe('parseStatusV2', () => {
     ])
   })
 
+  it('branch.oid를 headHash로 파싱한다', () => {
+    const parsed = parseStatusV2(raw(['# branch.oid 1234567890abcdef', '# branch.head main']))
+    expect(parsed.headHash).toBe('1234567890abcdef')
+  })
+
+  it('아직 저장이 없으면(initial) headHash가 null이다', () => {
+    const parsed = parseStatusV2(raw(['# branch.oid (initial)', '# branch.head main']))
+    expect(parsed.headHash).toBeNull()
+  })
+
   it('필드가 모자란 기형 레코드는 추측하지 않고 건너뛴다', () => {
     const parsed = parseStatusV2(raw(['1 .M N... 100644', 'u UU N...']))
     expect(parsed.changes).toEqual([])

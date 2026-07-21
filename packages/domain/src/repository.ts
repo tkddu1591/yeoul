@@ -38,6 +38,8 @@ export interface FileChange {
 export interface RepositoryStatus {
   state: RepositoryStateKind
   branch: BranchInfo
+  /** HEAD 커밋 해시 — 아직 저장이 없으면(unborn) null. "지금 여기" 마커가 이 값을 따라간다 (E5b) */
+  headHash: string | null
   changes: FileChange[]
 }
 

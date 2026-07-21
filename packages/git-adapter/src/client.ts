@@ -215,7 +215,12 @@ export function createGitClient(repoPath: string): GitClient {
           await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })
         ).stdout.trim()
         const markers = await readGitDirMarkers(gitDir)
-        return { state: detectState(markers), branch: parsed.branch, changes: parsed.changes }
+        return {
+          state: detectState(markers),
+          branch: parsed.branch,
+          headHash: parsed.headHash,
+          changes: parsed.changes,
+        }
       },
     },
     branches: {
@@ -568,6 +573,13 @@ export function createGitClient(repoPath: string): GitClient {
           // clone 기본 장식의 origin/HEAD와 replace ref는 배지 소음이다 — 장식에서 제외한다 (실측 확인)
           '--decorate-refs-exclude=refs/remotes/*/HEAD',
           '--decorate-refs-exclude=refs/replace/*',
+          // 전체 그래프(피드백 4) — 로컬·원격·태그를 전부 순회한다. --exclude는 뒤의 --all에만
+          // 적용되며, refs/stash를 빼지 않으면 보관함 WIP 커밋 3형제가, refs/notes를 빼지 않으면
+          // 노트 커밋이 역사에 등장한다(실측 1). refs/replace는 같은 계열의 예방 제외다
+          '--exclude=refs/stash',
+          '--exclude=refs/notes/*',
+          '--exclude=refs/replace/*',
+          '--all',
           // 타임스탬프가 같은 커밋(스크립트 연속 커밋 등)에서도 부모가 자식보다 아래에 오도록
           // 고정한다 — 레인 그래프는 "기다리던 커밋이 아래에 나타난다"를 전제한다 (실측: 동률에서 유령 레인)
           '--date-order',
@@ -576,7 +588,7 @@ export function createGitClient(repoPath: string): GitClient {
         ]
         const result = await execGit(args, { cwd })
         if (result.exitCode !== 0) {
-          // 아직 커밋이 없는 저장소(unborn HEAD)는 빈 역사다 — 에러로 위장하지 않는다
+          // 아직 커밋이 없는 저장소(unborn HEAD)는 빈 역사다 — --all은 exit 0 빈 출력이지만(실측 3) 심층 방어로 남긴다
           if (result.stderr.includes('does not have any commits')) return []
           throw new GitError(args, result)
         }

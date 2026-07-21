@@ -1,6 +1,6 @@
 import type { BranchInfo, ChangeKind, FileChange, RepositoryStatus } from '@git-gui/domain'
 
-export type ParsedStatus = Pick<RepositoryStatus, 'branch' | 'changes'>
+export type ParsedStatus = Pick<RepositoryStatus, 'branch' | 'changes' | 'headHash'>
 
 function kindFromChar(char: string): ChangeKind | null {
   switch (char) {
@@ -36,11 +36,16 @@ export function parseStatusV2(rawOutput: string): ParsedStatus {
 
   const branch: BranchInfo = { name: null, upstream: null, ahead: null, behind: null }
   const changes: FileChange[] = []
+  let headHash: string | null = null
 
   let i = 0
   while (i < tokens.length) {
     const token = tokens[i]!
-    if (token.startsWith('# branch.head ')) {
+    if (token.startsWith('# branch.oid ')) {
+      const value = token.slice('# branch.oid '.length)
+      // 아직 저장이 없는(unborn) 저장소는 "(initial)"이다 (실측 3)
+      headHash = value === '(initial)' ? null : value
+    } else if (token.startsWith('# branch.head ')) {
       const value = token.slice('# branch.head '.length)
       branch.name = value === '(detached)' ? null : value
     } else if (token.startsWith('# branch.upstream ')) {
@@ -96,9 +101,9 @@ export function parseStatusV2(rawOutput: string): ParsedStatus {
         unstaged: 'untracked',
       })
     }
-    // '!'(ignored)와 '# branch.oid'는 이번 범위에서 무시한다
+    // '!'(ignored)는 이번 범위에서 무시한다
     i += 1
   }
 
-  return { branch, changes }
+  return { branch, changes, headHash }
 }

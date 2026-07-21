@@ -445,6 +445,57 @@ describe('GitClient', () => {
     }
   })
 
+  it('history — 다른 실험 공간의 커밋도 전부 반환한다 (--all 전체 그래프)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['checkout', '-b', 'side'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side work'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+
+    // 지금 공간(main)에서 도달할 수 없는 side 커밋이 함께 보인다 (피드백 4)
+    const history = await client.history.list(10)
+    expect(history.map((c) => c.subject).sort()).toEqual(['init', 'side work'])
+    expect(history.find((c) => c.subject === 'side work')!.refs).toContain('side')
+  })
+
+  it('history — 보관함(refs/stash) 커밋은 역사에 나타나지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# dirty\n')
+    await client.shelf.save('보관 실험')
+
+    // 실측 1: --exclude=refs/stash 없는 --all은 WIP 커밋 3형제를 역사에 노출한다
+    const history = await client.history.list(10)
+    expect(history.map((c) => c.subject)).toEqual(['init'])
+  })
+
+  it('history — 분리된 루트(고아 브랜치)가 있어도 전체가 반환된다', async () => {
+    const repo = await createFixtureRepo()
+    await execGitOrThrow(['checkout', '--orphan', 'lonely'], { cwd: repo })
+    await execGitOrThrow(['rm', '-rf', '--cached', '.'], { cwd: repo })
+    await unlink(join(repo, 'README.md'))
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', 'orphan root'], {
+      cwd: repo,
+    })
+
+    const history = await createGitClient(repo).history.list(10)
+    expect(history.map((c) => c.subject).sort()).toEqual(['init', 'orphan root'])
+    // 고아 루트도 부모 없는 정상 레코드다 — 레인 그래프 전제(실측 2: buildGraph 5,003커밋 2.8ms 무붕괴)
+    expect(history.find((c) => c.subject === 'orphan root')!.parents).toEqual([])
+  })
+
+  it('status — headHash가 HEAD 커밋을 가리키고, 저장이 없으면 null이다', async () => {
+    const repo = await createFixtureRepo()
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    expect((await createGitClient(repo).repo.status()).headHash).toBe(head)
+
+    const unborn = await mkdtemp(join(tmpdir(), 'git-gui-unborn-'))
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: unborn })
+    expect((await createGitClient(unborn).repo.status()).headHash).toBeNull()
+  })
+
   it('branches — 목록(현재 표시·최신순)과 만들기, 특정 시점에서 만들기', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
