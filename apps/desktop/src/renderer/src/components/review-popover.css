@@ -45,9 +45,13 @@
 }
 .review-popover__row {
   border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .review-popover__pull {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -80,6 +84,23 @@
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
+}
+/* 항목의 바깥 링크 아이콘 — 클릭 영역을 행(상세 열기)과 분리한다 (E3b) */
+.review-popover__pull-external {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: var(--space-2) 4px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+.review-popover__pull-external:hover {
+  background: var(--color-surface-sunken);
+  color: var(--color-text);
 }
 
 /* 960px 최소 창에서 헤더 한 줄 보장(E1c) — 좁은 창에서는 원어 배지를 접는다

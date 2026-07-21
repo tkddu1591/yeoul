@@ -10,6 +10,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
+import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
 import {
@@ -60,6 +61,10 @@ export function App() {
   // 리뷰(호스팅) 다이얼로그 — 토큰 붙여넣기·리뷰 요청 제목 (팝오버는 닫고 연다)
   const [tokenPrompt, setTokenPrompt] = useState(false)
   const [pullPrompt, setPullPrompt] = useState(false)
+
+  // 리뷰 상세의 병합 확인과 병합 후 "기본 공간 이동+받아오기" 제안(base 이름 보관)
+  const [confirmingMerge, setConfirmingMerge] = useState(false)
+  const [mergeFollowUp, setMergeFollowUp] = useState<string | null>(null)
 
   // 우측 열 폭 — 드래그로 조절하고 기억한다 (5차 피드백). 저장값·창 크기 변화 모두
   // 뷰포트 기준으로 재클램프한다 — 큰 모니터에서 넓혀둔 폭이 노트북에서 중앙을 짓누르지 않게
@@ -203,6 +208,7 @@ export function App() {
               store.clearError()
               setPullPrompt(true)
             }}
+            onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
           />
           <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
@@ -276,7 +282,9 @@ export function App() {
         </div>
       )}
       <main
-        className={`app__main${store.commitDetail !== null ? ' app__main--detail' : ''}`}
+        className={`app__main${
+          store.commitDetail !== null || store.pullDetail !== null ? ' app__main--detail' : ''
+        }`}
         style={{ gridTemplateColumns: `340px minmax(0, 1fr) 6px ${effectiveRight}px` }}
       >
         <ChangesPanel
@@ -339,7 +347,17 @@ export function App() {
           onDoubleClick={resetResize}
           data-testid="column-resizer"
         />
-        {store.commitDetail !== null ? (
+        {store.pullDetail !== null ? (
+          <ReviewDetailPanel
+            view={store.pullDetail}
+            busy={store.busy}
+            onOpenBrowser={() => void store.openPull(store.pullDetail!.detail.number)}
+            onBack={() => store.closePullDetail()}
+            onComment={(body) => store.addPullComment(body)}
+            onApprove={() => void store.approvePull()}
+            onMerge={() => setConfirmingMerge(true)}
+          />
+        ) : store.commitDetail !== null ? (
           <CommitDetailPanel
             detail={store.commitDetail}
             shelfPreview={shelfPreview}
@@ -455,6 +473,40 @@ export function App() {
         onCancel={() => setConfirmingAbort(false)}
       >
         지금까지 고른 것을 되돌리고 이전 상태로 돌아가요.
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmingMerge}
+        title="리뷰 요청을 병합할까요?"
+        confirmLabel="병합하기"
+        onConfirm={() => {
+          setConfirmingMerge(false)
+          void (async () => {
+            // base 이름은 병합 전에 붙잡아 둔다 — 성공 후 제안 다이얼로그가 쓴다
+            const base = store.pullDetail?.detail.baseBranch ?? null
+            if (await store.mergePull()) setMergeFollowUp(base)
+          })()
+        }}
+        onCancel={() => setConfirmingMerge(false)}
+      >
+        "{store.pullDetail?.detail.baseBranch}"에 합쳐져요. 이 동작은 GitHub에서 일어나요.
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={mergeFollowUp !== null}
+        title="기본 공간으로 이동할까요?"
+        confirmLabel="이동하고 받아오기"
+        onConfirm={() => {
+          const base = mergeFollowUp
+          setMergeFollowUp(null)
+          void (async () => {
+            if (base === null) return
+            // 기존 안전망 그대로 — 전환(자동 보관)·받아오기(충돌 흐름)를 순서대로 실행한다
+            await store.switchBranch(base)
+            await store.pullLatest()
+          })()
+        }}
+        onCancel={() => setMergeFollowUp(null)}
+      >
+        병합 완료 — 기본 공간({mergeFollowUp})으로 이동해 최신을 받아올까요? 나중에 해도 돼요.
       </ConfirmDialog>
     </div>
   )

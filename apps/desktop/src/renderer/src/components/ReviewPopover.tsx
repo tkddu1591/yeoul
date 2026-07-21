@@ -23,11 +23,13 @@ interface ReviewPopoverProps {
   onDisconnect(): void
   /** 리뷰 요청 제목 다이얼로그 열기 — 다이얼로그 자체는 App이 관리한다 */
   onCreate(): void
-  /** 리뷰 요청을 브라우저로 — 주소는 main이 보관한 목록에서만 찾는다 */
+  /** 목록 항목 클릭 — 팝오버를 닫고 우측 열을 리뷰 상세로 전환한다 */
+  onSelectPull(number: number): void
+  /** 리뷰 요청을 브라우저로 — 주소는 main이 보관한 목록에서만 찾는다. 항목의 바깥 링크 아이콘 전용 */
   onOpenPull(number: number): void
 }
 
-/** 리뷰 (스펙 §9 E3a) — GitHub 연결과 리뷰 요청(pull request) 생성·목록. ShelfPopover 패턴 */
+/** 리뷰 (스펙 §9 E3a·E3b) — GitHub 연결·리뷰 요청 생성·목록·상세 진입. ShelfPopover 패턴 */
 export function ReviewPopover({
   status,
   pulls,
@@ -39,6 +41,7 @@ export function ReviewPopover({
   onConnectToken,
   onDisconnect,
   onCreate,
+  onSelectPull,
   onOpenPull,
 }: ReviewPopoverProps) {
   // 다이얼로그를 여는 동작은 팝오버를 닫고 시작한다 — 모달과 팝오버의 포커스 경합을 피한다
@@ -144,8 +147,8 @@ export function ReviewPopover({
                           <button
                             type="button"
                             className="review-popover__pull"
-                            title="브라우저에서 열기"
-                            onClick={() => onOpenPull(pull.number)}
+                            title="코멘트·승인·병합 보기"
+                            onClick={() => openDialog(() => onSelectPull(pull.number))}
                             data-testid={`review-pull-${pull.number}`}
                           >
                             <span className="review-popover__pull-title">
@@ -153,6 +156,15 @@ export function ReviewPopover({
                               {pull.isDraft && <Badge>초안</Badge>}
                             </span>
                             <span className="review-popover__pull-branch">{pull.headBranch}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="review-popover__pull-external"
+                            title="브라우저에서 열기"
+                            aria-label={`#${pull.number} 브라우저에서 열기`}
+                            onClick={() => onOpenPull(pull.number)}
+                            data-testid={`review-pull-open-${pull.number}`}
+                          >
                             <ExternalLink size={12} aria-hidden="true" />
                           </button>
                         </li>
