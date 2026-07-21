@@ -79,6 +79,8 @@
   color: var(--color-text-muted);
 }
 .history-item__ref--head {
+  /* 현재 브랜치 배지는 줄어들지 않는다 — "내가 어디 있는지"가 최우선 생존자 (품질 리뷰) */
+  flex: none;
   background: var(--color-selection-bg);
   border-color: var(--color-accent);
   color: var(--color-accent);

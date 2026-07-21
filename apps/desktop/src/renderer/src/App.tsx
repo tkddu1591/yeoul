@@ -406,6 +406,7 @@ export function App() {
             actionsDisabled={status?.state !== 'normal'}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
+            onLocateHead={() => void store.revealHead()}
             onAction={(action) => {
               switch (action.kind) {
                 case 'switch':

@@ -1733,6 +1733,15 @@ describe('GitClient', () => {
     await expect(client.commits.reword(head, '고친 제목')).rejects.toThrow(/먼저 마무리하거나 취소/)
   })
 
+  it('reword — 빈 커밋(변경 없는 저장)의 메시지도 고칠 수 있다 (원어 에러 없음)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', '빈 저장'], { cwd: repo })
+    const head = (await client.history.list(1))[0]!
+    await client.commits.reword(head.hash, '고친 제목')
+    expect((await client.history.list(1))[0]!.subject).toBe('고친 제목')
+  })
+
   it('reverting 중에는 전환·받아오기도 읽히는 메시지로 거부한다', async () => {
     const { repo } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

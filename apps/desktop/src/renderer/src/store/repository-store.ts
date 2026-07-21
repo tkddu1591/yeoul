@@ -130,6 +130,8 @@ interface RepositoryStore {
   clearError(): void
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
+  /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
+  revealHead(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
   commit(message: string): Promise<boolean>
   backup(): Promise<void>
@@ -614,8 +616,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           empty: '이미 지금 내용에 들어 있는 저장이에요 — 새로 만든 저장은 없어요.',
         }
-        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
-        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        // conflict(안내 null) + 자동 보관 조합에서 선행 공백이 남지 않게 join으로 조립한다 (품질 리뷰)
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
           ...CLEAR_SELECTIONS,
@@ -820,6 +823,21 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
       const more = await git().history.list(repoPath, next)
       set({ history: more, historyLimit: next })
+    })
+  },
+
+  async revealHead() {
+    const { repoPath, status } = get()
+    const headHash = status?.headHash ?? null
+    if (!repoPath || headHash === null) return
+    await guard(set, get, async () => {
+      // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
+      let limit = get().historyLimit
+      for (let round = 0; round < 10; round += 1) {
+        if (get().history.some((commit) => commit.hash === headHash)) return
+        limit += 2000
+        set({ historyLimit: limit, history: await git().history.list(repoPath, limit) })
+      }
     })
   },
 

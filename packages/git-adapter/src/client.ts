@@ -1009,8 +1009,9 @@ export function createGitClient(repoPath: string): GitClient {
         if (staged.exitCode !== 0) {
           throw new Error('저장 예정에 올린 파일이 있어요 — 함께 들어가지 않게 먼저 비워 주세요.')
         }
-        // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전
-        await execGitOrThrow(['commit', '--amend', '-F', '-'], { cwd, stdin: message })
+        // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전.
+        // --allow-empty: 빈 커밋의 메시지 고치기가 "would make it empty" 원어로 죽지 않게 (품질 리뷰)
+        await execGitOrThrow(['commit', '--amend', '--allow-empty', '-F', '-'], { cwd, stdin: message })
       },
       async revert(hash) {
         const cwd = await topLevel()

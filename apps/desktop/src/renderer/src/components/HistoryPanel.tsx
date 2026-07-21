@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CommitSummary } from '@git-gui/domain'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { buildGraph, type GraphRow } from './history-graph'
@@ -37,6 +38,8 @@ interface HistoryPanelProps {
   actionsDisabled: boolean
   onSelect(hash: string): void
   onLoadMore(): void
+  /** "지금 여기"가 로드 범위 밖일 때 누른다 — 찾을 때까지 더 읽어 스크롤한다 (품질 리뷰) */
+  onLocateHead(): void
   onAction(action: HistoryAction): void
 }
 
@@ -141,6 +144,7 @@ export function HistoryPanel({
   actionsDisabled,
   onSelect,
   onLoadMore,
+  onLocateHead,
   onAction,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
@@ -157,6 +161,16 @@ export function HistoryPanel({
   })
   const virtualItems = virtualizer.getVirtualItems()
   const lastRendered = virtualItems[virtualItems.length - 1]?.index ?? -1
+
+  // "지금 여기"(HEAD)가 바뀌거나, "지금 여기로"로 로드 범위에 처음 들어온 순간 그 행으로 스크롤한다
+  // (품질 리뷰 — 구현 실측 정정: revealHead는 headHash를 바꾸지 않으므로 발견 전이(headFound)도 봐야 한다.
+  //  불리언 전이만 보므로 이미 보이는 상태의 단순 더 불러오기로는 튀지 않는다)
+  const headIndex = headHash === null ? -1 : history.findIndex((commit) => commit.hash === headHash)
+  const headFound = headIndex >= 0
+  useEffect(() => {
+    if (headIndex >= 0) virtualizer.scrollToIndex(headIndex, { align: 'center' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headHash, headFound])
 
   // 마지막 행이 렌더 범위에 들어오면 다음 페이지를 불러온다 (⑩) — busy·상한은 store가 이중 방어한다
   useEffect(() => {
@@ -239,6 +253,11 @@ export function HistoryPanel({
               {truncated ? `${historyLimit}+` : history.length}
             </span>
           </Badge>
+          {headHash !== null && headIndex < 0 && (
+            <Button variant="ghost" size="sm" isDisabled={busy} onPress={onLocateHead} testId="history-locate-head">
+              지금 여기로
+            </Button>
+          )}
         </>
       }
       testId="history-panel"
