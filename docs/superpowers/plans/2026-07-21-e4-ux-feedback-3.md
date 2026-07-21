@@ -19,7 +19,7 @@
 
 ### Task 1: 히스토리 ref 배지 — 우선순위 정렬 + "+N" 접기 + 툴팁
 
-배지가 3개 이상이거나 이름이 길면 각각이 말줄임되어 "fe…" "origin…"만 남는다(피드백 1). 우선순위(현재 브랜치 > 로컬 > origin/원격 > 기타)로 정렬해 **상위 2개만 보여주고 나머지는 "+N" 배지로 접는다**. 모든 배지에 title 툴팁(전체 이름), +N 툴팁에는 접힌 전체 목록.
+배지가 3개 이상이거나 이름이 길면 각각이 말줄임되어 "fe…" "origin…"만 남는다(피드백 1). 우선순위(현재 브랜치 > 로컬 > origin/원격)로 정렬해 **상위 2개만 보여주고 나머지는 "+N" 배지로 접는다**. 모든 배지에 title 툴팁(전체 이름), +N 툴팁에는 접힌 전체 목록. (태그는 파서가 `tag: ` 접두를 벗겨 문자열만으로 구분 불가 — 로컬과 동급으로 두고, 태그 하위 분류는 후속 노트.)
 
 **Files:**
 - Create: `apps/desktop/src/renderer/src/components/history-refs.ts`
@@ -37,7 +37,8 @@ describe('arrangeRefs', () => {
   it('현재 브랜치 > 로컬 > 원격(origin/) 순으로 정렬해 상위 2개만 보이고 나머지는 접는다', () => {
     const result = arrangeRefs(['origin/main', 'feature/login', 'main', 'v1.0'], 'main')
     expect(result.visible).toEqual(['main', 'feature/login'])
-    expect(result.hidden).toEqual(['origin/main', 'v1.0'])
+    // v1.0(태그)은 파서가 tag: 접두를 벗겨 구분 불가 — 로컬과 동급(원격보다 앞)
+    expect(result.hidden).toEqual(['v1.0', 'origin/main'])
   })
 
   it('2개 이하면 전부 보이고 접힘이 없다', () => {
@@ -59,13 +60,13 @@ describe('arrangeRefs', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인** — `pnpm --filter @git-gui/desktop test` → FAIL(모듈 없음)
+- [ ] **Step 2: Red 확인** — `cd apps/desktop && npx vitest run test/history-refs.test.ts` → FAIL(모듈 없음). (주의: `pnpm --filter @git-gui/desktop test`는 test 스크립트가 없어 무음 exit 0 — 쓰지 않는다.)
 
 - [ ] **Step 3: 구현** (`apps/desktop/src/renderer/src/components/history-refs.ts` 신규)
 
 ```ts
 export interface ArrangedRefs {
-  /** 보여줄 배지 — 우선순위 상위 (현재 브랜치 > 로컬 > 원격 > 기타) */
+  /** 보여줄 배지 — 우선순위 상위 (현재 브랜치 > 로컬·태그 > 원격) */
   visible: string[]
   /** "+N"으로 접히는 나머지 — 툴팁으로만 보여준다 */
   hidden: string[]
@@ -97,7 +98,7 @@ export function arrangeRefs(
 }
 ```
 
-- [ ] **Step 4: Green 확인** — 4건 PASS
+- [ ] **Step 4: Green 확인** — `cd apps/desktop && npx vitest run test/history-refs.test.ts` → 4건 PASS
 
 - [ ] **Step 5: HistoryPanel 렌더 교체** — import 추가:
 
@@ -308,4 +309,5 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - "+N" 배지 클릭 시 전체 ref 목록 팝오버(지금은 툴팁만 — 트랙패드 hover가 어려운 환경 고려)
 - 원격 ref 판정이 origin/ 접두사 휴리스틱 — 커스텀 remote 이름은 로컬로 분류된다(무해: 우선순위만 영향)
+- 태그를 로컬과 구분해 뒤로 보내려면 log 파서가 `tag: ` 접두 정보를 보존해야 한다(CommitSummary.refs 구조 확장) — 우선순위 하위 분류 후속
 - 오버레이 스택이 본문 상단을 덮는 트레이드오프 — 장시간 머무는 merging 중에는 좌측 패널 헤더가 가려질 수 있어, 필요시 "스택에 마우스 올리면 반투명" 같은 완화 검토
