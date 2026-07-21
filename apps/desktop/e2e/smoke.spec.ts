@@ -2,11 +2,17 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 
 // cwd에 의존하지 않도록 앱 루트를 절대 경로로 지정한다
 const APP_ROOT = join(__dirname, '..')
+
+// 실패한 테스트만 마지막 화면(last-screen-N.png)이 남는다 — harness가 close 직전마다 찍은 것을 정리
+test.afterEach(async ({}, testInfo) => {
+  await cleanupScreens(testInfo)
+})
 
 async function createRepoWithChange(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'git-gui-e2e-'))
@@ -61,10 +67,13 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
   try {
     const window = await app.firstWindow()
 
-    // E2E 창 비간섭(E6a) — 창은 숨긴 채 CDP로만 조작한다. 회귀하면 e2e마다 작업 화면을 가린다
-    expect(
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
-    ).toBe(false)
+    // E2E 창 비간섭(E6a) — 창은 숨긴 채 CDP로만 조작한다. 회귀하면 e2e마다 작업 화면을 가린다.
+    // GIT_GUI_E2E_SHOW=1(로컬 디버깅 opt-out — E6b)은 의도적으로 보이므로 이 가드만 건너뛴다
+    if (process.env.GIT_GUI_E2E_SHOW !== '1') {
+      expect(
+        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+      ).toBe(false)
+    }
 
     // 변경 파일과 기존 역사(init)가 보인다
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()

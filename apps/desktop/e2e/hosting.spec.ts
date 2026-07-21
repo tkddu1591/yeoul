@@ -3,10 +3,16 @@ import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
+
+// 실패한 테스트만 마지막 화면(last-screen-N.png)이 남는다 — harness가 close 직전마다 찍은 것을 정리
+test.afterEach(async ({}, testInfo) => {
+  await cleanupScreens(testInfo)
+})
 
 /** mock GitHub — /user·/repos·/pulls + 코멘트·리뷰·병합 최소 구현. 쓰기를 메모리에 반영한다 */
 interface MockPull {

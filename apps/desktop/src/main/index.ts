@@ -14,6 +14,9 @@ if (process.env.GIT_GUI_USER_DATA) {
 // 클릭·드래그·키보드·screenshot(1200·960) 정상 + 기존 42건 전체 통과).
 // 패키징된 앱에서는 무시한다 (GIT_GUI_E2E_GH_TOKEN과 동일 관례)
 const isE2E = !app.isPackaged && process.env.GIT_GUI_E2E_REPO !== undefined
+// 로컬 디버깅 opt-out (E6a 후속) — GIT_GUI_E2E_SHOW=1이면 숨김 게이트만 무시하고 창을 보여준다.
+// 스로틀 해제 등 나머지 E2E 동작은 유지. 프로덕션(isPackaged)·CI 기본 동작 무변
+const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -22,7 +25,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제
-    show: !isE2E,
+    show: !isE2E || isE2EShow,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -47,7 +50,7 @@ function createWindow(): void {
 }
 
 // macOS에서는 앱 실행 자체가 활성화되며 포커스를 훔칠 수 있다 — E2E에서는 dock 아이콘째 숨긴다
-if (isE2E) app.dock?.hide()
+if (isE2E && !isE2EShow) app.dock?.hide()
 
 app
   .whenReady()
