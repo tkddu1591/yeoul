@@ -6,6 +6,7 @@ import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import './changes-panel.css'
@@ -20,6 +21,8 @@ interface ChangesPanelProps {
   onUnstage(paths: string[]): void
   /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
   onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
+  /** 우클릭 → "파일 삭제 (delete)" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
+  onRemoveFile(path: string): void
   onSelect(selected: SelectedFile): void
 }
 
@@ -39,9 +42,20 @@ interface FileRowProps {
   busy: boolean
   onToggle(): void
   onSelect(): void
+  /** 우클릭 메뉴 — 좌표만 올린다. 메뉴 구성은 목록이 담당 (E5a) */
+  onMenu(x: number, y: number): void
 }
 
-function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSelect }: FileRowProps) {
+function FileRow({
+  change,
+  staged,
+  isSelected,
+  isChecked,
+  busy,
+  onToggle,
+  onSelect,
+  onMenu,
+}: FileRowProps) {
   const kind = staged ? change.staged : change.unstaged
   const kindLabel = kind ? KIND_LABELS[kind] : ''
   // 이름 변경은 "무엇이었는지"가 핵심 정보 — 원래 경로를 툴팁에 병기한다
@@ -72,6 +86,10 @@ function FileRow({ change, staged, isSelected, isChecked, busy, onToggle, onSele
         className={`file-row__main file-row__main--${kind ?? 'none'}`}
         disabled={busy}
         onClick={onSelect}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          onMenu(event.clientX, event.clientY)
+        }}
         title={tooltip}
         aria-label={tooltip}
         data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
@@ -100,6 +118,8 @@ interface FileListProps {
   bulkLabel: string
   /** unstaged 목록에만 있다 — 확인창을 거쳐 선택 파일의 변경을 취소한다 */
   onDiscard?: (trackedPaths: string[], untrackedPaths: string[]) => void
+  /** unstaged 목록에만 있다 — 우클릭 "파일 삭제". 확인창은 이 목록이 관리한다 (E5a) */
+  onRemoveFile?: (path: string) => void
   onAction(paths: string[]): void
   onSelect(selected: SelectedFile): void
 }
@@ -115,6 +135,7 @@ function FileList({
   busy,
   bulkLabel,
   onDiscard,
+  onRemoveFile,
   onAction,
   onSelect,
 }: FileListProps) {
@@ -163,6 +184,23 @@ function FileList({
     setConfirmingDiscard(false)
     onDiscard?.(discardTracked, discardUntracked)
     setChecked(new Set())
+  }
+
+  // 우클릭 메뉴와 단일 파일 확인창(되돌리기·삭제) — 이 목록이 관리한다 (E5a 피드백 2)
+  const [menu, setMenu] = useState<{ x: number; y: number; change: FileChange } | null>(null)
+  const [menuDiscard, setMenuDiscard] = useState<FileChange | null>(null)
+  const [menuRemove, setMenuRemove] = useState<FileChange | null>(null)
+  const runMenuDiscard = () => {
+    const change = menuDiscard
+    setMenuDiscard(null)
+    if (change === null) return
+    if (change.unstaged === 'untracked') onDiscard?.([], [change.path])
+    else onDiscard?.([change.path], [])
+  }
+  const runMenuRemove = () => {
+    const change = menuRemove
+    setMenuRemove(null)
+    if (change !== null) onRemoveFile?.(change.path)
   }
 
   return (
@@ -249,6 +287,7 @@ function FileList({
                       busy={busy}
                       onToggle={() => toggle(change.path)}
                       onSelect={() => onSelect({ change, staged })}
+                      onMenu={(x, y) => setMenu({ x, y, change })}
                     />
                   </li>
                 )
@@ -269,6 +308,72 @@ function FileList({
               동작은 되돌릴 수 없어요.
             </ConfirmDialog>
           )}
+          {menu !== null && (
+            <ContextMenu
+              x={menu.x}
+              y={menu.y}
+              items={
+                menu.change.staged === 'conflicted' || menu.change.unstaged === 'conflicted'
+                  ? [
+                      // 사유를 담은 disabled 항목 1개 — 이유 없는 회색 나열보다 다음 행동이 명확하다.
+                      // 실제 차단은 엔진 가드(restore/remove/discard의 unmerged 거부)가 심층 방어한다
+                      {
+                        key: 'conflicted-info',
+                        label: '충돌 중인 파일이에요 — 충돌 화면에서 정리해요',
+                        disabled: true,
+                        onSelect: () => {},
+                      },
+                    ]
+                  : staged
+                    ? [
+                        {
+                          key: 'unstage-file',
+                          label: '내리기 (unstage)',
+                          onSelect: () => onAction(actionPaths(menu.change, true)),
+                        },
+                      ]
+                    : [
+                        {
+                          key: 'stage-file',
+                          label: '올리기 (stage)',
+                          onSelect: () => onAction(actionPaths(menu.change, false)),
+                        },
+                        {
+                          key: 'discard-file',
+                          label: '이 파일만 되돌리기 (discard)',
+                          onSelect: () => setMenuDiscard(menu.change),
+                        },
+                        {
+                          key: 'remove-file',
+                          label: '파일 삭제 (delete)',
+                          onSelect: () => setMenuRemove(menu.change),
+                        },
+                      ]
+              }
+              onClose={() => setMenu(null)}
+            />
+          )}
+          <ConfirmDialog
+            isOpen={menuDiscard !== null}
+            title="이 파일의 변경을 취소할까요?"
+            confirmLabel="변경 취소"
+            onConfirm={runMenuDiscard}
+            onCancel={() => setMenuDiscard(null)}
+          >
+            "{menuDiscard?.path}"의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔(staged) 내용은
+            남아요.
+            {menuDiscard?.unstaged === 'untracked' && ' 새 파일이라 파일 자체가 삭제돼요.'} 이 동작은
+            되돌릴 수 없어요.
+          </ConfirmDialog>
+          <ConfirmDialog
+            isOpen={menuRemove !== null}
+            title="파일을 삭제할까요?"
+            confirmLabel="파일 삭제"
+            onConfirm={runMenuRemove}
+            onCancel={() => setMenuRemove(null)}
+          >
+            "{menuRemove?.path}" 파일을 디스크에서 삭제해요. 이 동작은 되돌릴 수 없어요.
+          </ConfirmDialog>
         </>
       )}
     </Panel>
@@ -282,6 +387,7 @@ export function ChangesPanel({
   onStage,
   onUnstage,
   onDiscard,
+  onRemoveFile,
   onSelect,
 }: ChangesPanelProps) {
   const stagedChanges = changes.filter((c) => c.staged !== null)
@@ -301,6 +407,7 @@ export function ChangesPanel({
         bulkLabel="올리기"
         onAction={onStage}
         onDiscard={onDiscard}
+        onRemoveFile={onRemoveFile}
         onSelect={onSelect}
       />
       <FileList

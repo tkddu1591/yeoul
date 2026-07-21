@@ -300,6 +300,7 @@ export function App() {
           onDiscard={(trackedPaths, untrackedPaths) =>
             void store.discard(trackedPaths, untrackedPaths)
           }
+          onRemoveFile={(path) => void store.removeFile(path)}
           onSelect={(selected) => void store.selectFile(selected)}
         />
         <div className="app__center">
