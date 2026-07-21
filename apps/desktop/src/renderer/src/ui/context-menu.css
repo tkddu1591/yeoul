@@ -28,3 +28,9 @@
 .ui-context-menu__item:hover:not(:disabled) {
   background: var(--color-surface-sunken);
 }
+
+.ui-context-menu__separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
+}

@@ -1,15 +1,25 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useEffect, useRef, useState } from 'react'
 import type { CommitSummary } from '@git-gui/domain'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { buildGraph, type GraphRow } from './history-graph'
-import { arrangeRefs } from './history-refs'
+import { arrangeRefs, isRemoteRef } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
 import './history-panel.css'
 import './virtual.css'
+
+/** 우클릭 메뉴에서 고른 커밋 작업 — 분기·다이얼로그는 App이 담당한다 (data options 패턴: props 폭발 방지) */
+export type HistoryAction =
+  | { kind: 'switch'; branch: string }
+  | { kind: 'branch-here'; hash: string }
+  | { kind: 'cherry-pick'; hash: string }
+  | { kind: 'revert'; hash: string }
+  | { kind: 'undo'; hash: string }
+  | { kind: 'reword'; hash: string; subject: string }
+  | { kind: 'tag'; hash: string }
 
 interface HistoryPanelProps {
   history: CommitSummary[]
@@ -17,16 +27,17 @@ interface HistoryPanelProps {
   historyLimit: number
   /** 현재 브랜치 — 같은 이름의 ref 배지를 강조한다 */
   currentBranch: string | null
+  /** HEAD 커밋 해시 — "지금 여기" 마커가 이 행을 따라간다 (피드백 4). unborn이면 null */
+  headHash: string | null
+  /** 로컬 실험 공간 이름 전체 — "이동(switch)" 메뉴 대상 판별(원격 배지 휴리스틱과 달리 정확한 목록) */
+  localBranches: string[]
   selectedHash: string | null
   busy: boolean
+  /** merging 등 진행 중에는 이력 조작(이동·가져오기·되돌리기·실행취소·메시지 고치기)을 비활성 */
+  actionsDisabled: boolean
   onSelect(hash: string): void
   onLoadMore(): void
-  /** 우클릭 → "여기서 실험 공간 만들기" — 해시를 넘긴다 (⑦) */
-  onCreateBranchAt(hash: string): void
-  /** merging/reverting 중에는 되돌리기를 비활성 — 진행 중 작업을 먼저 마무리해야 한다 (통합 리뷰) */
-  revertDisabled: boolean
-  /** 우클릭 → "이 저장 되돌리기" (revert) */
-  onRevert(hash: string): void
+  onAction(action: HistoryAction): void
 }
 
 /** 레인 간격·행 높이 — 행 높이는 고정이라 그래프 좌표가 단순해진다 (measureElement 불필요) */
@@ -123,19 +134,20 @@ export function HistoryPanel({
   history,
   historyLimit,
   currentBranch,
+  headHash,
+  localBranches,
   selectedHash,
   busy,
+  actionsDisabled,
   onSelect,
   onLoadMore,
-  onCreateBranchAt,
-  revertDisabled,
-  onRevert,
+  onAction,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
   const truncated = history.length >= historyLimit
   // 수천 커밋에서도 DOM은 가시 범위만 유지한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  // 레인 그래프 — 목록이 바뀔 때마다 전체를 다시 배정한다 (10000행 수 ms — 실측상 무해)
+  // 레인 그래프 — 목록이 바뀔 때마다 전체를 다시 배정한다 (E5b 실측: --all 5,003커밋 2.8ms — 무해)
   const graph = buildGraph(history)
   const virtualizer = useVirtualizer({
     count: history.length,
@@ -150,6 +162,71 @@ export function HistoryPanel({
   useEffect(() => {
     if (truncated && !busy && lastRendered >= history.length - 1) onLoadMore()
   }, [truncated, busy, lastRendered, history.length, onLoadMore])
+
+  // 메뉴 8항목 + 구분선 — HEAD 전용 항목은 숨기지 않고 사유와 함께 비활성 (상태를 숨기지 않는다)
+  const buildMenu = (commit: CommitSummary): ContextMenuEntry[] => {
+    const isHead = commit.hash === headHash
+    // 이 커밋을 끝으로 갖는 첫 로컬 실험 공간 — 현재 공간이면 이동 항목을 만들지 않는다
+    const switchTarget =
+      commit.refs.find((ref) => ref !== currentBranch && localBranches.includes(ref)) ?? null
+    const entries: ContextMenuEntry[] = []
+    if (switchTarget !== null) {
+      entries.push({
+        key: 'switch-here',
+        label: `"${switchTarget}" 실험 공간으로 이동 (switch)`,
+        disabled: actionsDisabled,
+        onSelect: () => onAction({ kind: 'switch', branch: switchTarget }),
+      })
+    }
+    entries.push(
+      {
+        key: 'branch-here',
+        label: '여기서 실험 공간 만들기…',
+        onSelect: () => onAction({ kind: 'branch-here', hash: commit.hash }),
+      },
+      { key: 'sep-1', separator: true },
+      {
+        key: 'cherry-pick',
+        label: '이 저장만 가져오기 (cherry-pick)',
+        disabled: actionsDisabled,
+        onSelect: () => onAction({ kind: 'cherry-pick', hash: commit.hash }),
+      },
+      {
+        key: 'revert',
+        label: '이 저장 되돌리기 (revert)',
+        disabled: actionsDisabled,
+        onSelect: () => onAction({ kind: 'revert', hash: commit.hash }),
+      },
+      {
+        key: 'undo-last',
+        label: isHead ? '저장 실행취소 (undo)' : '저장 실행취소 (undo) — 가장 최근 저장에서만',
+        disabled: actionsDisabled || !isHead,
+        onSelect: () => onAction({ kind: 'undo', hash: commit.hash }),
+      },
+      {
+        key: 'reword',
+        label: isHead
+          ? '저장 메시지 고치기… (amend)'
+          : '저장 메시지 고치기 (amend) — 가장 최근 저장에서만',
+        disabled: actionsDisabled || !isHead,
+        onSelect: () => onAction({ kind: 'reword', hash: commit.hash, subject: commit.subject }),
+      },
+      {
+        key: 'tag-here',
+        label: '태그 만들기… (tag)',
+        onSelect: () => onAction({ kind: 'tag', hash: commit.hash }),
+      },
+      { key: 'sep-2', separator: true },
+      {
+        key: 'copy-hash',
+        label: `해시 복사 (${commit.shortHash})`,
+        onSelect: () => {
+          void navigator.clipboard.writeText(commit.hash)
+        },
+      },
+    )
+    return entries
+  }
 
   return (
     <Panel
@@ -184,6 +261,8 @@ export function HistoryPanel({
           >
             {virtualItems.map((item) => {
               const commit = history[item.index]!
+              // "지금 여기"는 index 0 고정이 아니라 HEAD 커밋 행을 따라간다 (피드백 4 — --all에서는 다를 수 있다)
+              const isHead = commit.hash === headHash
               return (
                 <li
                   key={commit.hash}
@@ -194,7 +273,7 @@ export function HistoryPanel({
                     type="button"
                     className={[
                       'history-item',
-                      item.index === 0 ? 'history-item--head' : '',
+                      isHead ? 'history-item--head' : '',
                       selectedHash === commit.hash ? 'history-item--selected' : '',
                     ]
                       .filter(Boolean)
@@ -209,12 +288,10 @@ export function HistoryPanel({
                     aria-current={selectedHash === commit.hash ? 'true' : undefined}
                     data-testid={`history-item-${commit.hash}`}
                   >
-                    <GraphCell row={graph[item.index]!} isHead={item.index === 0} />
+                    <GraphCell row={graph[item.index]!} isHead={isHead} />
                     <div className="history-item__body">
                       <span className="history-item__title">
-                        {item.index === 0 && (
-                          <span className="history-item__here">지금 여기</span>
-                        )}
+                        {isHead && <span className="history-item__here">지금 여기</span>}
                         {(() => {
                           // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
                           const arranged = arrangeRefs(commit.refs, currentBranch)
@@ -224,17 +301,24 @@ export function HistoryPanel({
                                 <span
                                   key={ref}
                                   title={ref}
-                                  className={`history-item__ref${
-                                    ref === currentBranch ? ' history-item__ref--head' : ''
-                                  }`}
+                                  className={[
+                                    'history-item__ref',
+                                    ref === currentBranch ? 'history-item__ref--head' : '',
+                                    // 원격은 ☁ 접두 + 점선으로 구분한다 (피드백 3)
+                                    isRemoteRef(ref) ? 'history-item__ref--remote' : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
                                 >
-                                  {ref}
+                                  {isRemoteRef(ref) ? `☁ ${ref}` : ref}
                                 </span>
                               ))}
                               {arranged.hidden.length > 0 && (
                                 <span
                                   className="history-item__ref history-item__ref--more"
-                                  title={arranged.hidden.join('\n')}
+                                  title={arranged.hidden
+                                    .map((ref) => (isRemoteRef(ref) ? `☁ ${ref}` : ref))
+                                    .join('\n')}
                                   data-testid={`history-refs-more-${commit.hash}`}
                                 >
                                   +{arranged.hidden.length}
@@ -271,26 +355,7 @@ export function HistoryPanel({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={[
-            {
-              key: 'branch-here',
-              label: '여기서 실험 공간 만들기…',
-              onSelect: () => onCreateBranchAt(menu.commit.hash),
-            },
-            {
-              key: 'revert',
-              label: '이 저장 되돌리기 (revert)',
-              disabled: revertDisabled,
-              onSelect: () => onRevert(menu.commit.hash),
-            },
-            {
-              key: 'copy-hash',
-              label: `해시 복사 (${menu.commit.shortHash})`,
-              onSelect: () => {
-                void navigator.clipboard.writeText(menu.commit.hash)
-              },
-            },
-          ]}
+          items={buildMenu(menu.commit)}
           onClose={() => setMenu(null)}
         />
       )}

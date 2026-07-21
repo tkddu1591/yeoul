@@ -1,6 +1,7 @@
 import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
+import { isHeadBackedUp } from './components/backup-state'
 import { BranchSwitcher } from './components/BranchSwitcher'
 import { ConflictPanel } from './components/ConflictPanel'
 import { ChangesPanel } from './components/ChangesPanel'
@@ -39,6 +40,13 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
   bisecting: '원인 찾는 중',
 }
 
+/** 진행 중 작업 상태 바 문구 — merging/reverting/cherry-picking 3겸용 (E5b) */
+const OP_BAR = {
+  merging: { doing: '실험 공간 합치는 중', abort: '합치기 취소' },
+  reverting: { doing: '저장 되돌리는 중', abort: '되돌리기 취소' },
+  'cherry-picking': { doing: '저장 가져오는 중', abort: '가져오기 취소' },
+} as const
+
 export function App() {
   const store = useRepositoryStore()
 
@@ -57,6 +65,11 @@ export function App() {
   const [mergePicker, setMergePicker] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [confirmingAbort, setConfirmingAbort] = useState(false)
+
+  // E5b 커밋 작업 다이얼로그 — 태그 이름·실행취소 확인·메시지 고치기 (대상 커밋 정보를 함께 보관)
+  const [tagPrompt, setTagPrompt] = useState<{ hash: string } | null>(null)
+  const [confirmingUndo, setConfirmingUndo] = useState<{ hash: string } | null>(null)
+  const [rewordPrompt, setRewordPrompt] = useState<{ hash: string; subject: string } | null>(null)
 
   // 리뷰(호스팅) 다이얼로그 — 토큰 붙여넣기·리뷰 요청 제목 (팝오버는 닫고 연다)
   const [tokenPrompt, setTokenPrompt] = useState(false)
@@ -120,6 +133,8 @@ export function App() {
       ? '실험 공간 합치기'
       : suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
+  // 마지막 저장(HEAD)이 원격에 이미 백업됐는가 — 실행취소·메시지 고치기 확인창의 경고 병기 (판정 편차는 플랜 표)
+  const headBackedUp = status !== null && isHeadBackedUp(status.branch)
   // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
   const openDetail = store.commitDetail
   const shelfPreview =
@@ -241,23 +256,22 @@ export function App() {
       </header>
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
+        status?.state === 'cherry-picking' ||
         store.error !== null ||
         store.notice !== null) && (
         <div className="app__top-layer">
           <div className="app__top-stack">
-            {(status?.state === 'merging' || status?.state === 'reverting') && (
+            {(status?.state === 'merging' ||
+              status?.state === 'reverting' ||
+              status?.state === 'cherry-picking') && (
               <div className="app__merge-bar" data-testid="merge-bar">
-                <Pictogram
-                  kind="conflict"
-                  size={14}
-                  label={status.state === 'merging' ? '합치는 중' : '되돌리는 중'}
-                />
+                <Pictogram kind="conflict" size={14} label={OP_BAR[status.state].doing} />
                 <span className="app__merge-text" data-testid="merge-remaining">
-                  {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
+                  {`${OP_BAR[status.state].doing} — ${
                     conflictCount > 0
                       ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
-                      : status.state === 'reverting' && stagedCount === 0
-                        ? '겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — 되돌리기 취소를 눌러 마무리해요.'
+                      : status.state !== 'merging' && stagedCount === 0
+                        ? `겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — ${OP_BAR[status.state].abort}를 눌러 마무리해요.`
                         : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
                   }`}
                 </span>
@@ -268,7 +282,7 @@ export function App() {
                   onPress={() => setConfirmingAbort(true)}
                   testId="merge-abort"
                 >
-                  {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
+                  {OP_BAR[status.state].abort}
                 </Button>
               </div>
             )}
@@ -310,6 +324,7 @@ export function App() {
               path={store.conflictFile.path}
               content={store.conflictFile.content}
               busy={store.busy}
+              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 "이 저장만 가져오기" 어휘와 일치한다 (E5b 설계 판단)
               mode={status?.state === 'reverting' ? 'reverting' : 'merging'}
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
@@ -384,16 +399,41 @@ export function App() {
             history={store.history}
             historyLimit={store.historyLimit}
             currentBranch={status?.branch.name ?? null}
+            headHash={status?.headHash ?? null}
+            localBranches={store.branches.map((branch) => branch.name)}
             selectedHash={null}
             busy={store.busy}
+            actionsDisabled={status?.state !== 'normal'}
             onSelect={(hash) => void store.selectCommit(hash)}
             onLoadMore={() => void store.loadMoreHistory()}
-            revertDisabled={status?.state !== 'normal'}
-            onCreateBranchAt={(hash) => {
-              store.clearError()
-              setBranchPrompt({ fromHash: hash })
+            onAction={(action) => {
+              switch (action.kind) {
+                case 'switch':
+                  void store.switchBranch(action.branch)
+                  break
+                case 'branch-here':
+                  store.clearError()
+                  setBranchPrompt({ fromHash: action.hash })
+                  break
+                case 'cherry-pick':
+                  void store.cherryPickCommit(action.hash)
+                  break
+                case 'revert':
+                  void store.revertCommit(action.hash)
+                  break
+                case 'undo':
+                  setConfirmingUndo({ hash: action.hash })
+                  break
+                case 'reword':
+                  store.clearError()
+                  setRewordPrompt({ hash: action.hash, subject: action.subject })
+                  break
+                case 'tag':
+                  store.clearError()
+                  setTagPrompt({ hash: action.hash })
+                  break
+              }
             }}
-            onRevert={(hash) => void store.revertCommit(hash)}
           />
         )}
       </main>
@@ -477,17 +517,82 @@ export function App() {
       />
       <ConfirmDialog
         isOpen={confirmingAbort}
-        title={status?.state === 'reverting' ? '되돌리기를 취소할까요?' : '합치기를 취소할까요?'}
-        confirmLabel={status?.state === 'reverting' ? '되돌리기 취소' : '합치기 취소'}
+        title={
+          status?.state === 'reverting'
+            ? '되돌리기를 취소할까요?'
+            : status?.state === 'cherry-picking'
+              ? '가져오기를 취소할까요?'
+              : '합치기를 취소할까요?'
+        }
+        confirmLabel={
+          status?.state === 'reverting'
+            ? '되돌리기 취소'
+            : status?.state === 'cherry-picking'
+              ? '가져오기 취소'
+              : '합치기 취소'
+        }
         onConfirm={() => {
           setConfirmingAbort(false)
           if (status?.state === 'reverting') void store.abortRevert()
+          else if (status?.state === 'cherry-picking') void store.abortCherryPick()
           else void store.abortMerge()
         }}
         onCancel={() => setConfirmingAbort(false)}
       >
         지금까지 고른 것을 되돌리고 이전 상태로 돌아가요.
       </ConfirmDialog>
+      <PromptDialog
+        isOpen={tagPrompt !== null}
+        title="태그 만들기"
+        description="이 저장 시점에 이름표(태그)를 붙여요. 역사 목록에 배지로 함께 보여요."
+        label="태그 이름"
+        placeholder="예: v1.0"
+        submitLabel="만들기"
+        errorText={tagPrompt !== null ? store.error : null}
+        onSubmit={(name) => {
+          void (async () => {
+            const prompt = tagPrompt
+            if (prompt === null) return
+            // 실패하면 다이얼로그를 유지해 입력을 보존한다 — 에러는 인라인으로 (branchPrompt 관례)
+            if (await store.createTag(name, prompt.hash)) setTagPrompt(null)
+          })()
+        }}
+        onCancel={() => setTagPrompt(null)}
+      />
+      <ConfirmDialog
+        isOpen={confirmingUndo !== null}
+        title="마지막 저장을 실행취소할까요?"
+        confirmLabel="실행취소"
+        onConfirm={() => {
+          const hash = confirmingUndo?.hash ?? null
+          setConfirmingUndo(null)
+          if (hash !== null) void store.undoLastCommit(hash)
+        }}
+        onCancel={() => setConfirmingUndo(null)}
+      >
+        저장만 취소하고 바뀐 내용은 그대로 남아요 — 왼쪽 변경 목록에서 다시 저장할 수 있어요.
+        {headBackedUp && ' 이미 백업된 저장이에요 — 취소하면 원격과 어긋나요.'}
+      </ConfirmDialog>
+      <PromptDialog
+        isOpen={rewordPrompt !== null}
+        title="저장 메시지 고치기"
+        description={`가장 최근 저장의 메시지를 새 한 줄로 바꿔요. 본문이 있었다면 함께 이 한 줄로 바뀌어요.${
+          headBackedUp ? ' 이미 백업된 저장이에요 — 고치면 원격과 어긋나요.' : ''
+        }`}
+        label="메시지"
+        placeholder="예: 로그인 버튼 색 수정"
+        submitLabel="고치기"
+        initialValue={rewordPrompt?.subject ?? ''}
+        errorText={rewordPrompt !== null ? store.error : null}
+        onSubmit={(message) => {
+          void (async () => {
+            const prompt = rewordPrompt
+            if (prompt === null) return
+            if (await store.rewordLastCommit(prompt.hash, message)) setRewordPrompt(null)
+          })()
+        }}
+        onCancel={() => setRewordPrompt(null)}
+      />
       <ConfirmDialog
         isOpen={confirmingMerge}
         title="리뷰 요청을 병합할까요?"

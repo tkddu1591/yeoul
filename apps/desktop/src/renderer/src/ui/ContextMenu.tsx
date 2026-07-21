@@ -10,11 +10,23 @@ export interface ContextMenuItem {
   onSelect(): void
 }
 
+/** 구분선 — 항목 그룹 사이 시각 구분 (E5b: 커밋 메뉴가 8항목으로 커졌다) */
+export interface ContextMenuSeparator {
+  key: string
+  separator: true
+}
+
+export type ContextMenuEntry = ContextMenuItem | ContextMenuSeparator
+
 interface ContextMenuProps {
   x: number
   y: number
-  items: ContextMenuItem[]
+  items: ContextMenuEntry[]
   onClose(): void
+}
+
+function isSeparator(entry: ContextMenuEntry): entry is ContextMenuSeparator {
+  return 'separator' in entry
 }
 
 /** 우클릭 메뉴 — 바깥 클릭·ESC로 닫힌다. 항목 실행 후에도 닫힌다 */
@@ -38,27 +50,31 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       window.removeEventListener('wheel', onWheel)
     }
   }, [onClose])
-  // 화면 가장자리에서 잘리지 않게 최소한만 보정한다
+  // 화면 가장자리에서 잘리지 않게 최소한만 보정한다 (구분선은 행보다 낮다 — 행 높이 근사치로 충분)
   const left = Math.min(x, window.innerWidth - 240)
   const top = Math.min(y, window.innerHeight - items.length * 34 - 12)
   return createPortal(
     <div ref={ref} className="ui-context-menu" role="menu" style={{ left, top }}>
-      {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          role="menuitem"
-          className="ui-context-menu__item"
-          disabled={item.disabled === true}
-          onClick={() => {
-            item.onSelect()
-            onClose()
-          }}
-          data-testid={`context-${item.key}`}
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.map((item) =>
+        isSeparator(item) ? (
+          <div key={item.key} className="ui-context-menu__separator" role="separator" />
+        ) : (
+          <button
+            key={item.key}
+            type="button"
+            role="menuitem"
+            className="ui-context-menu__item"
+            disabled={item.disabled === true}
+            onClick={() => {
+              item.onSelect()
+              onClose()
+            }}
+            data-testid={`context-${item.key}`}
+          >
+            {item.label}
+          </button>
+        ),
+      )}
     </div>,
     document.body,
   )
