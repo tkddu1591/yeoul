@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { buildGraph, type GraphRow } from './history-graph'
+import { arrangeRefs } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
 import './history-panel.css'
 import './virtual.css'
@@ -214,16 +215,34 @@ export function HistoryPanel({
                         {item.index === 0 && (
                           <span className="history-item__here">지금 여기</span>
                         )}
-                        {commit.refs.map((ref) => (
-                          <span
-                            key={ref}
-                            className={`history-item__ref${
-                              ref === currentBranch ? ' history-item__ref--head' : ''
-                            }`}
-                          >
-                            {ref}
-                          </span>
-                        ))}
+                        {(() => {
+                          // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
+                          const arranged = arrangeRefs(commit.refs, currentBranch)
+                          return (
+                            <>
+                              {arranged.visible.map((ref) => (
+                                <span
+                                  key={ref}
+                                  title={ref}
+                                  className={`history-item__ref${
+                                    ref === currentBranch ? ' history-item__ref--head' : ''
+                                  }`}
+                                >
+                                  {ref}
+                                </span>
+                              ))}
+                              {arranged.hidden.length > 0 && (
+                                <span
+                                  className="history-item__ref history-item__ref--more"
+                                  title={arranged.hidden.join('\n')}
+                                  data-testid={`history-refs-more-${commit.hash}`}
+                                >
+                                  +{arranged.hidden.length}
+                                </span>
+                              )}
+                            </>
+                          )
+                        })()}
                         {commit.parents.length >= 2 && (
                           <span className="history-item__mergemark">병합</span>
                         )}

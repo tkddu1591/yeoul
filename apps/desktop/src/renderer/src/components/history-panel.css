@@ -83,6 +83,12 @@
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* 접힌 배지 수 — 마우스를 올리면 전체 목록이 툴팁으로 보인다 (피드백) */
+.history-item__ref--more {
+  flex: none;
+  min-width: 0;
+  cursor: default;
+}
 /* 현재 위치(HEAD) — "내가 어디에 있는지"를 최신 행에 명시한다 (5차 피드백) */
 .history-item__here {
   flex: none;
