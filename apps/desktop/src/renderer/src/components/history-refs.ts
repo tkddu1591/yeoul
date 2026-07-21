@@ -31,3 +31,11 @@ export function arrangeRefs(
   const effectiveMax = sorted.length > max ? 1 : max
   return { visible: sorted.slice(0, effectiveMax), hidden: sorted.slice(effectiveMax) }
 }
+
+/**
+ * 원격 ref 추정 — decorate 출력의 원격은 "origin/…" 형태다(E4 관례 휴리스틱, refPriority와 동일 기준).
+ * 폴더형 로컬 이름(feature/a)과의 구분은 origin/ 접두만 신뢰한다
+ */
+export function isRemoteRef(ref: string): boolean {
+  return ref.startsWith('origin/')
+}

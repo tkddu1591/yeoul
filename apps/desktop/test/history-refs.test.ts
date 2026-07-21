@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { arrangeRefs } from '../src/renderer/src/components/history-refs'
+import { arrangeRefs, isRemoteRef } from '../src/renderer/src/components/history-refs'
 
 describe('arrangeRefs', () => {
   it('현재 브랜치 > 로컬 > 원격(origin/) 순으로 정렬하고, 접힘이 생기면 1개만 보여준다', () => {
@@ -24,5 +24,17 @@ describe('arrangeRefs', () => {
     const result = arrangeRefs(['z-branch', 'a-branch', 'main'], 'main')
     expect(result.visible).toEqual(['main'])
     expect(result.hidden).toEqual(['z-branch', 'a-branch'])
+  })
+})
+
+describe('isRemoteRef', () => {
+  it('origin/ 접두만 원격으로 본다 (E4 휴리스틱 — refPriority와 동일 기준)', () => {
+    expect(isRemoteRef('origin/main')).toBe(true)
+    expect(isRemoteRef('main')).toBe(false)
+  })
+
+  it('폴더형 로컬 이름(feature/a)은 원격이 아니다', () => {
+    expect(isRemoteRef('feature/login')).toBe(false)
+    expect(isRemoteRef('origin/feature/login')).toBe(true)
   })
 })

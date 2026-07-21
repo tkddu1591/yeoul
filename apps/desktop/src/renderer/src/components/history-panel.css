@@ -83,6 +83,11 @@
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* 원격(origin) 배지 — 점선 테두리 + ☁ 접두로 로컬과 시각 구분한다 (피드백 3).
+   색은 기존 토큰 그대로라 대비(WCAG)가 유지된다 */
+.history-item__ref--remote {
+  border-style: dashed;
+}
 /* 접힌 배지 수 — 마우스를 올리면 전체 목록이 툴팁으로 보인다 (피드백) */
 .history-item__ref--more {
   flex: none;
