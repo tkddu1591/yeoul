@@ -2026,9 +2026,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   })
 ```
 
-Run: FAIL 확인(현재 가드 없음 — 원문 GitError).
+Run: FAIL 확인(구현 실측: 상태 가드가 없어 ls-tree 사전 검사가 먼저 걸려 `'그 시점에는 이 파일이 없어요.'` — 어느 쪽이든 신규 메시지 불일치 Red 성립).
 
-- [ ] **Step 2: 엔진 가드** — `restoreFile`의 `assertRepoRelative(path)` 줄 **뒤**(unmerged 가드 앞)에 추가:
+- [ ] **Step 2: 엔진 가드** — `restoreFile`의 **unmerged(충돌) 가드 블록 뒤, ls-tree 사전 검사 앞**에 추가. (구현 실측 정정: 충돌 가드보다 앞에 두면 merge 충돌 경로에서 기존 `/충돌 화면에서/` 구체 안내가 영원히 가려진다 — 구체 안내가 일반 안내를 이긴다):
 
 ```ts
         // merging·reverting 도중의 적용은 병합 index를 중간 변경하고, stash도 unmerged index에서
