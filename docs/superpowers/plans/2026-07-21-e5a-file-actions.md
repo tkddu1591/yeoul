@@ -1985,6 +1985,110 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8-보완: 품질 리뷰 4건 (실측 반영)
+
+품질 리뷰(유실 안전 전 시나리오 실측 통과) 지적:
+
+- **(Important) merging/reverting 중 restoreFile 원문 에러** — 충돌 중 히스토리 우클릭으로 도달 가능. stash가 unmerged index에서 `could not write index` 원문으로 죽는다(데이터는 안전). → revert와 동일 관례의 상태 가드.
+- **(Minor) notice 3건** — ① 적용 결과가 staged로 올라가는 것 안내 부재, ② 조사 오류(`"app.txt"을`), ③ 보관함 꺼내기에도 "이 시점" 커밋 어투. → 문장 재구성으로 일괄 해소.
+- **(Minor) 실패 시 커밋 상세 닫힘** — finally의 CLEAR_SELECTIONS 무조건 실행. → 성공 시에만 선택 정리.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts` (+`packages/git-adapter/test/client.test.ts`)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/e2e/smoke.spec.ts` (notice 단언 갱신)
+
+- [ ] **Step 1: 엔진 가드 테스트 (Red)** — client.test.ts의 restoreFile 테스트 묶음 끝에 추가:
+
+```ts
+  it('restoreFile — 합치는 중(merging)에는 읽히는 메시지로 거부한다 (변경·보관함 무손상)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await writeFixtureFile(repo, 'other.txt', 'precious\n')
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.restoreFile(head.hash, 'other.txt')).rejects.toThrow(
+      /먼저 마무리하거나 취소/,
+    )
+    // 변경은 그대로, 보관함도 생기지 않았다 — stash 선실행 유실 경로 차단 확인
+    expect(await client.files.readText('other.txt')).toBe('precious\n')
+    expect(await client.shelf.list()).toHaveLength(0)
+  })
+```
+
+Run: FAIL 확인(현재 가드 없음 — 원문 GitError).
+
+- [ ] **Step 2: 엔진 가드** — `restoreFile`의 `assertRepoRelative(path)` 줄 **뒤**(unmerged 가드 앞)에 추가:
+
+```ts
+        // merging·reverting 도중의 적용은 병합 index를 중간 변경하고, stash도 unmerged index에서
+        // 원문 에러로 죽는다(품질 리뷰 실측) — revert와 동일 관례로 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 적용할 수 있어요.')
+        }
+```
+
+Green: 신규 1건 포함 전체 PASS (**315 tests**).
+
+- [ ] **Step 3: store — notice 재구성·실패 시 상세 유지** (`restoreFileFromCommit` 전체 교체)
+
+```ts
+  async restoreFileFromCommit(hash, path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 파괴 작업 — 자동 보관까지 간 뒤 실패해도 보관함 카운트가 낡지 않게 스냅샷은 finally로 (revert 관례).
+      // 실패 시에는 선택(커밋 상세)을 유지해 맥락을 잃지 않는다 (품질 리뷰)
+      let succeeded = false
+      let notice: string | null = null
+      try {
+        const result = await git().commits.restoreFile(repoPath, hash, path)
+        succeeded = true
+        // "이 시점" 어투를 빼 커밋·보관함 공통으로 읽히게, staged로 올라간 것도 함께 안내한다 (품질 리뷰)
+        notice = `"${path}"에 이 내용을 적용하고 저장 예정에 올려뒀어요 — 저장하기로 확정해요.${
+          result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        }`
+      } finally {
+        set({
+          ...(succeeded ? CLEAR_SELECTIONS : {}),
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+```
+
+- [ ] **Step 4: E2E 단언 갱신** — `'커밋 상세에서 파일 우클릭 — 이 파일만 그 시점 내용으로 적용한다'`의 notice 단언 교체:
+
+```ts
+    await expect(window.getByTestId('notice')).toContainText('저장 예정에 올려뒀어요')
+```
+
+- [ ] **Step 5: 게이트** — 루트 `pnpm test`(**315**) + typecheck(6 Done) + build + E2E 전체(**38 passed**) 전부 exit 0
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/git-adapter apps/desktop/src apps/desktop/e2e
+git commit -m "fix: 품질 리뷰 — restoreFile 상태 가드·notice 재구성(staged 안내)·실패 시 상세 유지
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
