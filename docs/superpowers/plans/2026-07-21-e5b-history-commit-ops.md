@@ -2626,6 +2626,84 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 9-보완: 통합 리뷰 2건 (실측 반영)
+
+- **(Important) 비조상 커밋 revert 원어 에러** — --all로 다른 브랜치 커밋에 revert 우클릭이 가능해졌는데, 변경이 이미 없는 경우 `nothing to commit` 원문 노출(상태 훼손은 없음 — REVERT_HEAD 미생성 실측). cherryPick의 empty 친절 처리와 비대칭. → classify에 친절 분기.
+- **(Minor 4) notice join 일관화** — 선행 공백 방지 join 패턴을 cherryPick에만 적용했다. → mergeBranch·pullLatest·revertCommit 3곳 동일 패턴으로.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts` (+`packages/git-adapter/test/client.test.ts`)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+
+- [ ] **Step 1: revert empty 테스트 (Red)** — revert 테스트 묶음 끝에 추가:
+
+```ts
+  it('revert — 되돌려도 바뀌는 내용이 없으면 읽히는 메시지로 알린다 (비조상·이미 반영)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    // 같은 내용을 되돌린 뒤 또 되돌리면 변경이 없다 — "이미 반영"의 최소 재현
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'revert', '--no-edit', 'HEAD'], { cwd: repo })
+    const middle = (await client.history.list(2))[1]!
+    await expect(client.commits.revert(middle.hash)).rejects.toThrow(/바뀌는 내용이 없어요/)
+    // 상태가 오염되지 않았다
+    expect((await client.repo.status()).state).toBe('normal')
+  })
+```
+
+Run: FAIL 확인(GitError — `nothing to commit` 원문).
+
+- [ ] **Step 2: 엔진** — revert의 `classify`에서 CONFLICT 분기 **뒤**에 추가:
+
+```ts
+          if (output.includes('nothing to commit')) {
+            throw new Error(
+              '되돌려도 바뀌는 내용이 없어요 — 이미 지금 내용에 반영되어 있는 저장이에요.',
+            )
+          }
+```
+
+Green: **348 tests**.
+
+- [ ] **Step 3: store notice join 3곳** — 각 액션의 shelfNotice 선언·notice 조립을 교체:
+
+(a) `mergeBranch`·`pullLatest` 공통 형태(각각):
+
+```ts
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
+```
+
+(mergeBranch의 여러 줄 shelfNotice 선언 포함 기존 블록을 위 2줄로. 주석은 기존 것 유지.)
+
+(b) `revertCommit`:
+
+```ts
+      const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+      // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다 (join으로 선행 공백 방지)
+      notice =
+        [result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null, shelfNotice]
+          .filter((part) => part)
+          .join(' ') || null
+```
+
+(기존 단언 문구는 그대로 유지되므로 E2E 무영향 — `toContainText` 부분 매칭.)
+
+- [ ] **Step 4: 게이트** — 루트 `pnpm test`(**348**) + typecheck(6 Done) + build + E2E 전체(**42 passed**) → **공식 스크린샷 3장 복원**(scratchpad 사본 → test-results/, 이후 e2e 재실행 금지)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/git-adapter apps/desktop/src
+git commit -m "fix: 통합 리뷰 — 빈 revert 친절 안내·notice join 일관화
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
@@ -2646,7 +2724,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## 후속 노트 (이관 후보)
 
-- **HEAD가 조회 상한 밖이면 "지금 여기"가 안 보인다**: --all에서 다른 브랜치의 최신 커밋이 상한(50)을 채우면 오래된 HEAD 행이 목록 밖일 수 있다 — "지금 여기로 스크롤" 버튼(HEAD 행 자동 스크롤·상한 자동 확장) 검토.
+- **HEAD가 조회 상한 밖이면 "지금 여기"가 안 보인다**: --all에서 다른 브랜치의 최신 커밋이 상한(50)을 채우면 오래된 HEAD 행이 목록 밖일 수 있다 — "지금 여기로 스크롤" 버튼(HEAD 행 자동 스크롤·상한 자동 확장) 검토. (Task 8-보완으로 구현 — 완료)
+- (통합 리뷰 Minor) undo 후 백업(push)이 원어 에러(`failed to push some refs`) — 원격이 앞선 기존 상황과 동일 노출. 친절 매핑 또는 "받아온 뒤 백업" 안내 검토.
+- (통합 리뷰 Minor) undo 후 리뷰 요청은 upstream 일치로 push를 생략해 원격 잔존분(실행취소한 커밋)이 PR에 포함될 수 있다 — 안내 검토.
+- (통합 리뷰 Minor) headFound 전이 스크롤이 일반 더 불러오기로 HEAD가 우연히 로드될 때도 발동(스크롤 강탈 가능), revealHead 10회×2000 캡 초과 시 무통보 종료 — 다듬기 후보.
 - **레인 폭 상한**: 실측상 브랜치 21개에서 laneCount 21(거터 252px)까지 커진다. 수십 브랜치 저장소는 거터가 제목을 짓누른다 — 레인 수 상한 + "그 외" 축약 렌더 검토.
 - **"커밋 제거"(임의 중간 커밋 drop)**: 피드백 5의 잔여. rebase 계열이라 진행 중 상태·충돌 흐름 설계가 따로 필요 — HEAD 실행취소(undo)·revert로 대응한 현 범위 밖.
 - **reword의 본문 유실**: 한 줄 입력이라 본문 있는 커밋을 고치면 본문이 사라진다(다이얼로그에 경고 문구로 고지). 멀티라인 편집 다이얼로그 승격 검토.
