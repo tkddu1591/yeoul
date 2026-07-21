@@ -20,6 +20,8 @@ export const HISTORY_LIMIT = 50
 const HISTORY_PAGE = 200
 /** IPC assertLimit와 동일한 상한 — 이 이상은 더 불러오지 않는다 */
 const HISTORY_MAX = 10000
+/** notice 자동 소멸 시간(ms) — 타이머는 renderer(App)가 건다. 에러·머지 바에는 적용하지 않는다 (E1d 후속) */
+export const NOTICE_TTL_MS = 10_000
 
 export interface SelectedFile {
   change: FileChange
@@ -128,6 +130,8 @@ interface RepositoryStore {
   clearCommitFile(): void
   /** 전역 에러를 지운다 — 다이얼로그를 새로 열 때 이전 작업 에러가 인라인으로 새어들지 않게. 동기라 guard 불필요 */
   clearError(): void
+  /** notice만 지운다 — 자동 소멸 타이머(App) 전용. 동기라 guard 불필요 */
+  clearNotice(): void
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
   /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
@@ -812,6 +816,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   clearError() {
     set({ error: null })
+  },
+
+  clearNotice() {
+    set({ notice: null })
   },
 
   async loadMoreHistory() {

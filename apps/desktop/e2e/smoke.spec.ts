@@ -1157,6 +1157,31 @@ test('태그 만들기 (tag) — 배지로 나타난다', async () => {
   }
 })
 
+test('notice 안내는 10초 뒤 자동으로 사라진다 (에러·머지 바와 달리)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    // 가짜 시계 — 10초를 실제로 기다리지 않는다 (플랜 실측 3: Electron 페이지에서 clock 동작 확인)
+    await window.clock.install()
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await window.getByTestId('prompt-input').fill('v-auto')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('notice')).toContainText('태그를 만들었어요')
+    await window.clock.fastForward(10_500)
+    await expect(window.getByTestId('notice')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
 test('저장 실행취소 (undo)와 메시지 고치기 (amend)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['add', '-A'], { cwd: repo })

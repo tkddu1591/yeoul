@@ -22,7 +22,7 @@ import {
   RIGHT_COLUMN_DEFAULT,
   saveRightWidth,
 } from './ui/column-resize'
-import { useRepositoryStore } from './store/repository-store'
+import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
 import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -123,6 +123,17 @@ export function App() {
     // 마운트 시 1회만 실행
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // notice만 10초 뒤 자동으로 사라진다 — 에러·머지 바는 남는다 (E1d 후속). 새 notice가 오면
+  // 값이 바뀌어 effect가 다시 걸리며 타이머가 리셋된다. 같은 문구가 연속으로 와도 guard가
+  // 작업 시작마다 notice를 null로 비우므로 null→값 전이로 반드시 리셋된다
+  useEffect(() => {
+    if (store.notice === null) return
+    const timer = window.setTimeout(() => store.clearNotice(), NOTICE_TTL_MS)
+    return () => window.clearTimeout(timer)
+    // store 객체는 렌더마다 새 참조 — notice 값 변화에만 반응해야 임의 갱신이 타이머를 연장하지 않는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.notice])
 
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
