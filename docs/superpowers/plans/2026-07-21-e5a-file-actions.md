@@ -2100,7 +2100,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | Task 4·5 후 | 314 유지 + typecheck 전부 Done |
 | Task 6·7 후 | typecheck 전부 Done + 실렌더 확인 |
 | Task 8 후 | E2E **38 passed** (smoke 32 + hosting 6) + 변이 실증 1건(FAIL→원복 PASS) |
-| 최종 (Task 9) | 314 tests + typecheck + build + E2E 38 — 전부 exit 0 + 스크린샷 2장 + README |
+| 최종 (Task 9, 8-보완 +1 반영) | **315 tests** + typecheck + build + E2E 38 — 전부 exit 0 + 스크린샷 2장 + README |
 
 ## 인용 앵커 검증 기록
 
@@ -2109,7 +2109,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ## 후속 노트 (이관 후보)
 
 - **비교의 untracked 한계**: `git diff <hash> -- <path>`는 untracked 파일을 비추지 않는다(실측 5). 지금은 비교 진입점이 커밋 상세(그 시점에 존재하는 파일)뿐이라 문제없지만, 좌측 목록에 "그 시점과 비교" 같은 역방향 진입점을 만들면 untracked 처리(--no-index 병용)가 필요하다.
-- **적용이 staged로 잡히는 UX**: checkout이 index까지 갱신해 적용 결과가 "저장 예정"에 나타난다(실측 4). 사용자가 "적용했는데 왜 올려져 있지?"라고 물으면 notice에 한 줄("적용 결과는 저장 예정에 올라가 있어요") 추가를 검토.
+- **적용이 staged로 잡히는 UX**: checkout이 index까지 갱신해 적용 결과가 "저장 예정"에 나타난다(실측 4). 사용자가 "적용했는데 왜 올려져 있지?"라고 물으면 notice에 한 줄("적용 결과는 저장 예정에 올라가 있어요") 추가를 검토. (Task 8-보완이 notice에 반영 — 완료)
+- (통합 리뷰 Minor) HEAD와 동일 내용 적용 시 staged가 비는데 notice는 "올려뒀어요"라고 안내 — 문구 엣지.
+- (통합 리뷰 Minor) 커밋이 삭제한 파일에도 "이 파일만 적용" 메뉴가 뜬다(엔진이 친절 거부하긴 함) — disabled 처리 검토.
 - **rename된 파일의 restore**: 커밋 상세의 renamed 파일을 적용하면 옛 경로가 아니라 현재(커밋 시점) 경로로 복원된다. 워크트리에 staged rename이 걸쳐 있는 교차 케이스는 유실은 없지만(새 경로 비접촉) 결과가 낯설 수 있다 — 사용자 보고 시 확인창 문구 보강.
 - **conflicted 행 메뉴**: disabled 사유 항목 1개로 대체했다. 충돌 뷰로 바로 이동하는 활성 항목("충돌 화면 열기")으로 승격 검토.
 - **보관함 파일 단위 꺼내기와 항목 정리**: restoreFile은 stash 항목을 소비하지 않는다(남는다). 파일 하나만 꺼낸 뒤 항목을 지울지 묻는 흐름은 후속.
