@@ -895,6 +895,54 @@ describe('GitClient', () => {
     )
   })
 
+  it('removeFile — tracked 파일을 디스크에서 지우고 삭제 변경으로 잡힌다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.changes.removeFile('README.md')
+    expect(existsSync(join(repo, 'README.md'))).toBe(false)
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('deleted')
+  })
+
+  it('removeFile — untracked 파일은 지우면 목록에서 사라진다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'junk.txt', 'j\n')
+    await client.changes.removeFile('junk.txt')
+    expect(existsSync(join(repo, 'junk.txt'))).toBe(false)
+    expect((await client.repo.status()).changes).toEqual([])
+  })
+
+  it('removeFile — 없는 파일·디렉터리·심볼릭 링크·밖 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.changes.removeFile('ghost.txt')).rejects.toThrow(/이미 없는 파일이에요/)
+    await mkdir(join(repo, 'sub'))
+    await expect(client.changes.removeFile('sub')).rejects.toThrow(/폴더는/)
+    // 저장소 밖을 가리키는(끊어진 것 포함) 링크 — readText와 동일 계열로 거부한다
+    await symlink(join(tmpdir(), 'no-such-target'), join(repo, 'link'))
+    await expect(client.changes.removeFile('link')).rejects.toThrow(/링크 파일/)
+    await expect(client.changes.removeFile('../outside')).rejects.toThrow(/저장소 밖 경로/)
+    await expect(client.changes.removeFile('')).rejects.toThrow(/저장소 밖 경로/)
+  })
+
+  it('removeFile — 충돌 중인 파일은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.changes.removeFile('README.md')).rejects.toThrow(/충돌 화면에서/)
+  })
+
   it('discard — 충돌 중인 파일은 읽히는 메시지로 거부한다 (이관)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

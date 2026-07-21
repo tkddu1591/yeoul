@@ -16,7 +16,7 @@ import {
   type SyncBranchStatus,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
-import { lstat, readFile, writeFile } from 'node:fs/promises'
+import { lstat, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
@@ -93,6 +93,11 @@ export interface GitClient {
      */
     discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
     diff(path: string, options: DiffOptions): Promise<FileDiff>
+    /**
+     * 파일 하나를 디스크에서 삭제한다 — tracked는 status가 삭제 변경으로 잡고 untracked는 그대로 사라진다.
+     * 되돌릴 수 없다(확인창은 UI 책임). 부재 파일·디렉터리·심볼릭 링크·충돌 파일은 친절 에러로 거부
+     */
+    removeFile(path: string): Promise<void>
   }
   history: {
     /** 최신순 커밋 요약. limit은 1~10000으로 잘린다 */
@@ -485,6 +490,30 @@ export function createGitClient(repoPath: string): GitClient {
         if (untrackedPaths.length > 0) {
           await execGitOrThrow(['clean', '-f', '--', ...toPathspecs(untrackedPaths)], { cwd })
         }
+      },
+      async removeFile(path) {
+        const cwd = await topLevel()
+        assertRepoRelative(path)
+        // 충돌(unmerged) 파일 가드 — 삭제는 충돌 정리 흐름을 우회한다 (discard 가드와 동일 계열)
+        const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
+        if (unmerged.stdout.trim() !== '') {
+          throw new Error(
+            '충돌 중인 파일은 삭제로 정리할 수 없어요. 충돌 화면에서 한쪽을 고르거나 병합을 취소해 주세요.',
+          )
+        }
+        const filePath = join(cwd, path)
+        const stats = await lstat(filePath).catch(() => null)
+        if (stats === null) {
+          throw new Error('이미 없는 파일이에요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // 심볼릭 링크는 저장소 밖을 가리킬 수 있다 — readText·saveText와 동일 계열로 거부한다
+        if (stats.isSymbolicLink()) {
+          throw new Error('링크 파일이라 여기서는 지울 수 없어요.')
+        }
+        if (stats.isDirectory()) {
+          throw new Error('폴더는 여기서 지울 수 없어요. 파일만 지울 수 있어요.')
+        }
+        await rm(filePath)
       },
       async diff(path, options) {
         const cwd = await topLevel()
