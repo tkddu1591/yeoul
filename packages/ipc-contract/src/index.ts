@@ -1,5 +1,6 @@
 import type {
   BranchSummary,
+  CherryPickResult,
   CommitDetail,
   CommitSummary,
   DiffOptions,
@@ -87,6 +88,15 @@ export interface GitApi {
     diffAgainstWorktree(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
     revert(repoPath: string, hash: string): Promise<RevertResult>
     revertAbort(repoPath: string): Promise<void>
+    /** 이 저장 하나만 지금 공간으로 가져온다(cherry-pick) — 병합 커밋은 거부된다 */
+    cherryPick(repoPath: string, hash: string): Promise<CherryPickResult>
+    cherryPickAbort(repoPath: string): Promise<void>
+    /** 이 시점에 태그(lightweight)를 만든다 — 이름·중복·사라진 해시는 친절 에러 */
+    createTag(repoPath: string, name: string, hash: string): Promise<void>
+    /** 마지막 저장 실행취소(reset --mixed) — hash는 화면이 아는 HEAD(낡은 목록이면 거부) */
+    undoLast(repoPath: string, hash: string): Promise<void>
+    /** 마지막 저장 메시지 고치기(amend, 메시지만) — staged가 있으면 거부된다 */
+    reword(repoPath: string, hash: string, message: string): Promise<void>
   }
   history: {
     /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어) */
@@ -134,6 +144,11 @@ export const CHANNELS = {
   commitsDiffWorktree: 'commits:diff-worktree',
   commitsRevert: 'commits:revert',
   commitsRevertAbort: 'commits:revert-abort',
+  commitsCherryPick: 'commits:cherry-pick',
+  commitsCherryPickAbort: 'commits:cherry-pick-abort',
+  commitsCreateTag: 'commits:create-tag',
+  commitsUndoLast: 'commits:undo-last',
+  commitsReword: 'commits:reword',
   historyList: 'history:list',
   syncPush: 'sync:push',
   syncPull: 'sync:pull',

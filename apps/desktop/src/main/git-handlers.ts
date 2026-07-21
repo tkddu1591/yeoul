@@ -199,6 +199,36 @@ export function registerGitHandlers(): void {
     createGitClient(assertAllowedRepo(repoPath)).commits.revertAbort(),
   )
 
+  ipcMain.handle(CHANNELS.commitsCherryPick, (_event, repoPath: unknown, hash: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.cherryPick(assertHash(hash)),
+  )
+
+  ipcMain.handle(CHANNELS.commitsCherryPickAbort, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.cherryPickAbort(),
+  )
+
+  ipcMain.handle(
+    CHANNELS.commitsCreateTag,
+    (_event, repoPath: unknown, name: unknown, hash: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).commits.createTag(
+        assertString(name),
+        assertHash(hash),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.commitsUndoLast, (_event, repoPath: unknown, hash: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).commits.undoLast(assertHash(hash)),
+  )
+
+  ipcMain.handle(
+    CHANNELS.commitsReword,
+    (_event, repoPath: unknown, hash: unknown, message: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).commits.reword(
+        assertHash(hash),
+        assertString(message),
+      ),
+  )
+
   ipcMain.handle(CHANNELS.filesReadText, (_event, repoPath: unknown, path: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).files.readText(assertString(path)),
   )

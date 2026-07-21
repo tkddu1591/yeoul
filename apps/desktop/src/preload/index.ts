@@ -67,6 +67,13 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.commitsDiffWorktree, repoPath, hash, path, origPath),
     revert: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsRevert, repoPath, hash),
     revertAbort: (repoPath) => ipcRenderer.invoke(CHANNELS.commitsRevertAbort, repoPath),
+    cherryPick: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsCherryPick, repoPath, hash),
+    cherryPickAbort: (repoPath) => ipcRenderer.invoke(CHANNELS.commitsCherryPickAbort, repoPath),
+    createTag: (repoPath, name, hash) =>
+      ipcRenderer.invoke(CHANNELS.commitsCreateTag, repoPath, name, hash),
+    undoLast: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsUndoLast, repoPath, hash),
+    reword: (repoPath, hash, message) =>
+      ipcRenderer.invoke(CHANNELS.commitsReword, repoPath, hash, message),
   },
   history: {
     list: (repoPath, limit) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit),
