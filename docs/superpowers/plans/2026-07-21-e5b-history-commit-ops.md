@@ -2471,6 +2471,159 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8-보완: 품질 리뷰 4건 (실측 반영)
+
+품질 리뷰(파괴 작업 안전 전 시나리오 통과) 지적:
+
+- **(Important 1) HEAD가 로드 범위 밖이면 "내가 어디 있는지"를 찾을 수 없다** — 전환 직후 스크롤·로드 범위가 그대로라 "지금 여기"가 DOM에도 없음(피드백 4 핵심 미완). → HEAD 변화 시 자동 스크롤 + 범위 밖이면 "지금 여기로" 버튼(찾을 때까지 상한 확장).
+- **(Important 2) 빈 커밋 reword 원어 에러** — amend가 "would make it empty"로 거부, 영어 원문 노출. → `--allow-empty` 병기(빈 커밋의 메시지 고치기는 빈 채로 유지 — 안전).
+- **(Minor 3) HEAD 행 배지 crush** — '지금 여기'+N 접기와 폭 경쟁으로 `main`도 "m…". → 현재 브랜치 배지는 flex none(최우선 생존자).
+- **(Minor 5) 체리픽 충돌+자동 보관 notice 선행 공백**. → join 방식 정리.
+
+**Files:**
+- Modify: `packages/git-adapter/src/client.ts` (+`packages/git-adapter/test/client.test.ts`)
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/src/renderer/src/components/HistoryPanel.tsx` (+`history-panel.css`)
+- Modify: `apps/desktop/src/renderer/src/App.tsx`
+
+- [ ] **Step 1: reword 빈 커밋 테스트 (Red)** — reword 테스트 묶음 끝에 추가:
+
+```ts
+  it('reword — 빈 커밋(변경 없는 저장)의 메시지도 고칠 수 있다 (원어 에러 없음)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', '빈 저장'], { cwd: repo })
+    const head = (await client.history.list(1))[0]!
+    await client.commits.reword(head.hash, '고친 제목')
+    expect((await client.history.list(1))[0]!.subject).toBe('고친 제목')
+  })
+```
+
+Run: FAIL 확인(GitError — "would make it empty" 원문).
+
+- [ ] **Step 2: 엔진** — reword의 amend 실행 줄 교체:
+
+```ts
+        // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전.
+        // --allow-empty: 빈 커밋의 메시지 고치기가 "would make it empty" 원어로 죽지 않게 (품질 리뷰)
+        await execGitOrThrow(['commit', '--amend', '--allow-empty', '-F', '-'], { cwd, stdin: message })
+```
+
+Green: **347 tests**.
+
+- [ ] **Step 3: store**
+
+(a) `cherryPickCommit`의 notice 조합 교체 — 기존:
+
+```ts
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+```
+
+교체:
+
+```ts
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        // conflict(안내 null) + 자동 보관 조합에서 선행 공백이 남지 않게 join으로 조립한다 (품질 리뷰)
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
+```
+
+(b) 인터페이스에 추가(`loadMoreHistory(): Promise<void>` 줄 뒤):
+
+```ts
+  /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
+  revealHead(): Promise<void>
+```
+
+(c) `loadMoreHistory` 구현 뒤에 추가:
+
+```ts
+  async revealHead() {
+    const { repoPath, status } = get()
+    const headHash = status?.headHash ?? null
+    if (!repoPath || headHash === null) return
+    await guard(set, get, async () => {
+      // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
+      let limit = get().historyLimit
+      for (let round = 0; round < 10; round += 1) {
+        if (get().history.some((commit) => commit.hash === headHash)) return
+        limit += 2000
+        set({ historyLimit: limit, history: await git().history.list(repoPath, limit) })
+      }
+    })
+  },
+```
+
+- [ ] **Step 4: HistoryPanel + App + CSS**
+
+(a) HistoryPanel props에 추가(`onLoadMore(): void` 줄 뒤):
+
+```ts
+  /** "지금 여기"가 로드 범위 밖일 때 누른다 — 찾을 때까지 더 읽어 스크롤한다 (품질 리뷰) */
+  onLocateHead(): void
+```
+
+(구조 분해에도 `onLocateHead` 추가.)
+
+(b) virtualizer 선언 **뒤**에 HEAD 추적 추가:
+
+```tsx
+  // "지금 여기"(HEAD)가 바뀌면 그 행으로 스크롤한다 — 전환·실행취소 뒤 내 위치를 바로 보여준다 (품질 리뷰)
+  const headIndex = headHash === null ? -1 : history.findIndex((commit) => commit.hash === headHash)
+  useEffect(() => {
+    if (headIndex >= 0) virtualizer.scrollToIndex(headIndex, { align: 'center' })
+    // headHash 변화 시점에만 — 목록 증가(더 불러오기)로는 튀지 않는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headHash])
+```
+
+(`useEffect`를 react import에 추가 — 기존 import 형태에 맞춰.)
+
+(c) 패널 헤더 accessory(기존 log Badge·count가 있는 자리)에 조건부 버튼 추가 — 정확한 삽입 지점은 기존 accessory 마크업을 읽고 count 요소 **뒤**에:
+
+```tsx
+          {headHash !== null && headIndex < 0 && (
+            <Button variant="ghost" size="sm" isDisabled={busy} onPress={onLocateHead} testId="history-locate-head">
+              지금 여기로
+            </Button>
+          )}
+```
+
+(Button import가 없으면 추가. 삽입 지점이 플랜 전제와 다르면 NEEDS_CONTEXT.)
+
+(d) App의 HistoryPanel 배선에 추가(`onLoadMore=` 줄 뒤):
+
+```tsx
+            onLocateHead={() => void store.revealHead()}
+```
+
+(e) `history-panel.css`의 `.history-item__ref--head` 블록 교체:
+
+```css
+.history-item__ref--head {
+  /* 현재 브랜치 배지는 줄어들지 않는다 — "내가 어디 있는지"가 최우선 생존자 (품질 리뷰) */
+  flex: none;
+  background: var(--color-selection-bg);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+```
+
+- [ ] **Step 5: 실렌더 확인 4건** — (1) 5000커밋 저장소에서 HEAD가 범위 밖인 브랜치로 전환 → "지금 여기로" 버튼 노출 → 클릭 → HEAD 행 도달·중앙 표시; 범위 안 케이스는 전환 즉시 자동 스크롤, (2) 빈 커밋 메시지 고치기 → 친절 동작(원어 에러 없음), (3) HEAD 행에서 `main` 배지 온전(+N·병합 배지 공존 상태), (4) 체리픽 충돌+자동 보관 notice 선행 공백 없음.
+
+- [ ] **Step 6: 게이트** — 루트 `pnpm test`(**347**) + typecheck(6 Done) + build + E2E 전체(**42 passed**) 전부 exit 0
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/git-adapter apps/desktop/src
+git commit -m "fix: 품질 리뷰 — HEAD 추적 스크롤·지금 여기로 버튼·빈 커밋 reword·배지 생존·notice 공백
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
