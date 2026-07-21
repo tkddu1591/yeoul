@@ -428,8 +428,13 @@ test('우클릭한 저장 시점에서 실험 공간을 만든다', async () => 
     await window.getByTestId('prompt-input').fill('from-root')
     await window.getByTestId('prompt-submit').click()
     await expect(window.getByTestId('header-branch')).toContainText('from-root')
-    // root 시점으로 이동했으므로 역사는 1개
-    await expect(window.getByTestId('history-count')).toHaveText('1')
+    // 전체 그래프(--all) — root로 이동해도 main의 커밋까지 2개가 그대로 보인다 (E5b)
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    // "지금 여기"는 이동한 root 커밋 행을 따라온다
+    const rootHash = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    await expect(window.getByTestId(`history-item-${rootHash}`)).toContainText('지금 여기')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -501,7 +506,8 @@ test('다른 실험 공간을 합친다 (빨리 감기)', async () => {
   })
   try {
     const window = await app.firstWindow()
-    await expect(window.getByTestId('history-count')).toHaveText('1')
+    // 전체 그래프(--all) — 합치기 전에도 exp의 커밋이 함께 보인다 (E5b)
+    await expect(window.getByTestId('history-count')).toHaveText('2')
     await window.getByTestId('merge-open').click()
     await window.getByTestId('list-option-exp').click()
     await expect(window.getByTestId('notice')).toContainText('모두 가져왔어요')
@@ -986,6 +992,161 @@ test('커밋 상세에서 지금 코드와 비교 — 중앙 diff 제목이 비�
     await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
     // 상세(파일 목록)는 열린 채 유지된다 — 다른 파일을 이어서 비교할 수 있다
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('히스토리 전체 그래프 — 다른 실험 공간·원격(☁)이 함께 보이고 "지금 여기"가 나를 따라온다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'other'], { cwd: repo })
+  await writeFile(join(repo, 'other.txt'), 'o\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'other 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  // 보관함(stash) 커밋은 전체 그래프에 나타나면 안 된다 — 픽스처에 하나 심는다 (검출력 변이 대상)
+  await writeFile(join(repo, 'app.txt'), 'dirty\n')
+  await execGitOrThrow(['stash', 'push', '-u', '-m', '픽스처 보관'], { cwd: repo })
+  const mainHash = (await execGitOrThrow(['rev-parse', 'main'], { cwd: repo })).stdout.trim()
+  const otherHash = (await execGitOrThrow(['rev-parse', 'other'], { cwd: repo })).stdout.trim()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // main(=origin/main 동일 해시 dedup) 1개 + other 1개 — stash WIP 커밋은 제외된다
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await expect(window.getByTestId('history-list')).not.toContainText('픽스처 보관')
+    // 원격 배지 — origin/은 ☁ 접두로 로컬과 구분된다 (피드백 3)
+    await expect(window.getByTestId('history-list')).toContainText('☁ origin/main')
+    // "지금 여기"는 index 0(최신 행 = other)이 아니라 HEAD(main) 행에 붙는다 (피드백 4)
+    await expect(window.getByTestId(`history-item-${mainHash}`)).toContainText('지금 여기')
+    await expect(window.getByTestId(`history-item-${otherHash}`)).not.toContainText('지금 여기')
+    // 전환하면 마커가 따라온다 — 목록은 그대로 전체
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-item-other').click()
+    await expect(window.getByTestId('header-branch')).toContainText('other')
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await expect(window.getByTestId(`history-item-${otherHash}`)).toContainText('지금 여기')
+    await expect(window.getByTestId(`history-item-${mainHash}`)).not.toContainText('지금 여기')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
+test('이 저장만 가져오기 (cherry-pick) — 성공과 충돌·취소', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 깔끔히 가져올 수 있는 저장(새 파일)과 겹치는 저장(app.txt 수정)을 각각 다른 공간에 만든다
+  await execGitOrThrow(['checkout', '-b', 'feature'], { cwd: repo })
+  await writeFile(join(repo, 'feature.txt'), 'f\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '기능 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'rival\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'rival 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'mine\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'mine 저장'], { cwd: repo })
+  const featureHash = (await execGitOrThrow(['rev-parse', 'feature'], { cwd: repo })).stdout.trim()
+  const rivalHash = (await execGitOrThrow(['rev-parse', 'rival'], { cwd: repo })).stdout.trim()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('4')
+    // (1) 깔끔한 가져오기 — 새 저장이 생기고 파일이 도착한다
+    await window.getByTestId(`history-item-${featureHash}`).click({ button: 'right' })
+    await window.getByTestId('context-cherry-pick').click()
+    await expect(window.getByTestId('notice')).toContainText('가져와 새 저장을 만들었어요')
+    await expect(window.getByTestId('history-count')).toHaveText('5')
+    expect(await readFile(join(repo, 'feature.txt'), 'utf8')).toBe('f\n')
+    // (2) 겹치는 가져오기 — cherry-picking 상태 바가 뜨고 취소로 돌아온다
+    await window.getByTestId(`history-item-${rivalHash}`).click({ button: 'right' })
+    await window.getByTestId('context-cherry-pick').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('저장 가져오는 중')
+    await expect(window.getByTestId('merge-abort')).toHaveText('가져오기 취소')
+    await window.getByTestId('merge-abort').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    await expect(window.getByTestId('notice')).toContainText('가져오기를 취소')
+    await expect(window.getByTestId('history-count')).toHaveText('5')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('태그 만들기 (tag) — 배지로 나타난다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await window.getByTestId('prompt-input').fill('v1.0')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('notice')).toContainText('태그를 만들었어요')
+    // 태그는 --all 그래프의 decorate 배지로 자동 반영된다 (실측 9)
+    await expect(window.getByTestId('history-list')).toContainText('v1.0')
+    const tags = await execGitOrThrow(['tag', '--list'], { cwd: repo })
+    expect(tags.stdout.trim()).toBe('v1.0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('저장 실행취소 (undo)와 메시지 고치기 (amend)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    // HEAD가 아닌 행에서는 실행취소·메시지 고치기가 사유와 함께 비활성이다
+    await window.locator('[data-testid^="history-item-"]').last().click({ button: 'right' })
+    await expect(window.getByTestId('context-undo-last')).toBeDisabled()
+    await expect(window.getByTestId('context-reword')).toBeDisabled()
+    await window.keyboard.press('Escape')
+    // 실행취소 — 확인창은 내용이 남는다는 안내를 담는다
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-undo-last').click()
+    await expect(window.getByRole('alertdialog')).toContainText('바뀐 내용은 그대로 남아요')
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    // 취소된 저장의 내용(v2)이 변경 목록으로 돌아왔다 — 유실 없음
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe('v2\n')
+    // 메시지 고치기 — 남은 HEAD(init)의 제목이 초기값으로 채워진다
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-reword').click()
+    await expect(window.getByTestId('prompt-input')).toHaveValue('init')
+    await window.getByTestId('prompt-input').fill('고친 첫 저장')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('history-list')).toContainText('고친 첫 저장')
+    const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
+    expect(log.stdout.trim()).toBe('고친 첫 저장')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
