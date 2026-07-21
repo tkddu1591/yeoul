@@ -2568,13 +2568,15 @@ Green: **347 tests**.
 (b) virtualizer 선언 **뒤**에 HEAD 추적 추가:
 
 ```tsx
-  // "지금 여기"(HEAD)가 바뀌면 그 행으로 스크롤한다 — 전환·실행취소 뒤 내 위치를 바로 보여준다 (품질 리뷰)
+  // "지금 여기"(HEAD)가 바뀌거나, "지금 여기로"로 로드 범위에 처음 들어온 순간 그 행으로 스크롤한다
+  // (품질 리뷰 — 구현 실측 정정: revealHead는 headHash를 바꾸지 않으므로 발견 전이(headFound)도 봐야 한다.
+  //  불리언 전이만 보므로 이미 보이는 상태의 단순 더 불러오기로는 튀지 않는다)
   const headIndex = headHash === null ? -1 : history.findIndex((commit) => commit.hash === headHash)
+  const headFound = headIndex >= 0
   useEffect(() => {
     if (headIndex >= 0) virtualizer.scrollToIndex(headIndex, { align: 'center' })
-    // headHash 변화 시점에만 — 목록 증가(더 불러오기)로는 튀지 않는다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [headHash])
+  }, [headHash, headFound])
 ```
 
 (`useEffect`를 react import에 추가 — 기존 import 형태에 맞춰.)
