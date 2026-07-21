@@ -2468,6 +2468,143 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
 ---
+### Task 7-보완: 품질 리뷰 4건 (실렌더 실측 반영)
+
+품질 리뷰가 잡은 결함:
+
+- **(Important 1) 죽은 클릭 레이스** — 팝오버를 열면 refreshPulls가 busy를 잡는데 캐시 목록이 바로 보여, 즉시 클릭하면 guard 재진입 거부로 openPullDetail이 **조용히 삼켜진다**(팝오버는 닫히고 아무 일도 없음 — localhost mock에서도 5회 중 3회, 실 GitHub 왕복에서는 상시). → busy가 풀릴 때까지 잠깐 대기(상한 5초) 후 진행.
+- **(Important 2) 답변 후 내 답변이 화면 밖** — 긴 타임라인에서 전송해도 스크롤이 옛 위치라 안 보임 → "안 보내진 줄 알고 재전송 → 중복" 유도. 최초 열림도 맨 위(가장 오래된 것)부터. → 열 때·코멘트 수 변화 시 맨 아래(최신)로 스크롤.
+- **(Minor 3) 부분 성공 상태 어긋남** — merge/comment/approve 성공 후 상세 재조회가 실패하면 성공이 에러로 뒤집힌다(병합됐는데 '열림' 배지 + 재전송 유도). → 재조회 실패는 삼키고 성공을 유지.
+- **(Minor 5) 코멘트 길이 무가드** — GitHub 상한(65,536자) 초과 시 원문 422 노출. → 길이 가드 + 친절 문구.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/src/renderer/src/components/ReviewDetailPanel.tsx`
+- Modify: `apps/desktop/src/main/hosting-handlers.ts`
+
+- [ ] **Step 1: store — openPullDetail busy 대기** (전체 교체)
+
+```ts
+  async openPullDetail(number) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    // 팝오버 열기 직후에는 refreshPulls가 busy를 잡고 있다 — 첫 클릭을 조용히 삼키지 않게
+    // busy가 풀릴 때까지 잠깐 기다린다(상한 5초 — 넘으면 guard가 재진입 거부로 처리) (품질 리뷰)
+    for (let waited = 0; get().busy && waited < 5000; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await guard(set, get, async () => {
+      const pullDetail = await hosting().pulls.detail(repoPath, number)
+      // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
+      set({ ...CLEAR_SELECTIONS, pullDetail })
+    })
+  },
+```
+
+- [ ] **Step 2: store — 부분 성공 분리 3곳**
+
+(a) `addPullComment` guard 내부 교체:
+
+```ts
+      const number = pullDetail.detail.number
+      await hosting().pulls.comment(repoPath, number, body)
+      // 내 답변만 붙이지 않고 서버 상태로 다시 읽는다 — 그 사이 달린 다른 코멘트도 함께 온다.
+      // 재조회 실패가 이미 성공한 전송을 에러로 뒤집지 않게 삼킨다(재전송=중복 유도 방지 — 품질 리뷰)
+      try {
+        set({ pullDetail: await hosting().pulls.detail(repoPath, number) })
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
+```
+
+(b) `approvePull` guard 내부 교체:
+
+```ts
+      const number = pullDetail.detail.number
+      await hosting().pulls.approve(repoPath, number)
+      // 재조회 실패가 이미 성공한 승인을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
+      let refreshed = get().pullDetail
+      try {
+        refreshed = await hosting().pulls.detail(repoPath, number)
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
+      set({
+        pullDetail: refreshed,
+        notice: `리뷰 요청 #${number}을 승인했어요.`,
+      })
+```
+
+(c) `mergePull` guard 내부 교체:
+
+```ts
+      const number = pullDetail.detail.number
+      const base = pullDetail.detail.baseBranch
+      await hosting().pulls.merge(repoPath, number)
+      // 상세를 다시 읽어 '병합됨' 배지로 갱신한다. 로컬 반영은 App의 후속 제안(전환+받아오기)이 담당.
+      // 재조회 실패가 이미 성공한 병합을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
+      let refreshed = get().pullDetail
+      try {
+        refreshed = await hosting().pulls.detail(repoPath, number)
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
+      set({
+        pullDetail: refreshed,
+        notice: `리뷰 요청 #${number}을 "${base}"에 병합했어요. 로컬은 아직 그대로예요 — 기본 공간에서 받아오기(pull)를 하면 반영돼요.`,
+      })
+```
+
+- [ ] **Step 3: ReviewDetailPanel — 최신으로 스크롤**
+
+(a) import 교체 — `import { useState } from 'react'` →
+
+```tsx
+import { useEffect, useRef, useState } from 'react'
+```
+
+(b) 컴포넌트 본문(기존 useState 선언들 뒤)에 추가:
+
+```tsx
+  const timelineRef = useRef<HTMLDivElement | null>(null)
+  // 열 때·답변이 늘었을 때 최신(맨 아래)으로 — "코멘트 확인"의 기본 시선이자,
+  // 전송 후 내 답변이 화면 밖에 남아 재전송(중복)을 유도하는 것을 막는다 (품질 리뷰)
+  useEffect(() => {
+    const el = timelineRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [view.comments.length])
+```
+
+(c) 타임라인 컨테이너에 ref 부착:
+
+```tsx
+      <div ref={timelineRef} className="review-detail__timeline" data-testid="review-detail-timeline">
+```
+
+- [ ] **Step 4: hosting-handlers — 길이 가드** — pull-comment 핸들러의 `if (text === '')` 줄 뒤에 추가:
+
+```ts
+      // GitHub 코멘트 상한(65,536자) 초과의 원문 422를 막는다 (품질 리뷰)
+      if (text.length > 60000) {
+        throw new Error('답변이 너무 길어요. 60,000자 안으로 줄여 주세요.')
+      }
+```
+
+- [ ] **Step 5: 실렌더 확인 3건** — (1) 팝오버 열기 직후 즉시 항목 클릭 5회 연속 → 매번 상세가 열린다(죽은 클릭 0), (2) 코멘트 20개+ 상세 열기 → 맨 아래(최신)가 보인다, 답변 전송 → 내 답변이 화면 안, (3) 60,000자 초과 답변 → 친절 문구.
+
+- [ ] **Step 6: 게이트** — 루트 `pnpm test`(**296**) + typecheck(6 Done) + build + E2E 전체(**35 passed**) 전부 exit 0
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src
+git commit -m "fix(desktop): 품질 리뷰 — 죽은 클릭 대기·타임라인 최신 스크롤·부분 성공 분리·답변 길이 가드
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 8: 최종 게이트 + 공식 스크린샷 3장 + README
 
 - [ ] **Step 1: 전체 게이트**
@@ -2823,6 +2960,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - **타임라인 자동 새로고침:** 열 때·쓸 때만 갱신 — 폴링 또는 수동 새로고침 버튼 검토.
 - **코멘트·리뷰 per_page=100 초과:** 잘린다 — 페이징(오래된 코멘트 접기 UI와 함께).
 - **승인 뒤집힘(CHANGES_REQUESTED·dismiss):** 승인됨 판정이 "APPROVED 존재"라 뒤집혀도 승인됨으로 보일 수 있다 — 최신 리뷰 상태 기준 판정으로 개선.
+- (품질 리뷰 Minor) 우측 열 최소폭(260px)에서 승인/병합 버튼 글자 세로 줄바꿈 — 코스메틱.
+- (품질 리뷰, 기존 결함) PromptDialog가 ESC로 안 닫힌다(data-exiting조차 미부착 — E1a 잔여 ESC 불응과 동류). 그만두기·바깥 클릭은 정상 — 후속 수리.
+- (품질 리뷰) 부분 성공 시퀀스(쓰기 성공+재조회 실패)의 자동 테스트는 mock 시퀀스 주입이 필요해 미작성 — Task 7-보완은 코드 경로 분리로 방어.
 - **merge_method 고정(merge):** squash·rebase는 앱 철학(조상 기록)상 비목표 — 저장소 설정이 병합 커밋을 금지하면 405 문구로만 안내된다. 설정 감지 후 안내 개선 검토.
 - **병합 후 원격 실험 공간 정리:** head 브랜치 삭제(DELETE /git/refs) 미지원 — 로컬 실험 공간 지우기 흐름과 묶어 검토.
 - **CLEAR_SELECTIONS로 리뷰 상세가 닫히는 폭:** 스테이지·커밋 등 로컬 작업마다 닫힌다(관례 일관) — 리뷰를 보며 작업하는 흐름이 잦으면 유지 정책 재검토.
