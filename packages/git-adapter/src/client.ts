@@ -1038,6 +1038,11 @@ export function createGitClient(repoPath: string): GitClient {
           if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
             return { outcome: 'conflict', autoShelved }
           }
+          if (output.includes('nothing to commit')) {
+            throw new Error(
+              '되돌려도 바뀌는 내용이 없어요 — 이미 지금 내용에 반영되어 있는 저장이에요.',
+            )
+          }
           if (output.includes('bad object')) {
             throw new Error(MISSING_COMMIT_MESSAGE)
           }

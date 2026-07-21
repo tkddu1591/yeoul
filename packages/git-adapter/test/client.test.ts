@@ -1434,6 +1434,20 @@ describe('GitClient', () => {
     expect(await client.files.readText('README.md')).toBe('# fixture\n')
   })
 
+  it('revert — 되돌려도 바뀌는 내용이 없으면 읽히는 메시지로 알린다 (비조상·이미 반영)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    // 같은 내용을 되돌린 뒤 또 되돌리면 변경이 없다 — "이미 반영"의 최소 재현
+    await writeFixtureFile(repo, 'README.md', 'v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'revert', '--no-edit', 'HEAD'], { cwd: repo })
+    const middle = (await client.history.list(2))[1]!
+    await expect(client.commits.revert(middle.hash)).rejects.toThrow(/바뀌는 내용이 없어요/)
+    // 상태가 오염되지 않았다
+    expect((await client.repo.status()).state).toBe('normal')
+  })
+
   it('revertAbort — 되돌리는 중이 아니면 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

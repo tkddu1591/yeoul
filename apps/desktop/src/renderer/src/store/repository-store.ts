@@ -512,10 +512,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           'up-to-date': '이미 모두 반영되어 있어요.',
         }
-        const shelfNotice = result.autoShelved
-          ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
-          : ''
-        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
           ...CLEAR_SELECTIONS,
@@ -554,8 +552,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           'up-to-date': '이미 최신이에요.',
         }
-        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
-        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
           ...CLEAR_SELECTIONS,
@@ -574,11 +572,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       let notice: string | null = null
       try {
         const result = await git().commits.revert(repoPath, hash)
-        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
-        // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다 (join으로 선행 공백 방지)
         notice =
-          `${result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : ''}${shelfNotice}` ||
-          null
+          [result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null, shelfNotice]
+            .filter((part) => part)
+            .join(' ') || null
       } finally {
         set({
           ...CLEAR_SELECTIONS,
