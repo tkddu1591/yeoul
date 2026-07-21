@@ -9,7 +9,7 @@ import type {
   RepositoryStatus,
   ShelfEntry,
 } from '@git-gui/domain'
-import type { HostingStatus, PullSummary } from '@git-gui/ipc-contract'
+import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 
 const git = () => window.gitApi
@@ -46,6 +46,8 @@ interface RepositoryStore {
   hostingStatus: HostingStatus | null
   /** 열린 리뷰 요청 — null이면 마지막 조회 실패(빈 목록으로 위장하지 않는다 — 품질 리뷰) */
   pulls: PullSummary[] | null
+  /** 리뷰 상세(상세+코멘트) — 열려 있으면 우측 열이 리뷰 상세로 전환된다. 커밋 상세와 상호 배타 */
+  pullDetail: PullDetailView | null
   /** 안내 배너 — 에러가 아닌 정보(자동 보관 등). 다음 작업 시작 시 지워진다 */
   notice: string | null
   error: string | null
@@ -122,6 +124,16 @@ interface RepositoryStore {
   createPull(title: string): Promise<boolean>
   /** 리뷰 요청을 브라우저로 연다 — 주소는 main이 보관한 목록에서만 */
   openPull(number: number): Promise<void>
+  /** 리뷰 상세 열기(상세+코멘트 한 번에) — 우측 열이 리뷰 상세로 전환된다. 커밋 상세와 상호 배타 */
+  openPullDetail(number: number): Promise<void>
+  /** 리뷰 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
+  closePullDetail(): void
+  /** 답변 달기 — 성공 여부 반환(성공 시에만 입력을 비운다). 성공 후 타임라인을 서버 상태로 재조회 */
+  addPullComment(body: string): Promise<boolean>
+  /** 승인 — 자기 PR이면 main이 친절 문구로 거부한다. 성공 후 상세 재조회(승인됨 배지 갱신) */
+  approvePull(): Promise<void>
+  /** 병합(병합 커밋) — 성공 여부 반환(App이 기본 공간 이동 제안을 연다). 성공 후 상세 재조회 */
+  mergePull(): Promise<boolean>
 }
 
 /** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함) */
@@ -151,6 +163,7 @@ const CLEAR_SELECTIONS = {
   commitDetail: null,
   commitFile: null,
   conflictFile: null,
+  pullDetail: null,
 } as const
 
 type StoreSet = (partial: Partial<RepositoryStore>) => void
@@ -188,6 +201,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   busy: false,
   hostingStatus: null,
   pulls: [],
+  pullDetail: null,
 
   async init() {
     await guard(set, get, async () => {
@@ -367,7 +381,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       const commitDetail = await git().commits.show(repoPath, hash)
-      set({ commitDetail, commitFile: null, conflictFile: null, selected: null, diff: null })
+      // 우측 열은 하나 — 리뷰 상세가 열려 있었다면 닫고 커밋 상세로 전환한다 (상호 배타)
+      set({
+        commitDetail,
+        commitFile: null,
+        conflictFile: null,
+        selected: null,
+        diff: null,
+        pullDetail: null,
+      })
     })
   },
 
@@ -721,6 +743,59 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await hosting().pulls.open(repoPath, number)
+    })
+  },
+
+  async openPullDetail(number) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const pullDetail = await hosting().pulls.detail(repoPath, number)
+      // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
+      set({ ...CLEAR_SELECTIONS, pullDetail })
+    })
+  },
+
+  closePullDetail() {
+    set({ pullDetail: null })
+  },
+
+  async addPullComment(body) {
+    const { repoPath, pullDetail } = get()
+    if (!repoPath || pullDetail === null) return false
+    return guard(set, get, async () => {
+      const number = pullDetail.detail.number
+      await hosting().pulls.comment(repoPath, number, body)
+      // 내 답변만 붙이지 않고 서버 상태로 다시 읽는다 — 그 사이 달린 다른 코멘트도 함께 온다
+      set({ pullDetail: await hosting().pulls.detail(repoPath, number) })
+    })
+  },
+
+  async approvePull() {
+    const { repoPath, pullDetail } = get()
+    if (!repoPath || pullDetail === null) return
+    await guard(set, get, async () => {
+      const number = pullDetail.detail.number
+      await hosting().pulls.approve(repoPath, number)
+      set({
+        pullDetail: await hosting().pulls.detail(repoPath, number),
+        notice: `리뷰 요청 #${number}을 승인했어요.`,
+      })
+    })
+  },
+
+  async mergePull() {
+    const { repoPath, pullDetail } = get()
+    if (!repoPath || pullDetail === null) return false
+    return guard(set, get, async () => {
+      const number = pullDetail.detail.number
+      const base = pullDetail.detail.baseBranch
+      await hosting().pulls.merge(repoPath, number)
+      // 상세를 다시 읽어 '병합됨' 배지로 갱신한다. 로컬 반영은 App의 후속 제안(전환+받아오기)이 담당
+      set({
+        pullDetail: await hosting().pulls.detail(repoPath, number),
+        notice: `리뷰 요청 #${number}을 "${base}"에 병합했어요. 로컬은 아직 그대로예요 — 기본 공간에서 받아오기(pull)를 하면 반영돼요.`,
+      })
     })
   },
 }))
