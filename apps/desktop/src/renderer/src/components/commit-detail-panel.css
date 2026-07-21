@@ -1,4 +1,4 @@
-/* 우측 열 전환형(3차 피드백) — 상단 파일 목록(잔여 공간), 하단 메시지(상한 + 자체 스크롤) */
+/* 우측 하단 슬롯(E6a) — 상단 파일 목록(잔여 공간), 하단 메시지(상한 + 자체 스크롤) */
 .commit-detail__files-head {
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-xs);

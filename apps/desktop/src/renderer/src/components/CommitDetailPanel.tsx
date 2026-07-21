@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowLeft } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { CommitDetail, CommitFileChange } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
@@ -76,7 +76,7 @@ function CommitFileRow({
 }
 
 /**
- * 커밋 클릭 상세 (#6·3차 피드백) — 우측 열이 타임라인에서 이 패널로 전환된다:
+ * 커밋 클릭 상세 (#6·3차 피드백 → E6a 하단 슬롯) — 트리 아래 45% 슬롯에 열린다(트리는 계속 보인다):
  * 상단 파일 목록(가상), 하단 메시지. 파일을 누르면 diff는 중앙 패널에 뜬다.
  * 파일 행 우클릭 — 이 파일만 적용(checkout)·지금 코드와 비교(diff) (E5a).
  * 보관함 미리보기도 이 패널을 재사용하므로 같은 메뉴가 생긴다 — 적용 라벨만 분기.
@@ -123,7 +123,7 @@ export function CommitDetailPanel({
             onPress={onBack}
             testId="commit-detail-back"
           >
-            <ArrowLeft size={13} aria-hidden="true" /> 목록으로
+            <X size={13} aria-hidden="true" /> 닫기
           </Button>
         </>
       }

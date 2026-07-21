@@ -171,3 +171,26 @@
 .app__center > .ui-panel {
   flex: 1;
 }
+/* 우측 열 — 트리(flex 1)가 기본 전체, 커밋 클릭 시에만 하단 상세 슬롯이 45%를 차지한다 (E6a).
+   리뷰 상세(단독 자식)도 같은 flex 1 규칙으로 전체 높이를 쓴다 */
+.app__right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+}
+.app__right > .ui-panel {
+  flex: 1;
+  min-height: 0;
+}
+.app__right-detail {
+  flex: none;
+  height: 45%;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+.app__right-detail > .ui-panel {
+  flex: 1;
+  min-height: 0;
+}

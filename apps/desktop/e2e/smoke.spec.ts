@@ -219,7 +219,7 @@ test('변경 목록 가상화 — 1500개 파일에서 DOM은 가시 범위만 �
   }
 })
 
-test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데에 뜬다', async () => {
+test('커밋을 누르면 트리 아래에 상세가 열리고 파일 diff는 가운데에 뜬다', async () => {
   const repo = await createRepoWithChange()
   // 본문 있는 커밋을 하나 더 쌓는다 — 상세에서 본문 표시를 검증한다
   await execGitOrThrow(['add', '-A'], { cwd: repo })
@@ -234,12 +234,15 @@ test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('history-count')).toHaveText('2')
-    // 최신 커밋 클릭 → 우측 열이 타임라인에서 상세로 전환
+    // 최신 커밋 클릭 → 트리는 그대로 보이고 우측 하단에만 상세가 열린다 (E6a)
     await window.locator('[data-testid^="history-item-"]').first().click()
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
-    // 상세 모드에서 우측 열이 확장된다 (4차 피드백)
-    await expect(window.locator('.app__main')).toHaveClass(/app__main--detail/)
-    await expect(window.getByTestId('history-panel')).toHaveCount(0)
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    // 클릭한 저장 행은 선택 하이라이트(aria-current)로 표시된다
+    await expect(window.locator('[data-testid^="history-item-"]').first()).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
     await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
     await expect(window.getByTestId('commit-detail-body')).toHaveText('자세한 설명 줄')
     await expect(window.getByTestId('commit-detail-file-count')).toHaveText('1')
@@ -247,8 +250,9 @@ test('커밋을 누르면 우측이 상세로 바뀌고 파일 diff는 가운데
     await window.getByTestId('commit-file-app.txt').click()
     await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
     await expect(window.getByTestId('diff-panel')).toContainText('저장')
-    // 목록으로 → 타임라인 복귀
+    // 닫기 → 하단 상세가 닫히고 트리가 전체 높이로 복귀한다
     await window.getByTestId('commit-detail-back').click()
+    await expect(window.getByTestId('commit-detail-panel')).toHaveCount(0)
     await expect(window.getByTestId('history-panel')).toBeVisible()
   } finally {
     await app.close()
@@ -268,6 +272,9 @@ test('스크롤 끝에서 저장 역사를 더 불러온다 (50개 제한 해제
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('history-count')).toHaveText('50+')
+    // 하단 상세가 열려 트리 높이가 줄어든 상태에서도 가상 스크롤·더 불러오기가 정상 동작한다 (E6a)
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
     // 히스토리 스크롤을 끝까지 내리면 다음 페이지를 불러온다 (⑩)
     await window.getByTestId('history-scroll').evaluate((el) => {
       el.scrollTop = el.scrollHeight
@@ -333,6 +340,38 @@ test('우측 열 폭을 드래그로 조절하고 재시작해도 기억한다',
     await second.close()
     await rm(repo, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('960px 최소 창에서 중앙 diff 폭이 380px 이상으로 보장된다 (반응형 열)', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]!.setSize(960, 800)
+    })
+    // 리사이즈 이벤트가 renderer에 닿아 열 폭이 재계산될 때까지 기다린 뒤 잰다
+    await expect.poll(() => window.evaluate(() => window.innerWidth)).toBe(960)
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await expect(window.getByTestId('diff-view-unified')).toBeVisible()
+    // 중앙(diff) ≥ 380px — computeColumns가 좌·우를 함께 줄여 만든 보장 (E2 후속 노트 해소)
+    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(378)
+    // 좌·우 열은 줄되 살아 있다 — 저장 폼(좌측 하단)·타임라인이 함께 보인다
+    await expect(window.getByTestId('commit-button')).toBeVisible()
+    expect(
+      (await window.getByTestId('history-panel').boundingBox())!.width,
+    ).toBeGreaterThanOrEqual(200)
+    // 하단 상세가 열려도 중앙 보장은 유지된다
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(378)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
   }
 })
 
@@ -943,8 +982,9 @@ test('커밋 상세에서 파일 우클릭 — 이 파일만 그 시점 내용�
     // dirty였던 v2는 보관함으로 +1, 디스크는 그 시점(v1) 내용 — 실측
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
     expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe('v1\n')
-    // 적용 결과가 HEAD와 같아 변경 목록은 비고, 파괴 작업 관례대로 상세가 닫혀 타임라인으로 복귀한다
+    // 적용 결과가 HEAD와 같아 변경 목록은 비고, 파괴 작업 관례대로 하단 상세가 닫힌다 (E6a)
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    await expect(window.getByTestId('commit-detail-panel')).toHaveCount(0)
     await expect(window.getByTestId('history-panel')).toBeVisible()
   } finally {
     await app.close()

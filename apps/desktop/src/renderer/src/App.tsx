@@ -304,9 +304,7 @@ export function App() {
         </div>
       )}
       <main
-        className={`app__main${
-          store.commitDetail !== null || store.pullDetail !== null ? ' app__main--detail' : ''
-        }`}
+        className="app__main"
         style={{ gridTemplateColumns: `${columns.left}px minmax(0, 1fr) 6px ${columns.right}px` }}
       >
         {/* 좌측 열 = 변경 목록(위) + 저장 폼(하단 푸터) — 고르고 저장하기까지 한 열에서 끝난다 (E6a) */}
@@ -375,75 +373,89 @@ export function App() {
           onDoubleClick={resetResize}
           data-testid="column-resizer"
         />
-        {store.pullDetail !== null ? (
-          <ReviewDetailPanel
-            key={store.pullDetail.detail.number}
-            view={store.pullDetail}
-            busy={store.busy}
-            onOpenBrowser={() => void store.openPull(store.pullDetail!.detail.number)}
-            onBack={() => store.closePullDetail()}
-            onComment={(body) => store.addPullComment(body)}
-            onApprove={() => void store.approvePull()}
-            onMerge={() => setConfirmingMerge(true)}
-          />
-        ) : store.commitDetail !== null ? (
-          <CommitDetailPanel
-            detail={store.commitDetail}
-            shelfPreview={shelfPreview}
-            selectedFile={store.commitFile}
-            busy={store.busy}
-            onSelectFile={(file) => void store.selectCommitFile(file)}
-            onRestoreFile={(file) =>
-              void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
-            }
-            onCompareFile={(file) =>
-              void store.compareFileWithWorktree(store.commitDetail!.hash, file.path, file.origPath)
-            }
-            onBack={() => store.clearCommit()}
-          />
-        ) : (
-          <HistoryPanel
-            history={store.history}
-            historyLimit={store.historyLimit}
-            currentBranch={status?.branch.name ?? null}
-            headHash={status?.headHash ?? null}
-            localBranches={store.branches.map((branch) => branch.name)}
-            selectedHash={null}
-            busy={store.busy}
-            actionsDisabled={status?.state !== 'normal'}
-            onSelect={(hash) => void store.selectCommit(hash)}
-            onLoadMore={() => void store.loadMoreHistory()}
-            onLocateHead={() => void store.revealHead()}
-            onAction={(action) => {
-              switch (action.kind) {
-                case 'switch':
-                  void store.switchBranch(action.branch)
-                  break
-                case 'branch-here':
-                  store.clearError()
-                  setBranchPrompt({ fromHash: action.hash })
-                  break
-                case 'cherry-pick':
-                  void store.cherryPickCommit(action.hash)
-                  break
-                case 'revert':
-                  void store.revertCommit(action.hash)
-                  break
-                case 'undo':
-                  setConfirmingUndo({ hash: action.hash })
-                  break
-                case 'reword':
-                  store.clearError()
-                  setRewordPrompt({ hash: action.hash, subject: action.subject })
-                  break
-                case 'tag':
-                  store.clearError()
-                  setTagPrompt({ hash: action.hash })
-                  break
-              }
-            }}
-          />
-        )}
+        {/* 우측 열 — 평소엔 트리 전체, 커밋 클릭 시에만 하단에 상세가 열린다 (E6a 사용자 제안).
+            리뷰(PR) 상세만 대화형 화면이라 기존의 우측 전체 전환을 유지한다 (사용자 동의).
+            store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다 */}
+        <div className="app__right">
+          {store.pullDetail !== null ? (
+            <ReviewDetailPanel
+              key={store.pullDetail.detail.number}
+              view={store.pullDetail}
+              busy={store.busy}
+              onOpenBrowser={() => void store.openPull(store.pullDetail!.detail.number)}
+              onBack={() => store.closePullDetail()}
+              onComment={(body) => store.addPullComment(body)}
+              onApprove={() => void store.approvePull()}
+              onMerge={() => setConfirmingMerge(true)}
+            />
+          ) : (
+            <>
+              <HistoryPanel
+                history={store.history}
+                historyLimit={store.historyLimit}
+                currentBranch={status?.branch.name ?? null}
+                headHash={status?.headHash ?? null}
+                localBranches={store.branches.map((branch) => branch.name)}
+                selectedHash={store.commitDetail?.hash ?? null}
+                busy={store.busy}
+                actionsDisabled={status?.state !== 'normal'}
+                onSelect={(hash) => void store.selectCommit(hash)}
+                onLoadMore={() => void store.loadMoreHistory()}
+                onLocateHead={() => void store.revealHead()}
+                onAction={(action) => {
+                  switch (action.kind) {
+                    case 'switch':
+                      void store.switchBranch(action.branch)
+                      break
+                    case 'branch-here':
+                      store.clearError()
+                      setBranchPrompt({ fromHash: action.hash })
+                      break
+                    case 'cherry-pick':
+                      void store.cherryPickCommit(action.hash)
+                      break
+                    case 'revert':
+                      void store.revertCommit(action.hash)
+                      break
+                    case 'undo':
+                      setConfirmingUndo({ hash: action.hash })
+                      break
+                    case 'reword':
+                      store.clearError()
+                      setRewordPrompt({ hash: action.hash, subject: action.subject })
+                      break
+                    case 'tag':
+                      store.clearError()
+                      setTagPrompt({ hash: action.hash })
+                      break
+                  }
+                }}
+              />
+              {store.commitDetail !== null && (
+                <div className="app__right-detail">
+                  <CommitDetailPanel
+                    detail={store.commitDetail}
+                    shelfPreview={shelfPreview}
+                    selectedFile={store.commitFile}
+                    busy={store.busy}
+                    onSelectFile={(file) => void store.selectCommitFile(file)}
+                    onRestoreFile={(file) =>
+                      void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
+                    }
+                    onCompareFile={(file) =>
+                      void store.compareFileWithWorktree(
+                        store.commitDetail!.hash,
+                        file.path,
+                        file.origPath,
+                      )
+                    }
+                    onBack={() => store.clearCommit()}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </main>
       <PromptDialog
         isOpen={branchPrompt !== null}
