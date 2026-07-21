@@ -75,6 +75,16 @@ interface RepositoryStore {
   revertCommit(hash: string): Promise<void>
   /** 되돌리기 취소 — 확인창(UI 책임) 경유 */
   abortRevert(): Promise<void>
+  /** 이 저장 하나만 가져오는 새 저장(cherry-pick) — 충돌이면 cherry-picking 상태 바가 안내 */
+  cherryPickCommit(hash: string): Promise<void>
+  /** 가져오기 취소 — 확인창(UI 책임) 경유 */
+  abortCherryPick(): Promise<void>
+  /** 이 시점에 태그 만들기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
+  createTag(name: string, hash: string): Promise<boolean>
+  /** 마지막 저장 실행취소 — 확인창(UI 책임) 경유. 내용은 변경 목록으로 돌아온다 */
+  undoLastCommit(hash: string): Promise<void>
+  /** 마지막 저장 메시지 고치기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
+  rewordLastCommit(hash: string, message: string): Promise<boolean>
   /** 실험 공간 지우기. 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
   removeBranch(name: string, force: boolean): Promise<boolean>
   /** 이름 바꾸기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
@@ -586,6 +596,87 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: '되돌리기를 취소하고 이전 상태로 돌아왔어요.',
+      })
+    })
+  },
+
+  async cherryPickCommit(hash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (revert 관례)
+      let notice: string | null = null
+      try {
+        const result = await git().commits.cherryPick(repoPath, hash)
+        const notices: Record<typeof result.outcome, string | null> = {
+          picked: '이 저장을 가져와 새 저장을 만들었어요.',
+          // 충돌 안내는 cherry-picking 상태 바가 담당한다 — 보관 안내만 남긴다
+          conflict: null,
+          empty: '이미 지금 내용에 들어 있는 저장이에요 — 새로 만든 저장은 없어요.',
+        }
+        const shelfNotice = result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = `${notices[result.outcome] ?? ''}${shelfNotice}` || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+
+  async abortCherryPick() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().commits.cherryPickAbort(repoPath)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '가져오기를 취소하고 이전 상태로 돌아왔어요.',
+      })
+    })
+  },
+
+  async createTag(name, hash) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      await git().commits.createTag(repoPath, name, hash)
+      // 파괴 작업이 아니다 — 보던 것은 유지하고 태그 배지만 스냅샷으로 반영한다
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `"${name}" 태그를 만들었어요.`,
+      })
+    })
+  },
+
+  async undoLastCommit(hash) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 이력을 바꾸는 파괴 작업 — 실패해도 낡은 목록을 남기지 않게 스냅샷은 finally로 (discard 관례)
+      let notice: string | null = null
+      try {
+        await git().commits.undoLast(repoPath, hash)
+        notice = '마지막 저장을 취소했어요. 바뀐 내용은 왼쪽 변경 목록에 그대로 남아 있어요.'
+      } finally {
+        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)), notice })
+      }
+    })
+  },
+
+  async rewordLastCommit(hash, message) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      await git().commits.reword(repoPath, hash, message)
+      // HEAD 해시가 바뀐다 — 보던 상세·diff를 비우고 새 목록으로
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '저장 메시지를 고쳤어요.',
       })
     })
   },
