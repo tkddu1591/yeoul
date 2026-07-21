@@ -1,5 +1,6 @@
 import { Archive } from 'lucide-react'
 import { useState } from 'react'
+import { useEscapeFallback } from '../ui/use-escape-fallback'
 import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import type { ShelfEntry } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
@@ -24,6 +25,8 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
   const [dropTarget, setDropTarget] = useState<ShelfEntry | null>(null)
   // 미리보기 클릭 시 닫아야 해서 제어형으로 둔다 — 그 외 동작은 기존과 같다
   const [open, setOpen] = useState(false)
+  // 버리기 확인창이 위에 떠 있는 동안에는 ESC를 확인창에 양보한다 (E6b 실측 2 — body 포커스 fallback)
+  useEscapeFallback(open && dropTarget === null, () => setOpen(false))
   return (
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>

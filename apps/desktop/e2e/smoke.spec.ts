@@ -508,6 +508,32 @@ test('변경을 보관함에 넣었다 꺼낸다', async () => {
   }
 })
 
+test('팝오버·입력 다이얼로그가 ESC로 닫힌다 (포커스가 body로 빠진 뒤에도)', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // (1) 보관함 팝오버 — 보관하기(busy 비활성화 사이클)로 포커스가 body로 떨어진 상태의 ESC (E1a 잔여 재현)
+    await window.getByTestId('shelf-open').click()
+    await window.getByTestId('shelf-save').click()
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await window.keyboard.press('Escape')
+    await expect(window.getByTestId('shelf-save')).toHaveCount(0)
+    // (2) PromptDialog — 입력에 포커스가 있어도 ESC로 닫힌다 (E3b 리뷰 재현: TextField 기본 전파 차단)
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await expect(window.getByTestId('prompt-input')).toBeVisible()
+    await window.keyboard.press('Escape')
+    await expect(window.getByTestId('prompt-input')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
 test('보관함 항목을 클릭하면 담긴 내용을 미리 보여준다', async () => {
   const repo = await createRepoWithChange()
   const app = await electron.launch({

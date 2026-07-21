@@ -68,7 +68,13 @@ export function PromptDialog({
             onChange={setValue}
             autoFocus
             onKeyDown={(event) => {
-              if (isSubmitEnter(event.key, event.nativeEvent.isComposing)) submit()
+              if (isSubmitEnter(event.key, event.nativeEvent.isComposing)) {
+                submit()
+                return
+              }
+              // react-aria는 onKeyDown이 있으면 기본으로 전파를 끊는다(createEventHandler — 실측 2).
+              // ESC가 ModalOverlay의 닫기 핸들러에 닿도록 제출이 아닌 키는 전파를 잇는다
+              event.continuePropagation()
             }}
           >
             <Label className="ui-prompt__label">{label}</Label>

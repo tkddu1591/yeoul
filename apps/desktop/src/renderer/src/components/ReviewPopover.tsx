@@ -1,5 +1,6 @@
 import { ExternalLink, GitPullRequest, Key, Terminal, Unplug } from 'lucide-react'
 import { useState } from 'react'
+import { useEscapeFallback } from '../ui/use-escape-fallback'
 import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import type { HostingStatus, PullSummary } from '@git-gui/ipc-contract'
 import { Badge } from '../ui/Badge'
@@ -46,6 +47,8 @@ export function ReviewPopover({
 }: ReviewPopoverProps) {
   // 다이얼로그를 여는 동작은 팝오버를 닫고 시작한다 — 모달과 팝오버의 포커스 경합을 피한다
   const [open, setOpen] = useState(false)
+  // busy 비활성화로 포커스가 body에 떨어진 뒤에도 ESC로 닫힌다 (E6b 실측 2)
+  useEscapeFallback(open, () => setOpen(false))
   const openDialog = (action: () => void) => {
     setOpen(false)
     action()

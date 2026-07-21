@@ -1,5 +1,7 @@
 import { Check, ChevronDown, Folder, Plus } from 'lucide-react'
+import { useState } from 'react'
 import { Header, Menu, MenuItem, MenuSection, MenuTrigger, Popover } from 'react-aria-components'
+import { useEscapeFallback } from '../ui/use-escape-fallback'
 import type { BranchSummary } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { Pictogram } from '../ui/Pictogram'
@@ -21,6 +23,9 @@ const MANAGE_KEY = '__manage__'
 
 /** 헤더 실험 공간 스위처 (⑧) — 목록에서 전환하거나 새로 만든다. '/' 접두사는 폴더로 묶는다 (피드백 5) */
 export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate, onManage }: BranchSwitcherProps) {
+  // ESC fallback을 걸기 위해 제어형으로 둔다 — 그 외 동작은 기존과 같다 (ShelfPopover 관례)
+  const [open, setOpen] = useState(false)
+  useEscapeFallback(open, () => setOpen(false))
   const grouped = groupBranches(branches)
   const renderItem = (branch: BranchSummary, display: string) => (
     <MenuItem
@@ -42,7 +47,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
     </MenuItem>
   )
   return (
-    <MenuTrigger>
+    <MenuTrigger isOpen={open} onOpenChange={setOpen}>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
         <Pictogram kind="branch" size={13} label="실험 공간 (branch)" />
         <span className="branch-switcher__current">{currentName ?? '(브랜치 없음)'}</span>
