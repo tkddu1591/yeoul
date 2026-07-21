@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -904,6 +905,87 @@ test('처음부터 다시를 누르면 겹침 표시가 되살아난다', async 
     await expect(window.getByTestId('conflict-progress')).toHaveText('겹침 2곳 중 1번째')
     await expect(window.getByTestId('conflict-card-1')).toBeVisible()
     expect(await readFile(join(repo, 'app.txt'), 'utf8')).toContain('<<<<<<<')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('커밋 상세에서 파일 우클릭 — 이 파일만 그 시점 내용으로 적용한다 (미저장 변경은 보관함으로)', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    // init 커밋(v1) 상세를 열고 파일 행을 우클릭한다
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await window.getByTestId('commit-file-app.txt').click({ button: 'right' })
+    await window.getByTestId('context-restore-file').click()
+    // 확인창 — 자동 보관 안내를 담는다
+    await expect(window.getByRole('alertdialog')).toContainText('보관함에 넣어 드려요')
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('notice')).toContainText('지금 코드에 적용했어요')
+    await expect(window.getByTestId('notice')).toContainText('보관함')
+    // dirty였던 v2는 보관함으로 +1, 디스크는 그 시점(v1) 내용 — 실측
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe('v1\n')
+    // 적용 결과가 HEAD와 같아 변경 목록은 비고, 파괴 작업 관례대로 상세가 닫혀 타임라인으로 복귀한다
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('좌측 파일 우클릭 — 올리기(stage)와 파일 삭제(delete)', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'junk.txt'), 'j\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('2')
+    // 올리기 (stage) — staged 목록으로 이동한다
+    await window.getByTestId('file-unstaged-app.txt').click({ button: 'right' })
+    await window.getByTestId('context-stage-file').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+    // 파일 삭제 (delete) — "되돌릴 수 없어요" 확인창을 거쳐 행과 디스크가 함께 사라진다
+    await window.getByTestId('file-unstaged-junk.txt').click({ button: 'right' })
+    await window.getByTestId('context-remove-file').click()
+    await expect(window.getByRole('alertdialog')).toContainText('되돌릴 수 없어요')
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+    expect(existsSync(join(repo, 'junk.txt'))).toBe(false)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('커밋 상세에서 지금 코드와 비교 — 중앙 diff 제목이 비교로 구분된다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await window.getByTestId('commit-file-app.txt').click({ button: 'right' })
+    await window.getByTestId('context-compare-worktree').click()
+    // 부모 대비 제목("— 저장 <hash>")이 아니라 비교 제목이 뜬다
+    await expect(window.getByTestId('diff-panel')).toContainText('app.txt — 지금 코드와 비교')
+    // 커밋 시점(v1)과 커밋 안 된 워크트리(v2)의 차이가 그대로 보인다 (피드백 6)
+    await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
+    // 상세(파일 목록)는 열린 채 유지된다 — 다른 파일을 이어서 비교할 수 있다
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
