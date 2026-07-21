@@ -36,6 +36,8 @@ interface RepositoryStore {
   historyLimit: number
   selected: SelectedFile | null
   diff: FileDiff | null
+  /** 공용 diff 슬롯의 제목 덮어쓰기 — "지금 코드와 비교"처럼 부모 대비 diff와 구분해야 할 때만 non-null */
+  diffLabel: string | null
   /** 커밋 클릭 상세 — 열려 있으면 중앙 패널이 커밋 상세로 바뀐다. 파일 diff 선택과 상호 배타 */
   commitDetail: CommitDetail | null
   /** 커밋 상세 안에서 선택된 파일 — diff는 공용 diff 슬롯을 쓴다 */
@@ -99,11 +101,17 @@ interface RepositoryStore {
   unstage(paths: string[]): Promise<void>
   /** 선택 파일 변경 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 (⑪) */
   discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+  /** 파일 하나를 디스크에서 삭제한다 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 */
+  removeFile(path: string): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
   /** diff 선택 해제 — 동기 상태 변경이라 guard 불필요 */
   clearSelection(): void
   selectCommit(hash: string): Promise<void>
   selectCommitFile(file: CommitFileChange): Promise<void>
+  /** 이 파일만 그 시점 내용으로 적용(checkout) — 확인창(UI 책임) 경유. 미저장 변경은 엔진이 파일 단위 자동 보관 */
+  restoreFileFromCommit(hash: string, path: string): Promise<void>
+  /** 그 시점과 지금 워크트리의 비교를 공용 diff 슬롯에 띄운다 — 제목은 diffLabel로 구분 */
+  compareFileWithWorktree(hash: string, path: string, origPath: string | null): Promise<void>
   /** 커밋 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
   clearCommit(): void
   /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 guard 불필요 */
@@ -163,6 +171,7 @@ async function fetchSnapshot(
 const CLEAR_SELECTIONS = {
   selected: null,
   diff: null,
+  diffLabel: null,
   commitDetail: null,
   commitFile: null,
   conflictFile: null,
@@ -196,6 +205,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   historyLimit: HISTORY_LIMIT,
   selected: null,
   diff: null,
+  diffLabel: null,
   commitDetail: null,
   commitFile: null,
   conflictFile: null,
@@ -370,6 +380,19 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
+  async removeFile(path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 파괴적 작업 — 실패해도 디스크가 이미 바뀌었을 수 있다. finally로 실제 상태를 다시 읽는다 (discard 관례)
+      try {
+        await git().changes.removeFile(repoPath, path)
+      } finally {
+        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      }
+    })
+  },
+
   async selectFile(selected) {
     const { repoPath } = get()
     if (!repoPath) return
@@ -387,12 +410,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         origPath: selected.staged ? selected.change.origPath : null,
       })
       // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
-      set({ selected, diff, commitDetail: null, commitFile: null, conflictFile: null })
+      set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
     })
   },
 
   clearSelection() {
-    set({ selected: null, diff: null })
+    set({ selected: null, diff: null, diffLabel: null })
   },
 
   async selectCommit(hash) {
@@ -407,6 +430,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         conflictFile: null,
         selected: null,
         diff: null,
+        diffLabel: null,
         pullDetail: null,
       })
     })
@@ -417,12 +441,40 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || !commitDetail) return
     await guard(set, get, async () => {
       const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
-      set({ diff, commitFile: file })
+      set({ diff, commitFile: file, diffLabel: null })
+    })
+  },
+
+  async restoreFileFromCommit(hash, path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 파괴 작업 — 자동 보관까지 간 뒤 실패해도 보관함 카운트가 낡지 않게 스냅샷은 finally로 (revert 관례)
+      let notice: string | null = null
+      try {
+        const result = await git().commits.restoreFile(repoPath, hash, path)
+        notice = `이 시점의 "${path}"을 지금 코드에 적용했어요.${
+          result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        }`
+      } finally {
+        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)), notice })
+      }
+    })
+  },
+
+  async compareFileWithWorktree(hash, path, origPath) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
+      // 같은 diff 슬롯 재사용 — 부모 대비 diff(commitFile 제목)와 오인하지 않게 제목만 diffLabel로 덮는다.
+      // commitFile은 비워 부모 대비 제목 규칙이 끼어들지 않게 한다 (상세 파일 목록은 열린 채 유지)
+      set({ diff, diffLabel: `${path} — 지금 코드와 비교`, commitFile: null })
     })
   },
 
   clearCommit() {
-    set({ commitDetail: null, commitFile: null, diff: null })
+    set({ commitDetail: null, commitFile: null, diff: null, diffLabel: null })
   },
 
   async mergeBranch(name) {
@@ -565,6 +617,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         conflictFile: { path, content },
         selected: null,
         diff: null,
+        diffLabel: null,
         commitDetail: null,
         commitFile: null,
       })
@@ -653,7 +706,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   },
 
   clearCommitFile() {
-    set({ commitFile: null, diff: null })
+    set({ commitFile: null, diff: null, diffLabel: null })
   },
 
   clearError() {
