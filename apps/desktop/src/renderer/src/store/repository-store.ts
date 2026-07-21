@@ -57,7 +57,10 @@ interface RepositoryStore {
   openRepository(): Promise<void>
   refresh(): Promise<void>
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
-  switchBranch(name: string): Promise<void>
+  /** 성공 여부를 반환한다 — 병합 후 이동 제안(syncAfterMerge)이 실패 시 받아오기를 잇지 않기 위해 */
+  switchBranch(name: string): Promise<boolean>
+  /** 병합 후 이동 제안 확인 — 전환(자동 보관)·받아오기를 안전하게 잇는다 (통합 리뷰) */
+  syncAfterMerge(base: string): Promise<void>
   /** 새 실험 공간을 만들고 바로 전환한다. fromHash가 있으면 그 시점에서. 성공 여부 반환 — 실패 시 다이얼로그를 열어 둬 입력을 보존한다 */
   createBranch(name: string, fromHash: string | null): Promise<boolean>
   /** name 공간을 지금 공간으로 합친다(스마트 병합) — 결과를 notice로 안내한다 */
@@ -247,8 +250,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async switchBranch(name) {
     const { repoPath } = get()
-    if (!repoPath) return
-    await guard(set, get, async () => {
+    if (!repoPath) return false
+    return guard(set, get, async () => {
       const result = await git().branches.switch(repoPath, name)
       // 다른 공간이다 — 보던 것들을 비우고 역사도 첫 페이지부터
       set({
@@ -260,6 +263,22 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           : null,
       })
     })
+  },
+
+  async syncAfterMerge(base) {
+    // 전환 실패면 받아오기를 잇지 않는다 — 엉뚱한 브랜치에서 성공 notice로 실패를 덮지 않게 (통합 리뷰)
+    if (!(await get().switchBranch(base))) return
+    const shelfNotice =
+      get().notice ===
+      '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+        ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+        : ''
+    await get().pullLatest()
+    // 전환의 자동 보관 안내가 pull notice에 덮여 사라지지 않게 이어붙인다 — 상태를 숨기지 않는다
+    const { error, notice } = get()
+    if (shelfNotice !== '' && error === null) {
+      set({ notice: `${notice ?? ''}${shelfNotice}` })
+    }
   },
 
   async createBranch(name, fromHash) {

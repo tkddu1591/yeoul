@@ -770,7 +770,7 @@ test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다
     await window.getByTestId('confirm-accept').click()
     // 합쳐지지 않은 저장 — 1차와 구분되는 강제 확인창(제목)이 이어진다
     await expect(window.getByText('아직 합쳐지지 않은 저장이 있어요')).toBeVisible()
-    // 1차 다이얼로그가 퇴장 애니메이션 동안 공존한다 — 강제 확인창으로 스코프해 클릭
+    // 강제 확인창으로 이름 스코프해 클릭 — 퇴장 즉시화(E3b) 이후에도 견고하다
     await window
       .getByRole('alertdialog', { name: '아직 합쳐지지 않은 저장이 있어요' })
       .getByTestId('confirm-accept')

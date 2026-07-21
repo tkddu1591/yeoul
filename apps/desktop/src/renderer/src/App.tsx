@@ -349,6 +349,7 @@ export function App() {
         />
         {store.pullDetail !== null ? (
           <ReviewDetailPanel
+            key={store.pullDetail.detail.number}
             view={store.pullDetail}
             busy={store.busy}
             onOpenBrowser={() => void store.openPull(store.pullDetail!.detail.number)}
@@ -498,12 +499,8 @@ export function App() {
         onConfirm={() => {
           const base = mergeFollowUp
           setMergeFollowUp(null)
-          void (async () => {
-            if (base === null) return
-            // 기존 안전망 그대로 — 전환(자동 보관)·받아오기(충돌 흐름)를 순서대로 실행한다
-            await store.switchBranch(base)
-            await store.pullLatest()
-          })()
+          // 기존 안전망 그대로 — 전환(자동 보관)·받아오기(충돌 흐름)를 store 합성 액션이 잇는다 (통합 리뷰)
+          if (base !== null) void store.syncAfterMerge(base)
         }}
         onCancel={() => setMergeFollowUp(null)}
       >
