@@ -178,6 +178,71 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 1-보완: 품질 리뷰 2건 — 접힘 행 visible 1개·배지 폭 확대
+
+품질 리뷰 실측: 접힘이 생기는 행(제목 행 264px 포화)에서 visible 배지 2개가 각 34px로 crush되어 `main`조차 "ma…"가 된다 — 사용자 원문 증상 재현. 긴 이름 단독 배지도 110px 캡으로 과하게 잘린다. → **접힘 행은 visible 1개**(우선순위 최상위 하나만 온전히 보여주는 것이 2개 다 죽는 것보다 낫다) + **max-width 110→150px**.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/history-refs.ts`
+- Modify: `apps/desktop/test/history-refs.test.ts`
+- Modify: `apps/desktop/src/renderer/src/components/history-panel.css`
+
+- [ ] **Step 1: 테스트 기대값 갱신 (Red)** — 테스트 1·3·4번 교체:
+
+```ts
+  it('현재 브랜치 > 로컬 > 원격(origin/) 순으로 정렬하고, 접힘이 생기면 1개만 보여준다', () => {
+    const result = arrangeRefs(['origin/main', 'feature/login', 'main', 'v1.0'], 'main')
+    // 3개 이상이면 배지끼리 폭을 나눠 갖다 전부 말줄임된다 — 최상위 1개만 온전히 (품질 리뷰 실측)
+    expect(result.visible).toEqual(['main'])
+    expect(result.hidden).toEqual(['feature/login', 'v1.0', 'origin/main'])
+  })
+```
+
+```ts
+  it('현재 브랜치가 없으면 로컬 우선 정렬만 적용한다', () => {
+    const result = arrangeRefs(['origin/a', 'b', 'origin/c', 'd'], null)
+    expect(result.visible).toEqual(['b'])
+    expect(result.hidden).toEqual(['d', 'origin/a', 'origin/c'])
+  })
+```
+
+```ts
+  it('같은 우선순위 안에서는 입력 순서를 유지한다 (안정 정렬)', () => {
+    const result = arrangeRefs(['z-branch', 'a-branch', 'main'], 'main')
+    expect(result.visible).toEqual(['main'])
+    expect(result.hidden).toEqual(['z-branch', 'a-branch'])
+  })
+```
+
+Run: `cd apps/desktop && npx vitest run test/history-refs.test.ts` → 3건 FAIL 확인.
+
+- [ ] **Step 2: arrangeRefs 구현 갱신** — return 문 교체:
+
+```ts
+  // 접힘이 생기는 행은 1개만 보여준다 — 배지끼리 폭을 나눠 갖다 전부 "ma…"로 죽는 것을 막는다 (품질 리뷰 실측)
+  const effectiveMax = sorted.length > max ? 1 : max
+  return { visible: sorted.slice(0, effectiveMax), hidden: sorted.slice(effectiveMax) }
+```
+
+- [ ] **Step 3: CSS** — `.history-item__ref`의 `max-width: 110px;`를 교체:
+
+```css
+  max-width: 150px;
+```
+
+- [ ] **Step 4: Green + 실렌더 재확인** — 4건 PASS. 9-ref 커밋에서 `지금 여기 + main(온전) + "+8"` 확인, 긴 이름(`feature/very-long-branch-name`) 단독 행에서 150px까지 표시, 2개 행은 기존처럼 2개 유지.
+
+- [ ] **Step 5: 게이트 + Commit** — 루트 `pnpm test`(300) + E2E 35 회귀 없음
+
+```bash
+git add apps/desktop/test/history-refs.test.ts apps/desktop/src/renderer/src/components
+git commit -m "fix(desktop): 품질 리뷰 — 접힘 행 배지 1개·배지 폭 150px (crush 해소)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 2: 상단 바 오버레이 스택 — 머지 바도 본문을 밀지 않는다
 
 머지 바(`app__merge-bar`)는 E1d에서 "상주 상태 표시라 흐름에 남긴다"고 설계했지만, 사용자에게는 이것도 알림이고 나타날 때마다 본문 전체가 밀린다(피드백 2). 머지 바와 알림(error/notice)을 **하나의 오버레이 스택**으로 통합한다 — 높이 0 레이어 안의 absolute 스택에 머지 바(위)→알림(아래) 순서로 쌓여, 본문은 밀리지 않고 서로 가리지도 않는다.
