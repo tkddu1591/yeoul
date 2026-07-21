@@ -31,6 +31,7 @@ describe('parseLog', () => {
         authorName: '홍길동',
         committedAt: 1752561600,
         refs: [],
+        tags: [],
         parents: ['b'.repeat(40)],
         subject: 'feat: 첫 커밋',
       },
@@ -45,12 +46,24 @@ describe('parseLog', () => {
       '\0'
     const commits = parseLog(raw)
     expect(commits[0]?.refs).toEqual(['main', 'origin/main', 'v1.0'])
+    // tag: 접두는 벗기되 tags로 보존한다 — refs에는 그대로 남는다 (E6b)
+    expect(commits[0]?.tags).toEqual(['v1.0'])
     expect(commits[1]?.refs).toEqual([])
+    expect(commits[1]?.tags).toEqual([])
   })
 
   it('refs — shallow clone의 pseudo-decoration grafted는 배지가 아니다', () => {
     const raw = record('a'.repeat(40), 'aaaaaaa', 'A', '100', 'grafted, HEAD -> main', '', 'x') + '\0'
     expect(parseLog(raw)[0]?.refs).toEqual(['main'])
+    expect(parseLog(raw)[0]?.tags).toEqual([])
+  })
+
+  it('tags — 태그가 여럿이어도 각각 tags에 담기고 순서는 refs와 동일하다', () => {
+    const raw =
+      record('a'.repeat(40), 'aaaaaaa', 'A', '100', 'tag: v2.0, main, tag: v1.0', '', 'x') + '\0'
+    const commit = parseLog(raw)[0]
+    expect(commit?.refs).toEqual(['v2.0', 'main', 'v1.0'])
+    expect(commit?.tags).toEqual(['v2.0', 'v1.0'])
   })
 
   it('parents — 공백 구분 해시를 배열로, root 커밋(빈 %P)은 빈 배열로', () => {

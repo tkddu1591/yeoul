@@ -1,13 +1,15 @@
 export interface ArrangedRefs {
-  /** 보여줄 배지 — 우선순위 상위 (현재 브랜치 > 로컬·태그 > 원격) */
+  /** 보여줄 배지 — 우선순위 상위 (현재 브랜치 > 로컬 > 원격 > 태그) */
   visible: string[]
   /** "+N"으로 접히는 나머지 — 툴팁으로만 보여준다 */
   hidden: string[]
 }
 
 /** 원격 ref 추정 — decorate 출력의 원격은 "<remote>/…" 형태다. origin 우선 규칙(push)과 동일 계열 휴리스틱 */
-function refPriority(ref: string, currentBranch: string | null): number {
+function refPriority(ref: string, currentBranch: string | null, tags: string[]): number {
   if (ref === currentBranch) return 0
+  // 태그는 원격 뒤 — E4 때 파서가 tag: 접두를 벗겨 불가했던 하위 분류 (E6b tags로 완성)
+  if (tags.includes(ref)) return 3
   if (!ref.includes('/')) return 1
   if (ref.startsWith('origin/')) return 2
   // 슬래시가 있지만 origin/이 아닌 것 — 로컬 폴더형(feature/a) 또는 다른 원격. 로컬 쪽에 가깝게 둔다
@@ -21,10 +23,11 @@ function refPriority(ref: string, currentBranch: string | null): number {
 export function arrangeRefs(
   refs: string[],
   currentBranch: string | null,
+  tags: string[] = [],
   max = 2,
 ): ArrangedRefs {
   const sorted = refs
-    .map((ref, index) => ({ ref, index, priority: refPriority(ref, currentBranch) }))
+    .map((ref, index) => ({ ref, index, priority: refPriority(ref, currentBranch, tags) }))
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
     .map((entry) => entry.ref)
   // 접힘이 생기는 행은 1개만 보여준다 — 배지끼리 폭을 나눠 갖다 전부 "ma…"로 죽는 것을 막는다 (품질 리뷰 실측)
@@ -38,4 +41,11 @@ export function arrangeRefs(
  */
 export function isRemoteRef(ref: string): boolean {
   return ref.startsWith('origin/')
+}
+
+/** 배지 표시명 — 태그 🏷, 원격 ☁ 접두로 로컬(민무늬)과 3분 구분한다. 태그 판정이 우선 (E6b) */
+export function refBadgeLabel(ref: string, tags: string[]): string {
+  if (tags.includes(ref)) return `🏷 ${ref}`
+  if (isRemoteRef(ref)) return `☁ ${ref}`
+  return ref
 }

@@ -61,6 +61,8 @@ export interface CommitSummary {
   committedAt: number
   /** 이 커밋을 가리키는 브랜치·태그 이름들 (%D에서 "HEAD -> "·"tag: " 접두사 제거). 없으면 빈 배열 */
   refs: string[]
+  /** refs 중 태그인 이름들 — 배지 모양(🏷)·우선순위 하위 분류용. refs에도 그대로 포함된다 (E4 후속, E6b) */
+  tags: string[]
   /** 부모 커밋 해시 — 2개 이상이면 병합 커밋 */
   parents: string[]
 }

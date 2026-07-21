@@ -1147,8 +1147,8 @@ test('태그 만들기 (tag) — 배지로 나타난다', async () => {
     await window.getByTestId('prompt-input').fill('v1.0')
     await window.getByTestId('prompt-submit').click()
     await expect(window.getByTestId('notice')).toContainText('태그를 만들었어요')
-    // 태그는 --all 그래프의 decorate 배지로 자동 반영된다 (실측 9)
-    await expect(window.getByTestId('history-list')).toContainText('v1.0')
+    // 태그는 --all 그래프의 decorate 배지로 자동 반영된다 (실측 9) — 🏷 접두로 로컬·원격과 구분 (E6b)
+    await expect(window.getByTestId('history-list')).toContainText('🏷 v1.0')
     const tags = await execGitOrThrow(['tag', '--list'], { cwd: repo })
     expect(tags.stdout.trim()).toBe('v1.0')
   } finally {

@@ -2,22 +2,32 @@ import type { CommitSummary } from '@git-gui/domain'
 
 const FIELD_SEPARATOR = '\x1f'
 
+interface ParsedDecoration {
+  refs: string[]
+  tags: string[]
+}
+
 /**
  * `%D` 장식 문자열을 이름 배열로 정리한다.
- * "HEAD -> main, origin/main, tag: v1" → ['main', 'origin/main', 'v1'].
+ * "HEAD -> main, origin/main, tag: v1" → refs ['main', 'origin/main', 'v1'], tags ['v1'].
+ * `tag: ` 접두는 벗기되 tags로 따로 보존한다 — 배지 모양(🏷)·우선순위 하위 분류용 (E4 후속, E6b).
  * detached HEAD의 단독 "HEAD"와 shallow clone의 pseudo-decoration "grafted"는
  * ref가 아니므로 제외한다 (origin/HEAD·replace ref는 log 인자에서 장식 제외).
  */
-function parseRefs(decoration: string): string[] {
-  if (decoration === '') return []
-  return decoration
-    .split(', ')
-    .map((ref) => {
-      if (ref.startsWith('HEAD -> ')) return ref.slice('HEAD -> '.length)
-      if (ref.startsWith('tag: ')) return ref.slice('tag: '.length)
-      return ref
-    })
-    .filter((ref) => ref !== 'HEAD' && ref !== 'grafted')
+function parseRefs(decoration: string): ParsedDecoration {
+  const refs: string[] = []
+  const tags: string[] = []
+  if (decoration === '') return { refs, tags }
+  for (const entry of decoration.split(', ')) {
+    let ref = entry
+    if (ref.startsWith('HEAD -> ')) ref = ref.slice('HEAD -> '.length)
+    const isTag = ref.startsWith('tag: ')
+    if (isTag) ref = ref.slice('tag: '.length)
+    if (ref === 'HEAD' || ref === 'grafted') continue
+    refs.push(ref)
+    if (isTag) tags.push(ref)
+  }
+  return { refs, tags }
 }
 
 /**
@@ -35,12 +45,14 @@ export function parseLog(rawOutput: string): CommitSummary[] {
     if (fields.length < 7) continue
     const committedAt = Number(fields[3])
     if (!Number.isFinite(committedAt)) continue
+    const { refs, tags } = parseRefs(fields[4]!)
     commits.push({
       hash: fields[0]!,
       shortHash: fields[1]!,
       authorName: fields[2]!,
       committedAt,
-      refs: parseRefs(fields[4]!),
+      refs,
+      tags,
       parents: fields[5]! === '' ? [] : fields[5]!.split(' '),
       // subject에 구분자가 섞이는 일은 없지만 방어적으로 나머지를 합친다
       subject: fields.slice(6).join(FIELD_SEPARATOR),

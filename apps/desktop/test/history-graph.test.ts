@@ -10,6 +10,7 @@ function commit(hash: string, parents: string[]): CommitSummary {
     authorName: 'T',
     committedAt: 0,
     refs: [],
+    tags: [],
     parents,
   }
 }

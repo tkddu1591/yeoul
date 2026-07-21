@@ -7,7 +7,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { buildGraph, type GraphRow } from './history-graph'
-import { arrangeRefs, isRemoteRef } from './history-refs'
+import { arrangeRefs, isRemoteRef, refBadgeLabel } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
 import './history-panel.css'
 import './virtual.css'
@@ -313,7 +313,7 @@ export function HistoryPanel({
                         {isHead && <span className="history-item__here">지금 여기</span>}
                         {(() => {
                           // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
-                          const arranged = arrangeRefs(commit.refs, currentBranch)
+                          const arranged = arrangeRefs(commit.refs, currentBranch, commit.tags)
                           return (
                             <>
                               {arranged.visible.map((ref) => (
@@ -323,20 +323,22 @@ export function HistoryPanel({
                                   className={[
                                     'history-item__ref',
                                     ref === currentBranch ? 'history-item__ref--head' : '',
-                                    // 원격은 ☁ 접두 + 점선으로 구분한다 (피드백 3)
-                                    isRemoteRef(ref) ? 'history-item__ref--remote' : '',
+                                    // 원격은 ☁ 접두 + 점선, 태그는 🏷 접두(실선 유지) — 3분 구분 (E4·E5b 후속)
+                                    !commit.tags.includes(ref) && isRemoteRef(ref)
+                                      ? 'history-item__ref--remote'
+                                      : '',
                                   ]
                                     .filter(Boolean)
                                     .join(' ')}
                                 >
-                                  {isRemoteRef(ref) ? `☁ ${ref}` : ref}
+                                  {refBadgeLabel(ref, commit.tags)}
                                 </span>
                               ))}
                               {arranged.hidden.length > 0 && (
                                 <span
                                   className="history-item__ref history-item__ref--more"
                                   title={arranged.hidden
-                                    .map((ref) => (isRemoteRef(ref) ? `☁ ${ref}` : ref))
+                                    .map((ref) => refBadgeLabel(ref, commit.tags))
                                     .join('\n')}
                                   data-testid={`history-refs-more-${commit.hash}`}
                                 >
