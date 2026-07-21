@@ -143,6 +143,18 @@ export interface GitClient {
     cherryPick(hash: string): Promise<CherryPickResult>
     /** 가져오기 취소 — 충돌 상태를 버리고 이전으로 */
     cherryPickAbort(): Promise<void>
+    /** 이 시점에 태그(lightweight)를 만든다 — 이름은 check-ref-format 선검증, 중복은 친절 에러 */
+    createTag(name: string, hash: string): Promise<void>
+    /**
+     * 마지막 저장 실행취소(reset --mixed HEAD~1) — 내용은 작업 폴더에 남는다(실측 8, 유실 없음).
+     * hash는 화면이 아는 HEAD — 실제 HEAD와 다르면(낡은 목록) 거부한다. 루트 커밋·진행 중 상태 거부
+     */
+    undoLast(hash: string): Promise<void>
+    /**
+     * 마지막 저장의 메시지를 바꾼다(commit --amend -F -, 메시지만 — 실측 7: tree 불변).
+     * staged가 있으면 amend가 조용히 흡수하므로 거부. hash는 undoLast와 동일한 HEAD 일치 가드
+     */
+    reword(hash: string, message: string): Promise<void>
   }
 }
 
@@ -938,6 +950,67 @@ export function createGitClient(repoPath: string): GitClient {
           }
           throw new GitError(['cherry-pick', '--abort'], result)
         }
+      },
+      async createTag(name, hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        // 태그 이름 선검증 — branch create/rename의 check-ref-format 관례를 태그 네임스페이스로 (실측 9)
+        const valid = await execGit(['check-ref-format', `refs/tags/${name}`], { cwd })
+        if (valid.exitCode !== 0) {
+          throw new Error(`"${name}"라는 이름으로는 만들 수 없어요. 공백 없이 지어 주세요.`)
+        }
+        const args = ['tag', '--end-of-options', name, hash]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('already exists')) {
+            throw new Error(`"${name}"는 이미 있는 태그예요. 다른 이름을 지어 주세요.`)
+          }
+          // 실측 9 stderr: "nonexistent object" — 목록이 낡아 사라진 해시
+          if (result.stderr.includes('nonexistent object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          throw new GitError(args, result)
+        }
+      },
+      async undoLast(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        // merging 등 도중의 reset은 진행 중 작업을 반쯤 무너뜨린다 — revert 관례로 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 실행취소할 수 있어요.')
+        }
+        // 화면 목록이 낡은 채 실행취소하면 엉뚱한 저장이 물린다(CLI 경합) — 실제 HEAD와 일치를 확인한다
+        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+        if (head.exitCode !== 0 || head.stdout.trim() !== hash) {
+          throw new Error('가장 최근 저장이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // 루트 커밋(부모 없음) — HEAD~1이 없다(실측 8: 조용히 exit 1). 원문 git 에러 대신 읽히는 메시지로
+        const parent = await execGit(['rev-parse', '-q', '--verify', 'HEAD~1'], { cwd })
+        if (parent.exitCode !== 0) {
+          throw new Error('맨 처음 저장은 실행취소할 수 없어요.')
+        }
+        // --mixed: 커밋만 물리고 내용은 작업 폴더에 그대로 남긴다 — 유실 없음 (스펙 §6 계열)
+        await execGitOrThrow(['reset', '--mixed', 'HEAD~1'], { cwd })
+      },
+      async reword(hash, message) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 메시지를 고칠 수 있어요.')
+        }
+        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+        if (head.exitCode !== 0 || head.stdout.trim() !== hash) {
+          throw new Error('가장 최근 저장이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // amend는 staged를 조용히 흡수한다 — 메시지만 바꾸는 의도와 어긋나므로 거부한다 (실측 7: --cached --quiet)
+        const staged = await execGit(['diff', '--cached', '--quiet'], { cwd })
+        if (staged.exitCode !== 0) {
+          throw new Error('저장 예정에 올린 파일이 있어요 — 함께 들어가지 않게 먼저 비워 주세요.')
+        }
+        // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전
+        await execGitOrThrow(['commit', '--amend', '-F', '-'], { cwd, stdin: message })
       },
       async revert(hash) {
         const cwd = await topLevel()

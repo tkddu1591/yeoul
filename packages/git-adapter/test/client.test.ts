@@ -1587,6 +1587,152 @@ describe('GitClient', () => {
     )
   })
 
+  it('createTag — 태그를 만들면 역사 refs 배지에 나타난다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    await client.commits.createTag('v1.0', head)
+    // decorate가 "tag: v1.0"을 주고 기존 log-parser가 접두를 벗긴다 (실측 9)
+    expect((await client.history.list(1))[0]!.refs).toContain('v1.0')
+  })
+
+  it('createTag — 잘못된 이름·중복 이름을 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await expect(client.commits.createTag('bad name', head)).rejects.toThrow(/이름으로는 만들 수 없어요/)
+    await client.commits.createTag('v1.0', head)
+    await expect(client.commits.createTag('v1.0', head)).rejects.toThrow(/이미 있는 태그예요/)
+  })
+
+  it('createTag — 사라진 커밋·ref 표현식을 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.createTag('v9', '0123456789012345678901234567890123456789'),
+    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    await expect(client.commits.createTag('v9', 'HEAD')).rejects.toThrow(/올바른 커밋 해시가 아니에요/)
+  })
+
+  it('undoLast — 마지막 저장만 취소하고 내용은 작업 폴더에 남는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    await client.commits.undoLast(head)
+    expect((await client.history.list(10)).map((c) => c.subject)).toEqual(['init'])
+    // 내용은 그대로 — 미저장 변경으로 돌아온다 (reset --mixed 실측 8, 유실 없음)
+    expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# v2\n')
+    const status = await client.repo.status()
+    expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('modified')
+  })
+
+  it('undoLast — 맨 처음 저장(루트)은 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await expect(client.commits.undoLast(head)).rejects.toThrow(/맨 처음 저장은 실행취소할 수 없어요/)
+  })
+
+  it('undoLast — 화면 목록이 낡았으면(HEAD 불일치) 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const stale = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+
+    // CLI 경합으로 HEAD가 이미 바뀐 상황 — 엉뚱한 저장이 물리면 안 된다
+    await expect(client.commits.undoLast(stale)).rejects.toThrow(/가장 최근 저장이 바뀌었어요/)
+    expect((await client.history.list(10))).toHaveLength(2)
+  })
+
+  it('undoLast — 합치는 중(merging)에는 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    await expect(client.commits.undoLast(head)).rejects.toThrow(/먼저 마무리하거나 취소/)
+  })
+
+  it('reword — 메시지만 바꾸고 내용(tree)·미저장 변경은 그대로다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# 작업 중\n')
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    const beforeTree = (await execGitOrThrow(['rev-parse', 'HEAD^{tree}'], { cwd: repo })).stdout.trim()
+
+    await client.commits.reword(head, '고친 제목')
+    // 실측 7: staged 없는 amend -F -는 tree 불변 — 메시지만 바뀐다
+    const afterTree = (await execGitOrThrow(['rev-parse', 'HEAD^{tree}'], { cwd: repo })).stdout.trim()
+    expect(afterTree).toBe(beforeTree)
+    expect(
+      (await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })).stdout.trim(),
+    ).toBe('고친 제목')
+    // 미저장 변경은 건드리지 않는다
+    expect(await client.files.readText('README.md')).toBe('# 작업 중\n')
+  })
+
+  it('reword — 저장 예정(staged)이 있으면 흡수 함정을 막기 위해 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await writeFixtureFile(repo, 'README.md', '# staged\n')
+    await client.changes.stage(['README.md'])
+
+    await expect(client.commits.reword(head, '고친 제목')).rejects.toThrow(/저장 예정에 올린 파일이 있어요/)
+    // 메시지도 staged도 그대로다
+    expect(
+      (await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })).stdout.trim(),
+    ).toBe('init')
+    expect((await client.repo.status()).changes.find((c) => c.path === 'README.md')?.staged).toBe(
+      'modified',
+    )
+  })
+
+  it('reword — 화면 목록이 낡았으면(HEAD 불일치) 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const stale = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await writeFixtureFile(repo, 'README.md', '# v2\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
+
+    await expect(client.commits.reword(stale, '고친 제목')).rejects.toThrow(/가장 최근 저장이 바뀌었어요/)
+  })
+
+  it('reword — 합치는 중(merging)에는 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    await expect(client.commits.reword(head, '고친 제목')).rejects.toThrow(/먼저 마무리하거나 취소/)
+  })
+
   it('reverting 중에는 전환·받아오기도 읽히는 메시지로 거부한다', async () => {
     const { repo } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
