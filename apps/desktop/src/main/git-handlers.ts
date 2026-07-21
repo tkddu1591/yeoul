@@ -263,6 +263,29 @@ export function registerGitHandlers(): void {
       ),
   )
 
+  ipcMain.handle(
+    CHANNELS.commitsRestoreFile,
+    (_event, repoPath: unknown, hash: unknown, path: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).commits.restoreFile(
+        assertHash(hash),
+        assertString(path),
+      ),
+  )
+
+  ipcMain.handle(
+    CHANNELS.commitsDiffWorktree,
+    (_event, repoPath: unknown, hash: unknown, path: unknown, origPath: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).commits.diffAgainstWorktree(
+        assertHash(hash),
+        assertString(path),
+        assertNullableString(origPath),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.changesRemoveFile, (_event, repoPath: unknown, path: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).changes.removeFile(assertString(path)),
+  )
+
   ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).history.list(assertLimit(limit)),
   )

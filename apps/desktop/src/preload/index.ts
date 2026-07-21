@@ -52,6 +52,7 @@ const api: GitApi = {
     unstage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesUnstage, repoPath, paths),
     discard: (repoPath, trackedPaths, untrackedPaths) =>
       ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, trackedPaths, untrackedPaths),
+    removeFile: (repoPath, path) => ipcRenderer.invoke(CHANNELS.changesRemoveFile, repoPath, path),
     diff: (repoPath, path, options: DiffOptions) =>
       ipcRenderer.invoke(CHANNELS.changesDiff, repoPath, path, options),
   },
@@ -60,6 +61,10 @@ const api: GitApi = {
     show: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsShow, repoPath, hash),
     diffFile: (repoPath, hash, path, origPath) =>
       ipcRenderer.invoke(CHANNELS.commitsDiffFile, repoPath, hash, path, origPath),
+    restoreFile: (repoPath, hash, path) =>
+      ipcRenderer.invoke(CHANNELS.commitsRestoreFile, repoPath, hash, path),
+    diffAgainstWorktree: (repoPath, hash, path, origPath) =>
+      ipcRenderer.invoke(CHANNELS.commitsDiffWorktree, repoPath, hash, path, origPath),
     revert: (repoPath, hash) => ipcRenderer.invoke(CHANNELS.commitsRevert, repoPath, hash),
     revertAbort: (repoPath) => ipcRenderer.invoke(CHANNELS.commitsRevertAbort, repoPath),
   },

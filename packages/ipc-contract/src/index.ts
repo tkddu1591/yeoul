@@ -8,6 +8,7 @@ import type {
   PullResult,
   RemoveBranchResult,
   RepositoryStatus,
+  RestoreFileResult,
   RevertResult,
   ShelfEntry,
   SwitchResult,
@@ -71,6 +72,8 @@ export interface GitApi {
     /** 선택 파일 변경 취소 — tracked는 복원, untracked는 삭제. 되돌릴 수 없다 (확인창은 renderer 책임) */
     discard(repoPath: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void>
     diff(repoPath: string, path: string, options: DiffOptions): Promise<FileDiff>
+    /** 파일 하나를 디스크에서 삭제 — 되돌릴 수 없다 (확인창은 renderer 책임) */
+    removeFile(repoPath: string, path: string): Promise<void>
   }
   commits: {
     create(repoPath: string, message: string): Promise<void>
@@ -78,6 +81,10 @@ export interface GitApi {
     show(repoPath: string, hash: string): Promise<CommitDetail>
     /** 커밋 안 단일 파일 diff — 첫 부모 기준. rename이면 origPath 동봉 */
     diffFile(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    /** 이 파일만 그 시점 내용으로 적용(checkout) — 미저장 변경은 엔진이 파일 단위 자동 보관 후 진행 */
+    restoreFile(repoPath: string, hash: string, path: string): Promise<RestoreFileResult>
+    /** 그 시점과 지금 워크트리(미저장 포함)의 단일 파일 diff — rename이면 origPath 동봉 */
+    diffAgainstWorktree(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
     revert(repoPath: string, hash: string): Promise<RevertResult>
     revertAbort(repoPath: string): Promise<void>
   }
@@ -119,9 +126,12 @@ export const CHANNELS = {
   changesUnstage: 'changes:unstage',
   changesDiscard: 'changes:discard',
   changesDiff: 'changes:diff',
+  changesRemoveFile: 'changes:remove-file',
   commitsCreate: 'commits:create',
   commitsShow: 'commits:show',
   commitsDiffFile: 'commits:diff-file',
+  commitsRestoreFile: 'commits:restore-file',
+  commitsDiffWorktree: 'commits:diff-worktree',
   commitsRevert: 'commits:revert',
   commitsRevertAbort: 'commits:revert-abort',
   historyList: 'history:list',
