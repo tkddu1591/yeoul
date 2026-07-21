@@ -123,6 +123,8 @@ export interface GitClient {
      * 보관함 항목의 커밋 해시로도 동작한다(파일 단위 꺼내기). 충돌 파일·그 시점에 없는 파일은 거부
      */
     restoreFile(hash: string, path: string): Promise<RestoreFileResult>
+    /** 그 시점(hash)과 지금 워크트리(미저장 포함)의 단일 파일 diff — diffFile(부모 대비)의 형제. rename이면 origPath 동봉 */
+    diffAgainstWorktree(hash: string, path: string, origPath: string | null): Promise<FileDiff>
     /** 이 저장이 바꾼 내용을 반대로 적용하는 새 저장을 만든다. merge commit은 첫 부모 기준(-m 1) */
     revert(hash: string): Promise<RevertResult>
     /** 되돌리기 취소 — 충돌 상태를 버리고 이전으로 */
@@ -792,6 +794,34 @@ export function createGitClient(repoPath: string): GitClient {
           cwd,
         })
         return { autoShelved }
+      },
+      async diffAgainstWorktree(hash, path, origPath) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        assertRepoRelative(path)
+        if (origPath != null) assertRepoRelative(origPath)
+        // diffFile과 동일 — rename 감지를 위해 원래 경로도 pathspec에 넣는다
+        const pathspecs =
+          origPath != null ? [`:(literal)${path}`, `:(literal)${origPath}`] : [`:(literal)${path}`]
+        const args = [
+          'diff',
+          '-M',
+          '--no-color',
+          '--no-ext-diff',
+          '--end-of-options',
+          hash,
+          '--',
+          ...pathspecs,
+        ]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          // 실측 stderr: "fatal: bad object <hash>" — 사라진(존재하지 않는) 해시
+          if (result.stderr.includes('bad object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          throw new GitError(args, result)
+        }
+        return parsePatch(result.stdout)
       },
       async revert(hash) {
         const cwd = await topLevel()

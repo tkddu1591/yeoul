@@ -849,6 +849,52 @@ describe('GitClient', () => {
     expect(await client.shelf.list()).toHaveLength(1)
   })
 
+  it('diffAgainstWorktree — 그 시점과 지금 코드(미저장 포함)의 차이를 반환한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const initHash = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    // 커밋하지 않은 워크트리 편집 그대로 비교된다 — "커밋 안 된 로컬이랑 비교" (피드백 6)
+    await writeFixtureFile(repo, 'README.md', '# 지금 작업\n')
+
+    const diff = await client.commits.diffAgainstWorktree(initHash, 'README.md', null)
+    const lines = diff.hunks.flatMap((hunk) => hunk.lines)
+    expect(lines).toContainEqual({ kind: 'del', oldLine: 1, newLine: null, text: '# fixture' })
+    expect(lines).toContainEqual({ kind: 'add', oldLine: null, newLine: 1, text: '# 지금 작업' })
+  })
+
+  it('diffAgainstWorktree — 그 시점에 없던(이후 추가된) 파일은 새 파일로 보인다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const initHash = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await writeFixtureFile(repo, 'new.txt', 'hello\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'add new'], { cwd: repo })
+
+    const diff = await client.commits.diffAgainstWorktree(initHash, 'new.txt', null)
+    expect(diff.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === 'hello')).toBe(
+      true,
+    )
+  })
+
+  it('diffAgainstWorktree — 사라진 커밋·잘못된 해시·저장소 밖 경로를 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.diffAgainstWorktree(
+        '0123456789012345678901234567890123456789',
+        'README.md',
+        null,
+      ),
+    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    await expect(client.commits.diffAgainstWorktree('HEAD', 'README.md', null)).rejects.toThrow(
+      /올바른 커밋 해시가 아니에요/,
+    )
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await expect(client.commits.diffAgainstWorktree(head, '../x', null)).rejects.toThrow(
+      /저장소 밖 경로/,
+    )
+  })
+
   it('discard — 충돌 중인 파일은 읽히는 메시지로 거부한다 (이관)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
