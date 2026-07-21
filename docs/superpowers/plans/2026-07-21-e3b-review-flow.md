@@ -2916,6 +2916,100 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8-보완: 통합 리뷰 3건 (실측 반영)
+
+통합 리뷰가 잡은 결함:
+
+- **(Important 1) PR 전환 시 답변 초안 잔존** — ReviewDetailPanel이 key 없이 재사용되어 PR1의 초안이 PR2 화면에 남고 **보내면 PR2로 전송**된다(실측). 같은 뿌리로 코멘트 수가 같은 PR 간 전환 시 최신 스크롤도 미동작. → `key={number}` 리마운트.
+- **(Important 2) 이동 제안 확인 시 자동 보관 안내 소실** — switch의 autoShelved notice를 직후 pullLatest guard가 덮어, 변경이 조용히 보관함으로 간다("상태를 숨기지 않는다" 위반). **(Minor 3) switch 실패에도 pullLatest가 이어져 실패를 성공 notice로 덮는다.** → store 합성 액션 `syncAfterMerge(base)`: 전환 실패면 중단, 보관 안내는 pull notice 뒤에 이어붙인다.
+- **(Minor 5)** 강제 삭제 E2E의 주석이 퇴장 즉시화 이후 stale — 문구 갱신(동작 무변).
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/App.tsx`
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+- Modify: `apps/desktop/e2e/smoke.spec.ts` (주석만)
+
+- [ ] **Step 1: App — ReviewDetailPanel 리마운트** — 렌더 분기 교체:
+
+```tsx
+        {store.pullDetail !== null ? (
+          <ReviewDetailPanel
+            key={store.pullDetail.detail.number}
+            view={store.pullDetail}
+```
+
+(이하 props는 기존 그대로.)
+
+- [ ] **Step 2: store — switchBranch 반환 + syncAfterMerge**
+
+(a) 인터페이스의 `switchBranch(name: string): Promise<void>` 교체:
+
+```ts
+  /** 성공 여부를 반환한다 — 병합 후 이동 제안(syncAfterMerge)이 실패 시 받아오기를 잇지 않기 위해 */
+  switchBranch(name: string): Promise<boolean>
+```
+
+바로 뒤에 추가:
+
+```ts
+  /** 병합 후 이동 제안 확인 — 전환(자동 보관)·받아오기를 안전하게 잇는다 (통합 리뷰) */
+  syncAfterMerge(base: string): Promise<void>
+```
+
+(b) `switchBranch` 구현 — `if (!repoPath) return`을 `if (!repoPath) return false`로, `await guard(`를 `return guard(`로 교체.
+
+(c) `switchBranch` 구현 **뒤**에 추가:
+
+```ts
+  async syncAfterMerge(base) {
+    // 전환 실패면 받아오기를 잇지 않는다 — 엉뚱한 브랜치에서 성공 notice로 실패를 덮지 않게 (통합 리뷰)
+    if (!(await get().switchBranch(base))) return
+    const shelfNotice =
+      get().notice ===
+      '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+        ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+        : ''
+    await get().pullLatest()
+    // 전환의 자동 보관 안내가 pull notice에 덮여 사라지지 않게 이어붙인다 — 상태를 숨기지 않는다
+    const { error, notice } = get()
+    if (shelfNotice !== '' && error === null) {
+      set({ notice: `${notice ?? ''}${shelfNotice}` })
+    }
+  },
+```
+
+- [ ] **Step 3: App — 이동 제안 onConfirm 교체**
+
+```tsx
+        onConfirm={() => {
+          const base = mergeFollowUp
+          setMergeFollowUp(null)
+          // 기존 안전망 그대로 — 전환(자동 보관)·받아오기(충돌 흐름)를 store 합성 액션이 잇는다 (통합 리뷰)
+          if (base !== null) void store.syncAfterMerge(base)
+        }}
+```
+
+- [ ] **Step 4: E2E 주석 갱신** — `'합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다'`의 `// 1차 다이얼로그가 퇴장 애니메이션 동안 공존한다 — 강제 확인창으로 스코프해 클릭` 줄을:
+
+```ts
+    // 강제 확인창으로 이름 스코프해 클릭 — 퇴장 즉시화(E3b) 이후에도 견고하다
+```
+
+- [ ] **Step 5: 실렌더 확인 2건** — (1) PR 2개에서 PR1 초안 입력 → PR2 전환 → textarea 비어 있음 + 최신 스크롤, (2) dirty 변경 상태에서 병합 → 이동 제안 확인 → 최종 notice에 받아오기 결과와 "보관함에 넣어뒀어요"가 함께 보임.
+
+- [ ] **Step 6: 게이트** — 루트 `pnpm test`(**296**) + typecheck(6 Done) + build + E2E 전체(**35 passed**) 전부 exit 0 → **공식 스크린샷 3장 복원**(scratchpad 사본 → test-results/, 이후 e2e 재실행 금지)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src apps/desktop/e2e
+git commit -m "fix(desktop): 통합 리뷰 — PR 전환 초안 격리(key)·병합 후 동기 합성 액션(실패 중단·보관 안내 보존)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## 검증 게이트 요약
 
 | 시점 | 기대치 |
