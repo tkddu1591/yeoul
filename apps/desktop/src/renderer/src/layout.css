@@ -92,20 +92,24 @@
   font-size: var(--text-sm);
   flex: none;
 }
-/* 알림은 흐름 밖 오버레이로 — 나타나고 사라질 때 본문이 밀리지 않는다 (피드백 3).
-   머지 바는 상주 상태 표시라 흐름에 남긴다 */
-.app__banner-layer {
+/* 상단 바(머지 바·알림)는 전부 흐름 밖 오버레이 스택 — 무엇이 떠도 본문이 밀리지 않는다 (피드백).
+   스택 안에서는 머지 바가 위, 알림이 아래로 쌓여 서로 가리지 않는다(E1c 가림 문제의 구조적 해소) */
+.app__top-layer {
   position: relative;
   height: 0;
   z-index: 40;
   flex: none;
 }
-.app__banner-layer .app__error,
-.app__banner-layer .app__notice {
+.app__top-stack {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app__top-stack .app__error,
+.app__top-stack .app__notice {
   box-shadow: var(--shadow-2);
 }
 .app__merge-bar {
@@ -119,6 +123,7 @@
   font-size: var(--text-sm);
   font-weight: 600;
   flex: none;
+  box-shadow: var(--shadow-2);
 }
 /* 메시지 span만 — `> span`은 Pictogram 루트(span)까지 잡아 아이콘이 중앙으로 밀린다 (리뷰 실측) */
 .app__merge-text {

@@ -239,46 +239,50 @@ export function App() {
           </Button>
         </div>
       </header>
-      {(status?.state === 'merging' || status?.state === 'reverting') && (
-        <div className="app__merge-bar" data-testid="merge-bar">
-          <Pictogram
-            kind="conflict"
-            size={14}
-            label={status.state === 'merging' ? '합치는 중' : '되돌리는 중'}
-          />
-          <span className="app__merge-text" data-testid="merge-remaining">
-            {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
-              conflictCount > 0
-                ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
-                : status.state === 'reverting' && stagedCount === 0
-                  ? '겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — 되돌리기 취소를 눌러 마무리해요.'
-                  : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
-            }`}
-          </span>
-          <Button
-            variant="danger"
-            size="sm"
-            isDisabled={store.busy}
-            onPress={() => setConfirmingAbort(true)}
-            testId="merge-abort"
-          >
-            {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
-          </Button>
-        </div>
-      )}
-      {/* 배너는 머지 바 '뒤' — 머지 바(상주 상태·취소 버튼)를 가리면 취소가 클릭 불가가 된다 (품질 리뷰 실측) */}
-      {(store.error !== null || store.notice !== null) && (
-        <div className="app__banner-layer">
-          {store.error && (
-            <p className="app__error" role="alert" data-testid="error">
-              {store.error}
-            </p>
-          )}
-          {store.notice && (
-            <p className="app__notice" role="status" data-testid="notice">
-              {store.notice}
-            </p>
-          )}
+      {(status?.state === 'merging' ||
+        status?.state === 'reverting' ||
+        store.error !== null ||
+        store.notice !== null) && (
+        <div className="app__top-layer">
+          <div className="app__top-stack">
+            {(status?.state === 'merging' || status?.state === 'reverting') && (
+              <div className="app__merge-bar" data-testid="merge-bar">
+                <Pictogram
+                  kind="conflict"
+                  size={14}
+                  label={status.state === 'merging' ? '합치는 중' : '되돌리는 중'}
+                />
+                <span className="app__merge-text" data-testid="merge-remaining">
+                  {`${status.state === 'merging' ? '실험 공간 합치는 중' : '저장 되돌리는 중'} — ${
+                    conflictCount > 0
+                      ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
+                      : status.state === 'reverting' && stagedCount === 0
+                        ? '겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — 되돌리기 취소를 눌러 마무리해요.'
+                        : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+                  }`}
+                </span>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  isDisabled={store.busy}
+                  onPress={() => setConfirmingAbort(true)}
+                  testId="merge-abort"
+                >
+                  {status.state === 'merging' ? '합치기 취소' : '되돌리기 취소'}
+                </Button>
+              </div>
+            )}
+            {store.error && (
+              <p className="app__error" role="alert" data-testid="error">
+                {store.error}
+              </p>
+            )}
+            {store.notice && (
+              <p className="app__notice" role="status" data-testid="notice">
+                {store.notice}
+              </p>
+            )}
+          </div>
         </div>
       )}
       <main
