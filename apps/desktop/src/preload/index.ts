@@ -85,6 +85,12 @@ const hostingApi: HostingApi = {
     list: (repoPath) => ipcRenderer.invoke(HOSTING_CHANNELS.pullsList, repoPath),
     create: (repoPath, input) => ipcRenderer.invoke(HOSTING_CHANNELS.pullCreate, repoPath, input),
     open: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullOpen, repoPath, number),
+    detail: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullDetail, repoPath, number),
+    comment: (repoPath, number, body) =>
+      ipcRenderer.invoke(HOSTING_CHANNELS.pullComment, repoPath, number, body),
+    approve: (repoPath, number) =>
+      ipcRenderer.invoke(HOSTING_CHANNELS.pullApprove, repoPath, number),
+    merge: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullMerge, repoPath, number),
   },
 }
 

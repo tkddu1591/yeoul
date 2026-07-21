@@ -89,6 +89,18 @@ function assertPullNumber(value: unknown): number {
   return value
 }
 
+/** 연결·GitHub origin 확인을 통과한 API 좌표 — E3b 상세·답변·승인·병합 핸들러가 공유한다.
+    (기존 pullsList·pullCreate는 E3a 검증 코드 그대로 둔다 — 회귀 면적 최소화) */
+async function requireHosting(
+  repoPath: string,
+): Promise<{ api: GitHubHosting; owner: string; repo: string }> {
+  const token = currentToken()
+  if (token === null) throw new Error('GitHub와 연결한 뒤 이용할 수 있어요.')
+  const ref = await gitHubRepoRef(repoPath)
+  if (ref === null) throw new Error('이 저장소의 원격(origin)은 GitHub가 아니에요.')
+  return { api: hosting(token), owner: ref.owner, repo: ref.repo }
+}
+
 export function registerHostingHandlers(): void {
   ipcMain.handle(
     HOSTING_CHANNELS.status,
@@ -214,4 +226,52 @@ export function registerHostingHandlers(): void {
     }
     await shell.openExternal(url)
   })
+
+  ipcMain.handle(
+    HOSTING_CHANNELS.pullDetail,
+    async (_event, repoPath: unknown, number: unknown) => {
+      const path = assertAllowedRepo(repoPath)
+      const pullNumber = assertPullNumber(number)
+      const { api, owner, repo } = await requireHosting(path)
+      const [detail, comments] = await Promise.all([
+        api.pulls.get(owner, repo, pullNumber),
+        api.pulls.comments(owner, repo, pullNumber),
+      ])
+      // 상세로 확인한 주소도 보관한다 — 목록 갱신 없이도 "브라우저에서 열기"가 동작하게
+      knownPullUrls.set(pullUrlKey(path, detail.number), detail.url)
+      return { detail, comments }
+    },
+  )
+
+  ipcMain.handle(
+    HOSTING_CHANNELS.pullComment,
+    async (_event, repoPath: unknown, number: unknown, body: unknown) => {
+      const path = assertAllowedRepo(repoPath)
+      const pullNumber = assertPullNumber(number)
+      const text = assertString(body).trim()
+      if (text === '') throw new Error('답변 내용을 입력해 주세요.')
+      const { api, owner, repo } = await requireHosting(path)
+      await api.pulls.addComment(owner, repo, pullNumber, text)
+    },
+  )
+
+  ipcMain.handle(
+    HOSTING_CHANNELS.pullApprove,
+    async (_event, repoPath: unknown, number: unknown) => {
+      const path = assertAllowedRepo(repoPath)
+      const pullNumber = assertPullNumber(number)
+      const { api, owner, repo } = await requireHosting(path)
+      await api.pulls.approve(owner, repo, pullNumber)
+    },
+  )
+
+  ipcMain.handle(
+    HOSTING_CHANNELS.pullMerge,
+    async (_event, repoPath: unknown, number: unknown) => {
+      const path = assertAllowedRepo(repoPath)
+      const pullNumber = assertPullNumber(number)
+      const { api, owner, repo } = await requireHosting(path)
+      await api.pulls.merge(owner, repo, pullNumber)
+    },
+  )
 }

@@ -14,9 +14,9 @@ import type {
 } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
-export type { PullSummary } from '@git-gui/hosting'
+export type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 
-import type { PullSummary } from '@git-gui/hosting'
+import type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 
 /**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
@@ -140,6 +140,12 @@ export interface HostingStatus {
   ghAvailable: boolean
 }
 
+/** 리뷰 상세 화면 데이터 — 상세와 코멘트 타임라인을 한 번에(IPC 왕복 1회) */
+export interface PullDetailView {
+  detail: PullDetail
+  comments: PullComment[]
+}
+
 /**
  * 호스팅(리뷰 요청) API 표면 — 네트워크·토큰은 전부 main 프로세스에서만 다룬다.
  * repoPath 신뢰 규칙은 GitApi와 동일(main의 allowlist).
@@ -162,6 +168,14 @@ export interface HostingApi {
     create(repoPath: string, input: { title: string; body: string }): Promise<PullSummary>
     /** 리뷰 요청을 브라우저로 연다 — URL은 main이 보관한 목록에서만 찾는다(임의 URL 열기 금지) */
     open(repoPath: string, number: number): Promise<void>
+    /** 상세 + 코멘트 타임라인 한 번에 — 밖에서 닫힌 404는 친절 문구로 온다 */
+    detail(repoPath: string, number: number): Promise<PullDetailView>
+    /** 답변 달기 — 빈 본문은 main에서 거부된다 */
+    comment(repoPath: string, number: number, body: string): Promise<void>
+    /** 승인 — 자기 PR이면 친절 문구로 거부된다 */
+    approve(repoPath: string, number: number): Promise<void>
+    /** 병합(병합 커밋) — 로컬 동기화는 별도(기존 전환·받아오기 흐름을 UI가 제안) */
+    merge(repoPath: string, number: number): Promise<void>
   }
 }
 
@@ -175,6 +189,10 @@ export const HOSTING_CHANNELS = {
   pullsList: 'hosting:pulls-list',
   pullCreate: 'hosting:pull-create',
   pullOpen: 'hosting:pull-open',
+  pullDetail: 'hosting:pull-detail',
+  pullComment: 'hosting:pull-comment',
+  pullApprove: 'hosting:pull-approve',
+  pullMerge: 'hosting:pull-merge',
 } as const
 
 /**
