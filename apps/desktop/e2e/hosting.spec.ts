@@ -8,14 +8,24 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 
-/** mock GitHub — /user·/repos·/pulls 최소 구현. POST를 메모리에 반영해 목록에 나타난다 */
+/** mock GitHub — /user·/repos·/pulls + 코멘트·리뷰·병합 최소 구현. 쓰기를 메모리에 반영한다 */
+interface MockPull {
+  number: number
+  title: string
+  head: string
+  base: string
+  merged: boolean
+  comments: Array<{ id: number; body: string; login: string; created_at: string }>
+  reviews: Array<{ id: number; body: string; state: string; login: string; submitted_at: string }>
+}
+
 interface MockGitHub {
   url: string
-  pulls: Array<{ number: number; title: string; head: string; base: string }>
+  pulls: MockPull[]
   close(): Promise<void>
 }
 
-function toApiPull(pull: { number: number; title: string; head: string; base: string }) {
+function toApiPull(pull: MockPull) {
   return {
     number: pull.number,
     title: pull.title,
@@ -26,8 +36,13 @@ function toApiPull(pull: { number: number; title: string; head: string; base: st
   }
 }
 
-async function startMockGitHub(): Promise<MockGitHub> {
+function toApiPullDetail(pull: MockPull) {
+  return { ...toApiPull(pull), state: pull.merged ? 'closed' : 'open', merged: pull.merged }
+}
+
+async function startMockGitHub(options: { rejectApprove?: boolean } = {}): Promise<MockGitHub> {
   const pulls: MockGitHub['pulls'] = []
+  let nextId = 1000
   const server: Server = createServer((req, res) => {
     const send = (status: number, body: unknown) => {
       res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -38,6 +53,15 @@ async function startMockGitHub(): Promise<MockGitHub> {
       return
     }
     const path = (req.url ?? '/').split('?')[0]!
+    const readBody = (done: (raw: string) => void) => {
+      let raw = ''
+      req.on('data', (chunk: Buffer) => {
+        raw += chunk.toString('utf8')
+      })
+      req.on('end', () => done(raw))
+    }
+    const pullOf = (segment: string | undefined) =>
+      pulls.find((pull) => String(pull.number) === segment)
     if (req.method === 'GET' && path === '/user') {
       send(200, { login: 'e2e-user' })
       return
@@ -47,15 +71,12 @@ async function startMockGitHub(): Promise<MockGitHub> {
       return
     }
     if (req.method === 'GET' && path === '/repos/e2e/fixture/pulls') {
-      send(200, pulls.map(toApiPull))
+      // state=open 요청 — 병합된 것은 목록에서 뺀다
+      send(200, pulls.filter((pull) => !pull.merged).map(toApiPull))
       return
     }
     if (req.method === 'POST' && path === '/repos/e2e/fixture/pulls') {
-      let raw = ''
-      req.on('data', (chunk: Buffer) => {
-        raw += chunk.toString('utf8')
-      })
-      req.on('end', () => {
+      readBody((raw) => {
         const input = JSON.parse(raw) as { title: string; head: string; base: string }
         if (pulls.some((pull) => pull.head === input.head)) {
           send(422, {
@@ -64,14 +85,117 @@ async function startMockGitHub(): Promise<MockGitHub> {
           })
           return
         }
-        const pull = {
+        const pull: MockPull = {
           number: pulls.length + 1,
           title: input.title,
           head: input.head,
           base: input.base,
+          merged: false,
+          comments: [],
+          reviews: [],
         }
         pulls.push(pull)
         send(201, toApiPull(pull))
+      })
+      return
+    }
+    const detailMatch = /^\/repos\/e2e\/fixture\/pulls\/(\d+)$/.exec(path)
+    if (req.method === 'GET' && detailMatch !== null) {
+      const pull = pullOf(detailMatch[1])
+      if (pull === undefined) {
+        send(404, { message: 'Not Found' })
+        return
+      }
+      send(200, toApiPullDetail(pull))
+      return
+    }
+    const commentsMatch = /^\/repos\/e2e\/fixture\/issues\/(\d+)\/comments$/.exec(path)
+    if (commentsMatch !== null) {
+      const pull = pullOf(commentsMatch[1])
+      if (pull === undefined) {
+        send(404, { message: 'Not Found' })
+        return
+      }
+      if (req.method === 'GET') {
+        send(
+          200,
+          pull.comments.map((comment) => ({
+            id: comment.id,
+            user: { login: comment.login },
+            body: comment.body,
+            created_at: comment.created_at,
+          })),
+        )
+        return
+      }
+      if (req.method === 'POST') {
+        readBody((raw) => {
+          const input = JSON.parse(raw) as { body: string }
+          nextId += 1
+          pull.comments.push({
+            id: nextId,
+            body: input.body,
+            login: 'e2e-user',
+            created_at: new Date().toISOString(),
+          })
+          send(201, { id: nextId })
+        })
+        return
+      }
+    }
+    const reviewsMatch = /^\/repos\/e2e\/fixture\/pulls\/(\d+)\/reviews$/.exec(path)
+    if (reviewsMatch !== null) {
+      const pull = pullOf(reviewsMatch[1])
+      if (pull === undefined) {
+        send(404, { message: 'Not Found' })
+        return
+      }
+      if (req.method === 'GET') {
+        send(
+          200,
+          pull.reviews.map((review) => ({
+            id: review.id,
+            user: { login: review.login },
+            body: review.body,
+            state: review.state,
+            submitted_at: review.submitted_at,
+          })),
+        )
+        return
+      }
+      if (req.method === 'POST') {
+        readBody(() => {
+          if (options.rejectApprove === true) {
+            // 실 GitHub 자기 PR 승인 응답 본문 — 이 부분 문자열로 친절 매핑된다
+            send(422, {
+              message: 'Unprocessable Entity',
+              errors: ['Can not approve your own pull request'],
+            })
+            return
+          }
+          nextId += 1
+          pull.reviews.push({
+            id: nextId,
+            body: '',
+            state: 'APPROVED',
+            login: 'e2e-user',
+            submitted_at: new Date().toISOString(),
+          })
+          send(200, { id: nextId, state: 'APPROVED' })
+        })
+        return
+      }
+    }
+    const mergeMatch = /^\/repos\/e2e\/fixture\/pulls\/(\d+)\/merge$/.exec(path)
+    if (req.method === 'PUT' && mergeMatch !== null) {
+      const pull = pullOf(mergeMatch[1])
+      if (pull === undefined) {
+        send(404, { message: 'Not Found' })
+        return
+      }
+      readBody(() => {
+        pull.merged = true
+        send(200, { merged: true, message: 'Pull Request successfully merged' })
       })
       return
     }
@@ -232,6 +356,158 @@ test('미연결 안내가 보이고 잘못된 토큰은 친절한 에러로 거�
     // mock이 401 — 첫 연결 맥락의 친절 문구로 거부되고 다이얼로그는 입력을 보존한 채 남는다
     await expect(window.getByTestId('prompt-error')).toContainText('토큰이 맞지 않아요')
     await expect(window.getByTestId('prompt-input')).toHaveValue('wrong-token')
+  } finally {
+    await app.close()
+    await mock.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('리뷰 요청 상세를 열어 코멘트를 확인하고 답변을 단다', async () => {
+  const mock = await startMockGitHub()
+  mock.pulls.push({
+    number: 1,
+    title: '로그인 버튼 색 실험',
+    head: 'feature',
+    base: 'main',
+    merged: false,
+    comments: [
+      {
+        id: 100,
+        body: '버튼 색이 좋아요. 문구만 다듬어 주세요.',
+        login: 'reviewer',
+        created_at: '2026-07-20T09:00:00Z',
+      },
+    ],
+    reviews: [],
+  })
+  const repo = await createGitHubFixtureRepo({ branch: 'feature', withUpstream: true })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: userData,
+      GIT_GUI_GITHUB_API: mock.url,
+      GIT_GUI_E2E_GH_TOKEN: 'e2e-token',
+    },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('review-open').click()
+    await window.getByTestId('review-pull-1').click()
+    // 팝오버가 닫히고 우측 열이 리뷰 상세로 전환된다 — 제목·상태·타임라인
+    await expect(window.getByTestId('review-detail-panel')).toContainText('#1 로그인 버튼 색 실험')
+    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
+    await expect(window.getByTestId('review-detail-timeline')).toContainText(
+      '버튼 색이 좋아요. 문구만 다듬어 주세요.',
+    )
+    // 답변 — 성공하면 서버 상태를 다시 읽어 타임라인에 반영된다
+    await window.getByTestId('review-reply-input').fill('고마워요! 문구를 다듬었어요.')
+    await window.getByTestId('review-reply-send').click()
+    await expect(window.getByTestId('review-detail-timeline')).toContainText(
+      '고마워요! 문구를 다듬었어요.',
+    )
+    // mock 상태에 실제 반영됐다
+    expect(mock.pulls[0]!.comments).toHaveLength(2)
+    expect(mock.pulls[0]!.comments[1]).toMatchObject({ body: '고마워요! 문구를 다듬었어요.' })
+  } finally {
+    await app.close()
+    await mock.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('승인하면 승인됨 배지, 병합하면 병합됨 배지와 기본 공간 이동 제안이 뜬다', async () => {
+  // mock은 타인 PR 시나리오 — 승인이 성공한다(자기 승인 거부는 다음 테스트)
+  const mock = await startMockGitHub()
+  mock.pulls.push({
+    number: 1,
+    title: '로그인 버튼 색 실험',
+    head: 'feature',
+    base: 'main',
+    merged: false,
+    comments: [],
+    reviews: [],
+  })
+  const repo = await createGitHubFixtureRepo({ branch: 'feature', withUpstream: true })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: userData,
+      GIT_GUI_GITHUB_API: mock.url,
+      GIT_GUI_E2E_GH_TOKEN: 'e2e-token',
+    },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('review-open').click()
+    await window.getByTestId('review-pull-1').click()
+    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
+    // 승인 → 상세 재조회로 '승인됨' 배지 + 타임라인의 승인 항목
+    await window.getByTestId('review-approve').click()
+    await expect(window.getByTestId('review-detail-status')).toContainText('승인됨')
+    await expect(window.getByTestId('review-detail-timeline')).toContainText('승인했어요')
+    expect(mock.pulls[0]!.reviews).toHaveLength(1)
+    // 병합 — 확인창을 거친다
+    await window.getByTestId('review-merge').click()
+    await expect(window.getByRole('alertdialog')).toContainText('이 동작은 GitHub에서 일어나요.')
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId('review-detail-status')).toContainText('병합됨')
+    expect(mock.pulls[0]!.merged).toBe(true)
+    // 병합 후 기본 공간 이동 제안 — '나중에'(그만두기)를 고르면 안내 notice만 남는다.
+    // 확인 경로(전환+받아오기)는 기존 smoke E2E가 커버하고, 여기서 실행하면 mock GitHub(가짜
+    // 병합)와 로컬 픽스처(원격 네트워크 없음)의 정합이 깨진다 — 취소로 끝낸다(근거: 헤더)
+    await expect(window.getByRole('alertdialog')).toContainText('기본 공간(main)으로 이동해')
+    await window.getByTestId('confirm-cancel').click()
+    await expect(window.getByTestId('notice')).toContainText('병합했어요')
+  } finally {
+    await app.close()
+    await mock.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('내가 만든 리뷰 요청은 스스로 승인할 수 없다는 친절 에러를 보여준다', async () => {
+  // mock이 실 GitHub의 자기 승인 422 본문을 그대로 돌려주는 모드
+  const mock = await startMockGitHub({ rejectApprove: true })
+  mock.pulls.push({
+    number: 1,
+    title: '로그인 버튼 색 실험',
+    head: 'feature',
+    base: 'main',
+    merged: false,
+    comments: [],
+    reviews: [],
+  })
+  const repo = await createGitHubFixtureRepo({ branch: 'feature', withUpstream: true })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: userData,
+      GIT_GUI_GITHUB_API: mock.url,
+      GIT_GUI_E2E_GH_TOKEN: 'e2e-token',
+    },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('review-open').click()
+    await window.getByTestId('review-pull-1').click()
+    await expect(window.getByTestId('review-detail-panel')).toBeVisible()
+    await window.getByTestId('review-approve').click()
+    await expect(window.getByTestId('error')).toContainText('스스로 승인할 수 없어요')
+    // 상세는 열린 채 남는다 — 다른 사람의 승인을 기다리면 된다
+    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
   } finally {
     await app.close()
     await mock.close()
