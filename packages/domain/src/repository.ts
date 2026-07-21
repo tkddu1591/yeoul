@@ -138,6 +138,14 @@ export interface RevertResult {
   autoShelved: boolean
 }
 
+/** 가져오기(cherry-pick) 결과 — conflict면 CHERRY_PICK_HEAD가 남는다(상태 바 cherry-picking) */
+export interface CherryPickResult {
+  /** empty = 이미 반영된 저장 — 엔진이 빈 진행 상태(CHERRY_PICK_HEAD)를 정리(abort)하고 알려만 준다 */
+  outcome: 'picked' | 'conflict' | 'empty'
+  /** 막혀서 변경을 보관함에 자동 저장했는가 (스펙: 덮기 전 자동 보관) */
+  autoShelved: boolean
+}
+
 /** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */
 export interface RemoveBranchResult {
   removed: boolean

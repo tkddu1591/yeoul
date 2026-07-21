@@ -1440,6 +1440,153 @@ describe('GitClient', () => {
     await expect(client.commits.revertAbort()).rejects.toThrow(/되돌리는 중이 아니에요/)
   })
 
+  it('cherryPick — 다른 공간의 저장 하나를 가져와 새 저장을 만든다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side work'], { cwd: repo })
+    const target = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await client.branches.switch('main')
+
+    expect(await client.commits.cherryPick(target)).toEqual({
+      outcome: 'picked',
+      autoShelved: false,
+    })
+    expect(existsSync(join(repo, 'side.txt'))).toBe(true)
+    // 새 저장이 main 끝에 생겼다 — side 커밋과 다른 해시의 복제다
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    expect(head).not.toBe(target)
+    expect(
+      (await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })).stdout.trim(),
+    ).toBe('side work')
+  })
+
+  it('cherryPick — 겹치면 conflict 상태(cherry-picking)로 남고, 취소로 돌아온다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'README.md', '# side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side edit'], { cwd: repo })
+    const target = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+
+    expect(await client.commits.cherryPick(target)).toEqual({
+      outcome: 'conflict',
+      autoShelved: false,
+    })
+    let status = await client.repo.status()
+    expect(status.state).toBe('cherry-picking')
+    expect(status.changes.some((c) => c.unstaged === 'conflicted')).toBe(true)
+
+    await client.commits.cherryPickAbort()
+    status = await client.repo.status()
+    expect(status.state).toBe('normal')
+    expect(await client.files.readText('README.md')).toBe('# mine\n')
+  })
+
+  it('cherryPick — 이미 반영된 저장은 empty로 알리고 진행 흔적을 남기지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'a.txt', '1\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'work'], { cwd: repo })
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+
+    // HEAD 자신을 가져오기 — 바뀔 것이 없다(실측 5-ⓓ: CHERRY_PICK_HEAD가 남는 exit 1 → 엔진이 정리)
+    expect(await client.commits.cherryPick(head)).toEqual({ outcome: 'empty', autoShelved: false })
+    expect((await client.repo.status()).state).toBe('normal')
+    expect((await client.history.list(10)).map((c) => c.subject)).toEqual(['work', 'init'])
+  })
+
+  it('cherryPick — 병합 커밋은 읽히는 메시지로 거부한다 (-m 재시도 없음)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'main.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main work'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'merge', '--no-edit', 'side'], { cwd: repo })
+    const mergeHash = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    const root = (
+      await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    await client.branches.create('from-root', root)
+    await client.branches.switch('from-root')
+
+    await expect(client.commits.cherryPick(mergeHash)).rejects.toThrow(/통째로 가져올 수 없어요/)
+    // 진행 흔적 없음 — 상태는 정상 그대로다
+    expect((await client.repo.status()).state).toBe('normal')
+  })
+
+  it('cherryPick — 저장 안 된 변경이 겹치면 보관함에 넣고 가져온다 (스마트 가져오기)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('side', null)
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'README.md', '# side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side edit'], { cwd: repo })
+    const target = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# dirty\n')
+
+    expect(await client.commits.cherryPick(target)).toEqual({
+      outcome: 'picked',
+      autoShelved: true,
+    })
+    expect(await client.files.readText('README.md')).toBe('# side\n')
+    const shelf = await client.shelf.list()
+    expect(shelf).toHaveLength(1)
+    expect(shelf[0]!.message).toContain('저장 가져오기 자동 보관')
+  })
+
+  it('cherryPick — 합치는 중(merging)에는 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    const target = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await expect(client.commits.cherryPick(target)).rejects.toThrow(/먼저 마무리하거나 취소/)
+  })
+
+  it('cherryPick — 사라진 커밋·ref 표현식을 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(
+      client.commits.cherryPick('0123456789012345678901234567890123456789'),
+    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    await expect(client.commits.cherryPick('HEAD')).rejects.toThrow(/올바른 커밋 해시가 아니에요/)
+  })
+
+  it('cherryPickAbort — 가져오는 중이 아니면 읽히는 메시지로 거부한다', async () => {
+    const repo = await createFixtureRepo()
+    await expect(createGitClient(repo).commits.cherryPickAbort()).rejects.toThrow(
+      /지금은 가져오는 중이 아니에요/,
+    )
+  })
+
   it('reverting 중에는 전환·받아오기도 읽히는 메시지로 거부한다', async () => {
     const { repo } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

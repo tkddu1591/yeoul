@@ -1,6 +1,7 @@
 import {
   detectState,
   type BranchSummary,
+  type CherryPickResult,
   type CommitDetail,
   type CommitSummary,
   type DiffOptions,
@@ -134,6 +135,14 @@ export interface GitClient {
     revert(hash: string): Promise<RevertResult>
     /** 되돌리기 취소 — 충돌 상태를 버리고 이전으로 */
     revertAbort(): Promise<void>
+    /**
+     * 이 저장 하나만 지금 공간으로 가져오는 새 저장을 만든다(cherry-pick) — revert와 동일 골격.
+     * merge commit은 친절 거부(-m 재시도 없음 — "이 저장만"의 의미가 병합 전체와 어긋난다).
+     * 이미 반영된 저장은 빈 진행 상태를 정리하고 empty로 알린다. dirty 겹침은 자동 보관 후 재시도
+     */
+    cherryPick(hash: string): Promise<CherryPickResult>
+    /** 가져오기 취소 — 충돌 상태를 버리고 이전으로 */
+    cherryPickAbort(): Promise<void>
   }
 }
 
@@ -183,6 +192,9 @@ const REVERT_SHELF_MESSAGE = '저장 되돌리기 자동 보관'
 
 /** 파일 단위 적용이 미저장 변경을 덮기 전 자동 보관할 때의 보관함 메시지 */
 const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
+
+/** 가져오기(cherry-pick)가 막혀 자동 보관할 때의 보관함 메시지 */
+const CHERRY_PICK_SHELF_MESSAGE = '저장 가져오기 자동 보관'
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
@@ -869,6 +881,63 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, result)
         }
         return parsePatch(result.stdout)
+      },
+      async cherryPick(hash) {
+        const cwd = await topLevel()
+        assertFullHash(hash)
+        // merging·reverting 도중의 cherry-pick은 진행 중 상태를 오염시킨다 — revert와 동일 관례로 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 가져올 수 있어요.')
+        }
+        const runOnce = () => execGit(['cherry-pick', '--no-edit', '--end-of-options', hash], { cwd })
+        const classify = async (
+          result: GitResult,
+          autoShelved: boolean,
+        ): Promise<CherryPickResult | null> => {
+          if (result.exitCode === 0) return { outcome: 'picked', autoShelved }
+          const output = result.stdout + result.stderr
+          // merge commit은 -m 없이 거부된다(실측 5-ⓐ) — revert와 달리 재시도하지 않는다:
+          // "이 저장만"과 병합 전체 가져오기는 의미가 다르다 (추측 금지 원칙)
+          if (output.includes('is a merge but no -m option')) {
+            throw new Error('합쳐진 저장은 통째로 가져올 수 없어요. 안에 있는 저장을 하나씩 가져와 주세요.')
+          }
+          if (output.includes('bad object')) {
+            throw new Error(MISSING_COMMIT_MESSAGE)
+          }
+          // 이미 반영된 저장 — CHERRY_PICK_HEAD가 남는다(실측 5-ⓓ). 빈 진행 상태를 정리하고 알려만 준다
+          if (output.includes('is now empty')) {
+            await execGitOrThrow(['cherry-pick', '--abort'], { cwd })
+            return { outcome: 'empty', autoShelved }
+          }
+          if (output.includes('CONFLICT') || output.includes('after resolving the conflicts')) {
+            return { outcome: 'conflict', autoShelved }
+          }
+          return null
+        }
+        const first = await runOnce()
+        const classified = await classify(first, false)
+        if (classified !== null) return classified
+        if (!(first.stdout + first.stderr).includes('would be overwritten')) {
+          throw new GitError(['cherry-pick', '--no-edit', '--end-of-options', hash], first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch·merge·pull·revert와 동일 패턴)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', CHERRY_PICK_SHELF_MESSAGE], { cwd })
+        const second = await runOnce()
+        const secondClassified = await classify(second, true)
+        if (secondClassified !== null) return secondClassified
+        throw new GitError(['cherry-pick', '--no-edit', '--end-of-options', hash], second)
+      },
+      async cherryPickAbort() {
+        const cwd = await topLevel()
+        const result = await execGit(['cherry-pick', '--abort'], { cwd })
+        if (result.exitCode !== 0) {
+          // 실측 5-ⓔ stderr: "error: no cherry-pick or revert in progress"
+          if (result.stderr.includes('cherry-pick or revert in progress')) {
+            throw new Error('지금은 가져오는 중이 아니에요.')
+          }
+          throw new GitError(['cherry-pick', '--abort'], result)
+        }
       },
       async revert(hash) {
         const cwd = await topLevel()
