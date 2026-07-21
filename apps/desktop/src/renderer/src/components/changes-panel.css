@@ -85,6 +85,8 @@
 }
 .file-list__bulk {
   display: flex;
+  /* 좁은 좌측 열(960px 창에서 260px)에서 버튼 줄이 잘리는 대신 줄바꿈으로 살아남는다 (E6a) */
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);

@@ -16,6 +16,7 @@ import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
 import {
   clampRightWidth,
+  computeColumns,
   loadRightWidth,
   resetRightWidth,
   RIGHT_COLUMN_DEFAULT,
@@ -84,8 +85,11 @@ export function App() {
   const [rightWidth, setRightWidth] = useState<number>(() =>
     clampRightWidth(loadRightWidth(), window.innerWidth),
   )
+  // 창 폭 — 좌·우 열이 창 폭에 따라 줄어드는 반응형 계산(computeColumns)의 입력 (E6a)
+  const [viewportWidth, setViewportWidth] = useState<number>(() => window.innerWidth)
   useEffect(() => {
     const onWindowResize = () => {
+      setViewportWidth(window.innerWidth)
       setRightWidth((width) => clampRightWidth(width, window.innerWidth))
     }
     window.addEventListener('resize', onWindowResize)
@@ -110,9 +114,9 @@ export function App() {
     resetRightWidth()
     setRightWidth(RIGHT_COLUMN_DEFAULT)
   }
-  // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) —
-  // 사용자가 정한 폭을 그대로 유지한다. 좁으면 손잡이로 넓히면 되고, 폭은 기억된다
-  const effectiveRight = rightWidth
+  // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
+  // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
+  const columns = computeColumns(viewportWidth, rightWidth)
 
   useEffect(() => {
     void store.init()
@@ -303,20 +307,30 @@ export function App() {
         className={`app__main${
           store.commitDetail !== null || store.pullDetail !== null ? ' app__main--detail' : ''
         }`}
-        style={{ gridTemplateColumns: `340px minmax(0, 1fr) 6px ${effectiveRight}px` }}
+        style={{ gridTemplateColumns: `${columns.left}px minmax(0, 1fr) 6px ${columns.right}px` }}
       >
-        <ChangesPanel
-          changes={status?.changes ?? []}
-          selected={store.selected}
-          busy={store.busy}
-          onStage={(paths) => void store.stage(paths)}
-          onUnstage={(paths) => void store.unstage(paths)}
-          onDiscard={(trackedPaths, untrackedPaths) =>
-            void store.discard(trackedPaths, untrackedPaths)
-          }
-          onRemoveFile={(path) => void store.removeFile(path)}
-          onSelect={(selected) => void store.selectFile(selected)}
-        />
+        {/* 좌측 열 = 변경 목록(위) + 저장 폼(하단 푸터) — 고르고 저장하기까지 한 열에서 끝난다 (E6a) */}
+        <div className="app__left">
+          <ChangesPanel
+            changes={status?.changes ?? []}
+            selected={store.selected}
+            busy={store.busy}
+            onStage={(paths) => void store.stage(paths)}
+            onUnstage={(paths) => void store.unstage(paths)}
+            onDiscard={(trackedPaths, untrackedPaths) =>
+              void store.discard(trackedPaths, untrackedPaths)
+            }
+            onRemoveFile={(path) => void store.removeFile(path)}
+            onSelect={(selected) => void store.selectFile(selected)}
+          />
+          <CommitForm
+            stagedCount={stagedCount}
+            busy={store.busy}
+            suggestion={suggestion}
+            allowEmpty={status?.state === 'merging'}
+            onCommit={(message) => store.commit(message)}
+          />
+        </div>
         <div className="app__center">
           {store.conflictFile !== null ? (
             <ConflictPanel
@@ -350,13 +364,6 @@ export function App() {
               }
             />
           )}
-          <CommitForm
-            stagedCount={stagedCount}
-            busy={store.busy}
-            suggestion={suggestion}
-            allowEmpty={status?.state === 'merging'}
-            onCommit={(message) => store.commit(message)}
-          />
         </div>
         {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값 */}
         <div
