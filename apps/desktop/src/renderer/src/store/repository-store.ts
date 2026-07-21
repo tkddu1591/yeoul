@@ -749,6 +749,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async openPullDetail(number) {
     const { repoPath } = get()
     if (!repoPath) return
+    // 팝오버 열기 직후에는 refreshPulls가 busy를 잡고 있다 — 첫 클릭을 조용히 삼키지 않게
+    // busy가 풀릴 때까지 잠깐 기다린다(상한 5초 — 넘으면 guard가 재진입 거부로 처리) (품질 리뷰)
+    for (let waited = 0; get().busy && waited < 5000; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     await guard(set, get, async () => {
       const pullDetail = await hosting().pulls.detail(repoPath, number)
       // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
@@ -766,8 +771,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     return guard(set, get, async () => {
       const number = pullDetail.detail.number
       await hosting().pulls.comment(repoPath, number, body)
-      // 내 답변만 붙이지 않고 서버 상태로 다시 읽는다 — 그 사이 달린 다른 코멘트도 함께 온다
-      set({ pullDetail: await hosting().pulls.detail(repoPath, number) })
+      // 내 답변만 붙이지 않고 서버 상태로 다시 읽는다 — 그 사이 달린 다른 코멘트도 함께 온다.
+      // 재조회 실패가 이미 성공한 전송을 에러로 뒤집지 않게 삼킨다(재전송=중복 유도 방지 — 품질 리뷰)
+      try {
+        set({ pullDetail: await hosting().pulls.detail(repoPath, number) })
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
     })
   },
 
@@ -777,8 +787,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     await guard(set, get, async () => {
       const number = pullDetail.detail.number
       await hosting().pulls.approve(repoPath, number)
+      // 재조회 실패가 이미 성공한 승인을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
+      let refreshed = get().pullDetail
+      try {
+        refreshed = await hosting().pulls.detail(repoPath, number)
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
       set({
-        pullDetail: await hosting().pulls.detail(repoPath, number),
+        pullDetail: refreshed,
         notice: `리뷰 요청 #${number}을 승인했어요.`,
       })
     })
@@ -791,9 +808,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const number = pullDetail.detail.number
       const base = pullDetail.detail.baseBranch
       await hosting().pulls.merge(repoPath, number)
-      // 상세를 다시 읽어 '병합됨' 배지로 갱신한다. 로컬 반영은 App의 후속 제안(전환+받아오기)이 담당
+      // 상세를 다시 읽어 '병합됨' 배지로 갱신한다. 로컬 반영은 App의 후속 제안(전환+받아오기)이 담당.
+      // 재조회 실패가 이미 성공한 병합을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
+      let refreshed = get().pullDetail
+      try {
+        refreshed = await hosting().pulls.detail(repoPath, number)
+      } catch {
+        // 다음 열기에서 다시 읽는다
+      }
       set({
-        pullDetail: await hosting().pulls.detail(repoPath, number),
+        pullDetail: refreshed,
         notice: `리뷰 요청 #${number}을 "${base}"에 병합했어요. 로컬은 아직 그대로예요 — 기본 공간에서 받아오기(pull)를 하면 반영돼요.`,
       })
     })

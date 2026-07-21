@@ -250,6 +250,10 @@ export function registerHostingHandlers(): void {
       const pullNumber = assertPullNumber(number)
       const text = assertString(body).trim()
       if (text === '') throw new Error('답변 내용을 입력해 주세요.')
+      // GitHub 코멘트 상한(65,536자) 초과의 원문 422를 막는다 (품질 리뷰)
+      if (text.length > 60000) {
+        throw new Error('답변이 너무 길어요. 60,000자 안으로 줄여 주세요.')
+      }
       const { api, owner, repo } = await requireHosting(path)
       await api.pulls.addComment(owner, repo, pullNumber, text)
     },

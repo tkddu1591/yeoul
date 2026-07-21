@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, ExternalLink, GitMerge, Send } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PullComment, PullDetailView } from '@git-gui/ipc-contract'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -58,6 +58,13 @@ export function ReviewDetailPanel({
   onMerge,
 }: ReviewDetailPanelProps) {
   const [reply, setReply] = useState('')
+  const timelineRef = useRef<HTMLDivElement | null>(null)
+  // 열 때·답변이 늘었을 때 최신(맨 아래)으로 — "코멘트 확인"의 기본 시선이자,
+  // 전송 후 내 답변이 화면 밖에 남아 재전송(중복)을 유도하는 것을 막는다 (품질 리뷰)
+  useEffect(() => {
+    const el = timelineRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [view.comments.length])
   const status = statusOf(view)
   // 병합·닫힘 뒤에는 승인·병합이 의미 없다 — 코멘트는 닫힌 뒤에도 달 수 있다(GitHub 동작 그대로)
   const settled = view.detail.merged || view.detail.state === 'closed'
@@ -106,7 +113,7 @@ export function ReviewDetailPanel({
           <ExternalLink size={13} aria-hidden="true" /> 브라우저에서 열기
         </Button>
       </div>
-      <div className="review-detail__timeline" data-testid="review-detail-timeline">
+      <div ref={timelineRef} className="review-detail__timeline" data-testid="review-detail-timeline">
         {view.comments.length === 0 ? (
           <p className="review-detail__empty">아직 코멘트가 없어요.</p>
         ) : (
