@@ -2065,7 +2065,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 > `confirm-dialog.css`에 퇴장 즉시화 1규칙을 추가한다:
 >
 > ```css
-> /* 퇴장 애니메이션을 없앤다 — 연속 확인창(병합→이동 제안)에서
+> /* 진입 중에 닫혀도 즉시 사라진다 — 진입 애니메이션이 돌고 있으면 react-aria가
+>    animationend까지 unmount를 미뤄, 연속 다이얼로그(병합 확인→이동 제안)에서
 >    alertdialog 2개가 잠깐 겹친다(E3b 실측: data-entering·data-exiting 동시 존재) */
 > .ui-modal-overlay[data-exiting] {
 >   animation: none;
