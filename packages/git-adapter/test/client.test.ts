@@ -849,6 +849,30 @@ describe('GitClient', () => {
     expect(await client.shelf.list()).toHaveLength(1)
   })
 
+  it('restoreFile — 합치는 중(merging)에는 읽히는 메시지로 거부한다 (변경·보관함 무손상)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: repo })
+    await client.branches.switch('main')
+    await writeFixtureFile(repo, 'README.md', '# mine\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
+    await client.branches.merge('rival')
+
+    await writeFixtureFile(repo, 'other.txt', 'precious\n')
+    const head = (await client.history.list(1))[0]!
+    await expect(client.commits.restoreFile(head.hash, 'other.txt')).rejects.toThrow(
+      /먼저 마무리하거나 취소/,
+    )
+    // 변경은 그대로, 보관함도 생기지 않았다 — stash 선실행 유실 경로 차단 확인
+    expect(await client.files.readText('other.txt')).toBe('precious\n')
+    expect(await client.shelf.list()).toHaveLength(0)
+  })
+
   it('diffAgainstWorktree — 그 시점과 지금 코드(미저장 포함)의 차이를 반환한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)

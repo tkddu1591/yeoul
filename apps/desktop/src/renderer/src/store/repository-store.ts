@@ -449,15 +449,23 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      // 파괴 작업 — 자동 보관까지 간 뒤 실패해도 보관함 카운트가 낡지 않게 스냅샷은 finally로 (revert 관례)
+      // 파괴 작업 — 자동 보관까지 간 뒤 실패해도 보관함 카운트가 낡지 않게 스냅샷은 finally로 (revert 관례).
+      // 실패 시에는 선택(커밋 상세)을 유지해 맥락을 잃지 않는다 (품질 리뷰)
+      let succeeded = false
       let notice: string | null = null
       try {
         const result = await git().commits.restoreFile(repoPath, hash, path)
-        notice = `이 시점의 "${path}"을 지금 코드에 적용했어요.${
+        succeeded = true
+        // "이 시점" 어투를 빼 커밋·보관함 공통으로 읽히게, staged로 올라간 것도 함께 안내한다 (품질 리뷰)
+        notice = `"${path}"에 이 내용을 적용하고 저장 예정에 올려뒀어요 — 저장하기로 확정해요.${
           result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
         }`
       } finally {
-        set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)), notice })
+        set({
+          ...(succeeded ? CLEAR_SELECTIONS : {}),
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
       }
     })
   },

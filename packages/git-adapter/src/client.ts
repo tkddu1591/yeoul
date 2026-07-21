@@ -792,6 +792,12 @@ export function createGitClient(repoPath: string): GitClient {
             '충돌 중인 파일은 다른 시점 내용으로 덮을 수 없어요. 충돌 화면에서 한쪽을 고르거나 병합을 취소해 주세요.',
           )
         }
+        // merging·reverting 도중의 적용은 병합 index를 중간 변경하고, stash도 unmerged index에서
+        // 원문 에러로 죽는다(품질 리뷰 실측) — revert와 동일 관례로 먼저 마무리를 안내한다
+        const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
+        if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 적용할 수 있어요.')
+        }
         // 사전 검사 — stash 후 checkout이 실패하면 사용자 변경만 보관함으로 사라진다.
         // 그 시점에 파일이 있는지(ls-tree)와 해시 존재를 먼저 확인한다 (실측: 없는 해시는 'not a tree object')
         const treeArgs = ['ls-tree', '-r', '--end-of-options', hash, '--', `:(literal)${path}`]

@@ -927,7 +927,7 @@ test('커밋 상세에서 파일 우클릭 — 이 파일만 그 시점 내용�
     // 확인창 — 자동 보관 안내를 담는다
     await expect(window.getByRole('alertdialog')).toContainText('보관함에 넣어 드려요')
     await window.getByTestId('confirm-accept').click()
-    await expect(window.getByTestId('notice')).toContainText('지금 코드에 적용했어요')
+    await expect(window.getByTestId('notice')).toContainText('저장 예정에 올려뒀어요')
     await expect(window.getByTestId('notice')).toContainText('보관함')
     // dirty였던 v2는 보관함으로 +1, 디스크는 그 시점(v1) 내용 — 실측
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
