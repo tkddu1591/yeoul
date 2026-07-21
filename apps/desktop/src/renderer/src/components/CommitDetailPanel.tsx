@@ -1,9 +1,11 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowLeft } from 'lucide-react'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { CommitDetail, CommitFileChange } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { formatRelativeTime } from './relative-time'
@@ -18,6 +20,10 @@ interface CommitDetailPanelProps {
   selectedFile: CommitFileChange | null
   busy: boolean
   onSelectFile(file: CommitFileChange): void
+  /** 우클릭 → "이 파일만 … 적용 (checkout)" — 확인창을 거친 뒤 호출된다 (E5a 피드백 1) */
+  onRestoreFile(file: CommitFileChange): void
+  /** 우클릭 → "지금 코드와 비교 (diff)" — 그 시점과 미저장 워크트리의 비교 (E5a 피드백 6) */
+  onCompareFile(file: CommitFileChange): void
   onBack(): void
 }
 
@@ -26,11 +32,13 @@ function CommitFileRow({
   isSelected,
   busy,
   onSelect,
+  onMenu,
 }: {
   file: CommitFileChange
   isSelected: boolean
   busy: boolean
   onSelect(): void
+  onMenu(x: number, y: number): void
 }) {
   const kindLabel = KIND_LABELS[file.kind]
   const tooltip =
@@ -48,6 +56,10 @@ function CommitFileRow({
       }`}
       disabled={busy}
       onClick={onSelect}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onMenu(event.clientX, event.clientY)
+      }}
       title={tooltip}
       aria-label={tooltip}
       data-testid={`commit-file-${file.path}`}
@@ -66,6 +78,8 @@ function CommitFileRow({
 /**
  * 커밋 클릭 상세 (#6·3차 피드백) — 우측 열이 타임라인에서 이 패널로 전환된다:
  * 상단 파일 목록(가상), 하단 메시지. 파일을 누르면 diff는 중앙 패널에 뜬다.
+ * 파일 행 우클릭 — 이 파일만 적용(checkout)·지금 코드와 비교(diff) (E5a).
+ * 보관함 미리보기도 이 패널을 재사용하므로 같은 메뉴가 생긴다 — 적용 라벨만 분기.
  */
 export function CommitDetailPanel({
   detail,
@@ -73,8 +87,13 @@ export function CommitDetailPanel({
   selectedFile,
   busy,
   onSelectFile,
+  onRestoreFile,
+  onCompareFile,
   onBack,
 }: CommitDetailPanelProps) {
+  // 우클릭 메뉴·확인창 상태는 패널이 관리한다 (HistoryPanel·다이얼로그 관례)
+  const [menu, setMenu] = useState<{ x: number; y: number; file: CommitFileChange } | null>(null)
+  const [confirmingRestore, setConfirmingRestore] = useState<CommitFileChange | null>(null)
   // 대형 커밋(수천 파일)에서도 파일 목록은 가시 범위만 렌더한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
@@ -83,6 +102,12 @@ export function CommitDetailPanel({
     estimateSize: () => 31,
     overscan: 10,
   })
+
+  const runRestore = () => {
+    const file = confirmingRestore
+    setConfirmingRestore(null)
+    if (file !== null) onRestoreFile(file)
+  }
 
   return (
     <Panel
@@ -134,6 +159,7 @@ export function CommitDetailPanel({
                   isSelected={selectedFile?.path === file.path}
                   busy={busy}
                   onSelect={() => onSelectFile(file)}
+                  onMenu={(x, y) => setMenu({ x, y, file })}
                 />
               </li>
             )
@@ -157,6 +183,36 @@ export function CommitDetailPanel({
             ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
         </p>
       </div>
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            {
+              key: 'restore-file',
+              label: shelfPreview
+                ? '이 파일만 꺼내 적용 (checkout)'
+                : '이 파일만 지금 코드에 적용 (checkout)',
+              onSelect: () => setConfirmingRestore(menu.file),
+            },
+            {
+              key: 'compare-worktree',
+              label: '지금 코드와 비교 (diff)',
+              onSelect: () => onCompareFile(menu.file),
+            },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      <ConfirmDialog
+        isOpen={confirmingRestore !== null}
+        title={shelfPreview ? '이 파일만 꺼내 적용할까요?' : '이 파일만 이 시점 내용으로 적용할까요?'}
+        confirmLabel="적용"
+        onConfirm={runRestore}
+        onCancel={() => setConfirmingRestore(null)}
+      >
+        지금 파일이 이 시점 내용으로 바뀌어요. 미저장 변경은 보관함에 넣어 드려요.
+      </ConfirmDialog>
     </Panel>
   )
 }

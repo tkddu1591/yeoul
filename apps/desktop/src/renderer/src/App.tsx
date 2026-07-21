@@ -322,9 +322,10 @@ export function App() {
           ) : (
             <DiffPanel
               path={
-                store.commitFile !== null && store.commitDetail !== null
+                store.diffLabel ??
+                (store.commitFile !== null && store.commitDetail !== null
                   ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
-                  : store.selected?.change.path ?? null
+                  : store.selected?.change.path ?? null)
               }
               diff={store.diff}
               busy={store.busy}
@@ -369,6 +370,12 @@ export function App() {
             selectedFile={store.commitFile}
             busy={store.busy}
             onSelectFile={(file) => void store.selectCommitFile(file)}
+            onRestoreFile={(file) =>
+              void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
+            }
+            onCompareFile={(file) =>
+              void store.compareFileWithWorktree(store.commitDetail!.hash, file.path, file.origPath)
+            }
             onBack={() => store.clearCommit()}
           />
         ) : (
