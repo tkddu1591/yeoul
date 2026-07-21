@@ -1263,6 +1263,54 @@ describe('GitClient', () => {
     await expect(createGitClient(repo).sync.push()).rejects.toThrow('브랜치가 아닌 시점')
   })
 
+  it('push — 원격이 앞서 있으면 받아오기 안내로 거부한다 (실측 ①: fetch first)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    // 다른 클론이 원격에 새 저장을 올린다 — 로컬은 fetch 없이 뒤처진 상태
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'b.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other work'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await writeFixtureFile(repo, 'c.txt', 'l\n')
+    await client.changes.stage(['c.txt'])
+    await client.commits.create('로컬 저장')
+    await expect(client.sync.push()).rejects.toThrow(
+      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+    )
+  })
+
+  it('push — 실행취소(undo)로 로컬이 뒤로 가도 같은 안내로 거부한다 (실측 ③: non-fast-forward)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'b.txt', '1\n')
+    await client.changes.stage(['b.txt'])
+    await client.commits.create('둘째')
+    await client.sync.push()
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await client.commits.undoLast(head)
+    await expect(client.sync.push()).rejects.toThrow(
+      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+    )
+  })
+
+  it('push — 첫 연결(-u) 경로에서도 원격이 앞서면 같은 안내로 거부한다 (실측 ④)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    // upstream을 만들기 전에 다른 클론이 원격을 먼저 채운다 — 로컬과 갈라진 역사
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await writeFixtureFile(other, 'b.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other first'], { cwd: other })
+    await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: other })
+    await expect(client.sync.push()).rejects.toThrow(
+      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+    )
+  })
+
   it('pull — 원격의 새 저장을 받아온다(ff)와 이미 최신을 구분한다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

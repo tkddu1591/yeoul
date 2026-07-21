@@ -632,6 +632,18 @@ export function createGitClient(repoPath: string): GitClient {
         }
         // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
         const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
+        // 원격이 앞서 거부된 push (E5b 후속) — 실측 stderr 4케이스 전부 "! [rejected] …
+        // (fetch first|non-fast-forward)". undo(실행취소)로 로컬이 뒤로 간 경우도 같은
+        // non-fast-forward 거부라 같은 문구로 커버된다. 'failed to push some refs'는 hook
+        // 거부([remote rejected])에도 나와 쓰지 않는다 — 괄호 사유로만 판정한다
+        const rejectIfRemoteAhead = (result: GitResult): void => {
+          if (
+            result.stderr.includes('(fetch first)') ||
+            result.stderr.includes('(non-fast-forward)')
+          ) {
+            throw new Error('원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.')
+          }
+        }
         const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
@@ -646,7 +658,11 @@ export function createGitClient(repoPath: string): GitClient {
           upstream.stdout.trim().endsWith(`/${branch.stdout.trim()}`)
         ) {
           // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
-          await execGitOrThrow(['-c', 'push.default=simple', 'push'], { cwd })
+          const plain = await execGit(['-c', 'push.default=simple', 'push'], { cwd })
+          if (plain.exitCode !== 0) {
+            rejectIfRemoteAhead(plain)
+            throw new GitError(['-c', 'push.default=simple', 'push'], plain)
+          }
           return
         }
         // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
@@ -660,7 +676,13 @@ export function createGitClient(repoPath: string): GitClient {
         }
         // 첫 백업(또는 이름이 어긋난 upstream 재연결) — 현재 브랜치를 remote에 연결하며 올린다.
         // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
-        await execGitOrThrow(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], { cwd })
+        const linked = await execGit(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], {
+          cwd,
+        })
+        if (linked.exitCode !== 0) {
+          rejectIfRemoteAhead(linked)
+          throw new GitError(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], linked)
+        }
       },
       async pull() {
         const cwd = await topLevel()
