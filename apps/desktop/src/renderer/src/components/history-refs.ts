@@ -27,5 +27,7 @@ export function arrangeRefs(
     .map((ref, index) => ({ ref, index, priority: refPriority(ref, currentBranch) }))
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
     .map((entry) => entry.ref)
-  return { visible: sorted.slice(0, max), hidden: sorted.slice(max) }
+  // 접힘이 생기는 행은 1개만 보여준다 — 배지끼리 폭을 나눠 갖다 전부 "ma…"로 죽는 것을 막는다 (품질 리뷰 실측)
+  const effectiveMax = sorted.length > max ? 1 : max
+  return { visible: sorted.slice(0, effectiveMax), hidden: sorted.slice(effectiveMax) }
 }

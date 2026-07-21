@@ -65,7 +65,7 @@
 .history-item__ref {
   flex: 0 1 auto;
   min-width: 32px;
-  max-width: 110px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
