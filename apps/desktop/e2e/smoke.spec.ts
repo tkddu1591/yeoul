@@ -1257,3 +1257,30 @@ test('저장 실행취소 (undo)와 메시지 고치기 (amend)', async () => {
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('커밋이 삭제한 파일은 "이 파일만 적용"이 사유와 함께 비활성이다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['rm', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '파일 정리 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+    // 삭제 커밋(최신) 상세 — app.txt는 kind=deleted로 나온다
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await window.getByTestId('commit-file-app.txt').click({ button: 'right' })
+    await expect(window.getByTestId('context-restore-file')).toBeDisabled()
+    await expect(window.getByTestId('context-restore-file')).toContainText('지워진 파일이에요')
+    // 비교(diff)는 계속 살아 있다 — 지워진 내용도 확인할 수 있다
+    await expect(window.getByTestId('context-compare-worktree')).toBeEnabled()
+    await window.keyboard.press('Escape')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

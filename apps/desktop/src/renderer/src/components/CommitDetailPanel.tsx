@@ -190,9 +190,15 @@ export function CommitDetailPanel({
           items={[
             {
               key: 'restore-file',
-              label: shelfPreview
-                ? '이 파일만 꺼내 적용 (checkout)'
-                : '이 파일만 지금 코드에 적용 (checkout)',
+              // 이 저장이 "지운" 파일은 그 시점 내용이 없다 — 숨기지 않고 사유와 함께 비활성 (E5a 후속).
+              // 엔진의 '그 시점에는 이 파일이 없어요' 친절 거부는 심층 방어로 유지된다
+              label:
+                menu.file.kind === 'deleted'
+                  ? '이 파일만 적용 (checkout) — 그 시점에 지워진 파일이에요'
+                  : shelfPreview
+                    ? '이 파일만 꺼내 적용 (checkout)'
+                    : '이 파일만 지금 코드에 적용 (checkout)',
+              disabled: menu.file.kind === 'deleted',
               onSelect: () => setConfirmingRestore(menu.file),
             },
             {
