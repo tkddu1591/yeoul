@@ -2059,6 +2059,19 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ---
 ### Task 7: E2E 3건 — mock GitHub 확장(코멘트·리뷰·병합 상태 반영)
 
+> **구현 실측 추기(Step 0):** 병합 확인 다이얼로그가 진입 애니메이션 120ms가 끝나기 전에 닫히면
+> react-aria가 animationend까지 unmount를 미뤄 후속 제안 다이얼로그와 alertdialog 2개가 겹친다
+> (실측: `data-entering`·`data-exiting` 동시 존재 — E1c의 확인창 공존 문제와 같은 뿌리).
+> `confirm-dialog.css`에 퇴장 즉시화 1규칙을 추가한다:
+>
+> ```css
+> /* 퇴장 애니메이션을 없앤다 — 연속 확인창(병합→이동 제안)에서
+>    alertdialog 2개가 잠깐 겹친다(E3b 실측: data-entering·data-exiting 동시 존재) */
+> .ui-modal-overlay[data-exiting] {
+>   animation: none;
+> }
+> ```
+
 **Files:**
 - Modify: `apps/desktop/e2e/hosting.spec.ts`
 
