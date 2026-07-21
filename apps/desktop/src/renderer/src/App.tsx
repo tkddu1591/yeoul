@@ -435,6 +435,7 @@ export function App() {
         description="github.com → Settings → Developer settings → Personal access tokens에서 만들 수 있어요. 만든 토큰을 붙여넣어 주세요."
         label="토큰"
         placeholder="ghp_..."
+        masked
         submitLabel="연결"
         errorText={tokenPrompt ? store.error : null}
         onSubmit={(token) => {

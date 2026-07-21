@@ -14,6 +14,8 @@ interface PromptDialogProps {
   submitLabel: string
   /** 열릴 때 채워 둘 값 — 이름 바꾸기 등. 기본은 빈 값 */
   initialValue?: string
+  /** 입력을 가린다(type=password) — 토큰 등 비밀값 전용 (E3a 후속 노트: PAT 마스킹) */
+  masked?: boolean
   /** 인라인 에러 — 실패 시 다이얼로그 안에서 바로 보인다 (상단 배너와 병행) */
   errorText?: string | null
   /** 제출 — 실패 시 호출 측이 다이얼로그를 열어 두면 입력이 보존된다 */
@@ -30,6 +32,7 @@ export function PromptDialog({
   placeholder,
   submitLabel,
   initialValue,
+  masked,
   errorText,
   onSubmit,
   onCancel,
@@ -69,7 +72,12 @@ export function PromptDialog({
             }}
           >
             <Label className="ui-prompt__label">{label}</Label>
-            <Input className="ui-prompt__input" placeholder={placeholder} data-testid="prompt-input" />
+            <Input
+              className="ui-prompt__input"
+              type={masked ? 'password' : 'text'}
+              placeholder={placeholder}
+              data-testid="prompt-input"
+            />
           </TextField>
           {errorText && (
             <p className="ui-prompt__error" role="alert" data-testid="prompt-error">
