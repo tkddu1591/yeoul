@@ -61,6 +61,11 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
   try {
     const window = await app.firstWindow()
 
+    // E2E 창 비간섭(E6a) — 창은 숨긴 채 CDP로만 조작한다. 회귀하면 e2e마다 작업 화면을 가린다
+    expect(
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    ).toBe(false)
+
     // 변경 파일과 기존 역사(init)가 보인다
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
     await expect(window.getByTestId('history-count')).toHaveText('1')

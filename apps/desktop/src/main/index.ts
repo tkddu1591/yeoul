@@ -9,17 +9,27 @@ if (process.env.GIT_GUI_USER_DATA) {
   app.setPath('userData', process.env.GIT_GUI_USER_DATA)
 }
 
+// E2E 창 비간섭 — Playwright 실행 중 창이 사용자 화면을 가리거나 포커스를 뺏지 않게 숨긴 채 띄운다.
+// CDP 입력·렌더·스크린샷은 숨김 창에서도 전부 동작한다(플랜 실측: isVisible false에서
+// 클릭·드래그·키보드·screenshot(1200·960) 정상 + 기존 42건 전체 통과).
+// 패키징된 앱에서는 무시한다 (GIT_GUI_E2E_GH_TOKEN과 동일 관례)
+const isE2E = !app.isPackaged && process.env.GIT_GUI_E2E_REPO !== undefined
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 960,
     minHeight: 600,
+    // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제
+    show: !isE2E,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // 숨김 창의 타이머·rAF 스로틀로 E2E 대기가 길어지지 않게 — E2E에서만 해제
+      backgroundThrottling: !isE2E,
     },
   })
 
@@ -35,6 +45,9 @@ function createWindow(): void {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
+
+// macOS에서는 앱 실행 자체가 활성화되며 포커스를 훔칠 수 있다 — E2E에서는 dock 아이콘째 숨긴다
+if (isE2E) app.dock?.hide()
 
 app
   .whenReady()
