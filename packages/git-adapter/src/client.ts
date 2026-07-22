@@ -335,8 +335,10 @@ export function createGitClient(repoPath: string): GitClient {
       async backup(name) {
         const cwd = await topLevel()
         const remoteConfig = await execGit(['config', '--get', `branch.${name}.remote`], { cwd })
-        if (remoteConfig.exitCode !== 0) {
-          // upstream 없음 — sync.push의 origin 우선 관례로 첫 연결하며 올린다
+        const mergeRef = await execGit(['config', '--get', `branch.${name}.merge`], { cwd })
+        if (remoteConfig.exitCode !== 0 || mergeRef.exitCode !== 0) {
+          // upstream 없음(또는 반쪽 연결 — remote만 있고 merge 없음, 품질 리뷰 보완) —
+          // sync.push의 origin 우선 관례로 첫 연결하며 올린다(반쪽 연결도 이 경로가 수리한다)
           const remotes = await execGitOrThrow(['remote'], { cwd })
           const remoteNames = remotes.stdout
             .trim()
@@ -355,7 +357,6 @@ export function createGitClient(repoPath: string): GitClient {
           return
         }
         const remoteName = remoteConfig.stdout.trim()
-        const mergeRef = await execGitOrThrow(['config', '--get', `branch.${name}.merge`], { cwd })
         const dstBranch = mergeRef.stdout.trim().replace(/^refs\/heads\//, '')
         const args = ['push', '--end-of-options', remoteName, `${name}:${dstBranch}`]
         const result = await execGit(args, { cwd })

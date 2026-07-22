@@ -1964,6 +1964,12 @@ describe('GitClient', () => {
       await execGitOrThrow(['rev-parse', 'side'], { cwd: remote })
     ).stdout.trim()
     expect(remoteSide).toBe(localSide)
+    // 반쪽 연결(merge 없음)은 -u 경로로 수리한다 (품질 리뷰 보완)
+    await client.branches.create('half', null)
+    await execGitOrThrow(['config', 'branch.half.remote', 'origin'], { cwd: repo })
+    await client.branches.backup('half')
+    const halfMerge = await execGitOrThrow(['config', '--get', 'branch.half.merge'], { cwd: repo })
+    expect(halfMerge.stdout.trim()).toBe('refs/heads/half')
   })
 
   it('branches.backup — 원격이 앞서 있으면 받아오기 안내로 거부한다 (E6b 매핑 공유)', async () => {
