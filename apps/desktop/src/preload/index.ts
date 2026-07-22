@@ -17,6 +17,7 @@ const api: GitApi = {
   },
   branches: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesList, repoPath),
+    overview: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesOverview, repoPath),
     create: (repoPath, name, fromHash) =>
       ipcRenderer.invoke(CHANNELS.branchesCreate, repoPath, name, fromHash),
     switch: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesSwitch, repoPath, name),
@@ -25,6 +26,19 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.branchesRemove, repoPath, name, force),
     rename: (repoPath, oldName, newName) =>
       ipcRenderer.invoke(CHANNELS.branchesRename, repoPath, oldName, newName),
+    update: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesUpdate, repoPath, name),
+    backup: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesBackup, repoPath, name),
+    checkoutRemote: (repoPath, name) =>
+      ipcRenderer.invoke(CHANNELS.branchesCheckoutRemote, repoPath, name),
+    removeRemote: (repoPath, name) =>
+      ipcRenderer.invoke(CHANNELS.branchesRemoveRemote, repoPath, name),
+    compare: (repoPath, name) => ipcRenderer.invoke(CHANNELS.branchesCompare, repoPath, name),
+  },
+  rebase: {
+    start: (repoPath, onto) => ipcRenderer.invoke(CHANNELS.rebaseStart, repoPath, onto),
+    continue: (repoPath) => ipcRenderer.invoke(CHANNELS.rebaseContinue, repoPath),
+    abort: (repoPath) => ipcRenderer.invoke(CHANNELS.rebaseAbort, repoPath),
+    progress: (repoPath) => ipcRenderer.invoke(CHANNELS.rebaseProgress, repoPath),
   },
   merge: {
     abort: (repoPath) => ipcRenderer.invoke(CHANNELS.mergeAbort, repoPath),

@@ -1,11 +1,14 @@
 import { create } from 'zustand'
 import type {
+  BranchCompare,
+  BranchOverview,
   BranchSummary,
   CommitDetail,
   CommitFileChange,
   CommitSummary,
   FileChange,
   FileDiff,
+  RebaseProgress,
   RepositoryStatus,
   ShelfEntry,
 } from '@git-gui/domain'
@@ -32,6 +35,12 @@ interface RepositoryStore {
   repoPath: string | null
   status: RepositoryStatus | null
   branches: BranchSummary[]
+  /** 실험 공간 탭 데이터 — 스냅샷마다 함께 갱신된다 (E7a) */
+  branchOverview: BranchOverview | null
+  /** "지금과 비교" 결과 — 열려 있으면 실험 공간 탭이 비교 뷰가 된다 */
+  branchCompare: { name: string; result: BranchCompare } | null
+  /** 재배치 진행 위치 — rebasing 상태에서만 non-null (상태 바 "M/N번째") */
+  rebaseProgress: RebaseProgress | null
   shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
@@ -91,6 +100,24 @@ interface RepositoryStore {
   removeBranch(name: string, force: boolean): Promise<boolean>
   /** 이름 바꾸기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
   renameBranch(oldName: string, newName: string): Promise<boolean>
+  /** 비현재 공간을 원격 최신으로(ff-only) — 현재 공간은 UI가 pullLatest로 보낸다 (E7a) */
+  updateBranch(name: string): Promise<void>
+  /** 선택 공간을 checkout 없이 백업 — 현재 공간은 UI가 backup으로 보낸다 (E7a) */
+  backupBranch(name: string): Promise<void>
+  /** "지금과 비교" 열기 — 결과는 branchCompare로, 실험 공간 탭이 비교 뷰가 된다 (E7a) */
+  compareBranch(name: string): Promise<void>
+  /** 비교 뷰 닫기 — 동기라 guard 불필요 */
+  clearBranchCompare(): void
+  /** 원격 공간을 추적 로컬로 가져와 이동 (E7a) */
+  checkoutRemoteBranch(name: string): Promise<void>
+  /** 원격에서 지우기 — 확인창(UI 책임) 경유. 다른 사람에게도 영향 (E7a) */
+  removeRemoteBranch(name: string): Promise<void>
+  /** 현재 공간을 name 위로 재배치 — 확인창(UI 책임) 경유. conflict면 rebasing 바가 안내 (E7a) */
+  rebaseOnto(name: string): Promise<void>
+  /** 겹침을 모두 해소한 뒤 다음 저장으로 — rebasing 바의 계속하기 (E7a) */
+  continueRebase(): Promise<void>
+  /** 재배치 취소 — 확인창(UI 책임) 경유 (E7a) */
+  abortRebase(): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
   /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
@@ -173,14 +200,20 @@ function toErrorMessage(cause: unknown): string {
 async function fetchSnapshot(
   repoPath: string,
   limit: number,
-): Promise<Pick<RepositoryStore, 'status' | 'history' | 'branches' | 'shelf'>> {
-  const [status, history, branches, shelf] = await Promise.all([
+): Promise<
+  Pick<RepositoryStore, 'status' | 'history' | 'branches' | 'shelf' | 'branchOverview' | 'rebaseProgress'>
+> {
+  const [status, history, branches, shelf, branchOverview] = await Promise.all([
     git().repo.status(repoPath),
     git().history.list(repoPath, limit),
     git().branches.list(repoPath),
     git().shelf.list(repoPath),
+    git().branches.overview(repoPath),
   ])
-  return { status, history, branches, shelf }
+  // 재배치 중일 때만 진행 위치를 읽는다 — 상태 바 "M/N번째" (E7a)
+  const rebaseProgress =
+    status.state === 'rebasing' ? await git().rebase.progress(repoPath) : null
+  return { status, history, branches, shelf, branchOverview, rebaseProgress }
 }
 
 /** 선택 상태 일괄 해제 — 저장소 내용이 바뀌는 모든 지점에서 보던 diff·상세를 무효화한다 */
@@ -192,6 +225,7 @@ const CLEAR_SELECTIONS = {
   commitFile: null,
   conflictFile: null,
   pullDetail: null,
+  branchCompare: null,
 } as const
 
 type StoreSet = (partial: Partial<RepositoryStore>) => void
@@ -229,6 +263,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   error: null,
   busy: false,
   hostingStatus: null,
+  branchOverview: null,
+  branchCompare: null,
+  rebaseProgress: null,
   pulls: [],
   pullDetail: null,
 
@@ -710,6 +747,130 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     return guard(set, get, async () => {
       await git().branches.rename(repoPath, oldName, newName)
       set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async updateBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().branches.update(repoPath, name)
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `"${name}"을 원격 최신으로 업데이트했어요.`,
+      })
+    })
+  },
+
+  async backupBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().branches.backup(repoPath, name)
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `"${name}"을 백업(push)했어요.`,
+      })
+    })
+  },
+
+  async compareBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().branches.compare(repoPath, name)
+      set({ branchCompare: { name, result } })
+    })
+  },
+
+  clearBranchCompare() {
+    set({ branchCompare: null })
+  },
+
+  async checkoutRemoteBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      const result = await git().branches.checkoutRemote(repoPath, name)
+      // 다른 공간이다 — 보던 것들을 비우고 역사도 첫 페이지부터 (switchBranch 관례)
+      set({
+        historyLimit: HISTORY_LIMIT,
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
+        notice: result.autoShelved
+          ? `원격 "${name}"을 내 공간으로 가져와 이동했어요. 저장 안 된 변경은 보관함에 넣어뒀어요.`
+          : `원격 "${name}"을 내 공간으로 가져와 이동했어요.`,
+      })
+    })
+  },
+
+  async removeRemoteBranch(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().branches.removeRemote(repoPath, name)
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `원격에서 "${name}"을 지웠어요.`,
+      })
+    })
+  },
+
+  async rebaseOnto(name) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (merge 관례)
+      let notice: string | null = null
+      try {
+        const result = await git().rebase.start(repoPath, name)
+        const notices: Record<typeof result.outcome, string | null> = {
+          completed: `"${name}" 위로 재배치했어요.`,
+          'up-to-date': '이미 그 위에 있어요 — 재배치할 것이 없어요.',
+          // 충돌 안내는 rebasing 상태 바가 상주하며 담당한다
+          conflict: null,
+        }
+        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+
+  async continueRebase() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      let notice: string | null = null
+      try {
+        const result = await git().rebase.continue(repoPath)
+        // 다음 충돌 안내는 rebasing 상태 바(진행 M/N)가 담당한다 — 완료만 notice로
+        notice = result.outcome === 'completed' ? '재배치를 마쳤어요.' : null
+      } finally {
+        set({
+          ...CLEAR_SELECTIONS,
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice,
+        })
+      }
+    })
+  },
+
+  async abortRebase() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().rebase.abort(repoPath)
+      set({
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: '재배치를 취소하고 이전 상태로 돌아왔어요.',
+      })
     })
   },
 

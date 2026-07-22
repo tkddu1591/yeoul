@@ -161,6 +161,46 @@ export function registerGitHandlers(): void {
       ),
   )
 
+  ipcMain.handle(CHANNELS.branchesOverview, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.overview(),
+  )
+
+  ipcMain.handle(CHANNELS.branchesUpdate, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.update(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.branchesBackup, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.backup(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.branchesCheckoutRemote, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.checkoutRemote(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.branchesRemoveRemote, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.removeRemote(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.branchesCompare, (_event, repoPath: unknown, name: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).branches.compare(assertString(name)),
+  )
+
+  ipcMain.handle(CHANNELS.rebaseStart, (_event, repoPath: unknown, onto: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).rebase.start(assertString(onto)),
+  )
+
+  ipcMain.handle(CHANNELS.rebaseContinue, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).rebase.continue(),
+  )
+
+  ipcMain.handle(CHANNELS.rebaseAbort, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).rebase.abort(),
+  )
+
+  ipcMain.handle(CHANNELS.rebaseProgress, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).rebase.progress(),
+  )
+
   ipcMain.handle(CHANNELS.mergeAbort, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).merge.abort(),
   )

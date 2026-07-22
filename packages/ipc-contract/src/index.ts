@@ -1,4 +1,6 @@
 import type {
+  BranchCompare,
+  BranchOverview,
   BranchSummary,
   CherryPickResult,
   CommitDetail,
@@ -7,6 +9,9 @@ import type {
   FileDiff,
   MergeResult,
   PullResult,
+  RebaseContinueResult,
+  RebaseProgress,
+  RebaseResult,
   RemoveBranchResult,
   RepositoryStatus,
   RestoreFileResult,
@@ -37,6 +42,8 @@ export interface GitApi {
   }
   branches: {
     list(repoPath: string): Promise<BranchSummary[]>
+    /** 패널용 일괄 개요 — 로컬(upstream·ahead/behind·gone)+원격 (E7a) */
+    overview(repoPath: string): Promise<BranchOverview>
     /** fromHash는 40자 hex 전체 해시 또는 null(지금 위치에서) */
     create(repoPath: string, name: string, fromHash: string | null): Promise<void>
     switch(repoPath: string, name: string): Promise<SwitchResult>
@@ -44,6 +51,25 @@ export interface GitApi {
     merge(repoPath: string, name: string): Promise<MergeResult>
     remove(repoPath: string, name: string, force: boolean): Promise<RemoveBranchResult>
     rename(repoPath: string, oldName: string, newName: string): Promise<void>
+    /** 비현재 공간을 원격 최신으로(ff-only) — 현재 공간은 renderer가 pull로 보낸다 (E7a) */
+    update(repoPath: string, name: string): Promise<void>
+    /** 선택 공간을 checkout 없이 백업(push) (E7a) */
+    backup(repoPath: string, name: string): Promise<void>
+    /** 원격 공간을 추적 로컬로 가져와 이동 (E7a) */
+    checkoutRemote(repoPath: string, name: string): Promise<SwitchResult>
+    /** 원격에서 지우기(push --delete) — 확인창은 UI 책임 (E7a) */
+    removeRemote(repoPath: string, name: string): Promise<void>
+    /** 지금 공간과의 양방향 전용 저장 목록 (E7a) */
+    compare(repoPath: string, name: string): Promise<BranchCompare>
+  }
+  rebase: {
+    /** 현재 공간을 onto 위로 재배치 — conflict면 rebasing 상태가 남는다 (E7a) */
+    start(repoPath: string, onto: string): Promise<RebaseResult>
+    /** 겹침 해소(add) 후 다음 저장으로 — 빈 저장은 git이 자동으로 건너뛴다(실측) */
+    continue(repoPath: string): Promise<RebaseContinueResult>
+    abort(repoPath: string): Promise<void>
+    /** 진행 위치 — rebasing이 아니면 null */
+    progress(repoPath: string): Promise<RebaseProgress | null>
   }
   merge: {
     abort(repoPath: string): Promise<void>
@@ -122,6 +148,16 @@ export const CHANNELS = {
   branchesMerge: 'branches:merge',
   branchesRemove: 'branches:remove',
   branchesRename: 'branches:rename',
+  branchesOverview: 'branches:overview',
+  branchesUpdate: 'branches:update',
+  branchesBackup: 'branches:backup',
+  branchesCheckoutRemote: 'branches:checkout-remote',
+  branchesRemoveRemote: 'branches:remove-remote',
+  branchesCompare: 'branches:compare',
+  rebaseStart: 'rebase:start',
+  rebaseContinue: 'rebase:continue',
+  rebaseAbort: 'rebase:abort',
+  rebaseProgress: 'rebase:progress',
   mergeAbort: 'merge:abort',
   conflictsResolve: 'conflicts:resolve',
   conflictsMarkResolved: 'conflicts:mark-resolved',
