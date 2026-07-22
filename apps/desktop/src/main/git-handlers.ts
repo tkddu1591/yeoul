@@ -126,6 +126,8 @@ export function registerGitHandlers(): void {
   // 저장소 감시 (E7b) — 한 번에 하나만. 새 경로가 오면 이전 감시를 교체한다.
   // 응답 대상은 invoke의 sender — window 배선 없이 push한다 (실측 3)
   let stopWatching: (() => void) | null = null
+  // destroyed 정리는 sender당 1회만 등록한다 — watch 재호출마다 쌓이면 MaxListeners 경고 (통합 리뷰, terminal-handlers 관례)
+  const watchCleanupHooked = new WeakSet<Electron.WebContents>()
   ipcMain.handle(CHANNELS.repoWatch, (event, repoPath: unknown) => {
     const path = assertAllowedRepo(repoPath)
     stopWatching?.()
@@ -133,10 +135,13 @@ export function registerGitHandlers(): void {
     stopWatching = watchRepository(path, () => {
       if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
     })
-    sender.once('destroyed', () => {
-      stopWatching?.()
-      stopWatching = null
-    })
+    if (!watchCleanupHooked.has(sender)) {
+      watchCleanupHooked.add(sender)
+      sender.once('destroyed', () => {
+        stopWatching?.()
+        stopWatching = null
+      })
+    }
   })
 
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
