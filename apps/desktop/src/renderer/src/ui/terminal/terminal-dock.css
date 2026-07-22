@@ -1,0 +1,84 @@
+/* E7b 터미널 도크 — 중앙+우측 하단(grid-column 2/5). 좌측 관리 존은 전체 높이 유지 (스펙 v2 목업) */
+.app__dock {
+  grid-column: 2 / 5;
+  min-height: 0;
+}
+.terminal-dock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: #1a1b23;
+  overflow: hidden;
+}
+.terminal-dock__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  cursor: row-resize;
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+}
+.terminal-dock__label {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.terminal-dock__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+.terminal-dock__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 2px;
+}
+.terminal-dock__tab--on {
+  border-color: var(--color-border-strong);
+}
+.terminal-dock__tab-name {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: var(--text-sm);
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.terminal-dock__tab-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+.terminal-dock__hint {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}
+.terminal-dock__error {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: var(--text-sm);
+  color: #ff9191;
+}
+.terminal-dock__body {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+.terminal-dock__view {
+  height: 100%;
+}
+.terminal-dock__view .xterm {
+  height: 100%;
+}

@@ -18,6 +18,14 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings('{}')).toEqual({})
     expect(sanitizeSettings([1, 2])).toEqual({})
   })
+
+  it('터미널 도크 필드(terminalOpen·terminalHeight)를 통과시키고 잘못된 타입은 버린다 (E7b)', () => {
+    expect(sanitizeSettings({ terminalOpen: true, terminalHeight: 240 })).toEqual({
+      terminalOpen: true,
+      terminalHeight: 240,
+    })
+    expect(sanitizeSettings({ terminalOpen: 'yes', terminalHeight: NaN })).toEqual({})
+  })
 })
 
 describe('sanitizePersistedSettings', () => {

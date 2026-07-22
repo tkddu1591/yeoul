@@ -270,6 +270,10 @@ export const HOSTING_CHANNELS = {
 export interface AppSettings {
   theme?: 'light' | 'dark'
   rightWidth?: number
+  /** 터미널 도크 열림 (E7b) */
+  terminalOpen?: boolean
+  /** 터미널 도크 높이(px) (E7b) */
+  terminalHeight?: number
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -280,6 +284,10 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (candidate.theme === 'light' || candidate.theme === 'dark') settings.theme = candidate.theme
   if (typeof candidate.rightWidth === 'number' && Number.isFinite(candidate.rightWidth)) {
     settings.rightWidth = candidate.rightWidth
+  }
+  if (typeof candidate.terminalOpen === 'boolean') settings.terminalOpen = candidate.terminalOpen
+  if (typeof candidate.terminalHeight === 'number' && Number.isFinite(candidate.terminalHeight)) {
+    settings.terminalHeight = candidate.terminalHeight
   }
   return settings
 }

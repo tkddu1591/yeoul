@@ -140,6 +140,8 @@
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (computeColumns — 중앙 380px 보장) — 여기 값은 초기 페인트 폴백 */
   grid-template-columns: 380px minmax(0, 1fr) 6px 360px;
+  /* 2행 = 터미널 도크 (E7b) — 도크가 숨겨지면 auto 행은 0으로 접힌다. 열 산식(MAIN_CHROME)과 무관 */
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   flex: 1;
@@ -160,6 +162,8 @@
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
+  /* 좌측 관리 존은 도크 행까지 전체 높이 — 도크는 중앙+우측 아래에만 (E7b 스펙 v2) */
+  grid-row: 1 / 3;
 }
 .app__left > .changes-panel {
   flex: 1;

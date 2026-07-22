@@ -1,4 +1,4 @@
-import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun } from 'lucide-react'
+import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun, Terminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
@@ -23,6 +23,14 @@ import {
   RIGHT_COLUMN_DEFAULT,
   saveRightWidth,
 } from './ui/column-resize'
+import {
+  clampDockHeight,
+  loadDockHeight,
+  loadDockOpen,
+  saveDockHeight,
+  saveDockOpen,
+} from './ui/terminal/dock-height'
+import { TerminalDock } from './ui/terminal/TerminalDock'
 import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
 import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
@@ -80,6 +88,34 @@ export function App() {
   const [confirmingRemoveRemote, setConfirmingRemoveRemote] = useState<{ name: string } | null>(
     null,
   )
+
+  // E7b 터미널 도크 — 중앙+우측 하단. 열림·높이는 설정 영속(rightWidth 관례).
+  // 접힘은 숨김일 뿐 언마운트가 아니다 — 언마운트하면 xterm 인스턴스가 죽어 세션 유지가 깨진다 (스펙)
+  const [dockOpen, setDockOpen] = useState<boolean>(() => loadDockOpen())
+  const [dockHeight, setDockHeight] = useState<number>(() =>
+    clampDockHeight(loadDockHeight(), window.innerHeight),
+  )
+  const toggleDock = () => {
+    setDockOpen((prev) => {
+      saveDockOpen(!prev)
+      return !prev
+    })
+  }
+  const startDockResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const onMove = (move: PointerEvent) => {
+      setDockHeight(clampDockHeight(window.innerHeight - move.clientY - 20, window.innerHeight))
+    }
+    const onUp = (up: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      saveDockHeight(clampDockHeight(window.innerHeight - up.clientY - 20, window.innerHeight))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
 
   // E5b 커밋 작업 다이얼로그 — 태그 이름·실행취소 확인·메시지 고치기 (대상 커밋 정보를 함께 보관)
   const [tagPrompt, setTagPrompt] = useState<{ hash: string } | null>(null)
@@ -148,6 +184,21 @@ export function App() {
     // store 객체는 렌더마다 새 참조 — notice 값 변화에만 반응해야 임의 갱신이 타이머를 연장하지 않는다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.notice])
+
+  // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === '`') {
+        event.preventDefault()
+        setDockOpen((prev) => {
+          saveDockOpen(!prev)
+          return !prev
+        })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
@@ -280,6 +331,9 @@ export function App() {
             testId="refresh"
           >
             <RefreshCw size={13} aria-hidden="true" /> 새로고침
+          </Button>
+          <Button variant="ghost" size="sm" onPress={toggleDock} testId="terminal-toggle">
+            <Terminal size={13} aria-hidden="true" /> 터미널
           </Button>
         </div>
       </header>
@@ -589,6 +643,18 @@ export function App() {
             </>
           )}
         </div>
+        {/* E7b 터미널 도크 — 접힘은 display:none(세션 유지). 행(auto)은 숨김 시 0으로 접힌다 */}
+        {store.repoPath !== null && (
+          <div className="app__dock" style={{ display: dockOpen ? 'block' : 'none' }}>
+            <TerminalDock
+              repoPath={store.repoPath}
+              open={dockOpen}
+              height={dockHeight}
+              onResizeStart={startDockResize}
+              onClose={toggleDock}
+            />
+          </div>
+        )}
       </main>
       <PromptDialog
         isOpen={branchPrompt !== null}
