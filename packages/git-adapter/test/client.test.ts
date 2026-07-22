@@ -1883,6 +1883,113 @@ describe('GitClient', () => {
     expect(overview.remotes).toEqual([{ remote: 'origin', name: 'origin/main' }])
   })
 
+  it('branches.update — 비현재 공간을 원격 최신으로 ff 업데이트한다 (실측 3)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('old', null)
+    await execGitOrThrow(['push', '-u', 'origin', 'old:old'], { cwd: repo })
+    await execGitOrThrow(['config', 'branch.old.remote', 'origin'], { cwd: repo })
+    await execGitOrThrow(['config', 'branch.old.merge', 'refs/heads/old'], { cwd: repo })
+    // 다른 클론이 old를 앞세운다 — 로컬 old는 behind만 있는 상태
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await execGitOrThrow(['checkout', 'old'], { cwd: other })
+    await writeFixtureFile(other, 'o.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other old'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await client.branches.update('old')
+    const localOld = (await execGitOrThrow(['rev-parse', 'old'], { cwd: repo })).stdout.trim()
+    const remoteOld = (await execGitOrThrow(['rev-parse', 'origin/old'], { cwd: repo })).stdout.trim()
+    expect(localOld).toBe(remoteOld)
+  })
+
+  it('branches.update — 갈라진 공간은 받아오기 안내로 거부한다 (non-fast-forward)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('old', null)
+    await execGitOrThrow(['push', '-u', 'origin', 'old:old'], { cwd: repo })
+    await execGitOrThrow(['config', 'branch.old.remote', 'origin'], { cwd: repo })
+    await execGitOrThrow(['config', 'branch.old.merge', 'refs/heads/old'], { cwd: repo })
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await execGitOrThrow(['checkout', 'old'], { cwd: other })
+    await writeFixtureFile(other, 'o.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other old'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    // 로컬 old도 따로 전진 — 갈라짐(ahead+behind)
+    await client.branches.switch('old')
+    await writeFixtureFile(repo, 'l.txt', 'l\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local old'], { cwd: repo })
+    await client.branches.switch('main')
+    await expect(client.branches.update('old')).rejects.toThrow(/갈라져 있어요/)
+  })
+
+  it('branches.update — upstream이 없으면 읽히는 메시지로 거부한다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('nolink', null)
+    await expect(client.branches.update('nolink')).rejects.toThrow(/연결된 적이 없는/)
+  })
+
+  it('branches.update — 체크아웃된 공간은 pull 안내로 거부한다 (실측 3)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await expect(client.branches.update('main')).rejects.toThrow(/받아오기\(pull\)로 업데이트/)
+  })
+
+  it('branches.backup — 비현재 공간을 checkout 없이 push한다 (upstream 없으면 -u 연결)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('side', null)
+    // 첫 백업 — upstream 없음 → -u 연결 경로
+    await client.branches.backup('side')
+    const upstream = await execGitOrThrow(['config', '--get', 'branch.side.remote'], { cwd: repo })
+    expect(upstream.stdout.trim()).toBe('origin')
+    // 연결된 뒤 두 번째 백업 — refspec 경로. side를 전진시키고 원격 해시 일치를 확인
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 's.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side work'], { cwd: repo })
+    await client.branches.switch('main')
+    await client.branches.backup('side')
+    const localSide = (await execGitOrThrow(['rev-parse', 'side'], { cwd: repo })).stdout.trim()
+    const remoteSide = (
+      await execGitOrThrow(['rev-parse', 'side'], { cwd: remote })
+    ).stdout.trim()
+    expect(remoteSide).toBe(localSide)
+  })
+
+  it('branches.backup — 원격이 앞서 있으면 받아오기 안내로 거부한다 (E6b 매핑 공유)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('side', null)
+    await client.branches.backup('side')
+    // 다른 클론이 side를 앞세운다 — 로컬 side의 push는 fetch first 거부
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await execGitOrThrow(['checkout', 'side'], { cwd: other })
+    await writeFixtureFile(other, 'o.txt', 'o\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other side'], { cwd: other })
+    await execGitOrThrow(['push'], { cwd: other })
+    await client.branches.switch('side')
+    await writeFixtureFile(repo, 'l.txt', 'l\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local side'], { cwd: repo })
+    await client.branches.switch('main')
+    await expect(client.branches.backup('side')).rejects.toThrow(
+      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+    )
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

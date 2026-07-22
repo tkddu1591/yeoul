@@ -39,6 +39,13 @@ export interface GitClient {
     list(): Promise<BranchSummary[]>
     /** 패널용 일괄 개요 — 로컬(upstream·ahead/behind·gone)+원격, for-each-ref 1회 (E7a) */
     overview(): Promise<BranchOverview>
+    /**
+     * 선택 공간을 원격 최신으로(비현재 전용 — 현재 공간은 renderer가 받아오기(pull)로 보낸다).
+     * fetch refspec은 ff-only가 기본(실측 3) — 갈라졌으면 이동해서 pull 하도록 친절 거부한다
+     */
+    update(name: string): Promise<void>
+    /** 선택 공간을 checkout 없이 백업(push). upstream 없으면 -u로 연결하며 올린다 (origin 우선 관례) */
+    backup(name: string): Promise<void>
     /** 새 실험 공간 — fromHash가 있으면 그 시점에서, 없으면 지금(HEAD)에서. 만들기만 하고 전환하지 않는다 */
     create(name: string, fromHash: string | null): Promise<void>
     /**
@@ -212,6 +219,22 @@ const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
 /** 가져오기(cherry-pick)가 막혀 자동 보관할 때의 보관함 메시지 */
 const CHERRY_PICK_SHELF_MESSAGE = '저장 가져오기 자동 보관'
 
+/**
+ * 원격이 앞서 거부된 push (E5b 후속·E6b 실측) — stderr 4케이스 전부 "! [rejected] …
+ * (fetch first|non-fast-forward)". undo(실행취소)로 로컬이 뒤로 간 경우도 같은
+ * non-fast-forward 거부라 같은 문구로 커버된다. 'failed to push some refs'는 hook
+ * 거부([remote rejected])에도 나와 쓰지 않는다 — 괄호 사유로만 판정한다.
+ * E7a에서 브랜치별 백업(branches.backup)과 공유하려고 sync.push 안에서 모듈로 올렸다
+ */
+function rejectIfRemoteAhead(result: GitResult): void {
+  if (
+    result.stderr.includes('(fetch first)') ||
+    result.stderr.includes('(non-fast-forward)')
+  ) {
+    throw new Error('원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.')
+  }
+}
+
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
   if (!/^stash@\{\d{1,6}\}$/.test(ref)) {
@@ -280,6 +303,66 @@ export function createGitClient(repoPath: string): GitClient {
         )
         const head = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         return parseOverview(raw.stdout, head.exitCode === 0 ? head.stdout.trim() : null)
+      },
+      async update(name) {
+        const cwd = await topLevel()
+        const remote = await execGit(['config', '--get', `branch.${name}.remote`], { cwd })
+        const mergeRef = await execGit(['config', '--get', `branch.${name}.merge`], { cwd })
+        if (remote.exitCode !== 0 || mergeRef.exitCode !== 0) {
+          throw new Error('원격과 연결된 적이 없는 공간이에요. 그 공간으로 이동해 백업(push)하면 연결돼요.')
+        }
+        const remoteName = remote.stdout.trim()
+        const srcBranch = mergeRef.stdout.trim().replace(/^refs\/heads\//, '')
+        // ff-only가 fetch refspec의 기본 동작이다(강제 없음) — 갈라졌으면 rejected로 끝난다 (실측 3)
+        const args = ['fetch', '--end-of-options', remoteName, `${srcBranch}:${name}`]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('(non-fast-forward)')) {
+            throw new Error(
+              '이 공간은 원격과 갈라져 있어요. 그 공간으로 이동한 뒤 받아오기(pull)로 합쳐 주세요.',
+            )
+          }
+          // 현재 공간(다른 워크트리 포함) — refspec fetch가 체크아웃된 브랜치를 거부한다 (실측 3)
+          if (result.stderr.includes('refusing to fetch into branch')) {
+            throw new Error('지금 체크아웃되어 있는 공간이에요. 받아오기(pull)로 업데이트해 주세요.')
+          }
+          if (result.stderr.includes("couldn't find remote ref")) {
+            throw new Error('원격에 이 공간이 더 이상 없어요. 새로고침해 주세요.')
+          }
+          throw new GitError(args, result)
+        }
+      },
+      async backup(name) {
+        const cwd = await topLevel()
+        const remoteConfig = await execGit(['config', '--get', `branch.${name}.remote`], { cwd })
+        if (remoteConfig.exitCode !== 0) {
+          // upstream 없음 — sync.push의 origin 우선 관례로 첫 연결하며 올린다
+          const remotes = await execGitOrThrow(['remote'], { cwd })
+          const remoteNames = remotes.stdout
+            .trim()
+            .split('\n')
+            .filter((n) => n !== '')
+          if (remoteNames.length === 0) {
+            throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+          }
+          const target = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
+          const args = ['push', '-u', '--end-of-options', target, name]
+          const linked = await execGit(args, { cwd })
+          if (linked.exitCode !== 0) {
+            rejectIfRemoteAhead(linked)
+            throw new GitError(args, linked)
+          }
+          return
+        }
+        const remoteName = remoteConfig.stdout.trim()
+        const mergeRef = await execGitOrThrow(['config', '--get', `branch.${name}.merge`], { cwd })
+        const dstBranch = mergeRef.stdout.trim().replace(/^refs\/heads\//, '')
+        const args = ['push', '--end-of-options', remoteName, `${name}:${dstBranch}`]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          rejectIfRemoteAhead(result)
+          throw new GitError(args, result)
+        }
       },
       async create(name, fromHash) {
         const cwd = await topLevel()
@@ -652,18 +735,6 @@ export function createGitClient(repoPath: string): GitClient {
         }
         // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
         const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
-        // 원격이 앞서 거부된 push (E5b 후속) — 실측 stderr 4케이스 전부 "! [rejected] …
-        // (fetch first|non-fast-forward)". undo(실행취소)로 로컬이 뒤로 간 경우도 같은
-        // non-fast-forward 거부라 같은 문구로 커버된다. 'failed to push some refs'는 hook
-        // 거부([remote rejected])에도 나와 쓰지 않는다 — 괄호 사유로만 판정한다
-        const rejectIfRemoteAhead = (result: GitResult): void => {
-          if (
-            result.stderr.includes('(fetch first)') ||
-            result.stderr.includes('(non-fast-forward)')
-          ) {
-            throw new Error('원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.')
-          }
-        }
         const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
         const upstream = await execGit(
           ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
