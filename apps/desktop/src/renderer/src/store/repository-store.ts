@@ -340,9 +340,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 자기 작업 꼬리 이벤트 억제 — 작업 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다
     if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
     await guard(set, get, async () => {
-      // 수동 새로고침과 같은 의미론(선택 무효화) — hosting 호출만 없다
+      // 수동 새로고침과 같은 의미론(선택 무효화) — 단, 열려 있는 충돌 뷰는 지우지 않는다:
+      // 편집 초안(draft)이 컴포넌트 로컬이라 언마운트되면 소리 없이 사라진다 (품질 리뷰 —
+      // 카드 뷰의 낡음은 패널 자체의 onReload 최신 검사가 흡수한다)
+      const { conflictFile } = get()
       set({
         ...CLEAR_SELECTIONS,
+        conflictFile,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
       })
     })

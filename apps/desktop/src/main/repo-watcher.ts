@@ -13,8 +13,16 @@ export function watchRepository(repoPath: string, onChanged: () => void): () => 
   const debounce = createTrailingDebounce(DEBOUNCE_MS, onChanged)
   let watcher: FSWatcher | null = null
   try {
+    // {recursive: true}는 macOS/Windows 전용 — Linux에선 생성이 throw해 fail-soft(수동 새로고침만)가 된다
     watcher = watch(join(repoPath, '.git'), { recursive: true }, (_type, file) => {
       if (file !== null && isRelevantGitEvent(file.toString())) debounce.hit()
+    })
+    // fs.watch는 생성 후에도 비동기 'error'를 낼 수 있다(.git 소멸·이름 변경 등) —
+    // 리스너가 없으면 main 프로세스가 죽는다. 감시만 조용히 내려놓는다 (품질 리뷰)
+    watcher.on('error', () => {
+      watcher?.close()
+      watcher = null
+      debounce.dispose()
     })
   } catch {
     return () => {}
