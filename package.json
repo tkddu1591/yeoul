@@ -5,6 +5,9 @@
   "engines": {
     "node": ">=22"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["node-pty"]
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "pnpm -r run typecheck"
