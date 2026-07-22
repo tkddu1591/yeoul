@@ -3,6 +3,7 @@ import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
 import { CHANNELS } from '@git-gui/ipc-contract'
+import { watchRepository } from './repo-watcher'
 
 /** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
 const allowedRepoPaths = new Set<string>()
@@ -121,6 +122,22 @@ export function registerGitHandlers(): void {
   ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).repo.status(),
   )
+
+  // 저장소 감시 (E7b) — 한 번에 하나만. 새 경로가 오면 이전 감시를 교체한다.
+  // 응답 대상은 invoke의 sender — window 배선 없이 push한다 (실측 3)
+  let stopWatching: (() => void) | null = null
+  ipcMain.handle(CHANNELS.repoWatch, (event, repoPath: unknown) => {
+    const path = assertAllowedRepo(repoPath)
+    stopWatching?.()
+    const sender = event.sender
+    stopWatching = watchRepository(path, () => {
+      if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
+    })
+    sender.once('destroyed', () => {
+      stopWatching?.()
+      stopWatching = null
+    })
+  })
 
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).branches.list(),

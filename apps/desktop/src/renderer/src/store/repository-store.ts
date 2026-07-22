@@ -159,6 +159,12 @@ interface RepositoryStore {
   clearError(): void
   /** notice만 지운다 — 자동 소멸 타이머(App) 전용. 동기라 guard 불필요 */
   clearNotice(): void
+  /**
+   * 감시(repo:changed)발 재조회 (E7b) — 새로고침과 같은 의미론(선택 무효화)이되 hosting 호출은
+   * 없다(감시 폭주가 네트워크를 때리지 않게). busy면 guard가 거부 = 자기 작업 이벤트 드롭(실측 1),
+   * 작업 종료 직후 억제 창은 트레일링 이벤트를 흡수한다
+   */
+  externalRefresh(): Promise<void>
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
   /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
@@ -231,6 +237,11 @@ const CLEAR_SELECTIONS = {
 type StoreSet = (partial: Partial<RepositoryStore>) => void
 type StoreGet = () => RepositoryStore
 
+/** 마지막 guard 작업이 끝난 시각 — 감시발 재조회의 억제 창 기준 (E7b 실측 1: 트레일링 이벤트 흡수) */
+let lastGuardEndAt = 0
+/** 작업 종료 후 이 시간 안의 감시 이벤트는 자기 작업의 꼬리로 보고 무시한다 (디바운스 300ms + 여유) */
+export const WATCH_SUPPRESS_MS = 800
+
 /** busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다 */
 async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Promise<boolean> {
   if (get().busy) return false
@@ -242,6 +253,7 @@ async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Pr
     set({ error: toErrorMessage(cause) })
     return false
   } finally {
+    lastGuardEndAt = Date.now()
     set({ busy: false })
   }
 }
@@ -278,6 +290,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         hostingStatus: await hosting().status(initial),
         ...(await fetchSnapshot(initial, get().historyLimit)),
       })
+      void git().repo.watch(initial)
+    })
+    // 이 guard는 읽기 전용(상태 조회)이라 자기 꼬리 이벤트가 없다 — 시작 직후 도착하는 첫 감시
+    // 이벤트까지 억제 창에 걸려 삼켜지지 않도록 초기화한다 (E7b: 실측 — 실제 앱 기동~외부 커밋
+    // 간격이 800ms 억제 창보다 짧을 수 있어 재현됨)
+    lastGuardEndAt = 0
+    // 감시 구독은 앱 수명 1회 — 이벤트가 온 저장소가 지금 저장소일 때만 재조회한다 (E7b)
+    git().repo.onChanged((changedPath) => {
+      if (get().repoPath === changedPath) void get().externalRefresh()
     })
   },
 
@@ -295,6 +316,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(path, HISTORY_LIMIT)),
       })
+      // 새 저장소로 감시 교체 (E7b) — 이전 저장소 감시는 main이 새 watch 호출에서 정리한다
+      void git().repo.watch(path)
     })
   },
 
@@ -306,6 +329,20 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...CLEAR_SELECTIONS,
         hostingStatus: await hosting().status(repoPath),
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+      })
+    })
+  },
+
+  async externalRefresh() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    // 자기 작업 꼬리 이벤트 억제 — 작업 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다
+    if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
+    await guard(set, get, async () => {
+      // 수동 새로고침과 같은 의미론(선택 무효화) — hosting 호출만 없다
+      set({
+        ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
       })
     })

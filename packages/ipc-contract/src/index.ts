@@ -39,6 +39,10 @@ export interface GitApi {
     /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
     status(repoPath: string): Promise<RepositoryStatus>
+    /** .git 감시 시작 — 이후 외부 변경이 repo:changed push로 온다. 새 경로로 부르면 이전 감시는 교체된다 (E7b) */
+    watch(repoPath: string): Promise<void>
+    /** repo:changed 구독 — 해제 함수를 반환한다. 이 앱 최초의 push 채널 (E7b) */
+    onChanged(listener: (repoPath: string) => void): () => void
   }
   branches: {
     list(repoPath: string): Promise<BranchSummary[]>
@@ -142,6 +146,9 @@ export const CHANNELS = {
   repoSelect: 'repo:select',
   repoInitialPath: 'repo:initial-path',
   repoStatus: 'repo:status',
+  repoWatch: 'repo:watch',
+  /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
+  repoChanged: 'repo:changed',
   branchesList: 'branches:list',
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',

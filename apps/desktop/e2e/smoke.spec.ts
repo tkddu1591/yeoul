@@ -1482,3 +1482,23 @@ test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추�
     await rm(remote, { recursive: true, force: true })
   }
 })
+
+test('감시 — 밖에서 저장하면 화면이 스스로 갱신된다 (E7b fs watch)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    // 앱 밖(터미널 상당)에서 커밋 — 클릭 없이 역사·브랜치 화면이 따라와야 한다
+    await execGitOrThrow(['commit', '--allow-empty', '-m', '외부 저장'], { cwd: repo })
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 5_000 })
+    await expect(window.getByTestId('history-list')).toContainText('외부 저장')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
