@@ -1866,6 +1866,23 @@ describe('GitClient', () => {
     await expect(client.branches.rename('no-such', 'x')).rejects.toThrow()
   })
 
+  it('branches.overview — 로컬 ahead·연결 없음·원격을 한 번에 담고 현재를 표시한다 (E7a)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push() // main upstream 연결(동기화 0/0)
+    await writeFixtureFile(repo, 'a.txt', 'a\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', '앞선 저장'], { cwd: repo })
+    await client.branches.create('nolink', null)
+    const overview = await client.branches.overview()
+    const main = overview.locals.find((b) => b.name === 'main')
+    expect(main).toMatchObject({ isCurrent: true, upstream: 'origin/main', ahead: 1, behind: 0 })
+    expect(main!.hash).toMatch(/^[0-9a-f]{40}$/)
+    const nolink = overview.locals.find((b) => b.name === 'nolink')
+    expect(nolink).toMatchObject({ isCurrent: false, upstream: null, ahead: null, behind: null })
+    expect(overview.remotes).toEqual([{ remote: 'origin', name: 'origin/main' }])
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

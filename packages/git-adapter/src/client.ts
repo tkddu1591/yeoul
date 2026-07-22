@@ -1,5 +1,6 @@
 import {
   detectState,
+  type BranchOverview,
   type BranchSummary,
   type CherryPickResult,
   type CommitDetail,
@@ -23,6 +24,7 @@ import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
 import { parsePatch } from './diff-parser'
 import { readGitDirMarkers } from './markers'
+import { parseOverview } from './overview-parser'
 import { parseBranches, parseShelf } from './refs-parser'
 import { parseStatusV2 } from './status-parser'
 
@@ -35,6 +37,8 @@ export interface GitClient {
   branches: {
     /** 실험 공간 목록 — 마지막 저장 시점 최신순 */
     list(): Promise<BranchSummary[]>
+    /** 패널용 일괄 개요 — 로컬(upstream·ahead/behind·gone)+원격, for-each-ref 1회 (E7a) */
+    overview(): Promise<BranchOverview>
     /** 새 실험 공간 — fromHash가 있으면 그 시점에서, 없으면 지금(HEAD)에서. 만들기만 하고 전환하지 않는다 */
     create(name: string, fromHash: string | null): Promise<void>
     /**
@@ -260,6 +264,22 @@ export function createGitClient(repoPath: string): GitClient {
           { cwd },
         )
         return parseBranches(raw.stdout)
+      },
+      async overview() {
+        const cwd = await topLevel()
+        // %1f = US 구분자, symref = origin/HEAD 판별, refname 전체 경로 = heads/remotes 분류 (실측 1)
+        const raw = await execGitOrThrow(
+          [
+            'for-each-ref',
+            'refs/heads',
+            'refs/remotes',
+            '--sort=-committerdate',
+            '--format=%(refname)%1f%(refname:short)%1f%(symref)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:unix)%1f%(objectname)',
+          ],
+          { cwd },
+        )
+        const head = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        return parseOverview(raw.stdout, head.exitCode === 0 ? head.stdout.trim() : null)
       },
       async create(name, fromHash) {
         const cwd = await topLevel()

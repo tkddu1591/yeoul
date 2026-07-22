@@ -98,6 +98,64 @@ export interface BranchSummary {
   upstream: string | null
 }
 
+/** 실험 공간 패널 한 행(로컬) — 상태 배지·우클릭 대상 정보 (E7a) */
+export interface LocalBranchStatus {
+  name: string
+  isCurrent: boolean
+  /** 'origin/main' 형태. 연결된 적 없으면 null */
+  upstream: string | null
+  /** 원격이 지워진 upstream([gone]) — 업데이트 불가, "연결 끊김" 표시 */
+  upstreamGone: boolean
+  /** upstream 대비 차이 — upstream이 없거나 gone이면 null (0/0으로 위장하지 않는다) */
+  ahead: number | null
+  behind: number | null
+  /** epoch 초 — 마지막 저장 시점 */
+  committedAt: number
+  /** 끝 커밋 해시(40자) — "여기서 새 실험 공간"의 fromHash로 쓴다 */
+  hash: string
+}
+
+/** 원격 브랜치 한 행 — 표시 이름이 곧 조작 키다 (E7a) */
+export interface RemoteBranchRef {
+  /** 'origin' — 첫 '/' 앞 */
+  remote: string
+  /** 'origin/feature/pay' — 전체 이름 */
+  name: string
+}
+
+/** 실험 공간 패널 데이터 — for-each-ref 1회 일괄 수집 (E7a 스펙 접근안 A) */
+export interface BranchOverview {
+  locals: LocalBranchStatus[]
+  remotes: RemoteBranchRef[]
+}
+
+/** "지금과 비교" 결과 — 양방향 전용 커밋 목록 (각 100개 상한) */
+export interface BranchCompare {
+  /** 선택 공간에만 있는 저장 (HEAD..name) */
+  onlyInSelected: CommitSummary[]
+  selectedOverflow: boolean
+  /** 지금 공간에만 있는 저장 (name..HEAD) */
+  onlyInCurrent: CommitSummary[]
+  currentOverflow: boolean
+}
+
+/** 재배치 시작 결과 — conflict면 rebasing 상태가 남는다 (E7a) */
+export interface RebaseResult {
+  outcome: 'completed' | 'up-to-date' | 'conflict'
+  autoShelved: boolean
+}
+
+/** 재배치 계속 결과 — 다음 저장이 또 겹치면 conflict */
+export interface RebaseContinueResult {
+  outcome: 'completed' | 'conflict'
+}
+
+/** 재배치 진행 위치 — .git/rebase-merge/msgnum·end (실측 2) */
+export interface RebaseProgress {
+  current: number
+  total: number
+}
+
 /** 보관함(stash) 항목 하나 */
 export interface ShelfEntry {
   /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */
