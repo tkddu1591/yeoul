@@ -10,6 +10,9 @@ import {
   type FileDiff,
   type MergeResult,
   type PullResult,
+  type RebaseContinueResult,
+  type RebaseProgress,
+  type RebaseResult,
   type RemoveBranchResult,
   type RepositoryStatus,
   type RestoreFileResult,
@@ -70,6 +73,22 @@ export interface GitClient {
     remove(name: string, force: boolean): Promise<RemoveBranchResult>
     /** 이름 바꾸기 */
     rename(oldName: string, newName: string): Promise<void>
+  }
+  rebase: {
+    /**
+     * 현재 공간을 onto 위로 재배치. 작업 중 변경이 겹치면 자동 보관 후 재시도(merge 관례).
+     * conflict면 rebasing 상태가 남는다 — 해소는 기존 충돌 카드, 진행은 continue, 취소는 abort
+     */
+    start(onto: string): Promise<RebaseResult>
+    /**
+     * 겹침을 모두 해소(add)한 뒤 다음 저장으로. 남은 저장이 또 겹치면 conflict.
+     * 해소 결과가 빈 저장이면 git이 자동으로 건너뛴다(실측 2 — --skip 확인창 불필요)
+     */
+    continue(): Promise<RebaseContinueResult>
+    /** 재배치 취소 — 시작 전 상태로 되돌린다 */
+    abort(): Promise<void>
+    /** 진행 위치(.git/rebase-merge/msgnum·end — 실측 2). rebasing이 아니면 null */
+    progress(): Promise<RebaseProgress | null>
   }
   merge: {
     /** 합치기 취소 — 충돌 상태를 버리고 합치기 전으로 되돌린다 */
@@ -225,6 +244,9 @@ const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
 
 /** 가져오기(cherry-pick)가 막혀 자동 보관할 때의 보관함 메시지 */
 const CHERRY_PICK_SHELF_MESSAGE = '저장 가져오기 자동 보관'
+
+/** 재배치가 막혀 자동 보관할 때의 보관함 메시지 (E7a) */
+const REBASE_SHELF_MESSAGE = '저장 재배치 자동 보관'
 
 /** "지금과 비교" 한 방향 상한 — 초과분은 overflow 플래그로만 알린다 (E7a) */
 const COMPARE_LIMIT = 100
@@ -551,6 +573,86 @@ export function createGitClient(repoPath: string): GitClient {
             throw new Error(`"${newName}"는 이미 있는 이름이에요. 다른 이름을 지어 주세요.`)
           }
           throw new GitError(args, result)
+        }
+      },
+    },
+    rebase: {
+      async start(onto) {
+        const cwd = await topLevel()
+        const classify = (result: GitResult): RebaseResult['outcome'] | null => {
+          const output = result.stdout + result.stderr
+          if (result.exitCode === 0) {
+            return output.includes('is up to date') ? 'up-to-date' : 'completed'
+          }
+          if (output.includes('Could not apply') || output.includes('CONFLICT')) return 'conflict'
+          return null
+        }
+        const args = ['rebase', '--end-of-options', onto]
+        const first = await execGit(args, { cwd })
+        const firstOutcome = classify(first)
+        if (firstOutcome !== null) return { outcome: firstOutcome, autoShelved: false }
+        const firstOut = first.stdout + first.stderr
+        if (firstOut.includes('invalid upstream')) {
+          throw new Error(`"${onto}"라는 실험 공간이 없어요.`)
+        }
+        if (
+          !firstOut.includes('You have unstaged changes') &&
+          !firstOut.includes('Please commit or stash')
+        ) {
+          throw new GitError(args, first)
+        }
+        // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 재시도한다 (merge 관례, 실측 2 dirty 판정)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', REBASE_SHELF_MESSAGE], { cwd })
+        const second = await execGit(args, { cwd })
+        const secondOutcome = classify(second)
+        if (secondOutcome !== null) return { outcome: secondOutcome, autoShelved: true }
+        throw new GitError(args, second)
+      },
+      async continue() {
+        const cwd = await topLevel()
+        // 원 메시지를 그대로 쓴다 — 편집기가 열리면 앱이 멈추므로 방어적으로 무시한다
+        const args = ['-c', 'core.editor=true', 'rebase', '--continue']
+        const result = await execGit(args, { cwd })
+        if (result.exitCode === 0) return { outcome: 'completed' as const }
+        const output = result.stdout + result.stderr
+        if (output.includes('Could not apply') || output.includes('CONFLICT')) {
+          return { outcome: 'conflict' as const }
+        }
+        if (output.includes('needs merge') || output.includes('You must edit all merge conflicts')) {
+          throw new Error('아직 겹침이 남아 있어요. 붉은 ! 파일을 모두 해결한 뒤 계속해 주세요.')
+        }
+        if (output.includes('no rebase in progress')) {
+          throw new Error('지금은 재배치 중이 아니에요.')
+        }
+        throw new GitError(args, result)
+      },
+      async abort() {
+        const cwd = await topLevel()
+        const result = await execGit(['rebase', '--abort'], { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('no rebase in progress')) {
+            throw new Error('지금은 재배치 중이 아니에요.')
+          }
+          throw new GitError(['rebase', '--abort'], result)
+        }
+      },
+      async progress() {
+        const cwd = await topLevel()
+        const gitDir = (
+          await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })
+        ).stdout.trim()
+        // merge 백엔드(이 앱이 시작하는 rebase의 기본)의 진행 파일 — msgnum=현재, end=전체 (실측 2).
+        // 파일이 없으면(외부 apply 백엔드 등) 진행 표시를 생략한다 — 추측하지 않는다
+        try {
+          const [current, total] = await Promise.all([
+            readFile(join(gitDir, 'rebase-merge', 'msgnum'), 'utf8'),
+            readFile(join(gitDir, 'rebase-merge', 'end'), 'utf8'),
+          ])
+          const parsed = { current: Number(current.trim()), total: Number(total.trim()) }
+          if (!Number.isFinite(parsed.current) || !Number.isFinite(parsed.total)) return null
+          return parsed
+        } catch {
+          return null
         }
       },
     },
