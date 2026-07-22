@@ -130,6 +130,12 @@
   flex: 1;
   min-width: 0;
 }
+/* E7a — 좌측 탭바(z-41)가 배너 위에 뜬다. 배너 텍스트가 탭 뒤로 숨지 않게 콘텐츠만 탭 구역 오른쪽에서 시작(배경은 전체 폭 유지) */
+.app__error,
+.app__notice,
+.app__merge-bar {
+  padding-left: 210px;
+}
 .app__main {
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (computeColumns — 중앙 380px 보장) — 여기 값은 초기 페인트 폴백 */
