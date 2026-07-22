@@ -1416,3 +1416,69 @@ test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속�
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('실험 공간 탭 — 비현재 공간을 원격 최신으로 업데이트한다 (E7a)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  await execGitOrThrow(['push', 'origin', 'main:old'], { cwd: repo })
+  await execGitOrThrow(['branch', '--track', 'old', 'origin/old'], { cwd: repo })
+  // 다른 클론이 old를 앞세운다 — 로컬 old는 뒤처진(ff 가능) 상태
+  const other = await mkdtemp(join(tmpdir(), 'git-gui-e2e-other-'))
+  await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: other })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: other })
+  await execGitOrThrow(['checkout', 'old'], { cwd: other })
+  await writeFile(join(other, 'o.txt'), 'o\n')
+  await execGitOrThrow(['add', '-A'], { cwd: other })
+  await execGitOrThrow(['commit', '-m', 'other old'], { cwd: other })
+  await execGitOrThrow(['push'], { cwd: other })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-old').click({ button: 'right' })
+    await window.getByTestId('context-update').click()
+    await expect(window.getByTestId('notice')).toContainText('원격 최신으로 업데이트했어요')
+    await expect(window.getByTestId('branch-row-old')).toContainText('동기화됨')
+    const localOld = await execGitOrThrow(['rev-parse', 'old'], { cwd: repo })
+    const remoteOld = await execGitOrThrow(['rev-parse', 'old'], { cwd: remote })
+    expect(localOld.stdout.trim()).toBe(remoteOld.stdout.trim())
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+    await rm(other, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추적 checkout) (E7a)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  // 원격에만 있는 공간 — push refspec으로 만들면 로컬 remote-tracking ref도 함께 생긴다
+  await execGitOrThrow(['push', 'origin', 'main:incoming'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-origin/incoming').click({ button: 'right' })
+    await window.getByTestId('context-checkout-remote').click()
+    await expect(window.getByTestId('notice')).toContainText('가져와 이동했어요')
+    await expect(window.getByTestId('branch-row-incoming')).toContainText('지금 여기')
+    const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
+    expect(current.stdout.trim()).toBe('incoming')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
