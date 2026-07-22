@@ -11,6 +11,11 @@ export function resolveShell(env: Record<string, string | undefined>): string {
   return process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'
 }
 
+/** pty가 죽지 않는 바닥 — fit addon이 극단 레이아웃에서 0·소수를 줄 수 있다 (품질 리뷰: 순수 함수로 추출해 검증) */
+export function clampPtyDims(cols: number, rows: number): { cols: number; rows: number } {
+  return { cols: Math.max(2, Math.floor(cols)), rows: Math.max(1, Math.floor(rows)) }
+}
+
 export interface TerminalEvents {
   onData(sessionId: string, chunk: string): void
   onExit(sessionId: string, exitCode: number): void
@@ -31,13 +36,20 @@ export class TerminalManager {
       throw new Error(`터미널은 ${MAX_SESSIONS}개까지 열 수 있어요. 안 쓰는 탭을 닫아 주세요.`)
     }
     const sessionId = randomUUID()
-    const pty = spawn(resolveShell(process.env), ['-l'], {
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd,
-      env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
-    })
+    const shell = resolveShell(process.env)
+    let pty: IPty
+    try {
+      pty = spawn(shell, ['-l'], {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 24,
+        cwd,
+        env: { ...process.env, TERM: 'xterm-256color' },
+      })
+    } catch {
+      // 깨진 $SHELL(삭제된 바이너리 등) — posix_spawnp 원어를 사용자에게 노출하지 않는다 (품질 리뷰)
+      throw new Error(`쉘(${shell})을 실행하지 못했어요. SHELL 환경 변수를 확인해 주세요.`)
+    }
     this.sessions.set(sessionId, pty)
     pty.onData((chunk) => this.events.onData(sessionId, chunk))
     pty.onExit(({ exitCode }) => {
@@ -59,8 +71,8 @@ export class TerminalManager {
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
-    // fit addon이 극단 레이아웃에서 0·소수를 줄 수 있다 — pty가 죽지 않게 바닥을 깐다
-    this.session(sessionId).resize(Math.max(2, Math.floor(cols)), Math.max(1, Math.floor(rows)))
+    const dims = clampPtyDims(cols, rows)
+    this.session(sessionId).resize(dims.cols, dims.rows)
   }
 
   kill(sessionId: string): void {
