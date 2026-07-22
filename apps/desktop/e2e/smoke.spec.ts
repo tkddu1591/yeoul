@@ -1502,3 +1502,116 @@ test('감시 — 밖에서 저장하면 화면이 스스로 갱신된다 (E7b fs
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('터미널 — 열고 명령을 치면 결과가 보인다 (E7b)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 터미널 토글은 dockOpen을 settings.json에 영속한다(rightWidth 선례) — 격리된 userData가
+  // 없으면 이전 터미널 테스트가 남긴 열림 상태를 물려받아 이번 클릭이 반대로 닫아버린다
+  // (실측: 기본 워커·순차 실행에서도 재현되는 결정적 실패 — 실측 뒤 추가한 최소 보정)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await expect(window.locator('.terminal-dock__view .xterm')).toBeVisible()
+    // pty가 키 입력을 버퍼링하므로 프롬프트 완성을 기다릴 필요 없다 (실측 2: echo 왕복)
+    await window.locator('.terminal-dock__view').first().click()
+    await window.keyboard.type('echo e7b-roundtrip-marker')
+    await window.keyboard.press('Enter')
+    await expect(window.getByTestId('terminal-body')).toContainText('e7b-roundtrip-marker', {
+      timeout: 10_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('터미널 — 터미널에서 저장하면 화면이 따라온다 (E7b 감시 연동)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // dockOpen 영속 격리 — 위 테스트와 동일 사유 (실측 후 최소 보정)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+    await window.getByTestId('terminal-toggle').click()
+    await window.locator('.terminal-dock__view').first().click()
+    // 로그인 쉘 rc가 cwd를 바꿀 수 있다 — 테스트는 명시적으로 저장소로 이동해 rc 의존을 없앤다
+    await window.keyboard.type(`cd "${repo}" && git commit --allow-empty -m e7b-terminal-commit`)
+    await window.keyboard.press('Enter')
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 10_000 })
+    await expect(window.getByTestId('history-list')).toContainText('e7b-terminal-commit')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('터미널 — 탭을 추가·전환·닫을 수 있다 (E7b)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // dockOpen 영속 격리 — 위 테스트와 동일 사유 (실측 후 최소 보정)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.locator('.terminal-dock__tab')).toHaveCount(1)
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab')).toHaveCount(2)
+    // 첫 탭으로 전환 후 둘째 탭 닫기
+    await window.locator('.terminal-dock__tab-name').first().click()
+    await window.locator('.terminal-dock__tab-close').nth(1).click()
+    await expect(window.locator('.terminal-dock__tab')).toHaveCount(1)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('터미널 — 접었다 펴도 세션이 유지된다 (E7b)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // dockOpen 영속 격리 — 위 테스트와 동일 사유 (실측 후 최소 보정)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await window.locator('.terminal-dock__view').first().click()
+    await window.keyboard.type('echo keep-alive-proof')
+    await window.keyboard.press('Enter')
+    await expect(window.getByTestId('terminal-body')).toContainText('keep-alive-proof', {
+      timeout: 10_000,
+    })
+    // 접기 — 숨김일 뿐 세션은 산다 (스펙)
+    await window.getByTestId('terminal-close').click()
+    await expect(window.getByTestId('terminal-dock')).toBeHidden()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await expect(window.getByTestId('terminal-body')).toContainText('keep-alive-proof')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
