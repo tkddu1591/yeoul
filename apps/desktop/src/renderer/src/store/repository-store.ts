@@ -755,7 +755,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().branches.update(repoPath, name)
+      // 비교 뷰가 바로 이 공간을 보고 있었다면 낡은 목록이 남는다 — 대상일 때만 닫는다 (품질 리뷰)
+      const stale = get().branchCompare?.name === name ? { branchCompare: null } : {}
       set({
+        ...stale,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: `"${name}"을 원격 최신으로 업데이트했어요.`,
       })
@@ -767,6 +770,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().branches.backup(repoPath, name)
+      // push는 ref를 움직이지 않는다 — 비교 뷰 무효화 불필요 (update와의 비대칭은 의도 — 품질 리뷰)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: `"${name}"을 백업(push)했어요.`,
@@ -809,7 +813,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     await guard(set, get, async () => {
       await git().branches.removeRemote(repoPath, name)
+      // 비교 뷰가 바로 이 공간을 보고 있었다면 낡은 목록이 남는다 — 대상일 때만 닫는다 (품질 리뷰)
+      const stale = get().branchCompare?.name === name ? { branchCompare: null } : {}
       set({
+        ...stale,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: `원격에서 "${name}"을 지웠어요.`,
       })
