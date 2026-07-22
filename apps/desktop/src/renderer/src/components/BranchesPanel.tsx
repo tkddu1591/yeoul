@@ -151,6 +151,12 @@ export function BranchesPanel({
 
   const openMenu = (event: MouseEvent, target: MenuState['target']) => {
     event.preventDefault()
+    // 키보드(Enter/Space) 활성화는 좌표가 (0,0)으로 온다 — 커서 대신 행 자체에 앵커한다 (품질 리뷰)
+    if (event.clientX === 0 && event.clientY === 0) {
+      const rect = event.currentTarget.getBoundingClientRect()
+      setMenu({ x: rect.left + 8, y: rect.bottom, target })
+      return
+    }
     setMenu({ x: event.clientX, y: event.clientY, target })
   }
 
