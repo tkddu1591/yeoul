@@ -1,13 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { TERMINAL_CHANNELS } from '@git-gui/ipc-contract'
-import { assertAllowedRepo } from './git-handlers'
+import { assertAllowedRepo, assertString } from './git-handlers'
 import { TerminalManager } from './terminal-manager'
-
-/** git-handlers의 비공개 헬퍼와 같은 규칙 — 문자열이 아니면 거부 (지역 복제) */
-function assertString(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('잘못된 요청이에요.')
-  return value
-}
 
 export function registerTerminalHandlers(): void {
   // 이벤트의 목적지는 세션을 만든 창(invoke의 event.sender) — 창 배선 없이 push한다 (실측 3)
@@ -28,10 +22,26 @@ export function registerTerminalHandlers(): void {
     },
   })
 
+  // 창이 닫히거나 renderer가 죽으면 그 창의 세션을 전부 정리한다 — 렌더러 예절에 의존하지 않는다.
+  // macOS는 창을 닫아도 앱이 살아 고아 쉘이 남는다 (품질 리뷰). sender당 1회만 등록한다
+  const cleanupHooked = new WeakSet<Electron.WebContents>()
+
   ipcMain.handle(TERMINAL_CHANNELS.create, (event, repoPath: unknown) => {
     const cwd = assertAllowedRepo(repoPath)
     const created = manager.create(cwd)
     targets.set(created.sessionId, event.sender)
+    if (!cleanupHooked.has(event.sender)) {
+      cleanupHooked.add(event.sender)
+      event.sender.once('destroyed', () => {
+        const ids = [...targets.entries()]
+          .filter(([, target]) => target === event.sender)
+          .map(([id]) => id)
+        for (const id of ids) {
+          targets.delete(id)
+          manager.kill(id)
+        }
+      })
+    }
     return created
   })
 
@@ -42,8 +52,13 @@ export function registerTerminalHandlers(): void {
   ipcMain.handle(
     TERMINAL_CHANNELS.resize,
     (_event, sessionId: unknown, cols: unknown, rows: unknown) => {
-      if (typeof cols !== 'number' || typeof rows !== 'number') {
-        throw new Error('잘못된 요청이에요.')
+      if (
+        typeof cols !== 'number' ||
+        typeof rows !== 'number' ||
+        !Number.isFinite(cols) ||
+        !Number.isFinite(rows)
+      ) {
+        throw new Error('잘못된 요청 형식이에요.')
       }
       manager.resize(assertString(sessionId), cols, rows)
     },
