@@ -1,23 +1,26 @@
 import type { BranchSummary } from '@git-gui/domain'
 
-export interface BranchFolder {
+export interface BranchFolder<T extends { name: string } = BranchSummary> {
   /** '/' 앞 첫 조각 — 폴더 이름 */
   name: string
-  branches: BranchSummary[]
+  branches: T[]
 }
 
-export interface GroupedBranches {
+export interface GroupedBranches<T extends { name: string } = BranchSummary> {
   /** '/' 없는 브랜치 — 목록 맨 위에 그대로 나열 */
-  loose: BranchSummary[]
+  loose: T[]
   /** '/'가 있는 브랜치를 첫 조각으로 묶는다 — IntelliJ식 폴더 (피드백 5) */
-  folders: BranchFolder[]
+  folders: BranchFolder<T>[]
 }
 
-/** 입력 순서(최근 커밋순)를 유지한다 — 폴더 위치는 그 폴더 브랜치가 처음 등장한 곳 */
-export function groupBranches(branches: BranchSummary[]): GroupedBranches {
-  const loose: BranchSummary[] = []
-  const folders: BranchFolder[] = []
-  const byName = new Map<string, BranchFolder>()
+/**
+ * 입력 순서(최근 커밋순)를 유지한다 — 폴더 위치는 그 폴더 브랜치가 처음 등장한 곳.
+ * E7a: 패널(LocalBranchStatus)과 스위처(BranchSummary)가 공유하도록 name만 요구하는 제네릭으로 넓혔다
+ */
+export function groupBranches<T extends { name: string }>(branches: T[]): GroupedBranches<T> {
+  const loose: T[] = []
+  const folders: BranchFolder<T>[] = []
+  const byName = new Map<string, BranchFolder<T>>()
   for (const branch of branches) {
     const slash = branch.name.indexOf('/')
     if (slash <= 0) {

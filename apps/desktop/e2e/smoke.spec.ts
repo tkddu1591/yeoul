@@ -1284,3 +1284,87 @@ test('커밋이 삭제한 파일은 "이 파일만 적용"이 사유와 함께 �
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('실험 공간 탭 — 목록·상태 배지·검색 (E7a)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('branches-panel')).toBeVisible()
+    await expect(window.getByTestId('branch-row-main')).toContainText('지금 여기')
+    await expect(window.getByTestId('branch-row-main')).toContainText('동기화됨')
+    await expect(window.getByTestId('branch-row-feature/login')).toContainText('연결 없음')
+    await expect(window.getByTestId('branch-row-origin/main')).toBeVisible()
+    // 검색 — login만 남는다
+    await window.getByTestId('branches-search').fill('login')
+    await expect(window.getByTestId('branch-row-main')).toHaveCount(0)
+    await expect(window.getByTestId('branch-row-feature/login')).toBeVisible()
+    // 변경 탭 복귀 — 저장 폼이 그대로다 (커밋 흐름 무변)
+    await window.getByTestId('left-tab-changes').click()
+    await expect(window.getByTestId('commit-button')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 탭 — 우클릭 이동(checkout)에 현재 표시가 따라온다 (E7a)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'sidework'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-sidework').click({ button: 'right' })
+    await window.getByTestId('context-switch').click()
+    await expect(window.getByTestId('branch-row-sidework')).toContainText('지금 여기')
+    const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
+    expect(current.stdout.trim()).toBe('sidework')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 탭 — 지금과 비교가 양방향 전용 저장을 보여준다 (E7a)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: repo })
+  await writeFile(join(repo, 'rival.txt'), 'r\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '상대 전용 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'mine.txt'), 'm\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '내 전용 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-rival').click({ button: 'right' })
+    await window.getByTestId('context-compare').click()
+    await expect(window.getByTestId('branch-compare-view')).toContainText('상대 전용 저장')
+    await expect(window.getByTestId('branch-compare-view')).toContainText('내 전용 저장')
+    await window.getByTestId('branch-compare-back').click()
+    await expect(window.getByTestId('branches-list')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

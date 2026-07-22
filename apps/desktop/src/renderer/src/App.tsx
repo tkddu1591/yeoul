@@ -2,6 +2,7 @@ import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun } from 'luci
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
+import { BranchesPanel } from './components/BranchesPanel'
 import { BranchSwitcher } from './components/BranchSwitcher'
 import { ConflictPanel } from './components/ConflictPanel'
 import { ChangesPanel } from './components/ChangesPanel'
@@ -66,6 +67,18 @@ export function App() {
   const [mergePicker, setMergePicker] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [confirmingAbort, setConfirmingAbort] = useState(false)
+
+  // E7a 좌측 탭 — [변경 | 실험 공간]. 기본은 변경(커밋 흐름 무변). 탭 상태는 렌더 로컬(store 오염 없음)
+  const [leftTab, setLeftTab] = useState<'changes' | 'branches'>('changes')
+  // E7a 실험 공간 우클릭 다이얼로그 — 재배치 확인·이름 바꾸기·지우기(needsForce 2단)·원격 지우기
+  const [confirmingRebase, setConfirmingRebase] = useState<{ name: string } | null>(null)
+  const [renamePrompt, setRenamePrompt] = useState<{ name: string } | null>(null)
+  const [confirmingRemove, setConfirmingRemove] = useState<{ name: string; force: boolean } | null>(
+    null,
+  )
+  const [confirmingRemoveRemote, setConfirmingRemoveRemote] = useState<{ name: string } | null>(
+    null,
+  )
 
   // E5b 커밋 작업 다이얼로그 — 태그 이름·실행취소 확인·메시지 고치기 (대상 커밋 정보를 함께 보관)
   const [tagPrompt, setTagPrompt] = useState<{ hash: string } | null>(null)
@@ -318,27 +331,105 @@ export function App() {
         className="app__main"
         style={{ gridTemplateColumns: `${columns.left}px minmax(0, 1fr) 6px ${columns.right}px` }}
       >
-        {/* 좌측 열 = 변경 목록(위) + 저장 폼(하단 푸터) — 고르고 저장하기까지 한 열에서 끝난다 (E6a) */}
+        {/* 좌측 열 = [변경 | 실험 공간] 탭 (E7a) — 변경 탭은 기존 그대로(목록+저장 폼, E6a), 커밋 흐름 무변.
+            빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화) */}
         <div className="app__left">
-          <ChangesPanel
-            changes={status?.changes ?? []}
-            selected={store.selected}
-            busy={store.busy}
-            onStage={(paths) => void store.stage(paths)}
-            onUnstage={(paths) => void store.unstage(paths)}
-            onDiscard={(trackedPaths, untrackedPaths) =>
-              void store.discard(trackedPaths, untrackedPaths)
-            }
-            onRemoveFile={(path) => void store.removeFile(path)}
-            onSelect={(selected) => void store.selectFile(selected)}
-          />
-          <CommitForm
-            stagedCount={stagedCount}
-            busy={store.busy}
-            suggestion={suggestion}
-            allowEmpty={status?.state === 'merging'}
-            onCommit={(message) => store.commit(message)}
-          />
+          <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leftTab === 'changes'}
+              className="app__left-tab"
+              onClick={() => setLeftTab('changes')}
+              data-testid="left-tab-changes"
+            >
+              변경{(status?.changes.length ?? 0) > 0 ? ` ${status?.changes.length}` : ''}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leftTab === 'branches'}
+              className="app__left-tab"
+              onClick={() => setLeftTab('branches')}
+              data-testid="left-tab-branches"
+            >
+              실험 공간
+            </button>
+          </div>
+          {leftTab === 'changes' ? (
+            <>
+              <ChangesPanel
+                changes={status?.changes ?? []}
+                selected={store.selected}
+                busy={store.busy}
+                onStage={(paths) => void store.stage(paths)}
+                onUnstage={(paths) => void store.unstage(paths)}
+                onDiscard={(trackedPaths, untrackedPaths) =>
+                  void store.discard(trackedPaths, untrackedPaths)
+                }
+                onRemoveFile={(path) => void store.removeFile(path)}
+                onSelect={(selected) => void store.selectFile(selected)}
+              />
+              <CommitForm
+                stagedCount={stagedCount}
+                busy={store.busy}
+                suggestion={suggestion}
+                allowEmpty={status?.state === 'merging'}
+                onCommit={(message) => store.commit(message)}
+              />
+            </>
+          ) : (
+            <BranchesPanel
+              overview={store.branchOverview}
+              compare={store.branchCompare}
+              currentBranch={status?.branch.name ?? null}
+              busy={store.busy}
+              actionsDisabled={status?.state !== 'normal'}
+              onCloseCompare={() => store.clearBranchCompare()}
+              onAction={(action) => {
+                switch (action.kind) {
+                  case 'switch':
+                    void store.switchBranch(action.name)
+                    break
+                  case 'branch-from':
+                    store.clearError()
+                    setBranchPrompt({ fromHash: action.hash })
+                    break
+                  case 'merge':
+                    void store.mergeBranch(action.name)
+                    break
+                  case 'rebase':
+                    setConfirmingRebase({ name: action.name })
+                    break
+                  case 'compare':
+                    void store.compareBranch(action.name)
+                    break
+                  case 'update':
+                    // 현재 공간은 기존 받아오기(pull)로 — 엔진 update는 비현재 전용 (스펙)
+                    if (action.name === status?.branch.name) void store.pullLatest()
+                    else void store.updateBranch(action.name)
+                    break
+                  case 'backup':
+                    if (action.name === status?.branch.name) void store.backup()
+                    else void store.backupBranch(action.name)
+                    break
+                  case 'rename':
+                    store.clearError()
+                    setRenamePrompt({ name: action.name })
+                    break
+                  case 'remove':
+                    setConfirmingRemove({ name: action.name, force: false })
+                    break
+                  case 'checkout-remote':
+                    void store.checkoutRemoteBranch(action.name)
+                    break
+                  case 'remove-remote':
+                    setConfirmingRemoveRemote({ name: action.name })
+                    break
+                }
+              }}
+            />
+          )}
         </div>
         <div className="app__center">
           {store.conflictFile !== null ? (
@@ -653,6 +744,77 @@ export function App() {
         onCancel={() => setMergeFollowUp(null)}
       >
         병합 완료 — 기본 공간({mergeFollowUp})으로 이동해 최신을 받아올까요? 나중에 해도 돼요.
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmingRebase !== null}
+        title={`"${confirmingRebase?.name}" 위로 재배치할까요?`}
+        confirmLabel="재배치 (rebase)"
+        onConfirm={() => {
+          const name = confirmingRebase?.name ?? null
+          setConfirmingRebase(null)
+          if (name !== null) void store.rebaseOnto(name)
+        }}
+        onCancel={() => setConfirmingRebase(null)}
+      >
+        지금 공간의 저장들을 그 위로 다시 쌓아요. 내용이 겹치면 하나씩 해결하는 화면이 열려요. 이미
+        백업(push)한 공간이라면 원격과 어긋날 수 있어요.
+      </ConfirmDialog>
+      <PromptDialog
+        isOpen={renamePrompt !== null}
+        title="실험 공간 이름 바꾸기"
+        description="이 공간의 이름만 바뀌어요. 저장 내용은 그대로예요."
+        label="새 이름"
+        placeholder="예: feature/login"
+        submitLabel="바꾸기"
+        initialValue={renamePrompt?.name ?? ''}
+        errorText={renamePrompt !== null ? store.error : null}
+        onSubmit={(newName) => {
+          void (async () => {
+            const prompt = renamePrompt
+            if (prompt === null) return
+            // 실패하면 다이얼로그를 유지해 입력을 보존한다 — 에러는 인라인으로 (branchPrompt 관례)
+            if (await store.renameBranch(prompt.name, newName)) setRenamePrompt(null)
+          })()
+        }}
+        onCancel={() => setRenamePrompt(null)}
+      />
+      <ConfirmDialog
+        isOpen={confirmingRemove !== null}
+        title={
+          confirmingRemove?.force === true
+            ? '합쳐지지 않은 저장이 있어요 — 그래도 지울까요?'
+            : `"${confirmingRemove?.name}" 실험 공간을 지울까요?`
+        }
+        confirmLabel={confirmingRemove?.force === true ? '그래도 지우기' : '지우기'}
+        onConfirm={() => {
+          const target = confirmingRemove
+          setConfirmingRemove(null)
+          if (target === null) return
+          void (async () => {
+            // 합쳐지지 않은 저장이 있으면 엔진이 지우지 않고 needsForce로 알린다 — 2단 확인 (ManageBranches 관례)
+            if (await store.removeBranch(target.name, target.force)) {
+              if (!target.force) setConfirmingRemove({ name: target.name, force: true })
+            }
+          })()
+        }}
+        onCancel={() => setConfirmingRemove(null)}
+      >
+        {confirmingRemove?.force === true
+          ? '이 공간에만 있는 저장은 함께 사라져요. 되돌릴 수 없어요.'
+          : '다른 곳에 합쳐진 저장은 남아요. 합쳐지지 않은 저장이 있으면 한 번 더 물어봐요.'}
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmingRemoveRemote !== null}
+        title={`원격에서 "${confirmingRemoveRemote?.name}"을 지울까요?`}
+        confirmLabel="원격에서 지우기"
+        onConfirm={() => {
+          const name = confirmingRemoveRemote?.name ?? null
+          setConfirmingRemoveRemote(null)
+          if (name !== null) void store.removeRemoteBranch(name)
+        }}
+        onCancel={() => setConfirmingRemoveRemote(null)}
+      >
+        원격 저장소에서 지워져요 — 함께 쓰는 다른 사람에게도 영향이 있어요.
       </ConfirmDialog>
     </div>
   )
