@@ -1996,6 +1996,116 @@ describe('GitClient', () => {
     )
   })
 
+  it('branches.checkoutRemote — 원격 공간을 추적 브랜치로 가져와 이동한다', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await execGitOrThrow(['checkout', '-b', 'feature/pay'], { cwd: other })
+    await writeFixtureFile(other, 'p.txt', 'p\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'pay'], { cwd: other })
+    await execGitOrThrow(['push', '-u', 'origin', 'feature/pay'], { cwd: other })
+    await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
+    const result = await client.branches.checkoutRemote('origin/feature/pay')
+    expect(result).toEqual({ autoShelved: false })
+    const current = (
+      await execGitOrThrow(['symbolic-ref', '--short', 'HEAD'], { cwd: repo })
+    ).stdout.trim()
+    expect(current).toBe('feature/pay')
+    const upstream = await execGitOrThrow(['config', '--get', 'branch.feature/pay.remote'], {
+      cwd: repo,
+    })
+    expect(upstream.stdout.trim()).toBe('origin')
+  })
+
+  it('branches.checkoutRemote — 동명 로컬이 있으면 읽히는 메시지로 거부한다 (실측 4)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
+    await expect(client.branches.checkoutRemote('origin/main')).rejects.toThrow(
+      /이미 "main" 공간이 있어요/,
+    )
+  })
+
+  it('branches.checkoutRemote — 겹치는 변경은 자동 보관 후 이동한다 (switch 관례)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    const other = await mkdtemp(join(tmpdir(), 'git-gui-other-'))
+    await execGitOrThrow(['clone', remote, other], { cwd: tmpdir() })
+    await execGitOrThrow(['checkout', '-b', 'rival'], { cwd: other })
+    await writeFixtureFile(other, 'README.md', '# rival\n')
+    await execGitOrThrow(['add', '-A'], { cwd: other })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'rival'], { cwd: other })
+    await execGitOrThrow(['push', '-u', 'origin', 'rival'], { cwd: other })
+    await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
+    // 같은 파일을 로컬에서 수정해 둔다 — 그대로 이동하면 would be overwritten
+    await writeFixtureFile(repo, 'README.md', '# local edit\n')
+    const result = await client.branches.checkoutRemote('origin/rival')
+    expect(result).toEqual({ autoShelved: true })
+    expect((await client.shelf.list()).length).toBe(1)
+  })
+
+  it('branches.removeRemote — 원격에서 지운다 (bare 저장소에서 소멸 확인)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await client.branches.create('doomed', null)
+    await client.branches.backup('doomed')
+    expect(
+      (await execGitOrThrow(['branch', '--list', 'doomed'], { cwd: remote })).stdout,
+    ).toContain('doomed')
+    await client.branches.removeRemote('origin/doomed')
+    expect(
+      (await execGitOrThrow(['branch', '--list', 'doomed'], { cwd: remote })).stdout.trim(),
+    ).toBe('')
+  })
+
+  it('branches.removeRemote — 원격에 이미 없으면 읽히는 메시지로 거부한다', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.sync.push()
+    await expect(client.branches.removeRemote('origin/no-such')).rejects.toThrow(/이미 없어요/)
+  })
+
+  it('branches.compare — 양방향 전용 저장을 나눠 담는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('rival', null)
+    await writeFixtureFile(repo, 'mine.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', '내 전용 저장'], { cwd: repo })
+    await client.branches.switch('rival')
+    await writeFixtureFile(repo, 'rival.txt', 'r\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', '상대 전용 저장'], { cwd: repo })
+    await client.branches.switch('main')
+    const compare = await client.branches.compare('rival')
+    expect(compare.onlyInSelected.map((c) => c.subject)).toEqual(['상대 전용 저장'])
+    expect(compare.onlyInCurrent.map((c) => c.subject)).toEqual(['내 전용 저장'])
+    expect(compare.selectedOverflow).toBe(false)
+    expect(compare.currentOverflow).toBe(false)
+  })
+
+  it('branches.compare — 100개 상한을 넘으면 overflow로 알린다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('base-mark', null)
+    for (let i = 0; i < 101; i += 1) {
+      await execGitOrThrow(
+        [...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', `bulk ${i}`],
+        { cwd: repo },
+      )
+    }
+    const compare = await client.branches.compare('base-mark')
+    expect(compare.onlyInCurrent.length).toBe(100)
+    expect(compare.currentOverflow).toBe(true)
+    expect(compare.onlyInSelected).toEqual([])
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

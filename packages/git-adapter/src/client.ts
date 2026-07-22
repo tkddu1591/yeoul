@@ -1,5 +1,6 @@
 import {
   detectState,
+  type BranchCompare,
   type BranchOverview,
   type BranchSummary,
   type CherryPickResult,
@@ -46,6 +47,12 @@ export interface GitClient {
     update(name: string): Promise<void>
     /** 선택 공간을 checkout 없이 백업(push). upstream 없으면 -u로 연결하며 올린다 (origin 우선 관례) */
     backup(name: string): Promise<void>
+    /** 원격 공간을 추적 로컬 브랜치로 가져와 이동한다. 동명 로컬이 있으면 거부, 겹치면 자동 보관 (switch 관례) */
+    checkoutRemote(name: string): Promise<SwitchResult>
+    /** 원격에서 이 공간을 지운다(push --delete) — 확인창은 UI 책임. 다른 사람에게도 영향이 있다 */
+    removeRemote(name: string): Promise<void>
+    /** 지금 공간과의 양방향 전용 저장 목록 — 각 100개 상한 + overflow (E7a) */
+    compare(name: string): Promise<BranchCompare>
     /** 새 실험 공간 — fromHash가 있으면 그 시점에서, 없으면 지금(HEAD)에서. 만들기만 하고 전환하지 않는다 */
     create(name: string, fromHash: string | null): Promise<void>
     /**
@@ -219,6 +226,9 @@ const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
 /** 가져오기(cherry-pick)가 막혀 자동 보관할 때의 보관함 메시지 */
 const CHERRY_PICK_SHELF_MESSAGE = '저장 가져오기 자동 보관'
 
+/** "지금과 비교" 한 방향 상한 — 초과분은 overflow 플래그로만 알린다 (E7a) */
+const COMPARE_LIMIT = 100
+
 /**
  * 원격이 앞서 거부된 push (E5b 후속·E6b 실측) — stderr 4케이스 전부 "! [rejected] …
  * (fetch first|non-fast-forward)". undo(실행취소)로 로컬이 뒤로 간 경우도 같은
@@ -363,6 +373,78 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           rejectIfRemoteAhead(result)
           throw new GitError(args, result)
+        }
+      },
+      async checkoutRemote(name) {
+        const cwd = await topLevel()
+        const slash = name.indexOf('/')
+        if (slash <= 0) throw new Error(`"${name}"는 원격 공간 이름이 아니에요.`)
+        const local = name.slice(slash + 1)
+        // 동명 로컬 선검사 — switch -c의 원어 fatal(실측 4) 대신 행동 안내를 준다
+        const existing = await execGit(['rev-parse', '-q', '--verify', `refs/heads/${local}`], {
+          cwd,
+        })
+        if (existing.exitCode === 0) {
+          throw new Error(
+            `이미 "${local}" 공간이 있어요. 그 공간으로 이동해 "원격 최신으로 업데이트"해 주세요.`,
+          )
+        }
+        const args = ['switch', '-c', local, '--track', '--end-of-options', name]
+        const first = await execGit(args, { cwd })
+        if (first.exitCode === 0) return { autoShelved: false }
+        if (!first.stderr.includes('would be overwritten')) throw new GitError(args, first)
+        // 겹쳐서 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch 관례)
+        await execGitOrThrow(['stash', 'push', '-u', '-m', AUTO_SHELF_MESSAGE], { cwd })
+        await execGitOrThrow(args, { cwd })
+        return { autoShelved: true }
+      },
+      async removeRemote(name) {
+        const cwd = await topLevel()
+        const slash = name.indexOf('/')
+        if (slash <= 0) throw new Error(`"${name}"는 원격 공간 이름이 아니에요.`)
+        const remoteName = name.slice(0, slash)
+        const branch = name.slice(slash + 1)
+        const args = ['push', '--delete', '--end-of-options', remoteName, branch]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('remote ref does not exist')) {
+            throw new Error('원격에 이 공간이 이미 없어요. 새로고침해 주세요.')
+          }
+          throw new GitError(args, result)
+        }
+      },
+      async compare(name) {
+        const cwd = await topLevel()
+        const valid = await execGit(['rev-parse', '-q', '--verify', `${name}^{commit}`], { cwd })
+        if (valid.exitCode !== 0) {
+          throw new Error(`"${name}"라는 공간을 찾을 수 없어요. 새로고침해 주세요.`)
+        }
+        // history.list와 같은 레코드 포맷 — parseLog를 그대로 재사용한다
+        const listSide = async (range: string) => {
+          const raw = await execGitOrThrow(
+            [
+              'log',
+              '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
+              '-z',
+              '-n',
+              String(COMPARE_LIMIT + 1),
+              range,
+            ],
+            { cwd },
+          )
+          const commits = parseLog(raw.stdout)
+          return {
+            commits: commits.slice(0, COMPARE_LIMIT),
+            overflow: commits.length > COMPARE_LIMIT,
+          }
+        }
+        const selectedOnly = await listSide(`HEAD..${name}`)
+        const currentOnly = await listSide(`${name}..HEAD`)
+        return {
+          onlyInSelected: selectedOnly.commits,
+          selectedOverflow: selectedOnly.overflow,
+          onlyInCurrent: currentOnly.commits,
+          currentOverflow: currentOnly.overflow,
         }
       },
       async create(name, fromHash) {
