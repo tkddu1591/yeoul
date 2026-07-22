@@ -415,7 +415,11 @@ export function createGitClient(repoPath: string): GitClient {
       },
       async compare(name) {
         const cwd = await topLevel()
-        const valid = await execGit(['rev-parse', '-q', '--verify', `${name}^{commit}`], { cwd })
+        // 같은 이름의 태그가 있으면 bare 이름이 태그로 풀린다(gitrevisions 우선순위 — 품질 리뷰) —
+        // 로컬 브랜치가 있으면 refs/heads/를 우선하고, 아니면(원격 ref 등) 이름 그대로 쓴다
+        const asLocal = await execGit(['rev-parse', '-q', '--verify', `refs/heads/${name}`], { cwd })
+        const ref = asLocal.exitCode === 0 ? `refs/heads/${name}` : name
+        const valid = await execGit(['rev-parse', '-q', '--verify', `${ref}^{commit}`], { cwd })
         if (valid.exitCode !== 0) {
           throw new Error(`"${name}"라는 공간을 찾을 수 없어요. 새로고침해 주세요.`)
         }
@@ -438,8 +442,8 @@ export function createGitClient(repoPath: string): GitClient {
             overflow: commits.length > COMPARE_LIMIT,
           }
         }
-        const selectedOnly = await listSide(`HEAD..${name}`)
-        const currentOnly = await listSide(`${name}..HEAD`)
+        const selectedOnly = await listSide(`HEAD..${ref}`)
+        const currentOnly = await listSide(`${ref}..HEAD`)
         return {
           onlyInSelected: selectedOnly.commits,
           selectedOverflow: selectedOnly.overflow,

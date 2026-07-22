@@ -2083,6 +2083,8 @@ describe('GitClient', () => {
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', '상대 전용 저장'], { cwd: repo })
     await client.branches.switch('main')
+    // 동명 태그가 있어도 브랜치를 비교한다 (품질 리뷰 보완 — refs/heads 우선)
+    await execGitOrThrow(['tag', 'rival', 'main'], { cwd: repo })
     const compare = await client.branches.compare('rival')
     expect(compare.onlyInSelected.map((c) => c.subject)).toEqual(['상대 전용 저장'])
     expect(compare.onlyInCurrent.map((c) => c.subject)).toEqual(['내 전용 저장'])
