@@ -322,3 +322,28 @@ export const SETTINGS_CHANNELS = {
   getSync: 'settings:get-sync',
   set: 'settings:set',
 } as const
+
+/** 터미널 표면 (E7b) — pty는 main 전용. renderer는 세션 id와 바이트 스트림만 다룬다 */
+export interface TerminalApi {
+  /** 세션 생성 — cwd는 allowlist된 저장소 루트로 고정된다 (E7c에서 워크트리 인자 확장) */
+  create(repoPath: string): Promise<{ sessionId: string }>
+  input(sessionId: string, data: string): Promise<void>
+  resize(sessionId: string, cols: number, rows: number): Promise<void>
+  kill(sessionId: string): Promise<void>
+  /** 출력 push 구독 — 해제 함수를 반환한다 */
+  onData(listener: (sessionId: string, chunk: string) => void): () => void
+  /** 종료 push 구독 — 쉘 exit·명시적 kill 모두 */
+  onExit(listener: (sessionId: string, exitCode: number) => void): () => void
+}
+
+export const TERMINAL_API_KEY = 'terminalApi' as const
+
+export const TERMINAL_CHANNELS = {
+  create: 'terminal:create',
+  input: 'terminal:input',
+  resize: 'terminal:resize',
+  kill: 'terminal:kill',
+  /** push(main→renderer) — invoke가 아니라 webContents.send 채널 */
+  data: 'terminal:data',
+  exit: 'terminal:exit',
+} as const

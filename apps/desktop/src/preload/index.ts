@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppSettings, DiffOptions, GitApi, HostingApi, SettingsApi } from '@git-gui/ipc-contract'
+import type {
+  AppSettings,
+  DiffOptions,
+  GitApi,
+  HostingApi,
+  SettingsApi,
+  TerminalApi,
+} from '@git-gui/ipc-contract'
 import {
   CHANNELS,
   GIT_API_KEY,
@@ -7,6 +14,8 @@ import {
   HOSTING_CHANNELS,
   SETTINGS_API_KEY,
   SETTINGS_CHANNELS,
+  TERMINAL_API_KEY,
+  TERMINAL_CHANNELS,
 } from '@git-gui/ipc-contract'
 
 const api: GitApi = {
@@ -138,3 +147,25 @@ const settingsApi: SettingsApi = {
 }
 
 contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)
+
+const terminalApi: TerminalApi = {
+  create: (repoPath) => ipcRenderer.invoke(TERMINAL_CHANNELS.create, repoPath),
+  input: (sessionId, data) => ipcRenderer.invoke(TERMINAL_CHANNELS.input, sessionId, data),
+  resize: (sessionId, cols, rows) =>
+    ipcRenderer.invoke(TERMINAL_CHANNELS.resize, sessionId, cols, rows),
+  kill: (sessionId) => ipcRenderer.invoke(TERMINAL_CHANNELS.kill, sessionId),
+  onData: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string, chunk: string) =>
+      listener(sessionId, chunk)
+    ipcRenderer.on(TERMINAL_CHANNELS.data, wrapped)
+    return () => ipcRenderer.removeListener(TERMINAL_CHANNELS.data, wrapped)
+  },
+  onExit: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string, exitCode: number) =>
+      listener(sessionId, exitCode)
+    ipcRenderer.on(TERMINAL_CHANNELS.exit, wrapped)
+    return () => ipcRenderer.removeListener(TERMINAL_CHANNELS.exit, wrapped)
+  },
+}
+
+contextBridge.exposeInMainWorld(TERMINAL_API_KEY, terminalApi)
