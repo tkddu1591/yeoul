@@ -587,7 +587,9 @@ export function createGitClient(repoPath: string): GitClient {
           if (output.includes('Could not apply') || output.includes('CONFLICT')) return 'conflict'
           return null
         }
-        const args = ['rebase', '--end-of-options', onto]
+        // 사용자 전역 rebase.autostash가 켜져 있으면 git이 스스로 stash+pop 해버려 우리의
+        // 자동 보관 경로·notice가 죽고, pop 충돌이 exit 0 뒤에 숨는다(품질 리뷰 재현) — 항상 끈다
+        const args = ['-c', 'rebase.autostash=false', 'rebase', '--end-of-options', onto]
         const first = await execGit(args, { cwd })
         const firstOutcome = classify(first)
         if (firstOutcome !== null) return { outcome: firstOutcome, autoShelved: false }
