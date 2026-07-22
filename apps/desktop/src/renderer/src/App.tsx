@@ -141,6 +141,8 @@ export function App() {
     const onWindowResize = () => {
       setViewportWidth(window.innerWidth)
       setRightWidth((width) => clampRightWidth(width, window.innerWidth))
+      // 도크도 창 세로 축소를 따라 재클램프 — 60% 상한 초과로 1행이 짓눌리는 것을 막는다 (품질 리뷰, rightWidth 선례)
+      setDockHeight((height) => clampDockHeight(height, window.innerHeight))
     }
     window.addEventListener('resize', onWindowResize)
     return () => window.removeEventListener('resize', onWindowResize)
