@@ -42,11 +42,12 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
   bisecting: '원인 찾는 중',
 }
 
-/** 진행 중 작업 상태 바 문구 — merging/reverting/cherry-picking 3겸용 (E5b) */
+/** 진행 중 작업 상태 바 문구 — merging/reverting/cherry-picking/rebasing 4겸용 (E5b·E7a) */
 const OP_BAR = {
   merging: { doing: '실험 공간 합치는 중', abort: '합치기 취소' },
   reverting: { doing: '저장 되돌리는 중', abort: '되돌리기 취소' },
   'cherry-picking': { doing: '저장 가져오는 중', abort: '가져오기 취소' },
+  rebasing: { doing: '저장 재배치 중', abort: '재배치 취소' },
 } as const
 
 export function App() {
@@ -285,24 +286,47 @@ export function App() {
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
         status?.state === 'cherry-picking' ||
+        status?.state === 'rebasing' ||
         store.error !== null ||
         store.notice !== null) && (
         <div className="app__top-layer">
           <div className="app__top-stack">
             {(status?.state === 'merging' ||
               status?.state === 'reverting' ||
-              status?.state === 'cherry-picking') && (
+              status?.state === 'cherry-picking' ||
+              status?.state === 'rebasing') && (
               <div className="app__merge-bar" data-testid="merge-bar">
                 <Pictogram kind="conflict" size={14} label={OP_BAR[status.state].doing} />
                 <span className="app__merge-text" data-testid="merge-remaining">
-                  {`${OP_BAR[status.state].doing} — ${
+                  {`${OP_BAR[status.state].doing}${
+                    status.state === 'rebasing' && store.rebaseProgress !== null
+                      ? ` (${store.rebaseProgress.total}개 중 ${store.rebaseProgress.current}번째)`
+                      : ''
+                  } — ${
                     conflictCount > 0
-                      ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 저장하기로 마무리해요.`
-                      : status.state !== 'merging' && stagedCount === 0
-                        ? `겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — ${OP_BAR[status.state].abort}를 눌러 마무리해요.`
-                        : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+                      ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 ${
+                          status.state === 'rebasing'
+                            ? '계속하기로 다음 저장으로 넘어가요'
+                            : '저장하기로 마무리해요'
+                        }.`
+                      : status.state === 'rebasing'
+                        ? '겹침 0개 남음. 계속하기를 눌러 다음 저장으로 넘어가요.'
+                        : status.state !== 'merging' && stagedCount === 0
+                          ? `겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — ${OP_BAR[status.state].abort}를 눌러 마무리해요.`
+                          : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
                   }`}
                 </span>
+                {status.state === 'rebasing' && conflictCount === 0 && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    isDisabled={store.busy}
+                    onPress={() => void store.continueRebase()}
+                    testId="rebase-continue"
+                  >
+                    계속하기
+                  </Button>
+                )}
                 <Button
                   variant="danger"
                   size="sm"
@@ -438,8 +462,15 @@ export function App() {
               path={store.conflictFile.path}
               content={store.conflictFile.content}
               busy={store.busy}
-              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 "이 저장만 가져오기" 어휘와 일치한다 (E5b 설계 판단)
-              mode={status?.state === 'reverting' ? 'reverting' : 'merging'}
+              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 "이 저장만 가져오기" 어휘와 일치한다 (E5b 설계 판단).
+              // rebasing은 git의 ours/theirs가 뒤집힌다(내 것=새 기반) — 전용 mode로 라벨을 정직하게 (E7a)
+              mode={
+                status?.state === 'reverting'
+                  ? 'reverting'
+                  : status?.state === 'rebasing'
+                    ? 'rebasing'
+                    : 'merging'
+              }
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
               onReload={() => store.reloadConflict(store.conflictFile!.path)}
@@ -644,19 +675,24 @@ export function App() {
             ? '되돌리기를 취소할까요?'
             : status?.state === 'cherry-picking'
               ? '가져오기를 취소할까요?'
-              : '합치기를 취소할까요?'
+              : status?.state === 'rebasing'
+                ? '재배치를 취소할까요?'
+                : '합치기를 취소할까요?'
         }
         confirmLabel={
           status?.state === 'reverting'
             ? '되돌리기 취소'
             : status?.state === 'cherry-picking'
               ? '가져오기 취소'
-              : '합치기 취소'
+              : status?.state === 'rebasing'
+                ? '재배치 취소'
+                : '합치기 취소'
         }
         onConfirm={() => {
           setConfirmingAbort(false)
           if (status?.state === 'reverting') void store.abortRevert()
           else if (status?.state === 'cherry-picking') void store.abortCherryPick()
+          else if (status?.state === 'rebasing') void store.abortRebase()
           else void store.abortMerge()
         }}
         onCancel={() => setConfirmingAbort(false)}

@@ -13,8 +13,11 @@ interface ConflictPanelProps {
   path: string
   content: string
   busy: boolean
-  /** 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰) */
-  mode: 'merging' | 'reverting'
+  /**
+   * 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰).
+   * rebase는 git의 ours/theirs가 뒤집힌다 — 초록(ours)=새 기반, 보라(theirs)=재배치 중인 내 저장 (E7a)
+   */
+  mode: 'merging' | 'reverting' | 'rebasing'
   /** 파일 전체 한쪽 확정 — ours=내 것 유지, theirs=가져온 것 사용 (빠른 길) */
   onResolve(choice: 'ours' | 'theirs'): void
   /** 확정(git add) — "고른 대로 확정"과 "직접 수정했어요"가 공유한다. 마커가 남아 있으면 확인창을 거친다 */
@@ -47,7 +50,10 @@ export function ConflictPanel({
   onSaveText,
   onReset,
 }: ConflictPanelProps) {
-  const takenLabel = mode === 'reverting' ? '되돌린 결과물' : '가져온 것'
+  const takenLabel =
+    mode === 'reverting' ? '되돌린 결과물' : mode === 'rebasing' ? '재배치 중인 내 저장' : '가져온 것'
+  // rebase에서는 초록(ours)이 "내 것"이 아니라 새 기반이다 — 이름을 정직하게 바꾼다 (E7a)
+  const mineLabel = mode === 'rebasing' ? '새 기반' : '내 것'
   const [confirmingMark, setConfirmingMark] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [view, setView] = useState<'cards' | 'edit'>('cards')
@@ -133,7 +139,7 @@ export function ConflictPanel({
         <>
           <p className="conflict-panel__hint">
             두 버전이 같은 곳을 다르게 고쳤어요. 겹침마다 카드에서 한쪽을 골라 주세요 — 초록이{' '}
-            <strong>내 것</strong>, 보라가 <strong>{takenLabel}</strong>이에요. 고르면 파일에 바로
+            <strong>{mineLabel}</strong>, 보라가 <strong>{takenLabel}</strong>이에요. 고르면 파일에 바로
             반영되지만, "고른 대로 확정"을 누르기 전에는 아무것도 확정되지 않아요. 선택하지 않은
             쪽도 사라지지 않고 저장된 역사에 남아 있어요.
           </p>
@@ -170,7 +176,7 @@ export function ConflictPanel({
               onPress={() => onResolve('ours')}
               testId="conflict-ours"
             >
-              <User size={13} aria-hidden="true" /> 내 것 유지
+              <User size={13} aria-hidden="true" /> {mineLabel} 유지
             </Button>
             <Button
               variant="neutral"
@@ -246,7 +252,7 @@ export function ConflictPanel({
                         <div className="conflict-card__sides">
                           <div className="conflict-card__side conflict-card__side--mine">
                             <span className="conflict-card__side-label">
-                              <User size={12} aria-hidden="true" /> 내 것
+                              <User size={12} aria-hidden="true" /> {mineLabel}
                             </span>
                             <pre className="conflict-card__code">
                               {item.block.ours.join('\n') || '(비어 있음)'}

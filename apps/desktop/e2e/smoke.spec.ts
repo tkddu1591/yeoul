@@ -1368,3 +1368,51 @@ test('실험 공간 탭 — 지금과 비교가 양방향 전용 저장을 보�
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속하기 → 완료 (E7a)', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e2e-'))
+  await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'base\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'topic'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'topic\n')
+  await execGitOrThrow(['commit', '-am', 'topic 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'main\n')
+  await execGitOrThrow(['commit', '-am', 'main 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'topic'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-main').click({ button: 'right' })
+    await window.getByTestId('context-rebase').click()
+    await window.getByRole('button', { name: '재배치 (rebase)' }).click()
+    // 충돌 — 4겸용 상태 바 + 진행 표시(실측 2: msgnum/end)
+    await expect(window.getByTestId('merge-bar')).toContainText('저장 재배치 중 (1개 중 1번째)')
+    // 변경 탭의 ! 파일에서 해결 — rebase 라벨 반전(초록=새 기반, 보라=재배치 중인 내 저장)
+    await window.getByTestId('left-tab-changes').click()
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await expect(window.getByTestId('conflict-panel')).toBeVisible()
+    await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 유지')
+    await window.getByTestId('conflict-theirs').click()
+    await expect(window.getByTestId('merge-bar')).toContainText('겹침 0개 남음')
+    await window.getByTestId('rebase-continue').click()
+    await expect(window.getByTestId('notice')).toContainText('재배치를 마쳤어요')
+    await expect(window.getByTestId('merge-bar')).toHaveCount(0)
+    // 재배치 성립 — topic의 부모가 main이고 내 저장 내용이 남았다
+    const parent = await execGitOrThrow(['rev-parse', 'topic^'], { cwd: repo })
+    const main = await execGitOrThrow(['rev-parse', 'main'], { cwd: repo })
+    expect(parent.stdout.trim()).toBe(main.stdout.trim())
+    expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe('topic\n')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
