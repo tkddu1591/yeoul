@@ -2373,6 +2373,68 @@ describe('GitClient', () => {
     await expect(client.remotes.fetch()).resolves.toBeUndefined()
   })
 
+  /**
+   * 원격과 발산한 클론 (E7e) — 원격에 저장 1개(tracked.txt 또는 충돌용 같은 파일), 로컬에 다른 저장 1개.
+   * conflicting이면 같은 파일을 양쪽이 다르게 저장해 재배치가 충돌한다
+   */
+  async function createDivergedFromRemote(options?: { conflicting?: boolean }): Promise<{
+    repo: string
+    remote: string
+  }> {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    // repo는 아직 origin과 공통 조상도 upstream 추적도 없다 — 먼저 push로 씨앗 커밋을 심어
+    // 양쪽에 공통 역사를 만들고 upstream을 연결한다 (E7e 편차 — Task 1의 push 씨앗과 같은 패턴)
+    await createGitClient(repo).sync.push()
+    // 원격 쪽 저장 — 별도 클론에서 만들어 push (bare에는 직접 커밋할 수 없다)
+    const sibling = await mkdtemp(join(tmpdir(), 'git-gui-fixture-sibling-'))
+    await execGitOrThrow(['clone', remote, sibling], { cwd: repo })
+    await writeFixtureFile(sibling, options?.conflicting === true ? 'clash.txt' : 'remote.txt', 'remote-side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: sibling })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote-side'], { cwd: sibling })
+    await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: sibling })
+    // 로컬 쪽 저장 — 발산
+    await writeFixtureFile(repo, options?.conflicting === true ? 'clash.txt' : 'local.txt', 'local-side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local-side'], { cwd: repo })
+    // dirty 테스트가 덮어쓸 tracked 파일
+    if (options?.conflicting !== true) {
+      await writeFixtureFile(repo, 'tracked.txt', 'clean\n')
+      await execGitOrThrow(['add', '-A'], { cwd: repo })
+      await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'tracked'], { cwd: repo })
+    }
+    return { repo, remote }
+  }
+
+  it('sync.pull rebase 모드 — 발산해도 병합 저장 없이 일직선이 된다 (E7e 실측 3)', async () => {
+    const { repo } = await createDivergedFromRemote()
+    const client = createGitClient(repo)
+    const result = await client.sync.pull('rebase')
+    expect(result).toEqual({ outcome: 'rebased', autoShelved: false })
+    // 병합 커밋(부모 2개)이 없다 — 역사가 일직선
+    const merges = (await execGitOrThrow(['log', '--merges', '--oneline'], { cwd: repo })).stdout
+    expect(merges.trim()).toBe('')
+  })
+
+  it('sync.pull rebase 모드 — 미저장 변경은 자동 보관 후 진행한다 (E7e 실측 3 dirty)', async () => {
+    const { repo } = await createDivergedFromRemote()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'tracked.txt', 'dirty\n')
+    const result = await client.sync.pull('rebase')
+    expect(result.outcome).toBe('rebased')
+    expect(result.autoShelved).toBe(true)
+    const shelf = await client.shelf.list()
+    expect(shelf.length).toBe(1)
+  })
+
+  it('sync.pull rebase 모드 — 충돌이면 rebasing 상태가 되어 기존 흐름을 잇는다 (E7e 실측 3)', async () => {
+    const { repo } = await createDivergedFromRemote({ conflicting: true })
+    const client = createGitClient(repo)
+    const result = await client.sync.pull('rebase')
+    expect(result.outcome).toBe('conflict')
+    expect((await client.repo.status()).state).toBe('rebasing')
+    expect(await client.rebase.progress()).toEqual({ current: 1, total: 1 })
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

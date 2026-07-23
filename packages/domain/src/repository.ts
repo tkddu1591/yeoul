@@ -201,7 +201,8 @@ export interface MergeResult {
 
 /** 받아오기(pull) 결과 — conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다 */
 export interface PullResult {
-  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
+  /** rebased: 재배치로 받기(pull --rebase)가 내 저장을 원격 위로 다시 쌓았다 (E7e) */
+  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date' | 'rebased'
   autoShelved: boolean
 }
 

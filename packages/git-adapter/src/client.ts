@@ -155,10 +155,11 @@ export interface GitClient {
     /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 */
     push(): Promise<void>
     /**
-     * 원격의 최신 저장을 받아온다(fetch+merge). 막히면 자동 보관 후 재시도.
-     * conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름(머지 바·충돌 뷰·저장하기 마무리)을 그대로 쓴다.
+     * 원격의 최신 저장을 받아온다. 막히면 자동 보관 후 재시도.
+     * merge 모드(기본): conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다.
+     * rebase 모드(E7e): 내 저장을 원격 위로 다시 쌓는다 — conflict면 rebasing 상태(E7a 흐름 재사용)
      */
-    pull(): Promise<PullResult>
+    pull(mode?: 'merge' | 'rebase'): Promise<PullResult>
     /** 현재 브랜치 이름과 upstream 유무 — 리뷰 요청(PR) 전 검사용. detached면 branch null */
     branchStatus(): Promise<SyncBranchStatus>
     /** 백업 대상 remote(origin 우선 — push와 동일 규칙)의 URL. remote가 없으면 null */
@@ -1031,18 +1032,33 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], linked)
         }
       },
-      async pull() {
+      async pull(mode = 'merge') {
         const cwd = await topLevel()
         const remotes = await execGitOrThrow(['remote'], { cwd })
         if (remotes.stdout.trim() === '') {
           throw new Error('받아올 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
         }
+        // rebase 모드는 사용자 전역 rebase.autostash가 앱의 보관함 흐름을 가로채지 않게 고정한다 (E7a 관례)
+        const args =
+          mode === 'rebase'
+            ? ['-c', 'rebase.autostash=false', 'pull', '--rebase']
+            : ['pull', '--no-rebase', '--no-edit']
         const classify = (output: string): PullResult['outcome'] => {
           if (output.includes('Already up to date')) return 'up-to-date'
           if (output.includes('Fast-forward')) return 'fast-forward'
-          return 'merged'
+          // 실측 3: 진짜 재배치 성공은 "Successfully rebased and updated"
+          if (output.includes('Successfully rebased')) return 'rebased'
+          return mode === 'rebase' ? 'rebased' : 'merged'
         }
-        const run = () => execGit(['pull', '--no-rebase', '--no-edit'], { cwd })
+        // 실측 3: rebase 충돌은 "Could not apply"가 병기된다 (CONFLICT는 양쪽 공통)
+        const isConflict = (output: string): boolean =>
+          output.includes('CONFLICT') ||
+          output.includes('Automatic merge failed') ||
+          output.includes('Could not apply')
+        // 실측 3: rebase의 미저장 거부 문구는 merge의 would be overwritten과 다르다
+        const isBlockedByLocal = (output: string): boolean =>
+          output.includes('would be overwritten') || output.includes('cannot pull with rebase')
+        const run = () => execGit(args, { cwd })
         const first = await run()
         const firstOut = first.stdout + first.stderr
         if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
@@ -1052,21 +1068,21 @@ export function createGitClient(repoPath: string): GitClient {
         if (firstOut.includes('no tracking information')) {
           throw new Error('이 실험 공간은 아직 원격과 연결되지 않았어요. 먼저 백업(push)으로 연결해 주세요.')
         }
-        if (firstOut.includes('CONFLICT') || firstOut.includes('Automatic merge failed')) {
+        if (isConflict(firstOut)) {
           return { outcome: 'conflict', autoShelved: false }
         }
-        if (!firstOut.includes('would be overwritten')) {
-          throw new GitError(['pull', '--no-rebase', '--no-edit'], first)
+        if (!isBlockedByLocal(firstOut)) {
+          throw new GitError(args, first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (merge·switch와 동일 패턴)
         await execGitOrThrow(['stash', 'push', '-u', '-m', PULL_SHELF_MESSAGE], { cwd })
         const second = await run()
         const secondOut = second.stdout + second.stderr
         if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
-        if (secondOut.includes('CONFLICT') || secondOut.includes('Automatic merge failed')) {
+        if (isConflict(secondOut)) {
           return { outcome: 'conflict', autoShelved: true }
         }
-        throw new GitError(['pull', '--no-rebase', '--no-edit'], second)
+        throw new GitError(args, second)
       },
       async branchStatus() {
         const cwd = await topLevel()
