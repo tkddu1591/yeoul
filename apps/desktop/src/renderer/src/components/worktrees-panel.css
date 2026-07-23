@@ -43,6 +43,11 @@
   align-items: center;
   gap: 6px;
 }
+/* 칩("지금 여기"·"터미널 대상")이 좁은 행에서 두 줄로 꺾이지 않게 (스크린샷 검수) */
+.worktree-row__top .ui-badge {
+  flex: none;
+  white-space: nowrap;
+}
 .worktree-row__name {
   overflow: hidden;
   text-overflow: ellipsis;

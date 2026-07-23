@@ -1,5 +1,5 @@
-/* E7c 설정 모달 — 카테고리 사이드바 구조. 기본 ui-modal보다 넓게 */
-.settings-dialog__modal {
+/* E7c 설정 모달 — 카테고리 사이드바 구조. 폭은 내부 .ui-dialog(기본 340px)에 걸어야 적용된다 */
+.settings-dialog__modal .ui-dialog {
   width: 560px;
   max-width: 90vw;
 }
