@@ -36,6 +36,14 @@ describe('sanitizeSettings', () => {
     })
     expect(sanitizeSettings({ worktreeSelectAction: 'always-ask' })).toEqual({})
   })
+
+  it('받아오기 방식(pullMode)·자동 새로고침(autoFetch)을 검증해 통과시킨다 (E7e)', () => {
+    expect(sanitizeSettings({ pullMode: 'rebase', autoFetch: false })).toEqual({
+      pullMode: 'rebase',
+      autoFetch: false,
+    })
+    expect(sanitizeSettings({ pullMode: 'squash', autoFetch: 'no' })).toEqual({})
+  })
 })
 
 describe('sanitizePersistedSettings', () => {

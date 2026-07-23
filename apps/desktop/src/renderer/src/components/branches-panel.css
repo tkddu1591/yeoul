@@ -4,6 +4,16 @@
   min-height: 0;
   height: 100%;
 }
+/* E7e 원격 새로고침 줄 — 버튼 + 마지막 시각(흐리게) */
+.branches-panel__fetch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.branches-panel__fetch-at {
+  font-size: 10px;
+  color: var(--color-text-faint);
+}
 .branches-panel__search {
   width: 100%;
   box-sizing: border-box;

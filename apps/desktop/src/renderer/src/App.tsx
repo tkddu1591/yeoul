@@ -39,6 +39,7 @@ import {
   saveWorktreeSelectAction,
   type WorktreeSelectAction,
 } from './ui/settings/worktree-select-action'
+import { loadAutoFetch, saveAutoFetch } from './ui/settings/sync-settings'
 import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
 import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
@@ -240,6 +241,23 @@ export function App() {
     prevConflictsRef.current = conflictCount
   }, [conflictCount])
 
+  // E7e ① 자동 원격 새로고침 — 시작 직후 1회 + 10분 주기. fetch만 던지고 갱신은 감시가 담당.
+  // 훅 순서 불변 — 이른 반환보다 앞 (E7d ① 교훈)
+  const [autoFetch, setAutoFetch] = useState<boolean>(() => loadAutoFetch())
+  const changeAutoFetch = (enabled: boolean) => {
+    saveAutoFetch(enabled)
+    setAutoFetch(enabled)
+  }
+  const repoPathForFetch = store.repoPath
+  useEffect(() => {
+    if (!autoFetch || repoPathForFetch === null) return
+    void store.autoFetchRemotes()
+    const timer = window.setInterval(() => void store.autoFetchRemotes(), 600_000)
+    return () => window.clearInterval(timer)
+    // store 액션은 zustand에서 안정 참조 — repoPath·autoFetch 전이에만 재구독
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFetch, repoPathForFetch])
+
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
   }
@@ -375,6 +393,10 @@ export function App() {
         onChangeTheme={changeTheme}
         worktreeSelectAction={worktreeSelectAction}
         onChangeWorktreeSelectAction={changeWorktreeSelectAction}
+        pullMode={store.pullMode}
+        onChangePullMode={(mode) => store.setPullMode(mode)}
+        autoFetch={autoFetch}
+        onChangeAutoFetch={changeAutoFetch}
         onClose={() => setSettingsOpen(false)}
       />
       <AddWorktreeDialog
@@ -552,6 +574,8 @@ export function App() {
             </>
           ) : leftTab === 'branches' ? (
             <BranchesPanel
+              lastFetchAt={store.lastFetchAt}
+              onFetchRemotes={() => void store.fetchRemotes()}
               overview={store.branchOverview}
               compare={store.branchCompare}
               currentBranch={status?.branch.name ?? null}
