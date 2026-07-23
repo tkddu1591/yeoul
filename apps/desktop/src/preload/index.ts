@@ -120,7 +120,10 @@ const api: GitApi = {
   },
   sync: {
     push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),
-    pull: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPull, repoPath),
+    pull: (repoPath, mode) => ipcRenderer.invoke(CHANNELS.syncPull, repoPath, mode),
+  },
+  remotes: {
+    fetch: (repoPath) => ipcRenderer.invoke(CHANNELS.remotesFetch, repoPath),
   },
 }
 
