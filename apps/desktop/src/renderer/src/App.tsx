@@ -1,5 +1,5 @@
-import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Settings, Sun, Terminal } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { CloudUpload, DownloadCloud, GitMerge, RefreshCw, Settings, Terminal } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
@@ -71,8 +71,8 @@ export function App() {
 
   // 첫 렌더에서 문서에 테마를 새긴다 — 저장값 우선, 없으면 시스템 설정 (⑥)
   const [theme, setTheme] = useState<Theme>(() => initTheme())
-  const toggleTheme = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+  // 전환 UI는 설정 모달 [테마] 카테고리로 이관 (E7d ⑦ — 헤더 단순화)
+  const changeTheme = (next: Theme) => {
     applyTheme(next)
     setTheme(next)
   }
@@ -227,13 +227,23 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  const status = store.status
+  const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
+  const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
+  // E7d ① 충돌이 "생기는 순간" 1회만 변경 탭으로 — 유발 경로(merge·pull·rebase·cherry-pick·
+  // revert·stash) 무관하게 충돌 개수 0→1+ 전이가 신호. 이후 사용자의 탭 이동은 다시 막지 않는다.
+  // 훅 순서 불변 규칙 때문에 아래 "repoPath 없으면 이른 반환"보다 앞에 둔다(반환 이후에 두면
+  // repoPath가 null→값으로 바뀌는 순간 훅 개수가 렌더마다 달라져 앱 전체가 깨진다 — 실행 중 실측)
+  const prevConflictsRef = useRef(0)
+  useEffect(() => {
+    if (conflictCount > 0 && prevConflictsRef.current === 0) setLeftTab('changes')
+    prevConflictsRef.current = conflictCount
+  }, [conflictCount])
+
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
   }
 
-  const status = store.status
-  const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
-  const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
   // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
   const suggestion =
     status?.state === 'merging' && stagedCount === 0
@@ -333,14 +343,6 @@ export function App() {
             onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
           />
-          <Button variant="ghost" size="sm" onPress={toggleTheme} testId="theme-toggle">
-            {theme === 'dark' ? (
-              <Sun size={13} aria-hidden="true" />
-            ) : (
-              <Moon size={13} aria-hidden="true" />
-            )}
-            {theme === 'dark' ? '밝게' : '어둡게'}
-          </Button>
           <Button
             variant="neutral"
             size="sm"
@@ -369,6 +371,8 @@ export function App() {
       </header>
       <SettingsDialog
         isOpen={settingsOpen}
+        theme={theme}
+        onChangeTheme={changeTheme}
         worktreeSelectAction={worktreeSelectAction}
         onChangeWorktreeSelectAction={changeWorktreeSelectAction}
         onClose={() => setSettingsOpen(false)}
@@ -385,9 +389,9 @@ export function App() {
           )
         }
         errorText={addWorktreeOpen ? store.error : null}
-        onSubmit={(path, branch) => {
+        onSubmit={(path, branch, createBranch) => {
           void (async () => {
-            if (await store.addWorktree(path, branch)) setAddWorktreeOpen(false)
+            if (await store.addWorktree(path, branch, createBranch)) setAddWorktreeOpen(false)
           })()
         }}
         onCancel={() => setAddWorktreeOpen(false)}

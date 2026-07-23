@@ -3,6 +3,7 @@ import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
 import type { LocalBranchStatus } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import '../ui/confirm-dialog.css'
+import '../ui/settings/settings-dialog.css'
 import './worktrees-panel.css'
 import { suggestWorktreePath } from './worktree-path'
 
@@ -14,11 +15,17 @@ interface AddWorktreeDialogProps {
   /** 이미 어떤 워크트리가 체크아웃한 브랜치 이름들 (git 제약: 같은 브랜치 중복 불가) */
   checkedOut: Set<string>
   errorText: string | null
-  onSubmit(path: string, branch: string): void
+  /** createBranch면 branch는 새로 만들 이름(-b) — 지금 위치(HEAD) 기준 (E7d ④) */
+  onSubmit(path: string, branch: string, createBranch: boolean): void
   onCancel(): void
 }
 
-/** 새 워크트리 만들기 (E7c) — 체크아웃 안 된 브랜치 선택 + 경로(자동 제안·수정 가능) */
+type AddMode = 'existing' | 'new'
+
+/**
+ * 새 워크트리 만들기 (E7c) — 체크아웃 안 된 브랜치 선택 + 경로(자동 제안·수정 가능).
+ * E7d ④: "새로 만들면서 펼치기" 모드 — 이름 입력 → 브랜치+워크트리 동시 생성(-b)
+ */
 export function AddWorktreeDialog({
   isOpen,
   mainPath,
@@ -29,23 +36,35 @@ export function AddWorktreeDialog({
   onCancel,
 }: AddWorktreeDialogProps) {
   const available = branches.filter((branch) => !checkedOut.has(branch.name))
+  const [mode, setMode] = useState<AddMode>('existing')
   const [branch, setBranch] = useState('')
+  const [newName, setNewName] = useState('')
   const [path, setPath] = useState('')
   const [pathEdited, setPathEdited] = useState(false)
   useEffect(() => {
     if (!isOpen) return
     const first = available[0]?.name ?? ''
+    setMode('existing')
     setBranch(first)
+    setNewName('')
     setPath(first === '' ? '' : suggestWorktreePath(mainPath, first))
     setPathEdited(false)
     // 열림 전이에만 초기화 — available은 렌더마다 새 배열
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
+  const suggestFor = (name: string) => {
+    if (!pathEdited) setPath(name === '' ? '' : suggestWorktreePath(mainPath, name))
+  }
   const chooseBranch = (name: string) => {
     setBranch(name)
-    if (!pathEdited) setPath(suggestWorktreePath(mainPath, name))
+    suggestFor(name)
   }
+  const chooseMode = (next: AddMode) => {
+    setMode(next)
+    suggestFor(next === 'existing' ? branch : newName)
+  }
+  const effectiveBranch = mode === 'existing' ? branch : newName.trim()
 
   return (
     <ModalOverlay
@@ -62,15 +81,36 @@ export function AddWorktreeDialog({
             새 워크트리 만들기
           </Heading>
           <p className="ui-dialog__body">
-            체크아웃되지 않은 실험 공간을 새 폴더에 함께 펼쳐요. 같은 실험 공간은 한 폴더에서만 열 수
-            있어요.
+            실험 공간을 새 폴더에 함께 펼쳐요. 같은 실험 공간은 한 폴더에서만 열 수 있어요.
           </p>
-          {available.length === 0 ? (
-            <p className="worktrees-panel__empty">
-              펼칠 수 있는 실험 공간이 없어요. 실험 공간 탭에서 먼저 만들어 주세요.
-            </p>
-          ) : (
-            <>
+          <fieldset className="settings-dialog__field add-worktree__mode">
+            <label className="settings-dialog__radio">
+              <input
+                type="radio"
+                name="add-worktree-mode"
+                checked={mode === 'existing'}
+                onChange={() => chooseMode('existing')}
+                data-testid="add-worktree-mode-existing"
+              />
+              기존 실험 공간 펼치기
+            </label>
+            <label className="settings-dialog__radio">
+              <input
+                type="radio"
+                name="add-worktree-mode"
+                checked={mode === 'new'}
+                onChange={() => chooseMode('new')}
+                data-testid="add-worktree-mode-new"
+              />
+              새로 만들면서 펼치기 — 지금 위치에서 갈라져요
+            </label>
+          </fieldset>
+          {mode === 'existing' ? (
+            available.length === 0 ? (
+              <p className="worktrees-panel__empty">
+                펼칠 수 있는 실험 공간이 없어요. "새로 만들면서 펼치기"를 써 보세요.
+              </p>
+            ) : (
               <label className="add-worktree__label">
                 실험 공간
                 <select
@@ -86,24 +126,38 @@ export function AddWorktreeDialog({
                   ))}
                 </select>
               </label>
-              <label className="add-worktree__label">
-                폴더 경로
-                <input
-                  className="add-worktree__input"
-                  value={path}
-                  onChange={(event) => {
-                    setPath(event.target.value)
-                    setPathEdited(true)
-                  }}
-                  data-testid="add-worktree-path"
-                />
-              </label>
-              {errorText !== null && (
-                <p className="add-worktree__error" role="alert" data-testid="add-worktree-error">
-                  {errorText}
-                </p>
-              )}
-            </>
+            )
+          ) : (
+            <label className="add-worktree__label">
+              새 실험 공간 이름
+              <input
+                className="add-worktree__input"
+                value={newName}
+                onChange={(event) => {
+                  setNewName(event.target.value)
+                  suggestFor(event.target.value.trim())
+                }}
+                placeholder="예: feature/login"
+                data-testid="add-worktree-new-name"
+              />
+            </label>
+          )}
+          <label className="add-worktree__label">
+            폴더 경로
+            <input
+              className="add-worktree__input"
+              value={path}
+              onChange={(event) => {
+                setPath(event.target.value)
+                setPathEdited(true)
+              }}
+              data-testid="add-worktree-path"
+            />
+          </label>
+          {errorText !== null && (
+            <p className="add-worktree__error" role="alert" data-testid="add-worktree-error">
+              {errorText}
+            </p>
           )}
           <div className="ui-dialog__actions">
             <Button variant="ghost" size="sm" onPress={onCancel} testId="add-worktree-cancel">
@@ -112,8 +166,8 @@ export function AddWorktreeDialog({
             <Button
               variant="primary"
               size="sm"
-              isDisabled={branch === '' || path === ''}
-              onPress={() => onSubmit(path, branch)}
+              isDisabled={effectiveBranch === '' || path === ''}
+              onPress={() => onSubmit(path, effectiveBranch, mode === 'new')}
               testId="add-worktree-submit"
             >
               만들기
