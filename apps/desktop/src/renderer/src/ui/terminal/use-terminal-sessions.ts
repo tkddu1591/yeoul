@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { silentExitNotice } from './silent-exit'
 
 export interface TerminalTab {
   sessionId: string
@@ -41,11 +42,14 @@ export function useTerminalSessions(repoPath: string | null) {
   const viewsRef = useRef(new Map<string, SessionView>())
   /** create 응답이 돌아오기 전 도착한 청크(로그인 쉘 프롬프트가 invoke 왕복을 이길 수 있다 — Task 3 리뷰) */
   const pendingRef = useRef(new Map<string, string[]>())
+  /** 출력을 한 번이라도 보낸 세션 — 무출력 exit(깨진 쉘) 판정용 (E7d ②) */
+  const receivedRef = useRef(new Set<string>())
   const counterRef = useRef(0)
 
   // push 구독은 훅 수명 1회 — sessionId로 해당 xterm에 라우팅한다
   useEffect(() => {
     const offData = window.terminalApi.onData((sessionId, chunk) => {
+      receivedRef.current.add(sessionId)
       const view = viewsRef.current.get(sessionId)
       if (view === undefined) {
         const pending = pendingRef.current.get(sessionId) ?? []
@@ -56,6 +60,9 @@ export function useTerminalSessions(repoPath: string | null) {
       view.terminal.write(chunk)
     })
     const offExit = window.terminalApi.onExit((sessionId) => {
+      // 출력 없이 죽은 세션 = 깨진 쉘 — "(종료)" 탭만으론 원인을 알 수 없다 (E7d ②)
+      const notice = silentExitNotice(receivedRef.current.has(sessionId))
+      if (notice !== null) setError(notice)
       setTabs((prev) =>
         prev.map((tab) => (tab.sessionId === sessionId ? { ...tab, exited: true } : tab)),
       )
