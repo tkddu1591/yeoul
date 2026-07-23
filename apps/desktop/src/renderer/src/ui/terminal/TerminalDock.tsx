@@ -2,10 +2,13 @@ import { Plus, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { Button } from '../Button'
 import { useTerminalSessions } from './use-terminal-sessions'
+import type { Theme } from '../theme'
 import './terminal-dock.css'
 
 interface TerminalDockProps {
   repoPath: string | null
+  /** 앱 테마 — xterm 팔레트가 따라간다 (E7d ③) */
+  theme: Theme
   /** 활성 워크트리(터미널 대상) — 새 세션이 이 폴더에서 열리고 탭 라벨에 이름이 병기된다 (E7c) */
   activeWorktree: { cwd: string; label: string } | null
   /** 도크가 보이는가 — 접힘은 숨김일 뿐 언마운트가 아니다(세션 유지 — 스펙) */
@@ -19,13 +22,14 @@ interface TerminalDockProps {
 /** 하단 터미널 도크 (E7b) — 렌더 전용. 세션 로직은 useTerminalSessions가 소유한다 */
 export function TerminalDock({
   repoPath,
+  theme,
   activeWorktree,
   open,
   height,
   onResizeStart,
   onClose,
 }: TerminalDockProps) {
-  const sessions = useTerminalSessions(repoPath)
+  const sessions = useTerminalSessions(repoPath, theme)
 
   // 처음 "열릴 때" 세션을 만든다 — 앱 시작만으로 쉘을 스폰하지 않는다. 열릴 때마다 크기를 다시 맞춘다
   useEffect(() => {

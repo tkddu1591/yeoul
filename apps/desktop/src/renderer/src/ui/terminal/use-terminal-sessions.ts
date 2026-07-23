@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { silentExitNotice } from './silent-exit'
+import { terminalPalette } from './terminal-theme'
+import type { Theme } from '../theme'
 
 export interface TerminalTab {
   sessionId: string
@@ -16,15 +18,7 @@ interface SessionView {
   fit: FitAddon
 }
 
-/**
- * xterm 고정 팔레트 — 쉘 출력 영역이라 앱 테마와 독립(후속: 테마 연동 검토).
- * 기본 DOM 렌더러를 쓴다 — 텍스트가 DOM에 남아 E2E가 출력을 읽을 수 있다
- */
-const TERMINAL_THEME = {
-  background: '#1a1b23',
-  foreground: '#e2e2ea',
-  cursor: '#9f8fff',
-}
+// 팔레트는 terminal-theme.ts (E7d ③ 테마 연동). 기본 DOM 렌더러 유지 — E2E가 출력을 읽는다
 
 /** IPC 래핑 접두 제거 — store toErrorMessage와 같은 규칙(모듈 비공개라 지역 복제) */
 function stripIpcPrefix(message: string): string {
@@ -35,7 +29,7 @@ function stripIpcPrefix(message: string): string {
  * 터미널 세션 로직 (E7b) — 세션 생성·xterm 인스턴스 수명·push 라우팅을 소유한다.
  * TerminalDock(프레젠테이션)은 이 훅의 값·콜백만 렌더한다 (레이어 분리)
  */
-export function useTerminalSessions(repoPath: string | null) {
+export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -76,6 +70,13 @@ export function useTerminalSessions(repoPath: string | null) {
     }
   }, [])
 
+  // 테마 전환 시 열린 세션 전부 즉시 교체 — options.theme는 "객체 재할당"이어야 반영된다 (실측 3)
+  useEffect(() => {
+    for (const view of viewsRef.current.values()) {
+      view.terminal.options.theme = { ...terminalPalette(theme) }
+    }
+  }, [theme])
+
   const refit = (sessionId: string) => {
     const view = viewsRef.current.get(sessionId)
     if (view === undefined || view.terminal.element === undefined) return
@@ -89,7 +90,7 @@ export function useTerminalSessions(repoPath: string | null) {
     try {
       const { sessionId } = await window.terminalApi.create(repoPath, options?.cwd)
       counterRef.current += 1
-      const terminal = new Terminal({ fontSize: 12, theme: TERMINAL_THEME, scrollback: 1000 })
+      const terminal = new Terminal({ fontSize: 12, theme: terminalPalette(theme), scrollback: 1000 })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
       terminal.onData((data) => void window.terminalApi.input(sessionId, data))

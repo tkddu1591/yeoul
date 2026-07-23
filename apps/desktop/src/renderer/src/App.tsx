@@ -781,6 +781,7 @@ export function App() {
           <div className="app__dock" style={{ display: dockOpen ? 'block' : 'none' }}>
             <TerminalDock
               repoPath={store.repoPath}
+              theme={theme}
               activeWorktree={activeWorktree}
               open={dockOpen}
               height={dockHeight}
