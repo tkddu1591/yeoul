@@ -84,3 +84,9 @@
 .terminal-dock__view .xterm {
   height: 100%;
 }
+/* xterm.css 기본 뷰포트 배경(#000 — macOS 스크롤바 불투명용)이 스크롤 여백에서 검은 띠로
+   노출된다(라이트에서 발견, 다크에선 팔레트와 겹쳐 잠복 — E7d ③ 스크린샷 검수). 투명화해
+   팔레트(.xterm-scrollable-element)·서피스가 그대로 비치게 한다 */
+.terminal-dock__view .xterm .xterm-viewport {
+  background-color: transparent;
+}
