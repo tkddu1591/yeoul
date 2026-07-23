@@ -1,5 +1,6 @@
 import {
   detectState,
+  type BackupResult,
   type BranchCompare,
   type BranchOverview,
   type BranchSummary,
@@ -50,8 +51,8 @@ export interface GitClient {
      * fetch refspec은 ff-only가 기본(실측 3) — 갈라졌으면 이동해서 pull 하도록 친절 거부한다
      */
     update(name: string): Promise<void>
-    /** 선택 공간을 checkout 없이 백업(push). upstream 없으면 -u로 연결하며 올린다 (origin 우선 관례) */
-    backup(name: string): Promise<void>
+    /** 선택 공간을 checkout 없이 백업(push). upstream 없으면 -u로 연결하며 올린다 (origin 우선 관례) — 첫 연결이면 linked (E7e) */
+    backup(name: string): Promise<BackupResult>
     /** 원격 공간을 추적 로컬 브랜치로 가져와 이동한다. 동명 로컬이 있으면 거부, 겹치면 자동 보관 (switch 관례) */
     checkoutRemote(name: string): Promise<SwitchResult>
     /** 원격에서 이 공간을 지운다(push --delete) — 확인창은 UI 책임. 다른 사람에게도 영향이 있다 */
@@ -152,8 +153,8 @@ export interface GitClient {
     list(limit: number): Promise<CommitSummary[]>
   }
   sync: {
-    /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 */
-    push(): Promise<void>
+    /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 — linked로 알린다 (E7e) */
+    push(): Promise<BackupResult>
     /**
      * 원격의 최신 저장을 받아온다. 막히면 자동 보관 후 재시도.
      * merge 모드(기본): conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다.
@@ -404,7 +405,7 @@ export function createGitClient(repoPath: string): GitClient {
             rejectIfRemoteAhead(linked)
             throw new GitError(args, linked)
           }
-          return
+          return { linked: true }
         }
         const remoteName = remoteConfig.stdout.trim()
         const dstBranch = mergeRef.stdout.trim().replace(/^refs\/heads\//, '')
@@ -414,6 +415,7 @@ export function createGitClient(repoPath: string): GitClient {
           rejectIfRemoteAhead(result)
           throw new GitError(args, result)
         }
+        return { linked: false }
       },
       async checkoutRemote(name) {
         const cwd = await topLevel()
@@ -1011,7 +1013,7 @@ export function createGitClient(repoPath: string): GitClient {
             rejectIfRemoteAhead(plain)
             throw new GitError(['-c', 'push.default=simple', 'push'], plain)
           }
-          return
+          return { linked: false }
         }
         // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
         const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
@@ -1031,6 +1033,7 @@ export function createGitClient(repoPath: string): GitClient {
           rejectIfRemoteAhead(linked)
           throw new GitError(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], linked)
         }
+        return { linked: true }
       },
       async pull(mode = 'merge') {
         const cwd = await topLevel()

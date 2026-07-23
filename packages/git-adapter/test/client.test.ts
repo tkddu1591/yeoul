@@ -2435,6 +2435,26 @@ describe('GitClient', () => {
     expect(await client.rebase.progress()).toEqual({ current: 1, total: 1 })
   })
 
+  it('sync.push — 첫 백업은 linked, 두 번째는 아니다 (E7e 실측 7)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['checkout', '-b', 'fresh-branch'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', 'x'], { cwd: repo })
+    expect(await client.sync.push()).toEqual({ linked: true })
+    expect(
+      (await execGitOrThrow(['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: repo })).stdout.trim(),
+    ).toBe('origin/fresh-branch')
+    expect(await client.sync.push()).toEqual({ linked: false })
+  })
+
+  it('branches.backup — 첫 연결은 linked, 기존 연결은 아니다 (E7e 실측 7)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('side-branch', null)
+    expect(await client.branches.backup('side-branch')).toEqual({ linked: true })
+    expect(await client.branches.backup('side-branch')).toEqual({ linked: false })
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
