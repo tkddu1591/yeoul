@@ -1,0 +1,83 @@
+.worktrees-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.worktrees-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.worktrees-panel__empty {
+  padding: var(--space-4);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}
+.worktree-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.worktree-row:hover {
+  background: var(--color-surface);
+}
+.worktree-row--gone {
+  opacity: 0.55;
+}
+.worktree-row--add {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+.worktree-row__top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.worktree-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree-row__branch {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-faint);
+}
+.worktree-row__path {
+  font-size: 10px;
+  color: var(--color-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.add-worktree__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: var(--text-sm);
+}
+.add-worktree__select,
+.add-worktree__input {
+  padding: 5px 8px;
+  font-size: var(--text-sm);
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+}
+.add-worktree__error {
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+  color: #ff9191;
+}

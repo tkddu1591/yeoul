@@ -2,6 +2,7 @@ import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Settings, Sun, T
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
+import { AddWorktreeDialog } from './components/AddWorktreeDialog'
 import { BranchesPanel } from './components/BranchesPanel'
 import { BranchSwitcher } from './components/BranchSwitcher'
 import { ConflictPanel } from './components/ConflictPanel'
@@ -15,6 +16,7 @@ import { RepoPicker } from './components/RepoPicker'
 import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
+import { WorktreesPanel } from './components/WorktreesPanel'
 import {
   clampRightWidth,
   computeColumns,
@@ -84,7 +86,14 @@ export function App() {
   const [confirmingAbort, setConfirmingAbort] = useState(false)
 
   // E7a 좌측 탭 — [변경 | 실험 공간]. 기본은 변경(커밋 흐름 무변). 탭 상태는 렌더 로컬(store 오염 없음)
-  const [leftTab, setLeftTab] = useState<'changes' | 'branches'>('changes')
+  const [leftTab, setLeftTab] = useState<'changes' | 'branches' | 'worktrees'>('changes')
+  // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함)
+  const [activeWorktree, setActiveWorktree] = useState<{ cwd: string; label: string } | null>(null)
+  const [addWorktreeOpen, setAddWorktreeOpen] = useState(false)
+  const [confirmingRemoveWorktree, setConfirmingRemoveWorktree] = useState<{
+    path: string
+    force: boolean
+  } | null>(null)
   // E7a 실험 공간 우클릭 다이얼로그 — 재배치 확인·이름 바꾸기·지우기(needsForce 2단)·원격 지우기
   const [confirmingRebase, setConfirmingRebase] = useState<{ name: string } | null>(null)
   const [renamePrompt, setRenamePrompt] = useState<{ name: string } | null>(null)
@@ -364,6 +373,50 @@ export function App() {
         onChangeWorktreeSelectAction={changeWorktreeSelectAction}
         onClose={() => setSettingsOpen(false)}
       />
+      <AddWorktreeDialog
+        isOpen={addWorktreeOpen}
+        mainPath={store.worktrees.find((worktree) => worktree.isMain)?.path ?? store.repoPath ?? ''}
+        branches={store.branchOverview?.locals ?? []}
+        checkedOut={
+          new Set(
+            store.worktrees
+              .map((worktree) => worktree.branch)
+              .filter((branch): branch is string => branch !== null),
+          )
+        }
+        errorText={addWorktreeOpen ? store.error : null}
+        onSubmit={(path, branch) => {
+          void (async () => {
+            if (await store.addWorktree(path, branch)) setAddWorktreeOpen(false)
+          })()
+        }}
+        onCancel={() => setAddWorktreeOpen(false)}
+      />
+      <ConfirmDialog
+        isOpen={confirmingRemoveWorktree !== null}
+        title={
+          confirmingRemoveWorktree?.force === true
+            ? '미저장 변경이 있어요 — 그래도 지울까요?'
+            : '워크트리를 지울까요?'
+        }
+        confirmLabel={confirmingRemoveWorktree?.force === true ? '그래도 지우기' : '지우기'}
+        onConfirm={() => {
+          const target = confirmingRemoveWorktree
+          setConfirmingRemoveWorktree(null)
+          if (target === null) return
+          void (async () => {
+            // 미저장 변경이 있으면 엔진이 needsForce로 알린다 — 2단 확인 (removeBranch 관례)
+            if (await store.removeWorktree(target.path, target.force)) {
+              if (!target.force) setConfirmingRemoveWorktree({ path: target.path, force: true })
+            }
+          })()
+        }}
+        onCancel={() => setConfirmingRemoveWorktree(null)}
+      >
+        {confirmingRemoveWorktree?.force === true
+          ? '그 폴더의 미저장 변경이 함께 사라져요. 되돌릴 수 없어요.'
+          : '워크트리 폴더가 디스크에서 지워져요. 저장된 역사와 실험 공간은 그대로예요.'}
+      </ConfirmDialog>
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
         status?.state === 'cherry-picking' ||
@@ -460,6 +513,16 @@ export function App() {
             >
               실험 공간
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={leftTab === 'worktrees'}
+              className="app__left-tab"
+              onClick={() => setLeftTab('worktrees')}
+              data-testid="left-tab-worktrees"
+            >
+              워크트리
+            </button>
           </div>
           {leftTab === 'changes' ? (
             <>
@@ -483,7 +546,7 @@ export function App() {
                 onCommit={(message) => store.commit(message)}
               />
             </>
-          ) : (
+          ) : leftTab === 'branches' ? (
             <BranchesPanel
               overview={store.branchOverview}
               compare={store.branchCompare}
@@ -534,7 +597,50 @@ export function App() {
                 }
               }}
             />
-          )}
+          ) : leftTab === 'worktrees' ? (
+            <WorktreesPanel
+              worktrees={store.worktrees}
+              currentPath={store.repoPath}
+              activePath={activeWorktree?.cwd ?? null}
+              busy={store.busy}
+              onAction={(action) => {
+                switch (action.kind) {
+                  case 'select':
+                    // 클릭의 기본 동작은 설정을 따른다 (우클릭엔 두 동작이 따로 있다 — 스펙)
+                    setActiveWorktree({ cwd: action.path, label: action.label })
+                    if (worktreeSelectAction === 'switch-app') void store.openWorktree(action.path)
+                    else {
+                      setDockOpen(() => {
+                        saveDockOpen(true)
+                        return true
+                      })
+                    }
+                    break
+                  case 'terminal':
+                    // 우클릭 "여기서 터미널 열기" — 설정 무관 항상 터미널
+                    setActiveWorktree({ cwd: action.path, label: action.label })
+                    setDockOpen(() => {
+                      saveDockOpen(true)
+                      return true
+                    })
+                    break
+                  case 'open':
+                    void store.openWorktree(action.path)
+                    break
+                  case 'reveal':
+                    void store.revealWorktree(action.path)
+                    break
+                  case 'remove':
+                    setConfirmingRemoveWorktree({ path: action.path, force: false })
+                    break
+                  case 'add':
+                    store.clearError()
+                    setAddWorktreeOpen(true)
+                    break
+                }
+              }}
+            />
+          ) : null}
         </div>
         <div className="app__center">
           {store.conflictFile !== null ? (
@@ -675,7 +781,7 @@ export function App() {
           <div className="app__dock" style={{ display: dockOpen ? 'block' : 'none' }}>
             <TerminalDock
               repoPath={store.repoPath}
-              activeWorktree={null}
+              activeWorktree={activeWorktree}
               open={dockOpen}
               height={dockHeight}
               onResizeStart={startDockResize}
