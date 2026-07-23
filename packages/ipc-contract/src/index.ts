@@ -295,6 +295,8 @@ export interface AppSettings {
   terminalOpen?: boolean
   /** 터미널 도크 높이(px) (E7b) */
   terminalHeight?: number
+  /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
+  worktreeSelectAction?: 'terminal' | 'switch-app'
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -309,6 +311,9 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof candidate.terminalOpen === 'boolean') settings.terminalOpen = candidate.terminalOpen
   if (typeof candidate.terminalHeight === 'number' && Number.isFinite(candidate.terminalHeight)) {
     settings.terminalHeight = candidate.terminalHeight
+  }
+  if (candidate.worktreeSelectAction === 'terminal' || candidate.worktreeSelectAction === 'switch-app') {
+    settings.worktreeSelectAction = candidate.worktreeSelectAction
   }
   return settings
 }

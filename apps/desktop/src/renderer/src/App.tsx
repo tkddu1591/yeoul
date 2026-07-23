@@ -1,4 +1,4 @@
-import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Sun, Terminal } from 'lucide-react'
+import { CloudUpload, DownloadCloud, GitMerge, Moon, RefreshCw, Settings, Sun, Terminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
@@ -31,6 +31,12 @@ import {
   saveDockOpen,
 } from './ui/terminal/dock-height'
 import { TerminalDock } from './ui/terminal/TerminalDock'
+import { SettingsDialog } from './ui/settings/SettingsDialog'
+import {
+  loadWorktreeSelectAction,
+  saveWorktreeSelectAction,
+  type WorktreeSelectAction,
+} from './ui/settings/worktree-select-action'
 import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
 import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
@@ -88,6 +94,16 @@ export function App() {
   const [confirmingRemoveRemote, setConfirmingRemoveRemote] = useState<{ name: string } | null>(
     null,
   )
+
+  // E7c 설정 모달 + 워크트리 선택 동작(클릭의 기본 동작만 결정 — 우클릭엔 항상 둘 다)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [worktreeSelectAction, setWorktreeSelectAction] = useState<WorktreeSelectAction>(() =>
+    loadWorktreeSelectAction(),
+  )
+  const changeWorktreeSelectAction = (action: WorktreeSelectAction) => {
+    setWorktreeSelectAction(action)
+    saveWorktreeSelectAction(action)
+  }
 
   // E7b 터미널 도크 — 중앙+우측 하단. 열림·높이는 설정 영속(rightWidth 관례).
   // 접힘은 숨김일 뿐 언마운트가 아니다 — 언마운트하면 xterm 인스턴스가 죽어 세션 유지가 깨진다 (스펙)
@@ -337,8 +353,17 @@ export function App() {
           <Button variant="ghost" size="sm" onPress={toggleDock} testId="terminal-toggle">
             <Terminal size={13} aria-hidden="true" /> 터미널
           </Button>
+          <Button variant="ghost" size="sm" onPress={() => setSettingsOpen(true)} testId="settings-open">
+            <Settings size={13} aria-hidden="true" />
+          </Button>
         </div>
       </header>
+      <SettingsDialog
+        isOpen={settingsOpen}
+        worktreeSelectAction={worktreeSelectAction}
+        onChangeWorktreeSelectAction={changeWorktreeSelectAction}
+        onClose={() => setSettingsOpen(false)}
+      />
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
         status?.state === 'cherry-picking' ||
