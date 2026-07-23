@@ -46,6 +46,13 @@ describe('isRelevantGitEvent', () => {
     expect(isRelevantGitEvent('worktrees/wt-feat/gitdir')).toBe(false)
     expect(isRelevantGitEvent('worktrees/wt-feat')).toBe(false)
   })
+
+  it('FETCH_HEAD는 무시한다 — 무변화 fetch의 헛갱신 차단, 변화는 refs/remotes/가 잡는다 (E7e 실측 1)', () => {
+    expect(isRelevantGitEvent('FETCH_HEAD')).toBe(false)
+    expect(isRelevantGitEvent('refs/remotes/origin/main')).toBe(true)
+    // 다른 대문자 상태 마커는 그대로 수용
+    expect(isRelevantGitEvent('MERGE_HEAD')).toBe(true)
+  })
 })
 
 describe('createTrailingDebounce', () => {
