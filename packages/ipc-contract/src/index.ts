@@ -53,8 +53,8 @@ export interface GitApi {
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
     list(repoPath: string): Promise<WorktreeInfo[]>
-    /** 새 워크트리 — path에 branch 체크아웃 */
-    add(repoPath: string, path: string, branch: string): Promise<void>
+    /** 새 워크트리 — path에 branch 체크아웃. createBranch면 HEAD에서 새 브랜치를 만들며(-b) (E7d) */
+    add(repoPath: string, path: string, branch: string, createBranch: boolean): Promise<void>
     /** 지우기 — 미저장 변경이면 needsForce (branches.remove 관례) */
     remove(repoPath: string, path: string, force: boolean): Promise<RemoveBranchResult>
     /** Finder에서 보기 — 경로는 워크트리 목록 검증 경유 (E7c) */

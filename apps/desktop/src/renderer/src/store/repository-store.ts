@@ -121,8 +121,8 @@ interface RepositoryStore {
   continueRebase(): Promise<void>
   /** 재배치 취소 — 확인창(UI 책임) 경유 (E7a) */
   abortRebase(): Promise<void>
-  /** 새 워크트리 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) (E7c) */
-  addWorktree(path: string, branch: string): Promise<boolean>
+  /** 새 워크트리 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존). createBranch면 -b (E7c·E7d) */
+  addWorktree(path: string, branch: string, createBranch?: boolean): Promise<boolean>
   /** 워크트리 지우기 — 반환 true면 미저장 변경이 있어 강제 확인 필요 (removeBranch 관례) (E7c) */
   removeWorktree(path: string, force: boolean): Promise<boolean>
   /** 워크트리를 앱에서 연다(전체 전환) — 경로 검증·allowlist 등록은 main (E7c) */
@@ -938,11 +938,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
-  async addWorktree(path, branch) {
+  async addWorktree(path, branch, createBranch) {
     const { repoPath } = get()
     if (!repoPath) return false
     return guard(set, get, async () => {
-      await git().worktrees.add(repoPath, path, branch)
+      await git().worktrees.add(repoPath, path, branch, createBranch === true)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: `"${branch}" 워크트리를 만들었어요.`,
@@ -989,9 +989,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async revealWorktree(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    // 읽기 전용·즉발 — busy 직렬화(guard) 없이 언제나 동작한다. 실패만 배너로 (E7d ⑥)
+    try {
       await git().worktrees.reveal(repoPath, path)
-    })
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+    }
   },
 
   async selectConflict(path) {
