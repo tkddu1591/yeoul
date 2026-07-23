@@ -141,11 +141,17 @@ export function registerGitHandlers(): void {
   let stopWatching: (() => void) | null = null
   // destroyed 정리는 sender당 1회만 등록한다 — watch 재호출마다 쌓이면 MaxListeners 경고 (통합 리뷰, terminal-handlers 관례)
   const watchCleanupHooked = new WeakSet<Electron.WebContents>()
-  ipcMain.handle(CHANNELS.repoWatch, (event, repoPath: unknown) => {
+  ipcMain.handle(CHANNELS.repoWatch, async (event, repoPath: unknown) => {
     const path = assertAllowedRepo(repoPath)
+    // 링크드 워크트리의 .git은 파일이라 그대로 감시하면 죽는다(실측 H1) — 공용 git dir을 해석해 감시한다
+    const gitDir = (
+      await execGitOrThrow(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+        cwd: path,
+      })
+    ).stdout.trim()
     stopWatching?.()
     const sender = event.sender
-    stopWatching = watchRepository(path, () => {
+    stopWatching = watchRepository(gitDir, () => {
       if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
     })
     if (!watchCleanupHooked.has(sender)) {

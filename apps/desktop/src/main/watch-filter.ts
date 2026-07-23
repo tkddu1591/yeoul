@@ -6,17 +6,20 @@
  * - 수용: HEAD·index·packed-refs·refs/**·대문자 상태 마커(MERGE_HEAD 등)·rebase 디렉터리
  */
 export function isRelevantGitEvent(relativePath: string): boolean {
-  if (relativePath.endsWith('.lock')) return false
-  if (relativePath.startsWith('objects/') || relativePath.startsWith('logs/')) return false
-  if (relativePath === 'HEAD' || relativePath === 'index' || relativePath === 'packed-refs') {
+  // 링크드 워크트리의 per-worktree 파일은 common dir 아래 worktrees/<이름>/에 있다 (E7c 실측 H2)
+  // — 접두를 벗기고 같은 규칙을 적용한다. 접두만 있는 경로(등록 디렉터리 자체)는 빈 문자열이 되어 거부된다
+  const normalized = relativePath.replace(/^worktrees\/[^/]+\//, '')
+  if (normalized.endsWith('.lock')) return false
+  if (normalized.startsWith('objects/') || normalized.startsWith('logs/')) return false
+  if (normalized === 'HEAD' || normalized === 'index' || normalized === 'packed-refs') {
     return true
   }
-  if (relativePath.startsWith('refs/')) return true
-  if (relativePath.startsWith('rebase-merge/') || relativePath.startsWith('rebase-apply/')) {
+  if (normalized.startsWith('refs/')) return true
+  if (normalized.startsWith('rebase-merge/') || normalized.startsWith('rebase-apply/')) {
     return true
   }
   // MERGE_HEAD·CHERRY_PICK_HEAD·REVERT_HEAD·FETCH_HEAD·ORIG_HEAD 등 top-level 상태 마커
-  return /^[A-Z_]+$/.test(relativePath)
+  return /^[A-Z_]+$/.test(normalized)
 }
 
 export interface TrailingDebounce {

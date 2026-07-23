@@ -30,6 +30,22 @@ describe('isRelevantGitEvent', () => {
     // 소문자 임의 파일은 아니다
     expect(isRelevantGitEvent('config')).toBe(false)
   })
+
+  it('링크드 워크트리 경로(worktrees/<이름>/)는 접두를 벗겨 같은 규칙을 적용한다 (E7c 실측 H2)', () => {
+    expect(isRelevantGitEvent('worktrees/wt-feat/HEAD')).toBe(true)
+    expect(isRelevantGitEvent('worktrees/wt-feat/index')).toBe(true)
+    expect(isRelevantGitEvent('worktrees/wt-feat/rebase-merge/msgnum')).toBe(true)
+  })
+
+  it('worktrees/ 아래 lock·logs도 걸러진다', () => {
+    expect(isRelevantGitEvent('worktrees/wt-feat/index.lock')).toBe(false)
+    expect(isRelevantGitEvent('worktrees/wt-feat/logs/HEAD')).toBe(false)
+  })
+
+  it('워크트리 등록 메타 파일(worktrees/<이름>/gitdir 등 소문자)은 무시한다', () => {
+    expect(isRelevantGitEvent('worktrees/wt-feat/gitdir')).toBe(false)
+    expect(isRelevantGitEvent('worktrees/wt-feat')).toBe(false)
+  })
 })
 
 describe('createTrailingDebounce', () => {
