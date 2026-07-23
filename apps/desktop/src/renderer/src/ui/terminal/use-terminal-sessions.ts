@@ -44,6 +44,8 @@ export function useTerminalSessions(repoPath: string | null) {
   const pendingRef = useRef(new Map<string, string[]>())
   /** 출력을 한 번이라도 보낸 세션 — 무출력 exit(깨진 쉘) 판정용 (E7d ②) */
   const receivedRef = useRef(new Set<string>())
+  /** 사용자가 닫아서(kill) 죽는 세션 — 프롬프트 도착 전 닫기가 깨진 쉘 오경보가 되는 것 방지 (E7d ② 보완) */
+  const closingRef = useRef(new Set<string>())
   const counterRef = useRef(0)
 
   // push 구독은 훅 수명 1회 — sessionId로 해당 xterm에 라우팅한다
@@ -60,8 +62,9 @@ export function useTerminalSessions(repoPath: string | null) {
       view.terminal.write(chunk)
     })
     const offExit = window.terminalApi.onExit((sessionId) => {
-      // 출력 없이 죽은 세션 = 깨진 쉘 — "(종료)" 탭만으론 원인을 알 수 없다 (E7d ②)
-      const notice = silentExitNotice(receivedRef.current.has(sessionId))
+      // 출력 없이 죽은 세션 = 깨진 쉘 — 단, 사용자가 닫은 세션은 제외 (E7d ② 보완: 빠른 닫기 오탐)
+      const userClosed = closingRef.current.delete(sessionId)
+      const notice = userClosed ? null : silentExitNotice(receivedRef.current.has(sessionId))
       if (notice !== null) setError(notice)
       setTabs((prev) =>
         prev.map((tab) => (tab.sessionId === sessionId ? { ...tab, exited: true } : tab)),
@@ -113,6 +116,7 @@ export function useTerminalSessions(repoPath: string | null) {
   }
 
   const close = (sessionId: string) => {
+    closingRef.current.add(sessionId)
     void window.terminalApi.kill(sessionId)
     const view = viewsRef.current.get(sessionId)
     viewsRef.current.delete(sessionId)
