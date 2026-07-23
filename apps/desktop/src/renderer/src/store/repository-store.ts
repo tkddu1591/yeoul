@@ -15,6 +15,7 @@ import type {
 } from '@git-gui/domain'
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
+import { findRevivableChange } from './selection-revive'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
@@ -237,6 +238,76 @@ async function fetchSnapshot(
   return { status, history, branches, shelf, branchOverview, rebaseProgress, worktrees }
 }
 
+/**
+ * 갱신 후 선택 재조회 (E7d ⑤) — 새로고침의 의미는 '최신화'지 '닫기'가 아니다.
+ * 재조회 가능한 선택은 새 데이터로 다시 채우고, 대상이 사라진 것만 조용히 닫는다(오류 아님 —
+ * 외부 변경으로 대상이 사라진 것은 정상). CLEAR_SELECTIONS 위에 덮어쓸 부분 상태를 돌려준다.
+ * 항목별 try/catch — 한 항목의 소멸이 다른 항목의 유지를 막지 않는다.
+ * "지금 코드와 비교" diff(diffLabel)는 재조회 키(path·origPath)가 상태에 없어 v1은 닫는다(실측 4)
+ */
+async function reviveSelections(
+  repoPath: string,
+  prev: RepositoryStore,
+  nextStatus: RepositoryStatus | null,
+): Promise<Partial<RepositoryStore>> {
+  if (nextStatus === null) return {}
+  const revived: Partial<RepositoryStore> = {}
+  // 1) 파일 diff — 같은 경로·같은 쪽 변경이 남아 있을 때만 (selectFile과 같은 조회 규칙)
+  if (prev.selected !== null) {
+    try {
+      const match = findRevivableChange(
+        nextStatus.changes,
+        prev.selected.change.path,
+        prev.selected.staged,
+      )
+      if (match !== null) {
+        const selected = { change: match, staged: prev.selected.staged }
+        revived.diff = await git().changes.diff(repoPath, match.path, {
+          staged: selected.staged,
+          untracked: match.unstaged === 'untracked',
+          origPath: selected.staged ? match.origPath : null,
+        })
+        revived.selected = selected
+        revived.diffLabel = null
+      }
+    } catch {
+      // 재조회 실패 = 닫힌 채 둔다
+    }
+  }
+  // 2) 커밋 상세 — 해시로 재조회(사라졌으면 throw → 닫힘). 파일 diff는 상세에 아직 있을 때만
+  if (prev.commitDetail !== null) {
+    try {
+      const commitDetail = await git().commits.show(repoPath, prev.commitDetail.hash)
+      revived.commitDetail = commitDetail
+      if (prev.commitFile !== null) {
+        const file = commitDetail.files.find((entry) => entry.path === prev.commitFile?.path)
+        if (file !== undefined) {
+          revived.diff = await git().commits.diffFile(
+            repoPath,
+            commitDetail.hash,
+            file.path,
+            file.origPath,
+          )
+          revived.commitFile = file
+          revived.diffLabel = null
+        }
+      }
+    } catch {
+      // 커밋 소멸(강제 재작성 등) — 상세를 닫힌 채 둔다
+    }
+  }
+  // 3) 비교 뷰 — 이름으로 재실행(브랜치가 사라졌으면 throw → 닫힘)
+  if (prev.branchCompare !== null) {
+    try {
+      const result = await git().branches.compare(repoPath, prev.branchCompare.name)
+      revived.branchCompare = { name: prev.branchCompare.name, result }
+    } catch {
+      // 브랜치 소멸 — 비교 뷰를 닫힌 채 둔다
+    }
+  }
+  return revived
+}
+
 /** 선택 상태 일괄 해제 — 저장소 내용이 바뀌는 모든 지점에서 보던 diff·상세를 무효화한다 */
 const CLEAR_SELECTIONS = {
   selected: null,
@@ -341,11 +412,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 보고 있던 diff·상세도 함께 무효화한다
+      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
+      // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
       set({
         ...CLEAR_SELECTIONS,
+        conflictFile: get().conflictFile,
+        ...(await reviveSelections(repoPath, get(), snapshot.status)),
         hostingStatus: await hosting().status(repoPath),
-        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        ...snapshot,
       })
     })
   },
@@ -356,14 +431,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 자기 작업 꼬리 이벤트 억제 — 작업 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다
     if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
     await guard(set, get, async () => {
-      // 수동 새로고침과 같은 의미론(선택 무효화) — 단, 열려 있는 충돌 뷰는 지우지 않는다:
-      // 편집 초안(draft)이 컴포넌트 로컬이라 언마운트되면 소리 없이 사라진다 (품질 리뷰 —
-      // 카드 뷰의 낡음은 패널 자체의 onReload 최신 검사가 흡수한다)
-      const { conflictFile } = get()
+      // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
+      // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰)
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
       set({
         ...CLEAR_SELECTIONS,
-        conflictFile,
-        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        conflictFile: get().conflictFile,
+        ...(await reviveSelections(repoPath, get(), snapshot.status)),
+        ...snapshot,
       })
     })
   },
