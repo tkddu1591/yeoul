@@ -2336,6 +2336,43 @@ describe('GitClient', () => {
     ).rejects.toThrow(/실험 공간 이름으로 쓸 수 없어요/)
   })
 
+  /** 원격에 to-vanish 브랜치가 있고 이 클론이 그것을 아는 상태 — prune 재현용 (E7e) */
+  async function execFixtureWithRemoteBranch(): Promise<{ repo: string; remote: string }> {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await createGitClient(repo).sync.push()
+    await execGitOrThrow(['--git-dir', remote, 'branch', 'to-vanish', 'HEAD'], { cwd: repo })
+    await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
+    return { repo, remote }
+  }
+
+  it('remotes.fetch — 원격의 새 브랜치가 refs/remotes에 나타난다 (E7e)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await client.sync.push()
+    // 원격(bare)에 직접 브랜치를 만든다 — 이 클론은 fetch 전까지 모른다
+    await execGitOrThrow(['--git-dir', remote, 'branch', 'fresh-on-remote', 'HEAD'], { cwd: repo })
+    await client.remotes.fetch()
+    const remoteRefs = (await execGitOrThrow(['branch', '-r'], { cwd: repo })).stdout
+    expect(remoteRefs).toContain('origin/fresh-on-remote')
+  })
+
+  it('remotes.fetch — 사라진 원격 브랜치 등록을 prune으로 정리한다 (E7e)', async () => {
+    const { repo, remote } = await execFixtureWithRemoteBranch()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['--git-dir', remote, 'branch', '-D', 'to-vanish'], { cwd: repo })
+    await client.remotes.fetch()
+    const remoteRefs = (await execGitOrThrow(['branch', '-r'], { cwd: repo })).stdout
+    expect(remoteRefs).not.toContain('origin/to-vanish')
+  })
+
+  it('remotes.fetch — 원격이 없으면 조용히 성공한다 (E7e 실측 2)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.remotes.fetch()).resolves.toBeUndefined()
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

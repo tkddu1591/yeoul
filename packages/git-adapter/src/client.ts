@@ -164,6 +164,13 @@ export interface GitClient {
     /** 백업 대상 remote(origin 우선 — push와 동일 규칙)의 URL. remote가 없으면 null */
     remoteUrl(): Promise<string | null>
   }
+  remotes: {
+    /**
+     * 원격 최신을 조용히 가져온다 — fetch --all --prune(사라진 원격 등록 정리 포함).
+     * 원격 0개면 no-op 성공(실측 2). 화면 갱신은 감시(refs/remotes 변화)가 담당한다 (E7e)
+     */
+    fetch(): Promise<void>
+  }
   commits: {
     create(message: string): Promise<void>
     /** 커밋 상세 — 전체 메시지·변경 파일. 병합 커밋은 첫 부모 기준 */
@@ -1090,6 +1097,12 @@ export function createGitClient(repoPath: string): GitClient {
         const target = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
         const url = await execGit(['remote', 'get-url', target], { cwd })
         return url.exitCode === 0 ? url.stdout.trim() : null
+      },
+    },
+    remotes: {
+      async fetch() {
+        const cwd = await topLevel()
+        await execGitOrThrow(['fetch', '--all', '--prune'], { cwd })
       },
     },
     commits: {
