@@ -1,20 +1,22 @@
 import { watch, type FSWatcher } from 'node:fs'
-import { join } from 'node:path'
 import { createTrailingDebounce, isRelevantGitEvent } from './watch-filter'
 
 /** 이벤트 폭주 묶음 창 (실측 1: 커밋 1회 = 18이벤트) */
 const DEBOUNCE_MS = 300
 
 /**
- * 저장소 하나의 .git을 감시한다 (E7b) — 관련 이벤트가 잦아들면 onChanged를 1회 부른다.
+ * 해석된 git dir(공용)을 감시한다 (E7b·E7c) — 관련 이벤트가 잦아들면 onChanged를 1회 부른다.
+ * 호출자(repoWatch 핸들러)가 --git-common-dir로 해석해 넘긴다: 링크드 워크트리의 .git은
+ * 파일(gitdir 포인터)이라 그대로 감시하면 이벤트가 오지 않는다(E7c 실측 H1). 공용 dir을
+ * 감시하면 본체·모든 워크트리의 변경(worktrees/<이름>/*)이 다 잡힌다(실측 H2).
  * 반환값은 정리 함수. 감시 실패는 기능 저하로만(수동 새로고침은 그대로 동작) — 던지지 않는다
  */
-export function watchRepository(repoPath: string, onChanged: () => void): () => void {
+export function watchRepository(gitDir: string, onChanged: () => void): () => void {
   const debounce = createTrailingDebounce(DEBOUNCE_MS, onChanged)
   let watcher: FSWatcher | null = null
   try {
     // {recursive: true}는 macOS/Windows 전용 — Linux에선 생성이 throw해 fail-soft(수동 새로고침만)가 된다
-    watcher = watch(join(repoPath, '.git'), { recursive: true }, (_type, file) => {
+    watcher = watch(gitDir, { recursive: true }, (_type, file) => {
       if (file !== null && isRelevantGitEvent(file.toString())) debounce.hit()
     })
     // fs.watch는 생성 후에도 비동기 'error'를 낼 수 있다(.git 소멸·이름 변경 등) —

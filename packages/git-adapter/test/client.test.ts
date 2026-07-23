@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, symlink, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -2228,6 +2228,85 @@ describe('GitClient', () => {
     expect((await client.repo.status()).state).toBe('normal')
     expect((await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()).toBe(before)
     expect(await client.rebase.progress()).toBeNull()
+  })
+
+  /** 워크트리 폴더를 통째로 지운다 — prunable 재현용 (E7c) */
+  async function rmDir(path: string): Promise<void> {
+    await rm(path, { recursive: true, force: true })
+  }
+
+  it('worktrees.list — 본체·링크드·detached·prunable을 담는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('feat', null)
+    await execGitOrThrow(['worktree', 'add', `${repo}-feat`, 'feat'], { cwd: repo })
+    await execGitOrThrow(['worktree', 'add', '--detach', `${repo}-detached`], { cwd: repo })
+    await client.branches.create('gone-branch', null)
+    await execGitOrThrow(['worktree', 'add', `${repo}-gone`, 'gone-branch'], { cwd: repo })
+    await rmDir(`${repo}-gone`)
+    const list = await client.worktrees.list()
+    // macOS: os.tmpdir()는 /var/... 미해석 경로지만 git은 워크트리를 실경로(/private/var/...)로
+    // 정규화해 담는다(실측) — rev-parse로 실경로를 구해 비교한다 (구현 편차: 테스트 한정)
+    const resolvedRepo = (
+      await execGitOrThrow(['rev-parse', '--show-toplevel'], { cwd: repo })
+    ).stdout.trim()
+    expect(list[0]).toMatchObject({ path: resolvedRepo, isMain: true, branch: 'main' })
+    expect(list.find((worktree) => worktree.path === `${resolvedRepo}-feat`)).toMatchObject({
+      isMain: false,
+      branch: 'feat',
+      prunable: false,
+    })
+    expect(list.find((worktree) => worktree.path === `${resolvedRepo}-detached`)).toMatchObject({
+      branch: null,
+    })
+    expect(list.find((worktree) => worktree.path === `${resolvedRepo}-gone`)).toMatchObject({
+      prunable: true,
+    })
+  })
+
+  it('worktrees.add — 만들고, 사용 중 브랜치·기존 경로는 읽히는 메시지로 거부한다 (실측 C·D)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('feat', null)
+    await client.worktrees.add(`${repo}-feat`, 'feat')
+    const current = (
+      await execGitOrThrow(['branch', '--show-current'], { cwd: `${repo}-feat` })
+    ).stdout.trim()
+    expect(current).toBe('feat')
+    await expect(client.worktrees.add(`${repo}-dup`, 'feat')).rejects.toThrow(
+      /이미 다른 워크트리가 쓰고 있어요/,
+    )
+    await expect(client.worktrees.add(`${repo}-feat`, 'main')).rejects.toThrow(/이미 폴더가 있어요/)
+  })
+
+  it('worktrees.remove — 미저장 변경은 needsForce, force로 지운다 (실측 E)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('feat', null)
+    await client.worktrees.add(`${repo}-feat`, 'feat')
+    await writeFixtureFile(`${repo}-feat`, 'dirty.txt', 'd\n')
+    expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
+      removed: false,
+      needsForce: true,
+    })
+    expect(await client.worktrees.remove(`${repo}-feat`, true)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+    expect((await client.worktrees.list()).length).toBe(1)
+  })
+
+  it('worktrees.remove — 사라진 폴더(prunable)도 그대로 정리한다 (실측 F)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('feat', null)
+    await client.worktrees.add(`${repo}-feat`, 'feat')
+    await rmDir(`${repo}-feat`)
+    expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
+      removed: true,
+      needsForce: false,
+    })
+    expect((await client.worktrees.list()).length).toBe(1)
   })
 
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {

@@ -20,6 +20,7 @@ import {
   type ShelfEntry,
   type SwitchResult,
   type SyncBranchStatus,
+  type WorktreeInfo,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
 import { lstat, readFile, rm, writeFile } from 'node:fs/promises'
@@ -30,6 +31,7 @@ import { parsePatch } from './diff-parser'
 import { readGitDirMarkers } from './markers'
 import { parseOverview } from './overview-parser'
 import { parseBranches, parseShelf } from './refs-parser'
+import { parseWorktrees } from './worktree-parser'
 import { parseStatusV2 } from './status-parser'
 
 export type { DiffOptions } from '@git-gui/domain'
@@ -89,6 +91,14 @@ export interface GitClient {
     abort(): Promise<void>
     /** 진행 위치(.git/rebase-merge/msgnum·end — 실측 2). rebasing이 아니면 null */
     progress(): Promise<RebaseProgress | null>
+  }
+  worktrees: {
+    /** 워크트리 목록 — 첫 항목이 본체. prunable(사라진 폴더)·locked·detached 포함 (E7c) */
+    list(): Promise<WorktreeInfo[]>
+    /** 새 워크트리 — path에 branch를 체크아웃해 만든다. 사용 중 브랜치·기존 경로는 친절 거부 */
+    add(path: string, branch: string): Promise<void>
+    /** 지우기 — 미저장 변경이 있으면 needsForce로 알린다(확인창은 UI). prunable도 그대로 정리된다(실측 F) */
+    remove(path: string, force: boolean): Promise<RemoveBranchResult>
   }
   merge: {
     /** 합치기 취소 — 충돌 상태를 버리고 합치기 전으로 되돌린다 */
@@ -656,6 +666,42 @@ export function createGitClient(repoPath: string): GitClient {
         } catch {
           return null
         }
+      },
+    },
+    worktrees: {
+      async list() {
+        const cwd = await topLevel()
+        const raw = await execGitOrThrow(['worktree', 'list', '--porcelain', '-z'], { cwd })
+        return parseWorktrees(raw.stdout)
+      },
+      async add(path, branch) {
+        const cwd = await topLevel()
+        const args = ['worktree', 'add', '--end-of-options', path, branch]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode !== 0) {
+          // 실측 C: 같은 브랜치는 두 워크트리가 체크아웃할 수 없다 (UI 비활성의 심층 방어)
+          if (result.stderr.includes('already used by worktree')) {
+            throw new Error(`"${branch}"는 이미 다른 워크트리가 쓰고 있어요. 다른 실험 공간을 골라 주세요.`)
+          }
+          // 실측 D: 비어있지 않은 기존 경로
+          if (result.stderr.includes('already exists')) {
+            throw new Error('그 위치에 이미 폴더가 있어요. 다른 경로를 입력해 주세요.')
+          }
+          throw new GitError(args, result)
+        }
+      },
+      async remove(path, force) {
+        const cwd = await topLevel()
+        const args = force
+          ? ['worktree', 'remove', '--force', '--end-of-options', path]
+          : ['worktree', 'remove', '--end-of-options', path]
+        const result = await execGit(args, { cwd })
+        if (result.exitCode === 0) return { removed: true, needsForce: false }
+        // 실측 E: 미저장 변경 거부 — 강제 확인은 UI 책임 (branches.remove 관례)
+        if (result.stderr.includes('contains modified or untracked files')) {
+          return { removed: false, needsForce: true }
+        }
+        throw new GitError(args, result)
       },
     },
     merge: {

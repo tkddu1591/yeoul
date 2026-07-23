@@ -156,6 +156,20 @@ export interface RebaseProgress {
   total: number
 }
 
+/** 워크트리 하나 — `git worktree list --porcelain` 항목 (E7c) */
+export interface WorktreeInfo {
+  /** 절대 경로 */
+  path: string
+  /** 첫 항목 = 본체(저장소 자체) */
+  isMain: boolean
+  /** 체크아웃 브랜치(refs/heads/ 제거). detached면 null */
+  branch: string | null
+  headHash: string | null
+  /** 폴더가 사라진 등록 — remove로 그대로 정리된다 (실측 F) */
+  prunable: boolean
+  locked: boolean
+}
+
 /** 보관함(stash) 항목 하나 */
 export interface ShelfEntry {
   /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */

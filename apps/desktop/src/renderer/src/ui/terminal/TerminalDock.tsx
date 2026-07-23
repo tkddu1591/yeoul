@@ -6,6 +6,8 @@ import './terminal-dock.css'
 
 interface TerminalDockProps {
   repoPath: string | null
+  /** 활성 워크트리(터미널 대상) — 새 세션이 이 폴더에서 열리고 탭 라벨에 이름이 병기된다 (E7c) */
+  activeWorktree: { cwd: string; label: string } | null
   /** 도크가 보이는가 — 접힘은 숨김일 뿐 언마운트가 아니다(세션 유지 — 스펙) */
   open: boolean
   height: number
@@ -15,13 +17,20 @@ interface TerminalDockProps {
 }
 
 /** 하단 터미널 도크 (E7b) — 렌더 전용. 세션 로직은 useTerminalSessions가 소유한다 */
-export function TerminalDock({ repoPath, open, height, onResizeStart, onClose }: TerminalDockProps) {
+export function TerminalDock({
+  repoPath,
+  activeWorktree,
+  open,
+  height,
+  onResizeStart,
+  onClose,
+}: TerminalDockProps) {
   const sessions = useTerminalSessions(repoPath)
 
   // 처음 "열릴 때" 세션을 만든다 — 앱 시작만으로 쉘을 스폰하지 않는다. 열릴 때마다 크기를 다시 맞춘다
   useEffect(() => {
     if (!open) return
-    if (sessions.tabs.length === 0) void sessions.create()
+    if (sessions.tabs.length === 0) void sessions.create(activeWorktree ?? undefined)
     else sessions.refitActive()
     // open 전이에만 반응한다 — sessions는 렌더마다 새 참조
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,7 +79,12 @@ export function TerminalDock({ repoPath, open, height, onResizeStart, onClose }:
               </button>
             </span>
           ))}
-          <Button variant="ghost" size="sm" onPress={() => void sessions.create()} testId="terminal-new-tab">
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={() => void sessions.create(activeWorktree ?? undefined)}
+            testId="terminal-new-tab"
+          >
             <Plus size={13} aria-hidden="true" />
           </Button>
         </div>

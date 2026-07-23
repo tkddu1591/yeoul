@@ -30,6 +30,16 @@ const api: GitApi = {
       ipcRenderer.on(CHANNELS.repoChanged, wrapped)
       return () => ipcRenderer.removeListener(CHANNELS.repoChanged, wrapped)
     },
+    openPath: (repoPath, worktreePath) =>
+      ipcRenderer.invoke(CHANNELS.repoOpenPath, repoPath, worktreePath),
+  },
+  worktrees: {
+    list: (repoPath) => ipcRenderer.invoke(CHANNELS.worktreesList, repoPath),
+    add: (repoPath, path, branch) =>
+      ipcRenderer.invoke(CHANNELS.worktreesAdd, repoPath, path, branch),
+    remove: (repoPath, path, force) =>
+      ipcRenderer.invoke(CHANNELS.worktreesRemove, repoPath, path, force),
+    reveal: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreesReveal, repoPath, path),
   },
   branches: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesList, repoPath),
@@ -149,7 +159,7 @@ const settingsApi: SettingsApi = {
 contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)
 
 const terminalApi: TerminalApi = {
-  create: (repoPath) => ipcRenderer.invoke(TERMINAL_CHANNELS.create, repoPath),
+  create: (repoPath, cwd) => ipcRenderer.invoke(TERMINAL_CHANNELS.create, repoPath, cwd),
   input: (sessionId, data) => ipcRenderer.invoke(TERMINAL_CHANNELS.input, sessionId, data),
   resize: (sessionId, cols, rows) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.resize, sessionId, cols, rows),

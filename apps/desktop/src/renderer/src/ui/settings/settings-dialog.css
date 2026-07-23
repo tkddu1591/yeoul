@@ -1,0 +1,62 @@
+/* E7c 설정 모달 — 카테고리 사이드바 구조. 폭은 내부 .ui-dialog(기본 340px)에 걸어야 적용된다 */
+.settings-dialog__modal .ui-dialog {
+  width: 560px;
+  max-width: 90vw;
+}
+.settings-dialog__body {
+  display: flex;
+  gap: var(--space-4);
+  min-height: 200px;
+}
+.settings-dialog__cats {
+  width: 130px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--color-border-strong);
+  padding-right: var(--space-4);
+}
+.settings-dialog__cat {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: var(--text-sm);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-dialog__cat--on {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+  font-weight: 600;
+}
+.settings-dialog__content {
+  flex: 1;
+  min-width: 0;
+}
+.settings-dialog__field {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+.settings-dialog__label {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  margin-bottom: 6px;
+}
+.settings-dialog__radio {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.settings-dialog__desc {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}

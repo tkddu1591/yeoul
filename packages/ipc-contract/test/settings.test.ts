@@ -26,6 +26,16 @@ describe('sanitizeSettings', () => {
     })
     expect(sanitizeSettings({ terminalOpen: 'yes', terminalHeight: NaN })).toEqual({})
   })
+
+  it('워크트리 선택 동작(worktreeSelectAction)은 두 값만 통과시킨다 (E7c)', () => {
+    expect(sanitizeSettings({ worktreeSelectAction: 'terminal' })).toEqual({
+      worktreeSelectAction: 'terminal',
+    })
+    expect(sanitizeSettings({ worktreeSelectAction: 'switch-app' })).toEqual({
+      worktreeSelectAction: 'switch-app',
+    })
+    expect(sanitizeSettings({ worktreeSelectAction: 'always-ask' })).toEqual({})
+  })
 })
 
 describe('sanitizePersistedSettings', () => {

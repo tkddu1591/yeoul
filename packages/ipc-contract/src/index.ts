@@ -18,6 +18,7 @@ import type {
   RevertResult,
   ShelfEntry,
   SwitchResult,
+  WorktreeInfo,
 } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
@@ -43,6 +44,21 @@ export interface GitApi {
     watch(repoPath: string): Promise<void>
     /** repo:changed 구독 — 해제 함수를 반환한다. 이 앱 최초의 push 채널 (E7b) */
     onChanged(listener: (repoPath: string) => void): () => void
+    /**
+     * 워크트리를 앱에서 연다(전체 전환) — worktreePath가 이 저장소의 워크트리인지 main이
+     * 검증한 뒤 allowlist에 등록하고 정규화 경로를 돌려준다 (E7c 보안 가드: select 없는 경로 열기)
+     */
+    openPath(repoPath: string, worktreePath: string): Promise<string>
+  }
+  worktrees: {
+    /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
+    list(repoPath: string): Promise<WorktreeInfo[]>
+    /** 새 워크트리 — path에 branch 체크아웃 */
+    add(repoPath: string, path: string, branch: string): Promise<void>
+    /** 지우기 — 미저장 변경이면 needsForce (branches.remove 관례) */
+    remove(repoPath: string, path: string, force: boolean): Promise<RemoveBranchResult>
+    /** Finder에서 보기 — 경로는 워크트리 목록 검증 경유 (E7c) */
+    reveal(repoPath: string, path: string): Promise<void>
   }
   branches: {
     list(repoPath: string): Promise<BranchSummary[]>
@@ -149,6 +165,11 @@ export const CHANNELS = {
   repoWatch: 'repo:watch',
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
+  repoOpenPath: 'repo:open-path',
+  worktreesList: 'worktrees:list',
+  worktreesAdd: 'worktrees:add',
+  worktreesRemove: 'worktrees:remove',
+  worktreesReveal: 'worktrees:reveal',
   branchesList: 'branches:list',
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',
@@ -274,6 +295,8 @@ export interface AppSettings {
   terminalOpen?: boolean
   /** 터미널 도크 높이(px) (E7b) */
   terminalHeight?: number
+  /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
+  worktreeSelectAction?: 'terminal' | 'switch-app'
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -288,6 +311,9 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof candidate.terminalOpen === 'boolean') settings.terminalOpen = candidate.terminalOpen
   if (typeof candidate.terminalHeight === 'number' && Number.isFinite(candidate.terminalHeight)) {
     settings.terminalHeight = candidate.terminalHeight
+  }
+  if (candidate.worktreeSelectAction === 'terminal' || candidate.worktreeSelectAction === 'switch-app') {
+    settings.worktreeSelectAction = candidate.worktreeSelectAction
   }
   return settings
 }
@@ -333,8 +359,8 @@ export const SETTINGS_CHANNELS = {
 
 /** 터미널 표면 (E7b) — pty는 main 전용. renderer는 세션 id와 바이트 스트림만 다룬다 */
 export interface TerminalApi {
-  /** 세션 생성 — cwd는 allowlist된 저장소 루트로 고정된다 (E7c에서 워크트리 인자 확장) */
-  create(repoPath: string): Promise<{ sessionId: string }>
+  /** 세션 생성 — cwd 생략 시 저장소 루트. cwd는 그 저장소의 워크트리 경로만 허용(main 검증 — E7c) */
+  create(repoPath: string, cwd?: string): Promise<{ sessionId: string }>
   input(sessionId: string, data: string): Promise<void>
   resize(sessionId: string, cols: number, rows: number): Promise<void>
   kill(sessionId: string): Promise<void>

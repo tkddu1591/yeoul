@@ -1,4 +1,4 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
@@ -18,6 +18,19 @@ export function assertAllowedRepo(repoPath: unknown): string {
 export function assertString(value: unknown): string {
   if (typeof value !== 'string') throw new Error('잘못된 요청 형식이에요.')
   return value
+}
+
+/**
+ * 경로가 이 저장소의 워크트리인지 검증한다 (E7c 보안 가드) — renderer가 임의 경로를
+ * 열거나(openPath) 쉘을 스폰하거나(terminal cwd) 노출(reveal)시키지 못하게 목록과 대조한다
+ */
+export async function assertWorktreePath(repoPath: string, candidate: unknown): Promise<string> {
+  const path = assertString(candidate)
+  const list = await createGitClient(repoPath).worktrees.list()
+  if (!list.some((worktree) => worktree.path === path)) {
+    throw new Error('이 저장소의 워크트리가 아니에요. 새로고침해 주세요.')
+  }
+  return path
 }
 
 function assertStringArray(value: unknown): string[] {
@@ -128,11 +141,17 @@ export function registerGitHandlers(): void {
   let stopWatching: (() => void) | null = null
   // destroyed 정리는 sender당 1회만 등록한다 — watch 재호출마다 쌓이면 MaxListeners 경고 (통합 리뷰, terminal-handlers 관례)
   const watchCleanupHooked = new WeakSet<Electron.WebContents>()
-  ipcMain.handle(CHANNELS.repoWatch, (event, repoPath: unknown) => {
+  ipcMain.handle(CHANNELS.repoWatch, async (event, repoPath: unknown) => {
     const path = assertAllowedRepo(repoPath)
+    // 링크드 워크트리의 .git은 파일이라 그대로 감시하면 죽는다(실측 H1) — 공용 git dir을 해석해 감시한다
+    const gitDir = (
+      await execGitOrThrow(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+        cwd: path,
+      })
+    ).stdout.trim()
     stopWatching?.()
     const sender = event.sender
-    stopWatching = watchRepository(path, () => {
+    stopWatching = watchRepository(gitDir, () => {
       if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
     })
     if (!watchCleanupHooked.has(sender)) {
@@ -142,6 +161,40 @@ export function registerGitHandlers(): void {
         stopWatching = null
       })
     }
+  })
+
+  ipcMain.handle(CHANNELS.repoOpenPath, async (_event, repoPath: unknown, worktreePath: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    const target = await assertWorktreePath(root, worktreePath)
+    return registerRepoPath(target)
+  })
+
+  ipcMain.handle(CHANNELS.worktreesList, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).worktrees.list(),
+  )
+
+  ipcMain.handle(
+    CHANNELS.worktreesAdd,
+    (_event, repoPath: unknown, path: unknown, branch: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).worktrees.add(
+        assertString(path),
+        assertString(branch),
+      ),
+  )
+
+  ipcMain.handle(
+    CHANNELS.worktreesRemove,
+    (_event, repoPath: unknown, path: unknown, force: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).worktrees.remove(
+        assertString(path),
+        assertBoolean(force),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.worktreesReveal, async (_event, repoPath: unknown, path: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    const target = await assertWorktreePath(root, path)
+    shell.showItemInFolder(target)
   })
 
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
