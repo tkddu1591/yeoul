@@ -192,7 +192,14 @@ export function BranchesPanel({
       >
         <div className="branches-panel">
           <div>
-            <Button variant="ghost" size="sm" onPress={onCloseCompare} testId="branch-compare-back">
+            {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={busy}
+              onPress={onCloseCompare}
+              testId="branch-compare-back"
+            >
               ← 목록으로
             </Button>
           </div>
