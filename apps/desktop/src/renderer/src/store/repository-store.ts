@@ -11,6 +11,7 @@ import type {
   RebaseProgress,
   RepositoryStatus,
   ShelfEntry,
+  WorktreeInfo,
 } from '@git-gui/domain'
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
@@ -41,6 +42,8 @@ interface RepositoryStore {
   branchCompare: { name: string; result: BranchCompare } | null
   /** 재배치 진행 위치 — rebasing 상태에서만 non-null (상태 바 "M/N번째") */
   rebaseProgress: RebaseProgress | null
+  /** 워크트리 목록 — 스냅샷마다 함께 갱신된다. 첫 항목이 본체 (E7c) */
+  worktrees: WorktreeInfo[]
   shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
@@ -118,6 +121,14 @@ interface RepositoryStore {
   continueRebase(): Promise<void>
   /** 재배치 취소 — 확인창(UI 책임) 경유 (E7a) */
   abortRebase(): Promise<void>
+  /** 새 워크트리 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) (E7c) */
+  addWorktree(path: string, branch: string): Promise<boolean>
+  /** 워크트리 지우기 — 반환 true면 미저장 변경이 있어 강제 확인 필요 (removeBranch 관례) (E7c) */
+  removeWorktree(path: string, force: boolean): Promise<boolean>
+  /** 워크트리를 앱에서 연다(전체 전환) — 경로 검증·allowlist 등록은 main (E7c) */
+  openWorktree(path: string): Promise<void>
+  /** Finder에서 보기 (E7c) */
+  revealWorktree(path: string): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
   /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
@@ -207,19 +218,23 @@ async function fetchSnapshot(
   repoPath: string,
   limit: number,
 ): Promise<
-  Pick<RepositoryStore, 'status' | 'history' | 'branches' | 'shelf' | 'branchOverview' | 'rebaseProgress'>
+  Pick<
+    RepositoryStore,
+    'status' | 'history' | 'branches' | 'shelf' | 'branchOverview' | 'rebaseProgress' | 'worktrees'
+  >
 > {
-  const [status, history, branches, shelf, branchOverview] = await Promise.all([
+  const [status, history, branches, shelf, branchOverview, worktrees] = await Promise.all([
     git().repo.status(repoPath),
     git().history.list(repoPath, limit),
     git().branches.list(repoPath),
     git().shelf.list(repoPath),
     git().branches.overview(repoPath),
+    git().worktrees.list(repoPath),
   ])
   // 재배치 중일 때만 진행 위치를 읽는다 — 상태 바 "M/N번째" (E7a)
   const rebaseProgress =
     status.state === 'rebasing' ? await git().rebase.progress(repoPath) : null
-  return { status, history, branches, shelf, branchOverview, rebaseProgress }
+  return { status, history, branches, shelf, branchOverview, rebaseProgress, worktrees }
 }
 
 /** 선택 상태 일괄 해제 — 저장소 내용이 바뀌는 모든 지점에서 보던 diff·상세를 무효화한다 */
@@ -278,6 +293,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   branchOverview: null,
   branchCompare: null,
   rebaseProgress: null,
+  worktrees: [],
   pulls: [],
   pullDetail: null,
 
@@ -919,6 +935,62 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: '재배치를 취소하고 이전 상태로 돌아왔어요.',
       })
+    })
+  },
+
+  async addWorktree(path, branch) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    return guard(set, get, async () => {
+      await git().worktrees.add(repoPath, path, branch)
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        notice: `"${branch}" 워크트리를 만들었어요.`,
+      })
+    })
+  },
+
+  async removeWorktree(path, force) {
+    const { repoPath } = get()
+    if (!repoPath) return false
+    let needsForce = false
+    await guard(set, get, async () => {
+      const result = await git().worktrees.remove(repoPath, path, force)
+      needsForce = result.needsForce
+      if (result.removed) {
+        set({
+          ...(await fetchSnapshot(repoPath, get().historyLimit)),
+          notice: '워크트리를 지웠어요.',
+        })
+      }
+    })
+    return needsForce
+  },
+
+  async openWorktree(path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      // 검증·allowlist 등록은 main — 통과하면 정규화 경로가 돌아온다 (E7c 보안 가드)
+      const opened = await git().repo.openPath(repoPath, path)
+      // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)
+      set({
+        repoPath: opened,
+        historyLimit: HISTORY_LIMIT,
+        hostingStatus: await hosting().status(opened),
+        pulls: [],
+        ...CLEAR_SELECTIONS,
+        ...(await fetchSnapshot(opened, HISTORY_LIMIT)),
+      })
+      void git().repo.watch(opened)
+    })
+  },
+
+  async revealWorktree(path) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().worktrees.reveal(repoPath, path)
     })
   },
 

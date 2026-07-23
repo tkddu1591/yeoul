@@ -30,6 +30,16 @@ const api: GitApi = {
       ipcRenderer.on(CHANNELS.repoChanged, wrapped)
       return () => ipcRenderer.removeListener(CHANNELS.repoChanged, wrapped)
     },
+    openPath: (repoPath, worktreePath) =>
+      ipcRenderer.invoke(CHANNELS.repoOpenPath, repoPath, worktreePath),
+  },
+  worktrees: {
+    list: (repoPath) => ipcRenderer.invoke(CHANNELS.worktreesList, repoPath),
+    add: (repoPath, path, branch) =>
+      ipcRenderer.invoke(CHANNELS.worktreesAdd, repoPath, path, branch),
+    remove: (repoPath, path, force) =>
+      ipcRenderer.invoke(CHANNELS.worktreesRemove, repoPath, path, force),
+    reveal: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreesReveal, repoPath, path),
   },
   branches: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesList, repoPath),

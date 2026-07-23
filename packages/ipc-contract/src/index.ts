@@ -18,6 +18,7 @@ import type {
   RevertResult,
   ShelfEntry,
   SwitchResult,
+  WorktreeInfo,
 } from '@git-gui/domain'
 
 export type { DiffOptions } from '@git-gui/domain'
@@ -43,6 +44,21 @@ export interface GitApi {
     watch(repoPath: string): Promise<void>
     /** repo:changed 구독 — 해제 함수를 반환한다. 이 앱 최초의 push 채널 (E7b) */
     onChanged(listener: (repoPath: string) => void): () => void
+    /**
+     * 워크트리를 앱에서 연다(전체 전환) — worktreePath가 이 저장소의 워크트리인지 main이
+     * 검증한 뒤 allowlist에 등록하고 정규화 경로를 돌려준다 (E7c 보안 가드: select 없는 경로 열기)
+     */
+    openPath(repoPath: string, worktreePath: string): Promise<string>
+  }
+  worktrees: {
+    /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
+    list(repoPath: string): Promise<WorktreeInfo[]>
+    /** 새 워크트리 — path에 branch 체크아웃 */
+    add(repoPath: string, path: string, branch: string): Promise<void>
+    /** 지우기 — 미저장 변경이면 needsForce (branches.remove 관례) */
+    remove(repoPath: string, path: string, force: boolean): Promise<RemoveBranchResult>
+    /** Finder에서 보기 — 경로는 워크트리 목록 검증 경유 (E7c) */
+    reveal(repoPath: string, path: string): Promise<void>
   }
   branches: {
     list(repoPath: string): Promise<BranchSummary[]>
@@ -149,6 +165,11 @@ export const CHANNELS = {
   repoWatch: 'repo:watch',
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
+  repoOpenPath: 'repo:open-path',
+  worktreesList: 'worktrees:list',
+  worktreesAdd: 'worktrees:add',
+  worktreesRemove: 'worktrees:remove',
+  worktreesReveal: 'worktrees:reveal',
   branchesList: 'branches:list',
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',

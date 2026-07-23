@@ -1,4 +1,4 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
@@ -18,6 +18,19 @@ export function assertAllowedRepo(repoPath: unknown): string {
 export function assertString(value: unknown): string {
   if (typeof value !== 'string') throw new Error('잘못된 요청 형식이에요.')
   return value
+}
+
+/**
+ * 경로가 이 저장소의 워크트리인지 검증한다 (E7c 보안 가드) — renderer가 임의 경로를
+ * 열거나(openPath) 쉘을 스폰하거나(terminal cwd) 노출(reveal)시키지 못하게 목록과 대조한다
+ */
+export async function assertWorktreePath(repoPath: string, candidate: unknown): Promise<string> {
+  const path = assertString(candidate)
+  const list = await createGitClient(repoPath).worktrees.list()
+  if (!list.some((worktree) => worktree.path === path)) {
+    throw new Error('이 저장소의 워크트리가 아니에요. 새로고침해 주세요.')
+  }
+  return path
 }
 
 function assertStringArray(value: unknown): string[] {
@@ -142,6 +155,40 @@ export function registerGitHandlers(): void {
         stopWatching = null
       })
     }
+  })
+
+  ipcMain.handle(CHANNELS.repoOpenPath, async (_event, repoPath: unknown, worktreePath: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    const target = await assertWorktreePath(root, worktreePath)
+    return registerRepoPath(target)
+  })
+
+  ipcMain.handle(CHANNELS.worktreesList, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).worktrees.list(),
+  )
+
+  ipcMain.handle(
+    CHANNELS.worktreesAdd,
+    (_event, repoPath: unknown, path: unknown, branch: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).worktrees.add(
+        assertString(path),
+        assertString(branch),
+      ),
+  )
+
+  ipcMain.handle(
+    CHANNELS.worktreesRemove,
+    (_event, repoPath: unknown, path: unknown, force: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).worktrees.remove(
+        assertString(path),
+        assertBoolean(force),
+      ),
+  )
+
+  ipcMain.handle(CHANNELS.worktreesReveal, async (_event, repoPath: unknown, path: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    const target = await assertWorktreePath(root, path)
+    shell.showItemInFolder(target)
   })
 
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
