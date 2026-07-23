@@ -65,6 +65,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.add-worktree__mode {
+  margin-bottom: 10px;
+}
 .add-worktree__label {
   display: flex;
   flex-direction: column;

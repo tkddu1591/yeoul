@@ -4,6 +4,7 @@ import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
 import { CHANNELS } from '@git-gui/ipc-contract'
 import { watchRepository } from './repo-watcher'
+import { assertOpenableWorktree } from './worktree-open-guard'
 
 /** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
 const allowedRepoPaths = new Set<string>()
@@ -165,8 +166,11 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(CHANNELS.repoOpenPath, async (_event, repoPath: unknown, worktreePath: unknown) => {
     const root = assertAllowedRepo(repoPath)
-    const target = await assertWorktreePath(root, worktreePath)
-    return registerRepoPath(target)
+    // 목록 대조 + prunable 친절 거부 (E7d ⑥) — reveal·terminal cwd는 기존 assertWorktreePath 유지
+    const path = assertString(worktreePath)
+    const list = await createGitClient(root).worktrees.list()
+    assertOpenableWorktree(list, path)
+    return registerRepoPath(path)
   })
 
   ipcMain.handle(CHANNELS.worktreesList, (_event, repoPath: unknown) =>
@@ -175,10 +179,11 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(
     CHANNELS.worktreesAdd,
-    (_event, repoPath: unknown, path: unknown, branch: unknown) =>
+    (_event, repoPath: unknown, path: unknown, branch: unknown, createBranch: unknown) =>
       createGitClient(assertAllowedRepo(repoPath)).worktrees.add(
         assertString(path),
         assertString(branch),
+        { createBranch: assertBoolean(createBranch) },
       ),
   )
 

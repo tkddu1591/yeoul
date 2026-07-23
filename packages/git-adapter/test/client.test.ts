@@ -2309,6 +2309,33 @@ describe('GitClient', () => {
     expect((await client.worktrees.list()).length).toBe(1)
   })
 
+  it('worktrees.add — createBranch면 새 실험 공간을 만들며 펼친다 (E7d 실측 1)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.worktrees.add(`${repo}-new`, 'brand-new', { createBranch: true })
+    const branches = (
+      await execGitOrThrow(['branch', '--list', 'brand-new'], { cwd: repo })
+    ).stdout
+    expect(branches).toContain('brand-new')
+    const current = (
+      await execGitOrThrow(['branch', '--show-current'], { cwd: `${repo}-new` })
+    ).stdout.trim()
+    expect(current).toBe('brand-new')
+  })
+
+  it('worktrees.add — 새 이름이 중복·규칙 위반이면 읽히는 메시지로 거부한다 (E7d 실측 1)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('taken', null)
+    // 함정: "a branch named ... already exists"가 기존 경로 매핑(already exists)에 먼저 걸리면 안 된다
+    await expect(client.worktrees.add(`${repo}-dup`, 'taken', { createBranch: true })).rejects.toThrow(
+      /이미 있는 실험 공간 이름이에요/,
+    )
+    await expect(
+      client.worktrees.add(`${repo}-bad`, 'bad..name', { createBranch: true }),
+    ).rejects.toThrow(/실험 공간 이름으로 쓸 수 없어요/)
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

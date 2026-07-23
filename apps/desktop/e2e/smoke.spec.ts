@@ -384,7 +384,7 @@ test('960px 최소 창에서 중앙 diff 폭이 380px 이상으로 보장된다 
   }
 })
 
-test('테마를 버튼으로 전환하고 재시작해도 기억한다', async () => {
+test('테마를 설정 모달에서 전환하고 재시작해도 기억한다 (E7d ⑦ 이관)', async () => {
   const repo = await createRepoWithChange()
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
   const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
@@ -393,10 +393,16 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
   try {
     const window = await app.firstWindow()
     // firstWindow는 React 마운트 전에 반환될 수 있다 — UI가 뜬 뒤 테마를 읽는다 (실측 레이스)
-    await expect(window.getByTestId('theme-toggle')).toBeVisible()
+    await expect(window.getByTestId('settings-open')).toBeVisible()
+    // 헤더 토글은 설정으로 이관되어 없다 (E7d ⑦)
+    await expect(window.getByTestId('theme-toggle')).toHaveCount(0)
     const initial = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(['light', 'dark']).toContain(initial)
-    await window.getByTestId('theme-toggle').click()
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-cat-theme').click()
+    await window
+      .getByTestId(initial === 'dark' ? 'settings-theme-light' : 'settings-theme-dark')
+      .click()
     flipped = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(flipped).not.toBe(initial)
   } finally {
@@ -406,7 +412,7 @@ test('테마를 버튼으로 전환하고 재시작해도 기억한다', async (
   const second = await electron.launch({ args: [APP_ROOT], env })
   try {
     const window = await second.firstWindow()
-    await expect(window.getByTestId('theme-toggle')).toBeVisible()
+    await expect(window.getByTestId('settings-open')).toBeVisible()
     const restored = await window.evaluate(() => document.documentElement.dataset.theme)
     expect(restored).toBe(flipped)
   } finally {
@@ -1786,6 +1792,140 @@ test('감시 — 링크드 워크트리를 앱에서 열면 그 안의 외부 �
     await app.close()
     await rm(repo, { recursive: true, force: true })
     await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('충돌이 생기면 변경 탭으로 자동 전환된다 (E7d ①)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 충돌 픽스처 — 같은 줄을 두 브랜치가 다르게 저장
+  await execGitOrThrow(['checkout', '-b', 'clash'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'clash-side\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'clash 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'main-side\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'main 저장'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 실험 공간 탭에서 합치기 → 충돌 → 변경 탭으로 자동 이동해 ! 파일이 보인다
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('left-tab-branches')).toHaveAttribute('aria-selected', 'true')
+    await window.getByTestId('branch-row-clash').click()
+    await window.getByTestId('context-merge').click()
+    await expect(window.getByTestId('left-tab-changes')).toHaveAttribute('aria-selected', 'true', {
+      timeout: 5_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('설정에서 테마를 바꾸면 열린 터미널 배경도 바뀐다 (E7d ③)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.locator('.terminal-dock__view .xterm')).toBeVisible()
+    // 실측: .xterm 루트 자체엔 backgroundColor가 안 걸린다(투명) — 팔레트 배경은
+    // xterm이 그리는 .xterm-scrollable-element에 실제로 반영된다(품질 리뷰 — DOM 실측)
+    const readBackground = () =>
+      window.evaluate(() => {
+        const screen = document.querySelector('.terminal-dock__view .xterm-scrollable-element')
+        return screen === null ? null : getComputedStyle(screen).backgroundColor
+      })
+    const before = await readBackground()
+    // 설정 → 테마 카테고리 → 반대 테마
+    const initial = await window.evaluate(() => document.documentElement.dataset.theme)
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-cat-theme').click()
+    await window
+      .getByTestId(initial === 'dark' ? 'settings-theme-light' : 'settings-theme-dark')
+      .click()
+    await expect.poll(readBackground).not.toBe(before)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('워크트리 — 새로 만들면서 펼치기(-b)로 브랜치가 함께 생긴다 (E7d ④)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId('worktree-add').click()
+    await window.getByTestId('add-worktree-mode-new').click()
+    await window.getByTestId('add-worktree-new-name').fill('fresh-space')
+    // 경로 제안이 새 이름을 따라간다
+    await expect(window.getByTestId('add-worktree-path')).toHaveValue(
+      new RegExp(`${repoName}-fresh-space$`),
+    )
+    await window.getByTestId('add-worktree-submit').click()
+    await expect(window.getByTestId(`worktree-row-${repoName}-fresh-space`)).toContainText(
+      'fresh-space',
+    )
+    const branches = (await execGitOrThrow(['branch', '--list', 'fresh-space'], { cwd: repo }))
+      .stdout
+    expect(branches).toContain('fresh-space')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-fresh-space`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('터미널(외부) 커밋 후에도 보던 커밋 상세가 유지된다 (E7d ⑤)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 커밋 상세 열기 — 첫(유일) 커밋 클릭 (기존 관례: history-item-* 로케이터)
+    // createRepoWithChange의 첫 커밋 메시지는 'init'이다 (품질 리뷰: 플랜 원문의 'e2e: 첫 저장'은
+    // 다른 테스트(앱 UI 커밋 흐름)의 메시지 — 이 픽스처는 실측대로 'init'을 쓴다)
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('commit-detail-subject')).toHaveText('init')
+    // 자기-이벤트 억제 창(800ms)이 지난 뒤 외부 커밋 (E7c 관례)
+    await window.waitForTimeout(900)
+    await execGitOrThrow(['commit', '--allow-empty', '-m', '외부 저장'], { cwd: repo })
+    // 자동 갱신으로 역사에 새 커밋이 오르고 —
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 5_000 })
+    // 보던 커밋 상세는 닫히지 않는다 (E7d ⑤: 새로고침은 최신화지 닫기가 아니다)
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('commit-detail-subject')).toHaveText('init')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
   }
 })

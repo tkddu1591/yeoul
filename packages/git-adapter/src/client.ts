@@ -95,8 +95,8 @@ export interface GitClient {
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체. prunable(사라진 폴더)·locked·detached 포함 (E7c) */
     list(): Promise<WorktreeInfo[]>
-    /** 새 워크트리 — path에 branch를 체크아웃해 만든다. 사용 중 브랜치·기존 경로는 친절 거부 */
-    add(path: string, branch: string): Promise<void>
+    /** 새 워크트리 — path에 branch를 체크아웃해 만든다. createBranch면 지금 위치(HEAD)에서 새 브랜치를 만들며 펼친다(-b — E7d). 거부는 전부 친절 매핑 */
+    add(path: string, branch: string, options?: { createBranch?: boolean }): Promise<void>
     /** 지우기 — 미저장 변경이 있으면 needsForce로 알린다(확인창은 UI). prunable도 그대로 정리된다(실측 F) */
     remove(path: string, force: boolean): Promise<RemoveBranchResult>
   }
@@ -674,11 +674,23 @@ export function createGitClient(repoPath: string): GitClient {
         const raw = await execGitOrThrow(['worktree', 'list', '--porcelain', '-z'], { cwd })
         return parseWorktrees(raw.stdout)
       },
-      async add(path, branch) {
+      async add(path, branch, options) {
         const cwd = await topLevel()
-        const args = ['worktree', 'add', '--end-of-options', path, branch]
+        // -b는 지금 위치(HEAD) 기준 새 브랜치 — 기준 커밋 선택은 후속 (E7d 스펙 YAGNI)
+        const args =
+          options?.createBranch === true
+            ? ['worktree', 'add', '-b', branch, '--end-of-options', path]
+            : ['worktree', 'add', '--end-of-options', path, branch]
         const result = await execGit(args, { cwd })
         if (result.exitCode !== 0) {
+          // E7d 실측 1 — 구체 문구를 먼저: "a branch named ... already exists"가
+          // 아래 기존-경로 매핑(already exists)에 잘못 걸리는 함정
+          if (result.stderr.includes('is not a valid branch name')) {
+            throw new Error(`"${branch}"는 실험 공간 이름으로 쓸 수 없어요. 다른 이름을 입력해 주세요.`)
+          }
+          if (result.stderr.includes('a branch named')) {
+            throw new Error(`"${branch}"는 이미 있는 실험 공간 이름이에요. 기존 실험 공간 펼치기에서 골라 주세요.`)
+          }
           // 실측 C: 같은 브랜치는 두 워크트리가 체크아웃할 수 없다 (UI 비활성의 심층 방어)
           if (result.stderr.includes('already used by worktree')) {
             throw new Error(`"${branch}"는 이미 다른 워크트리가 쓰고 있어요. 다른 실험 공간을 골라 주세요.`)
