@@ -2336,6 +2336,125 @@ describe('GitClient', () => {
     ).rejects.toThrow(/실험 공간 이름으로 쓸 수 없어요/)
   })
 
+  /** 원격에 to-vanish 브랜치가 있고 이 클론이 그것을 아는 상태 — prune 재현용 (E7e) */
+  async function execFixtureWithRemoteBranch(): Promise<{ repo: string; remote: string }> {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await createGitClient(repo).sync.push()
+    await execGitOrThrow(['--git-dir', remote, 'branch', 'to-vanish', 'HEAD'], { cwd: repo })
+    await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
+    return { repo, remote }
+  }
+
+  it('remotes.fetch — 원격의 새 브랜치가 refs/remotes에 나타난다 (E7e)', async () => {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await client.sync.push()
+    // 원격(bare)에 직접 브랜치를 만든다 — 이 클론은 fetch 전까지 모른다
+    await execGitOrThrow(['--git-dir', remote, 'branch', 'fresh-on-remote', 'HEAD'], { cwd: repo })
+    await client.remotes.fetch()
+    const remoteRefs = (await execGitOrThrow(['branch', '-r'], { cwd: repo })).stdout
+    expect(remoteRefs).toContain('origin/fresh-on-remote')
+  })
+
+  it('remotes.fetch — 사라진 원격 브랜치 등록을 prune으로 정리한다 (E7e)', async () => {
+    const { repo, remote } = await execFixtureWithRemoteBranch()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['--git-dir', remote, 'branch', '-D', 'to-vanish'], { cwd: repo })
+    await client.remotes.fetch()
+    const remoteRefs = (await execGitOrThrow(['branch', '-r'], { cwd: repo })).stdout
+    expect(remoteRefs).not.toContain('origin/to-vanish')
+  })
+
+  it('remotes.fetch — 원격이 없으면 조용히 성공한다 (E7e 실측 2)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.remotes.fetch()).resolves.toBeUndefined()
+  })
+
+  /**
+   * 원격과 발산한 클론 (E7e) — 원격에 저장 1개(tracked.txt 또는 충돌용 같은 파일), 로컬에 다른 저장 1개.
+   * conflicting이면 같은 파일을 양쪽이 다르게 저장해 재배치가 충돌한다
+   */
+  async function createDivergedFromRemote(options?: { conflicting?: boolean }): Promise<{
+    repo: string
+    remote: string
+  }> {
+    const { repo, remote } = await createFixtureRepoWithRemote()
+    // repo는 아직 origin과 공통 조상도 upstream 추적도 없다 — 먼저 push로 씨앗 커밋을 심어
+    // 양쪽에 공통 역사를 만들고 upstream을 연결한다 (E7e 편차 — Task 1의 push 씨앗과 같은 패턴)
+    await createGitClient(repo).sync.push()
+    // 원격 쪽 저장 — 별도 클론에서 만들어 push (bare에는 직접 커밋할 수 없다)
+    const sibling = await mkdtemp(join(tmpdir(), 'git-gui-fixture-sibling-'))
+    await execGitOrThrow(['clone', remote, sibling], { cwd: repo })
+    await writeFixtureFile(sibling, options?.conflicting === true ? 'clash.txt' : 'remote.txt', 'remote-side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: sibling })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'remote-side'], { cwd: sibling })
+    await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: sibling })
+    // 로컬 쪽 저장 — 발산
+    await writeFixtureFile(repo, options?.conflicting === true ? 'clash.txt' : 'local.txt', 'local-side\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local-side'], { cwd: repo })
+    // dirty 테스트가 덮어쓸 tracked 파일
+    if (options?.conflicting !== true) {
+      await writeFixtureFile(repo, 'tracked.txt', 'clean\n')
+      await execGitOrThrow(['add', '-A'], { cwd: repo })
+      await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'tracked'], { cwd: repo })
+    }
+    return { repo, remote }
+  }
+
+  it('sync.pull rebase 모드 — 발산해도 병합 저장 없이 일직선이 된다 (E7e 실측 3)', async () => {
+    const { repo } = await createDivergedFromRemote()
+    const client = createGitClient(repo)
+    const result = await client.sync.pull('rebase')
+    expect(result).toEqual({ outcome: 'rebased', autoShelved: false })
+    // 병합 커밋(부모 2개)이 없다 — 역사가 일직선
+    const merges = (await execGitOrThrow(['log', '--merges', '--oneline'], { cwd: repo })).stdout
+    expect(merges.trim()).toBe('')
+  })
+
+  it('sync.pull rebase 모드 — 미저장 변경은 자동 보관 후 진행한다 (E7e 실측 3 dirty)', async () => {
+    const { repo } = await createDivergedFromRemote()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'tracked.txt', 'dirty\n')
+    const result = await client.sync.pull('rebase')
+    expect(result.outcome).toBe('rebased')
+    expect(result.autoShelved).toBe(true)
+    const shelf = await client.shelf.list()
+    expect(shelf.length).toBe(1)
+  })
+
+  it('sync.pull rebase 모드 — 충돌이면 rebasing 상태가 되어 기존 흐름을 잇는다 (E7e 실측 3)', async () => {
+    const { repo } = await createDivergedFromRemote({ conflicting: true })
+    const client = createGitClient(repo)
+    const result = await client.sync.pull('rebase')
+    expect(result.outcome).toBe('conflict')
+    expect((await client.repo.status()).state).toBe('rebasing')
+    expect(await client.rebase.progress()).toEqual({ current: 1, total: 1 })
+  })
+
+  it('sync.push — 첫 백업은 linked, 두 번째는 아니다 (E7e 실측 7)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await execGitOrThrow(['checkout', '-b', 'fresh-branch'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '--allow-empty', '-m', 'x'], { cwd: repo })
+    expect(await client.sync.push()).toEqual({ linked: true })
+    expect(
+      (await execGitOrThrow(['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: repo })).stdout.trim(),
+    ).toBe('origin/fresh-branch')
+    expect(await client.sync.push()).toEqual({ linked: false })
+  })
+
+  it('branches.backup — 첫 연결은 linked, 기존 연결은 아니다 (E7e 실측 7)', async () => {
+    const { repo } = await createFixtureRepoWithRemote()
+    const client = createGitClient(repo)
+    await client.branches.create('side-branch', null)
+    expect(await client.branches.backup('side-branch')).toEqual({ linked: true })
+    expect(await client.branches.backup('side-branch')).toEqual({ linked: false })
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

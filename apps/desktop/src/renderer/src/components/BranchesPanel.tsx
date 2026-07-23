@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react'
+import { RefreshCw } from 'lucide-react'
 import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -6,6 +7,7 @@ import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { trackBadgeLabel } from './branch-badges'
 import { branchDisplayName, groupBranches } from './branch-groups'
+import { formatRelativeTime } from './relative-time'
 import './branches-panel.css'
 
 export type BranchPanelAction =
@@ -29,6 +31,10 @@ interface BranchesPanelProps {
   busy: boolean
   /** 진행 중 작업(merging 등) — 파괴적 항목을 사유와 함께 비활성한다 */
   actionsDisabled: boolean
+  /** 마지막 원격 새로고침 시각 — null이면 아직 없음 (E7e) */
+  lastFetchAt: number | null
+  /** 수동 원격 새로고침 (E7e) */
+  onFetchRemotes(): void
   onAction(action: BranchPanelAction): void
   onCloseCompare(): void
 }
@@ -46,6 +52,8 @@ export function BranchesPanel({
   currentBranch,
   busy,
   actionsDisabled,
+  lastFetchAt,
+  onFetchRemotes,
   onAction,
   onCloseCompare,
 }: BranchesPanelProps) {
@@ -251,6 +259,16 @@ export function BranchesPanel({
   return (
     <Panel title="실험 공간" accessory={<Badge tone="git">branch</Badge>} testId="branches-panel">
       <div className="branches-panel">
+        <div className="branches-panel__fetch">
+          <Button variant="ghost" size="sm" isDisabled={busy} onPress={onFetchRemotes} testId="fetch-remotes">
+            <RefreshCw size={13} aria-hidden="true" /> 원격 새로고침
+          </Button>
+          {lastFetchAt !== null && (
+            <span className="branches-panel__fetch-at" data-testid="fetch-at">
+              {formatRelativeTime(Math.floor(lastFetchAt / 1000), Date.now())} 새로고침
+            </span>
+          )}
+        </div>
         <input
           className="branches-panel__search"
           value={query}

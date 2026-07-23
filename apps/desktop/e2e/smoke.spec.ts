@@ -1929,3 +1929,149 @@ test('터미널(외부) 커밋 후에도 보던 커밋 상세가 유지된다 (E
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('원격 새로고침 — 원격의 새 실험 공간이 목록에 나타난다 (E7e ①)', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'git-gui-e2e-remote-'))
+  const remote = join(base, 'remote.git')
+  const repo = join(base, 'repo')
+  await execGitOrThrow(['init', '--bare', remote], { cwd: base })
+  await execGitOrThrow(['clone', remote, repo], { cwd: base })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v1\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+  await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: repo })
+  // 원격에만 있는 새 브랜치 — 이 클론은 fetch 전까지 모른다
+  await execGitOrThrow(['--git-dir', remote, 'branch', 'remote-only', 'HEAD'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('branch-row-origin/remote-only')).toHaveCount(0)
+    await window.getByTestId('fetch-remotes').click()
+    await expect(window.getByTestId('branch-row-origin/remote-only')).toBeVisible({ timeout: 10_000 })
+    await expect(window.getByTestId('fetch-at')).toContainText('방금 전')
+  } finally {
+    await app.close()
+    await rm(base, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('재배치로 받기 — 병합 저장 없이 일직선으로 받아온다 (E7e ②)', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'git-gui-e2e-remote-'))
+  const remote = join(base, 'remote.git')
+  const repo = join(base, 'repo')
+  const sibling = join(base, 'sibling')
+  await execGitOrThrow(['init', '--bare', remote], { cwd: base })
+  await execGitOrThrow(['clone', remote, repo], { cwd: base })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v1\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+  await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: repo })
+  // 원격 쪽 저장(다른 클론 경유) + 로컬 쪽 저장 — 발산
+  await execGitOrThrow(['clone', remote, sibling], { cwd: base })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: sibling })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: sibling })
+  await writeFile(join(sibling, 'remote.txt'), 'r\n')
+  await execGitOrThrow(['add', '-A'], { cwd: sibling })
+  await execGitOrThrow(['commit', '-m', '원격 쪽 저장'], { cwd: sibling })
+  await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: sibling })
+  await writeFile(join(repo, 'local.txt'), 'l\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '내 쪽 저장'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 설정 → 재배치로 받기
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-pull-rebase').click()
+    await window.getByTestId('settings-close').click()
+    await window.getByTestId('pull').click()
+    await expect(window.getByTestId('notice')).toContainText('일직선', { timeout: 10_000 })
+    // 병합 커밋 없음 — 역사 3개(초기·원격·재배치된 내 저장)
+    await expect(window.getByTestId('history-count')).toHaveText('3')
+    const merges = await execGitOrThrow(['log', '--merges', '--oneline'], { cwd: repo })
+    expect(merges.stdout.trim()).toBe('')
+  } finally {
+    await app.close()
+    await rm(base, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E7e ③)', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'git-gui-e2e-remote-'))
+  const remote = join(base, 'remote.git')
+  const repo = join(base, 'repo')
+  await execGitOrThrow(['init', '--bare', remote], { cwd: base })
+  await execGitOrThrow(['clone', remote, repo], { cwd: base })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v1\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+  await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', 'fresh-space'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('backup').click()
+    await expect(window.getByTestId('notice')).toContainText('연결하며 백업했어요', { timeout: 10_000 })
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('branch-row-fresh-space')).toContainText('동기화됨')
+  } finally {
+    await app.close()
+    await rm(base, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('설정 — 받아오기 방식·자동 새로고침이 재시작 후에도 기억된다 (E7e)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-pull-rebase').click()
+    await window.getByTestId('settings-auto-fetch').click()
+    await expect(window.getByTestId('settings-auto-fetch')).not.toBeChecked()
+  } finally {
+    await app.close()
+  }
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await window.getByTestId('settings-open').click()
+    await expect(window.getByTestId('settings-pull-rebase')).toBeChecked()
+    await expect(window.getByTestId('settings-auto-fetch')).not.toBeChecked()
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

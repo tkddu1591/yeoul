@@ -202,6 +202,10 @@ export function registerGitHandlers(): void {
     shell.showItemInFolder(target)
   })
 
+  ipcMain.handle(CHANNELS.remotesFetch, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).remotes.fetch(),
+  )
+
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).branches.list(),
   )
@@ -444,7 +448,8 @@ export function registerGitHandlers(): void {
     createGitClient(assertAllowedRepo(repoPath)).sync.push(),
   )
 
-  ipcMain.handle(CHANNELS.syncPull, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).sync.pull(),
-  )
+  ipcMain.handle(CHANNELS.syncPull, (_event, repoPath: unknown, mode: unknown) => {
+    if (mode !== 'merge' && mode !== 'rebase') throw new Error('잘못된 요청 형식이에요.')
+    return createGitClient(assertAllowedRepo(repoPath)).sync.pull(mode)
+  })
 }

@@ -5,6 +5,7 @@ import '../confirm-dialog.css'
 import './settings-dialog.css'
 import type { Theme } from '../theme'
 import type { WorktreeSelectAction } from './worktree-select-action'
+import type { PullMode } from './sync-settings'
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -12,6 +13,10 @@ interface SettingsDialogProps {
   onChangeTheme(theme: Theme): void
   worktreeSelectAction: WorktreeSelectAction
   onChangeWorktreeSelectAction(action: WorktreeSelectAction): void
+  pullMode: PullMode
+  onChangePullMode(mode: PullMode): void
+  autoFetch: boolean
+  onChangeAutoFetch(enabled: boolean): void
   onClose(): void
 }
 
@@ -27,6 +32,10 @@ export function SettingsDialog({
   onChangeTheme,
   worktreeSelectAction,
   onChangeWorktreeSelectAction,
+  pullMode,
+  onChangePullMode,
+  autoFetch,
+  onChangeAutoFetch,
   onClose,
 }: SettingsDialogProps) {
   const [category, setCategory] = useState<SettingsCategory>('general')
@@ -65,32 +74,72 @@ export function SettingsDialog({
             </nav>
             <div className="settings-dialog__content">
               {category === 'general' ? (
-                <fieldset className="settings-dialog__field">
-                  <legend className="settings-dialog__label">워크트리 선택 시 동작</legend>
-                  <label className="settings-dialog__radio">
-                    <input
-                      type="radio"
-                      name="worktree-select-action"
-                      checked={worktreeSelectAction === 'terminal'}
-                      onChange={() => onChangeWorktreeSelectAction('terminal')}
-                      data-testid="settings-worktree-terminal"
-                    />
-                    터미널만 따라가기 — 새 터미널이 그 폴더에서 열려요
-                  </label>
-                  <label className="settings-dialog__radio">
-                    <input
-                      type="radio"
-                      name="worktree-select-action"
-                      checked={worktreeSelectAction === 'switch-app'}
-                      onChange={() => onChangeWorktreeSelectAction('switch-app')}
-                      data-testid="settings-worktree-switch"
-                    />
-                    앱 전체 전환 — 변경·역사·실험 공간도 그 워크트리 기준으로 바뀌어요
-                  </label>
-                  <p className="settings-dialog__desc">
-                    우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.
-                  </p>
-                </fieldset>
+                <>
+                  <fieldset className="settings-dialog__field">
+                    <legend className="settings-dialog__label">워크트리 선택 시 동작</legend>
+                    <label className="settings-dialog__radio">
+                      <input
+                        type="radio"
+                        name="worktree-select-action"
+                        checked={worktreeSelectAction === 'terminal'}
+                        onChange={() => onChangeWorktreeSelectAction('terminal')}
+                        data-testid="settings-worktree-terminal"
+                      />
+                      터미널만 따라가기 — 새 터미널이 그 폴더에서 열려요
+                    </label>
+                    <label className="settings-dialog__radio">
+                      <input
+                        type="radio"
+                        name="worktree-select-action"
+                        checked={worktreeSelectAction === 'switch-app'}
+                        onChange={() => onChangeWorktreeSelectAction('switch-app')}
+                        data-testid="settings-worktree-switch"
+                      />
+                      앱 전체 전환 — 변경·역사·실험 공간도 그 워크트리 기준으로 바뀌어요
+                    </label>
+                    <p className="settings-dialog__desc">
+                      우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.
+                    </p>
+                  </fieldset>
+                  <fieldset className="settings-dialog__field">
+                    <legend className="settings-dialog__label">받아오기(pull) 방식</legend>
+                    <label className="settings-dialog__radio">
+                      <input
+                        type="radio"
+                        name="pull-mode"
+                        checked={pullMode === 'merge'}
+                        onChange={() => onChangePullMode('merge')}
+                        data-testid="settings-pull-merge"
+                      />
+                      합치며 받기 — 원격과 내 저장을 합쳐요. 지금까지의 방식
+                    </label>
+                    <label className="settings-dialog__radio">
+                      <input
+                        type="radio"
+                        name="pull-mode"
+                        checked={pullMode === 'rebase'}
+                        onChange={() => onChangePullMode('rebase')}
+                        data-testid="settings-pull-rebase"
+                      />
+                      재배치로 받기 — 내 저장을 원격 최신 위로 다시 쌓아 역사가 일직선이 돼요
+                    </label>
+                  </fieldset>
+                  <fieldset className="settings-dialog__field">
+                    <legend className="settings-dialog__label">원격 새로고침</legend>
+                    <label className="settings-dialog__radio">
+                      <input
+                        type="checkbox"
+                        checked={autoFetch}
+                        onChange={(event) => onChangeAutoFetch(event.target.checked)}
+                        data-testid="settings-auto-fetch"
+                      />
+                      주기적으로 원격 새로고침 (10분)
+                    </label>
+                    <p className="settings-dialog__desc">
+                      원격의 새 실험 공간·↑↓ 차이가 저절로 최신으로 유지돼요.
+                    </p>
+                  </fieldset>
+                </>
               ) : (
                 <fieldset className="settings-dialog__field">
                   <legend className="settings-dialog__label">테마</legend>

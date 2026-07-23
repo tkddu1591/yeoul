@@ -1,4 +1,5 @@
 import type {
+  BackupResult,
   BranchCompare,
   BranchOverview,
   BranchSummary,
@@ -73,8 +74,8 @@ export interface GitApi {
     rename(repoPath: string, oldName: string, newName: string): Promise<void>
     /** 비현재 공간을 원격 최신으로(ff-only) — 현재 공간은 renderer가 pull로 보낸다 (E7a) */
     update(repoPath: string, name: string): Promise<void>
-    /** 선택 공간을 checkout 없이 백업(push) (E7a) */
-    backup(repoPath: string, name: string): Promise<void>
+    /** 선택 공간을 checkout 없이 백업(push) — 첫 연결이면 linked (E7a, E7e) */
+    backup(repoPath: string, name: string): Promise<BackupResult>
     /** 원격 공간을 추적 로컬로 가져와 이동 (E7a) */
     checkoutRemote(repoPath: string, name: string): Promise<SwitchResult>
     /** 원격에서 지우기(push --delete) — 확인창은 UI 책임 (E7a) */
@@ -149,10 +150,14 @@ export interface GitApi {
     list(repoPath: string, limit: number): Promise<CommitSummary[]>
   }
   sync: {
-    /** 현재 브랜치를 원격으로 백업(push). 원격이 없으면 에러 */
-    push(repoPath: string): Promise<void>
-    /** 원격의 최신 저장을 받아온다 — conflict면 기존 합치기 충돌 흐름이 이어진다 */
-    pull(repoPath: string): Promise<PullResult>
+    /** 현재 브랜치를 원격으로 백업(push) — 첫 연결이면 linked (E7e). 원격이 없으면 에러 */
+    push(repoPath: string): Promise<BackupResult>
+    /** 원격의 최신 저장을 받아온다 — merge는 기존 충돌 흐름, rebase는 rebasing 흐름 (E7e) */
+    pull(repoPath: string, mode: 'merge' | 'rebase'): Promise<PullResult>
+  }
+  remotes: {
+    /** 원격 최신 가져오기(fetch --all --prune) — 갱신은 감시가 담당 (E7e) */
+    fetch(repoPath: string): Promise<void>
   }
 }
 
@@ -166,6 +171,7 @@ export const CHANNELS = {
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
   repoOpenPath: 'repo:open-path',
+  remotesFetch: 'remotes:fetch',
   worktreesList: 'worktrees:list',
   worktreesAdd: 'worktrees:add',
   worktreesRemove: 'worktrees:remove',
@@ -297,6 +303,10 @@ export interface AppSettings {
   terminalHeight?: number
   /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
   worktreeSelectAction?: 'terminal' | 'switch-app'
+  /** 받아오기 방식 — merge(기본)/rebase (E7e) */
+  pullMode?: 'merge' | 'rebase'
+  /** 주기적 원격 새로고침(10분) — 기본 켬 (E7e) */
+  autoFetch?: boolean
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -315,6 +325,10 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (candidate.worktreeSelectAction === 'terminal' || candidate.worktreeSelectAction === 'switch-app') {
     settings.worktreeSelectAction = candidate.worktreeSelectAction
   }
+  if (candidate.pullMode === 'merge' || candidate.pullMode === 'rebase') {
+    settings.pullMode = candidate.pullMode
+  }
+  if (typeof candidate.autoFetch === 'boolean') settings.autoFetch = candidate.autoFetch
   return settings
 }
 

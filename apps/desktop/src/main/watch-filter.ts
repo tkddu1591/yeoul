@@ -18,7 +18,10 @@ export function isRelevantGitEvent(relativePath: string): boolean {
   if (normalized.startsWith('rebase-merge/') || normalized.startsWith('rebase-apply/')) {
     return true
   }
-  // MERGE_HEAD·CHERRY_PICK_HEAD·REVERT_HEAD·FETCH_HEAD·ORIG_HEAD 등 top-level 상태 마커
+  // fetch는 변화가 없어도 FETCH_HEAD를 매번 touch한다(E7e 실측 1) — 자동 fetch가 10분마다
+  // 헛갱신을 만들지 않게 제외한다. 실제 변화는 refs/remotes/가 위의 refs/ 수용으로 잡힌다
+  if (normalized === 'FETCH_HEAD') return false
+  // MERGE_HEAD·CHERRY_PICK_HEAD·REVERT_HEAD·ORIG_HEAD 등 top-level 상태 마커
   return /^[A-Z_]+$/.test(normalized)
 }
 

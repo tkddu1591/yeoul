@@ -201,8 +201,14 @@ export interface MergeResult {
 
 /** 받아오기(pull) 결과 — conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다 */
 export interface PullResult {
-  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date'
+  /** rebased: 재배치로 받기(pull --rebase)가 내 저장을 원격 위로 다시 쌓았다 (E7e) */
+  outcome: 'fast-forward' | 'merged' | 'conflict' | 'up-to-date' | 'rebased'
   autoShelved: boolean
+}
+
+/** 백업(push) 결과 (E7e) — linked면 이번 백업이 upstream을 처음 연결했다(-u) */
+export interface BackupResult {
+  linked: boolean
 }
 
 /** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */

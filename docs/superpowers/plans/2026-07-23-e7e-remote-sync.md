@@ -29,7 +29,7 @@
 | `packages/ipc-contract/src/index.ts` (수정) + `test/settings.test.ts` | 채널·시그니처·AppSettings(autoFetch·pullMode) |
 | `apps/desktop/src/main/git-handlers.ts`·`preload/index.ts` (수정) | 배선 |
 | `apps/desktop/src/main/watch-filter.ts` (수정) + `test/watch-filter.test.ts` | FETCH_HEAD 제외 |
-| `apps/desktop/src/renderer/src/components/relative-time.ts` (신규) + `test/relative-time.test.ts` | 상대 시간 순수 |
+| `apps/desktop/src/renderer/src/components/relative-time.ts` (기존 E0-3b — 재사용, 무변) | 상대 시간(formatRelativeTime) |
 | `apps/desktop/src/renderer/src/ui/settings/sync-settings.ts` (신규) | autoFetch·pullMode load/save 순수 |
 | `apps/desktop/src/renderer/src/store/repository-store.ts` (수정) | lastFetchAt·pullMode 상태·fetchRemotes/autoFetchRemotes·notice 확장 |
 | `apps/desktop/src/renderer/src/ui/settings/SettingsDialog.tsx` (수정) | [일반]에 받아오기 방식·자동 새로고침 |
@@ -46,10 +46,10 @@
 | Task 2 후 | +3 → **446** (pull rebase) |
 | Task 3 후 | +2 → **448** (linked) |
 | Task 4 후 | 448 유지 + typecheck (배선) |
-| Task 5 후 | +4 → **452** (필터 1 + 상대시간 3) |
-| Task 6 후 | +1 → **453** (sanitize) + build + smoke 60 무회귀 |
+| Task 5 후 | +1 → **449** (필터 — 상대시간은 기존 유틸 재사용으로 플랜 정정) |
+| Task 6 후 | +1 → **450** (sanitize) + build + smoke 60 무회귀 |
 | Task 7 후 | smoke **64** (신규 4) |
-| 최종 (Task 8) | **453 tests** + typecheck + build + E2E **70**(smoke 64 + hosting 6) + last-screen 0건 + 스크린샷 2장 + README |
+| 최종 (Task 8) | **450 tests** + typecheck + build + E2E **70**(smoke 64 + hosting 6) + last-screen 0건 + 스크린샷 2장 + README |
 
 ---
 
@@ -59,9 +59,9 @@
 - Modify: `packages/git-adapter/src/client.ts`
 - Test: `packages/git-adapter/test/client.test.ts` (+3)
 
-- [ ] **Step 0: 브랜치 생성** — main(4e746fe)에서 `git checkout -b feature/e7e-remote-sync`. `git branch --show-current` 확인.
+- [x] **Step 0: 브랜치 생성** — main(4e746fe)에서 `git checkout -b feature/e7e-remote-sync`. `git branch --show-current` 확인.
 
-- [ ] **Step 1: Red.** `packages/git-adapter/test/client.test.ts`의 기존(E7d 마지막 worktrees 테스트 — createBranch 거부):
+- [x] **Step 1: Red.** `packages/git-adapter/test/client.test.ts`의 기존(E7d 마지막 worktrees 테스트 — createBranch 거부):
 
 ```ts
   it('worktrees.add — 새 이름이 중복·규칙 위반이면 읽히는 메시지로 거부한다 (E7d 실측 1)', async () => {
@@ -85,6 +85,8 @@
   it('remotes.fetch — 원격의 새 브랜치가 refs/remotes에 나타난다 (E7e)', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await client.sync.push()
     // 원격(bare)에 직접 브랜치를 만든다 — 이 클론은 fetch 전까지 모른다
     await execGitOrThrow(['--git-dir', remote, 'branch', 'fresh-on-remote', 'HEAD'], { cwd: repo })
     await client.remotes.fetch()
@@ -114,6 +116,8 @@
   /** 원격에 to-vanish 브랜치가 있고 이 클론이 그것을 아는 상태 — prune 재현용 (E7e) */
   async function execFixtureWithRemoteBranch(): Promise<{ repo: string; remote: string }> {
     const { repo, remote } = await createFixtureRepoWithRemote()
+    // 갓 init된 bare는 HEAD가 unborn이라 --git-dir로 직접 브랜치를 못 만든다 — 먼저 push로 씨앗 커밋을 심는다 (E7e 편차)
+    await createGitClient(repo).sync.push()
     await execGitOrThrow(['--git-dir', remote, 'branch', 'to-vanish', 'HEAD'], { cwd: repo })
     await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
     return { repo, remote }
@@ -122,9 +126,9 @@
 
 주의(구현자): `createFixtureRepoWithRemote`의 반환 형태(remote 경로 필드 이름)를 fixture.ts에서 실독해 위 구조 분해를 실제 형태에 맞추고 편차를 보고하라(예: 필드가 `remotePath`면 그 이름으로).
 
-- [ ] **Step 2: Red 확인** — `pnpm vitest run --project @git-gui/git-adapter -t 'remotes.fetch'` → 네임스페이스 부재로 실패 확인.
+- [x] **Step 2: Red 확인** — `pnpm vitest run --project @git-gui/git-adapter -t 'remotes.fetch'` → 네임스페이스 부재로 실패 확인.
 
-- [ ] **Step 3: 구현.** `packages/git-adapter/src/client.ts` 편집 2곳.
+- [x] **Step 3: 구현.** `packages/git-adapter/src/client.ts` 편집 2곳.
 
 (a) 인터페이스 — 기존(sync 블록 꼬리):
 
@@ -160,9 +164,9 @@
     },
 ```
 
-- [ ] **Step 4: Green + 게이트** — remotes.fetch 3건 통과. 루트 `pnpm test` → **443 passed**. `pnpm typecheck` Done.
+- [x] **Step 4: Green + 게이트** — remotes.fetch 3건 통과. 루트 `pnpm test` → **443 passed**. `pnpm typecheck` Done.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -180,7 +184,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `packages/git-adapter/src/client.ts`
 - Test: `packages/git-adapter/test/client.test.ts` (+3)
 
-- [ ] **Step 1: 도메인.** 기존:
+- [x] **Step 1: 도메인.** 기존:
 
 ```ts
 export interface PullResult {
@@ -199,7 +203,7 @@ export interface PullResult {
 }
 ```
 
-- [ ] **Step 2: Red.** Task 1이 추가한 `remotes.fetch — 원격이 없으면 조용히 성공한다` it 바로 뒤에 추가:
+- [x] **Step 2: Red.** Task 1이 추가한 `remotes.fetch — 원격이 없으면 조용히 성공한다` it 바로 뒤에 추가:
 
 ```ts
 
@@ -246,6 +250,8 @@ export interface PullResult {
     remote: string
   }> {
     const { repo, remote } = await createFixtureRepoWithRemote()
+    // 공통 조상·upstream이 없으면 pull --rebase가 tracking 에러로 죽는다 — push로 씨앗을 심는다 (E7e 편차, Task 1과 동일 패턴)
+    await createGitClient(repo).sync.push()
     // 원격 쪽 저장 — 별도 클론에서 만들어 push (bare에는 직접 커밋할 수 없다)
     const sibling = await mkdtemp(join(tmpdir(), 'git-gui-fixture-sibling-'))
     await execGitOrThrow(['clone', remote, sibling], { cwd: repo })
@@ -269,9 +275,9 @@ export interface PullResult {
 
 주의(구현자): `mkdtemp`·`tmpdir`·`join`·`FIXTURE_IDENT`의 import 유무를 client.test.ts 상단에서 실독 — 없으면 기존 import 줄에 추가하고 편차 보고. dirty 테스트의 자동 보관은 **tracked 파일의 미저장 변경**이어야 rebase가 거부한다(실측 3: unstaged changes).
 
-- [ ] **Step 3: Red 확인** — `-t 'sync.pull rebase'` → 인자 미지원/분류 부재로 실패 확인.
+- [x] **Step 3: Red 확인** — `-t 'sync.pull rebase'` → 인자 미지원/분류 부재로 실패 확인.
 
-- [ ] **Step 4: 구현.** `packages/git-adapter/src/client.ts` 편집 2곳.
+- [x] **Step 4: 구현.** `packages/git-adapter/src/client.ts` 편집 2곳.
 
 (a) 인터페이스 기존:
 
@@ -393,9 +399,9 @@ export interface PullResult {
       },
 ```
 
-- [ ] **Step 5: Green + 게이트** — 신규 3건 + 기존 pull 테스트 무회귀. 루트 `pnpm test` → **446 passed**. `pnpm typecheck` Done.
+- [x] **Step 5: Green + 게이트** — 신규 3건 + 기존 pull 테스트 무회귀. 루트 `pnpm test` → **446 passed**. `pnpm typecheck`: domain·git-adapter·ipc-contract Done — **apps/desktop은 의도된 적색**(outcome 확장으로 pullLatest의 Record에 rebased 키가 없다 — Task 4 (f)가 닫는다. E7d Task 6의 '설계된 임시 실패' 관례).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -413,7 +419,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `packages/git-adapter/src/client.ts`
 - Test: `packages/git-adapter/test/client.test.ts` (+2)
 
-- [ ] **Step 1: 도메인.** Task 2가 만든 PullResult 교체본 바로 뒤(기존 `/** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */` 주석 앞)에 추가 — 기존:
+- [x] **Step 1: 도메인.** Task 2가 만든 PullResult 교체본 바로 뒤(기존 `/** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */` 주석 앞)에 추가 — 기존:
 
 ```ts
 /** 되돌리기(revert) 결과 — conflict면 REVERT_HEAD가 남는다(상태 바 reverting) */
@@ -432,7 +438,7 @@ export interface BackupResult {
 export interface RevertResult {
 ```
 
-- [ ] **Step 2: Red.** Task 2가 추가한 `sync.pull rebase 모드 — 충돌이면...` it 바로 뒤에 추가:
+- [x] **Step 2: Red.** Task 2가 추가한 `sync.pull rebase 모드 — 충돌이면...` it 바로 뒤에 추가:
 
 ```ts
 
@@ -457,9 +463,9 @@ export interface RevertResult {
   })
 ```
 
-- [ ] **Step 3: Red 확인** — `-t 'linked'` → void 반환(toEqual undefined 불일치)으로 실패 확인.
+- [x] **Step 3: Red 확인** — `-t 'linked'` → void 반환(toEqual undefined 불일치)으로 실패 확인.
 
-- [ ] **Step 4: 구현.** `packages/git-adapter/src/client.ts` 편집 — 4곳.
+- [x] **Step 4: 구현.** `packages/git-adapter/src/client.ts` 편집 — 4곳.
 
 (a) 인터페이스 sync.push 기존:
 
@@ -583,9 +589,9 @@ export interface RevertResult {
 
 (e) client.ts의 domain import 목록에 `BackupResult`를 알파벳 자리(예: `type BranchCompare` 앞)에 추가.
 
-- [ ] **Step 5: Green + 게이트** — 신규 2건 + 기존 push/backup 테스트 무회귀(void 반환을 단언하던 기존 테스트가 있으면 반환값 무시 형태 확인 — 깨지면 실측 보고). 루트 `pnpm test` → **448 passed**. `pnpm typecheck` Done.
+- [x] **Step 5: Green + 게이트** — 신규 2건 + 기존 push/backup 테스트 무회귀(void 반환을 단언하던 기존 테스트가 있으면 반환값 무시 형태 확인 — 깨지면 실측 보고). 루트 `pnpm test` → **448 passed**. `pnpm typecheck`: 패키지 3종 Done — apps/desktop 적색은 Task 4가 닫는다(Task 2 게이트와 동일).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -605,7 +611,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `apps/desktop/src/renderer/src/ui/settings/sync-settings.ts`
 - Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
 
-- [ ] **Step 1: 계약.** `packages/ipc-contract/src/index.ts` 편집 3곳.
+- [x] **Step 1: 계약.** `packages/ipc-contract/src/index.ts` 편집 3곳.
 
 (a) 기존:
 
@@ -650,7 +656,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   remotesFetch: 'remotes:fetch',
 ```
 
-- [ ] **Step 2: 핸들러·preload.** `apps/desktop/src/main/git-handlers.ts` — worktreesReveal 핸들러 뒤(구현 시 grep — E7c에서 추가된 `ipcMain.handle(CHANNELS.worktreesReveal, ...)` 블록의 닫는 `})` 뒤)에 추가:
+- [x] **Step 2: 핸들러·preload.** `apps/desktop/src/main/git-handlers.ts` — worktreesReveal 핸들러 뒤(구현 시 grep — E7c에서 추가된 `ipcMain.handle(CHANNELS.worktreesReveal, ...)` 블록의 닫는 `})` 뒤)에 추가:
 
 ```ts
 
@@ -679,7 +685,7 @@ sync.pull 핸들러 — 현행(`CHANNELS.syncPull` 유사 이름을 grep)에 mod
 
 (push/backup은 invoke 반환이 그대로 전달되므로 preload 무변 — 타입만 계약이 이끈다.)
 
-- [ ] **Step 3: 설정 순수.** `apps/desktop/src/renderer/src/ui/settings/sync-settings.ts` 신규:
+- [x] **Step 3: 설정 순수.** `apps/desktop/src/renderer/src/ui/settings/sync-settings.ts` 신규:
 
 ```ts
 export type PullMode = 'merge' | 'rebase'
@@ -751,7 +757,7 @@ sanitize의 기존:
 
 (sanitize 단위 테스트는 Task 6에서 추가 — TDD 위반이 아니라 배선 태스크의 컴파일 요건이라 필드를 먼저 둔다.)
 
-- [ ] **Step 4: store.** `apps/desktop/src/renderer/src/store/repository-store.ts` 편집 6곳.
+- [x] **Step 4: store.** `apps/desktop/src/renderer/src/store/repository-store.ts` 편집 6곳.
 
 (a) import — 기존:
 
@@ -940,8 +946,9 @@ import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-s
       // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신. 첫 연결이면 알린다 (E7e ③)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        // linked는 첫 연결뿐 아니라 rename 재연결·반쪽 수리에서도 참 — "만들어"를 피한 중립 문구 (Task 3 리뷰)
         notice: result.linked
-          ? '원격에 이 실험 공간을 만들어 연결했어요 — 이제 ↑↓로 차이가 보여요.'
+          ? '이 실험 공간을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.'
           : null,
       })
     })
@@ -977,16 +984,16 @@ import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-s
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: result.linked
-          ? `"${name}"을 원격에 만들어 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.`
+          ? `"${name}"을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.`
           : `"${name}"을 백업(push)했어요.`,
       })
     })
   },
 ```
 
-- [ ] **Step 5: 게이트** — `pnpm typecheck` Done. 루트 `pnpm test` → **448 passed**(무변). `pnpm --filter @git-gui/desktop build` 성공.
+- [x] **Step 5: 게이트** — `pnpm typecheck` Done. 루트 `pnpm test` → **448 passed**(무변). `pnpm --filter @git-gui/desktop build` 성공.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts apps/desktop/src/renderer/src/ui/settings/sync-settings.ts apps/desktop/src/renderer/src/store/repository-store.ts
@@ -997,15 +1004,15 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: 필터 FETCH_HEAD 제외 + 상대 시간 순수 함수
+### Task 5: 필터 FETCH_HEAD 제외
+
+**(플랜 정정 — 컨트롤러 발견):** 상대 시간 유틸은 **E0-3b부터 `apps/desktop/src/renderer/src/components/relative-time.ts`의 `formatRelativeTime(epochSeconds, nowMs)`로 존재**한다(한국어 "방금 전/N분 전/N시간 전", 테스트 기보유). 최초안의 신규 `relativeTimeLabel` 생성은 DRY 위반이라 폐기 — Task 6이 기존 함수를 재사용한다(lastFetchAt은 ms라 `Math.floor(lastFetchAt / 1000)` 변환). 이 태스크는 필터 제외만 남는다.
 
 **Files:**
 - Modify: `apps/desktop/src/main/watch-filter.ts`
 - Test: `apps/desktop/test/watch-filter.test.ts` (+1)
-- Create: `apps/desktop/src/renderer/src/components/relative-time.ts`
-- Test: `apps/desktop/test/relative-time.test.ts` (신규, +3)
 
-- [ ] **Step 1: 필터 Red.** `apps/desktop/test/watch-filter.test.ts`의 기존(E7c 마지막 필터 테스트):
+- [x] **Step 1: 필터 Red.** `apps/desktop/test/watch-filter.test.ts`의 기존(E7c 마지막 필터 테스트):
 
 ```ts
   it('워크트리 등록 메타 파일(worktrees/<이름>/gitdir 등 소문자)은 무시한다', () => {
@@ -1026,7 +1033,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   })
 ```
 
-- [ ] **Step 2: Red 확인 후 구현.** `-t 'FETCH_HEAD'` 실패 확인 → `apps/desktop/src/main/watch-filter.ts` 기존:
+- [x] **Step 2: Red 확인 후 구현.** `-t 'FETCH_HEAD'` 실패 확인 → `apps/desktop/src/main/watch-filter.ts` 기존:
 
 ```ts
   // MERGE_HEAD·CHERRY_PICK_HEAD·REVERT_HEAD·FETCH_HEAD·ORIG_HEAD 등 top-level 상태 마커
@@ -1045,51 +1052,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Green 확인.
 
-- [ ] **Step 3: 상대 시간 Red.** `apps/desktop/test/relative-time.test.ts` 신규:
+- [x] **Step 3: 게이트** — 루트 `pnpm test` → **449 passed**. `pnpm typecheck` Done.
 
-```ts
-import { describe, expect, it } from 'vitest'
-import { relativeTimeLabel } from '../src/renderer/src/components/relative-time'
-
-const NOW = 1_700_000_000_000
-
-describe('relativeTimeLabel', () => {
-  it('1분 미만은 "방금 전"', () => {
-    expect(relativeTimeLabel(NOW - 30_000, NOW)).toBe('방금 전')
-  })
-
-  it('분·시간 단위로 내림해 표기한다', () => {
-    expect(relativeTimeLabel(NOW - 7 * 60_000, NOW)).toBe('7분 전')
-    expect(relativeTimeLabel(NOW - 3 * 3_600_000 - 10 * 60_000, NOW)).toBe('3시간 전')
-  })
-
-  it('하루 이상은 일 단위', () => {
-    expect(relativeTimeLabel(NOW - 2 * 86_400_000, NOW)).toBe('2일 전')
-  })
-})
-```
-
-- [ ] **Step 4: Red 확인 후 구현.** `-t 'relativeTimeLabel'` 실패 확인 → `apps/desktop/src/renderer/src/components/relative-time.ts` 신규:
-
-```ts
-/** "방금 전 / N분 전 / N시간 전 / N일 전" — 마지막 원격 새로고침 시각 표시용 순수 함수 (E7e) */
-export function relativeTimeLabel(fromMs: number, nowMs: number): string {
-  const minutes = Math.floor((nowMs - fromMs) / 60_000)
-  if (minutes < 1) return '방금 전'
-  if (minutes < 60) return `${minutes}분 전`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}시간 전`
-  return `${Math.floor(hours / 24)}일 전`
-}
-```
-
-- [ ] **Step 5: 게이트** — 루트 `pnpm test` → **452 passed**. `pnpm typecheck` Done.
-
-- [ ] **Step 6: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
-git add apps/desktop/src/main/watch-filter.ts apps/desktop/test/watch-filter.test.ts apps/desktop/src/renderer/src/components/relative-time.ts apps/desktop/test/relative-time.test.ts
-git commit -m "feat(desktop): E7e — FETCH_HEAD 필터 제외(헛갱신 차단)·상대 시간 순수 함수
+git add apps/desktop/src/main/watch-filter.ts apps/desktop/test/watch-filter.test.ts
+git commit -m "feat(desktop): E7e — FETCH_HEAD 필터 제외(무변화 fetch 헛갱신 차단)
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -1104,7 +1073,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/components/BranchesPanel.tsx` + `branches-panel.css`(해당 파일명 실독 — BranchesPanel이 import하는 css)
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 
-- [ ] **Step 1: sanitize Red→Green.** `packages/ipc-contract/test/settings.test.ts`의 기존(E7d worktreeSelectAction 테스트):
+- [x] **Step 1: sanitize Red→Green.** `packages/ipc-contract/test/settings.test.ts`의 기존(E7d worktreeSelectAction 테스트):
 
 ```ts
   it('워크트리 선택 동작(worktreeSelectAction)은 두 값만 통과시킨다 (E7c)', () => {
@@ -1133,7 +1102,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Red 확인(sanitize는 Task 4에서 이미 구현 — **바로 Green이어야 정상**. 실패하면 Task 4 구현 확인) → 통과 확인. (이 테스트는 사후 고정 — Task 4 배선의 컴파일 요건으로 필드가 먼저 갔다.)
 
-- [ ] **Step 2: SettingsDialog [일반] 확장.** `apps/desktop/src/renderer/src/ui/settings/SettingsDialog.tsx` 편집 3곳.
+- [x] **Step 2: SettingsDialog [일반] 확장.** `apps/desktop/src/renderer/src/ui/settings/SettingsDialog.tsx` 편집 3곳.
 
 (a) import 기존:
 
@@ -1240,9 +1209,9 @@ interface SettingsDialogProps {
 
 주의: [일반] 분기가 fieldset 하나를 감싸는 현행 구조에서 형제 fieldset 3개가 되므로, 분기 JSX가 단일 자식을 요구하면(현행은 `<fieldset>...</fieldset>` 하나) **fragment(`<>...</>`)로 감싼다** — 구현 시 현행 구조 실독 후 같은 취지로 조정·편차 보고.
 
-- [ ] **Step 3: BranchesPanel — 새로고침 버튼+시각.** 편집 3곳.
+- [x] **Step 3: BranchesPanel — 새로고침 버튼+시각.** 편집 3곳.
 
-(a) import — 현행 상단(실독)에 추가: `import { RefreshCw } from 'lucide-react'`(lucide 미사용이면 신규 줄), `import { relativeTimeLabel } from './relative-time'`. Button은 기존 import 확인(비교 뷰가 사용 — 있음).
+(a) import — 현행 상단(실독)에 추가: `import { RefreshCw } from 'lucide-react'`(lucide 미사용이면 신규 줄), `import { formatRelativeTime } from './relative-time'`(기존 E0-3b 유틸 재사용 — 플랜 정정). Button은 기존 import 확인(비교 뷰가 사용 — 있음).
 
 (b) props — 현행 interface(실독)에 추가(onAction 위 근처, 같은 취지·편차 보고):
 
@@ -1275,7 +1244,7 @@ interface SettingsDialogProps {
           </Button>
           {lastFetchAt !== null && (
             <span className="branches-panel__fetch-at" data-testid="fetch-at">
-              {relativeTimeLabel(lastFetchAt, Date.now())} 새로고침
+              {formatRelativeTime(Math.floor(lastFetchAt / 1000), Date.now())} 새로고침
             </span>
           )}
         </div>
@@ -1298,7 +1267,7 @@ interface SettingsDialogProps {
 }
 ```
 
-- [ ] **Step 4: App — 상태·타이머·프롭.** 편집 3곳.
+- [x] **Step 4: App — 상태·타이머·프롭.** 편집 3곳.
 
 (a) import — 기존:
 
@@ -1395,9 +1364,9 @@ import { loadAutoFetch, saveAutoFetch } from './ui/settings/sync-settings'
               onFetchRemotes={() => void store.fetchRemotes()}
 ```
 
-- [ ] **Step 5: 게이트** — 루트 `pnpm test` → **453 passed**. `pnpm typecheck` Done. `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **60 passed**(무회귀 — 자동 fetch는 원격 없는 픽스처에서 no-op).
+- [x] **Step 5: 게이트** — 루트 `pnpm test` → **450 passed**. `pnpm typecheck` Done. `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **60 passed**(무회귀 — 자동 fetch는 원격 없는 픽스처에서 no-op).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/ipc-contract/test/settings.test.ts apps/desktop/src/renderer/src/ui/settings/SettingsDialog.tsx apps/desktop/src/renderer/src/components/BranchesPanel.tsx apps/desktop/src/renderer/src/components/branches-panel.css apps/desktop/src/renderer/src/App.tsx
@@ -1415,9 +1384,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/desktop/e2e/smoke.spec.ts` (+4)
 
-원격이 필요한 테스트는 로컬 bare 원격을 mkdtemp로 만들어 clone·push로 구성한다(네트워크 무접촉). 파일 끝(E7d 마지막 테스트 `'터미널(외부) 커밋 후에도 보던 커밋 상세가 유지된다 (E7d ⑤)'`의 닫는 `})` 뒤)에 추가:
+원격이 필요한 테스트는 로컬 bare 원격을 mkdtemp로 만들어 clone·push로 구성한다(네트워크 무접촉). **자동 fetch 경합 차단(Task 6 리뷰 advisory)**: autoFetch 기본 켬이라 앱 시작 즉시 fetch가 돌아 원격 픽스처 테스트와 경합(감시발 externalRefresh 플레이크)할 수 있다 — 원격 픽스처 테스트 ①②③은 userData에 `settings.json`을 미리 시드해 끈다(`await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))` — launch 전). ④는 기본 켬 상태 검증이 목적이라 시드하지 않는다. 파일 끝(E7d 마지막 테스트 `'터미널(외부) 커밋 후에도 보던 커밋 상세가 유지된다 (E7d ⑤)'`의 닫는 `})` 뒤)에 추가:
 
-- [ ] **Step 1: 테스트 4건 추가.**
+- [x] **Step 1: 테스트 4건 추가.**
 
 ```ts
 
@@ -1436,6 +1405,8 @@ test('원격 새로고침 — 원격의 새 실험 공간이 목록에 나타난
   // 원격에만 있는 새 브랜치 — 이 클론은 fetch 전까지 모른다
   await execGitOrThrow(['--git-dir', remote, 'branch', 'remote-only', 'HEAD'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1479,6 +1450,8 @@ test('재배치로 받기 — 병합 저장 없이 일직선으로 받아온다 
   await execGitOrThrow(['add', '-A'], { cwd: repo })
   await execGitOrThrow(['commit', '-m', '내 쪽 저장'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1516,14 +1489,16 @@ test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E
   await execGitOrThrow(['push', 'origin', 'HEAD'], { cwd: repo })
   await execGitOrThrow(['checkout', '-b', 'fresh-space'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 fetch가 테스트 흐름과 경합하지 않게 끈다 — 이 테스트는 수동 버튼/흐름만 검증 (Task 6 리뷰 advisory)
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
   })
   try {
     const window = await app.firstWindow()
-    await window.getByTestId('push').click()
-    await expect(window.getByTestId('notice')).toContainText('연결했어요', { timeout: 10_000 })
+    await window.getByTestId('backup').click()
+    await expect(window.getByTestId('notice')).toContainText('연결하며 백업했어요', { timeout: 10_000 })
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branch-row-fresh-space')).toContainText('동기화됨')
   } finally {
@@ -1562,11 +1537,11 @@ test('설정 — 받아오기 방식·자동 새로고침이 재시작 후에도
 })
 ```
 
-주의(구현자): `pull`·`push`·`notice`의 testId 실명은 기존 스위트에서 grep으로 확정한다(받아오기·백업 버튼과 notice 배너 — 기존 pull/push/notice 관련 E2E가 이미 쓰는 이름을 그대로). 다르면 같은 취지로 맞추고 편차 보고. ②의 history-count 기대치(3)는 초기·원격·재배치된 내 저장 — createRepoWithChange 대신 직접 만든 픽스처라 정확히 3이다.
+testId 실명은 구현 시 grep으로 확정됨: 받아오기 `pull`·백업 `backup`(플랜 원문 'push'는 오기)·`notice` — 나머지는 플랜 원문 그대로. ②의 history-count 기대치(3)는 초기·원격·재배치된 내 저장 — createRepoWithChange 대신 직접 만든 픽스처라 정확히 3이다.
 
-- [ ] **Step 2: 게이트** — `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **64 passed**. 신규 4건 각각 단독(-g) non-flaky 확인. 루트 `pnpm test` 453, typecheck Done.
+- [x] **Step 2: 게이트** — `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **64 passed**. 신규 4건 각각 단독(-g) non-flaky 확인. 루트 `pnpm test` 450, typecheck Done.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/desktop/e2e/smoke.spec.ts
@@ -1579,14 +1554,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 8: 최종 게이트 + 공식 스크린샷 2장 + README
 
-- [ ] **Step 1: 전체 게이트** — 순서대로 전부 exit 0:
-  - 루트 `pnpm test` → **453 passed**
+- [x] **Step 1: 전체 게이트** — 순서대로 전부 exit 0:
+  - 루트 `pnpm test` → **450 passed**
   - 루트 `pnpm typecheck` → 전 프로젝트 Done
   - `pnpm --filter @git-gui/desktop build`
   - `pnpm --filter @git-gui/desktop e2e` → **70 passed** (smoke 64 + hosting 6, 창 미노출)
   - `find apps/desktop/test-results -name 'last-screen-*.png'` → 0건
 
-- [ ] **Step 2: README 반영.** `README.md` 기존(E7d 문단 끝):
+- [x] **Step 2: README 반영.** `README.md` 기존(E7d 문단 끝):
 
 ```
 깨진 쉘($SHELL)은 원인 안내를 띄우고, 테마 전환은 설정 모달 [테마] 카테고리로 이관됐습니다(헤더 단순화).
@@ -1598,9 +1573,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 깨진 쉘($SHELL)은 원인 안내를 띄우고, 테마 전환은 설정 모달 [테마] 카테고리로 이관됐습니다(헤더 단순화). E7e로 원격/동기화가 좋아졌습니다 — 10분 주기 자동 원격 새로고침(설정에서 끄기 가능)과 실험 공간 탭의 수동 새로고침 버튼(마지막 시각 표시)으로 원격 목록·↑↓가 늘 최신이고, 받아오기(pull)를 "재배치로 받기"로 바꾸면 병합 커밋 없이 역사가 일직선이 되며(충돌은 기존 재배치 흐름 그대로), 연결(upstream) 없는 실험 공간을 백업하면 자동으로 원격에 만들어 연결하고 알려줍니다.
 ```
 
-- [ ] **Step 3: 공식 스크린샷 2장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7e.spec.ts`(E7d 관례 — harness electron·1440×900·GIT_GUI_E2E_REPO/USER_DATA·finally 정리·scratchpad 사본·촬영 후 삭제·e2e 재실행 금지). 구성: **(1) e7e-fetch-branches.png** — 로컬 bare 원격 픽스처로 실험 공간 탭을 열고 수동 새로고침 실행 후(원격 새 브랜치 목록 반영·"방금 전 새로고침" 표시) 촬영. **(2) e7e-settings-sync.png** — 설정 [일반] 카테고리(워크트리·받아오기 방식·원격 새로고침 3개 fieldset이 겹침·잘림 없이) 촬영. **육안 검수는 컨트롤러가 한다** — 파일 경로만 보고.
+- [x] **Step 3: 공식 스크린샷 2장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7e.spec.ts`(E7d 관례 — harness electron·1440×900·GIT_GUI_E2E_REPO/USER_DATA·finally 정리·scratchpad 사본·촬영 후 삭제·e2e 재실행 금지). 구성: **(1) e7e-fetch-branches.png** — 로컬 bare 원격 픽스처로 실험 공간 탭을 열고 수동 새로고침 실행 후(원격 새 브랜치 목록 반영·"방금 전 새로고침" 표시) 촬영. **(2) e7e-settings-sync.png** — 설정 [일반] 카테고리(워크트리·받아오기 방식·원격 새로고침 3개 fieldset이 겹침·잘림 없이) 촬영. **육안 검수는 컨트롤러가 한다** — 파일 경로만 보고.
 
-- [ ] **Step 4: Commit** (README만 — 플랜 실행 기록은 컨트롤러가 별도 docs 커밋)
+- [x] **Step 4: Commit** (README만 — 플랜 실행 기록은 컨트롤러가 별도 docs 커밋)
 
 ```bash
 git add README.md
@@ -1615,7 +1590,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 2. **억제 창 함정(실측 6)**: 수동 fetch를 guard+감시에 맡기면 화면이 안 바뀐다 — 설계 단계에서 발견해 fetchRemotes가 직접 스냅샷(+revive)을 뜨는 구조로 확정.
 3. **pullMode를 store 상태로**: syncAfterMerge 등 내부 호출자가 시그니처 변경 없이 읽는다(App 상태로 두면 store 내부 호출자가 mode를 모르는 문제 — 타입 일관성 검토에서 발견).
 4. **rebase classify의 폴백**: ff-only pull --rebase 출력에 "Fast-forward"가 있고(실측 3), 진짜 재배치는 "Successfully rebased" — 둘 다 없으면 mode 기준 폴백(rebased/merged).
-5. **테스트 수 재검산**: T1 +3, T2 +3, T3 +2, T5 +4, T6 +1 = +13 → 440+13=**453**. smoke 60+4=**64**, 전체 70.
+5. **테스트 수 재검산(정정 반영)**: T1 +3, T2 +3, T3 +2, T5 +1, T6 +1 = +10 → 440+10=**450**. smoke 60+4=**64**, 전체 70. (최초안의 상대시간 +3은 기존 유틸 재사용으로 폐기 — E0-3b `formatRelativeTime` 발견.)
 6. **Task 4 게이트의 sanitize 선행**: sync-settings.ts가 AppSettings 필드를 요구해 필드+sanitize 구현을 Task 4로 당기고 테스트 고정은 Task 6에 — 게이트 순서 명시.
 
 ## 인용 앵커 검증 기록
@@ -1631,4 +1606,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - **rebase 받기 중 강제 종료 복원** — rebasing 상태는 재시작 시 기존 상태 바가 복원하지만 pull 유래임은 표시되지 않음(어휘 중립 — 기존 이관 항목과 동일 계열).
 - **lastFetchAt 영속** — 재시작 시 "N분 전" 이어가기(지금은 세션 로컬).
 
+## 실행 기록 (2026-07-23, subagent-driven — 태스크별 스펙 byte-match+품질 결합 리뷰 + 최종 통합 리뷰 전부 통과)
 
+- 커밋 8건: 96d2834(T1) · 868f3ba(T2) · 9c0dc4c(T3) · 197aec0(T4) · 743a1f5(T5) · adaa3c9(T6) · f5269a1(T7) · 7494378(T8 README).
+- 최종 게이트(통합 리뷰어 재실측): 단위 **450** · typecheck 전부 Done · E2E **70**(smoke 64 + hosting 6) · last-screen 0건 · 공식 스크린샷 2장 컨트롤러 육안 검수 통과.
+- 구현 편차(전부 본문 레트로 반영): T1·T2 픽스처 push 씨앗(갓 init된 bare의 unborn HEAD·공통 조상 부재 — 실기동 발견), **의도된 typecheck 적색 창**(T2의 outcome 확장 → T4가 닫음 — E7d '설계된 임시 실패' 관례로 게이트 명문화), **플랜 정정: 상대시간 유틸은 E0-3b `formatRelativeTime` 재사용**(신규 생성안은 DRY 위반 — 컨트롤러 발견, T5 축소·총계 453→450), T3 리뷰발 notice 중립화("만들어"→"연결하며" — rename 재연결·반쪽 수리도 linked라서), T6 리뷰 advisory로 원격 픽스처 E2E에 autoFetch:false 시드, T7 testId 실명(backup — 플랜 'push'는 오기).
+- 프로세스 사고 1건: T6 구현자가 전역 prettier를 실행해 무설정 재포맷 발생 — 커밋 전 자체 복구, 리뷰어가 잔재 0 독립 검증.
+
+## 후속 노트 추가분 (리뷰 이관)
+
+- **staging 배치 테스트 부하성 플레이크** — E7d 관찰 지속(이번엔 미발생·기록 유지).
+- **E2E 원격 픽스처 헬퍼 중복** — ①②③이 같은 bare+clone 구성을 반복 — 공용 헬퍼 추출 검토.

@@ -16,6 +16,7 @@ import type {
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 import { findRevivableChange } from './selection-revive'
+import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
@@ -45,6 +46,10 @@ interface RepositoryStore {
   rebaseProgress: RebaseProgress | null
   /** 워크트리 목록 — 스냅샷마다 함께 갱신된다. 첫 항목이 본체 (E7c) */
   worktrees: WorktreeInfo[]
+  /** 마지막 원격 새로고침(fetch) 성공 시각 — 자동·수동 공통, 영속 안 함 (E7e) */
+  lastFetchAt: number | null
+  /** 받아오기 방식 — 설정 영속. syncAfterMerge 등 내부 호출자도 이 값을 읽는다 (E7e) */
+  pullMode: PullMode
   shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
@@ -130,6 +135,12 @@ interface RepositoryStore {
   openWorktree(path: string): Promise<void>
   /** Finder에서 보기 (E7c) */
   revealWorktree(path: string): Promise<void>
+  /** 수동 원격 새로고침 — guard 경유(에러 배너). 억제 창이 감시 이벤트를 삼키므로 직접 스냅샷 (E7e 실측 6) */
+  fetchRemotes(): Promise<void>
+  /** 자동 원격 새로고침 — 조용히(배너·busy 없음), 실패 무시. 갱신은 감시가 담당 (E7e) */
+  autoFetchRemotes(): Promise<void>
+  /** 받아오기 방식 변경 — 즉시 영속 (E7e) */
+  setPullMode(mode: PullMode): void
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
   /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
@@ -365,6 +376,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   branchCompare: null,
   rebaseProgress: null,
   worktrees: [],
+  lastFetchAt: null,
+  pullMode: loadPullMode(),
   pulls: [],
   pullDetail: null,
 
@@ -717,11 +730,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
       let notice: string | null = null
       try {
-        const result = await git().sync.pull(repoPath)
+        const result = await git().sync.pull(repoPath, get().pullMode)
         const notices: Record<typeof result.outcome, string | null> = {
           'fast-forward': '원격의 최신 저장을 받아왔어요.',
           merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
-          // 충돌 안내는 머지 바가 상주하며 담당한다
+          rebased: '원격 최신 위로 내 저장을 다시 쌓았어요 — 역사가 일직선이에요.',
+          // 충돌 안내는 머지 바·rebasing 바가 상주하며 담당한다 (모드별)
           conflict: null,
           'up-to-date': '이미 최신이에요.',
         }
@@ -901,11 +915,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().branches.backup(repoPath, name)
+      const result = await git().branches.backup(repoPath, name)
       // push는 ref를 움직이지 않는다 — 비교 뷰 무효화 불필요 (update와의 비대칭은 의도 — 품질 리뷰)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: `"${name}"을 백업(push)했어요.`,
+        notice: result.linked
+          ? `"${name}"을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.`
+          : `"${name}"을 백업(push)했어요.`,
       })
     })
   },
@@ -1072,6 +1088,42 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     }
   },
 
+  async fetchRemotes() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      await git().remotes.fetch(repoPath)
+      // guard 종료 직후 억제 창(800ms)이 fetch발 감시 이벤트를 삼킨다(실측 6) —
+      // 감시에 맡기지 않고 여기서 직접 스냅샷을 뜬다. 보던 화면은 유지(E7d ⑤ 관례)
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+      set({
+        lastFetchAt: Date.now(),
+        ...CLEAR_SELECTIONS,
+        conflictFile: get().conflictFile,
+        ...(await reviveSelections(repoPath, get(), snapshot.status)),
+        ...snapshot,
+      })
+    })
+  },
+
+  async autoFetchRemotes() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    // 주기 작업 — busy 잠금·에러 배너 없이 조용히. 화면 갱신은 감시(refs/remotes 변화)가 담당하고,
+    // 무변화면 FETCH_HEAD 필터 제외 덕에 아무 일도 없다 (E7e ① — 실패는 다음 주기 재시도)
+    try {
+      await git().remotes.fetch(repoPath)
+      set({ lastFetchAt: Date.now() })
+    } catch {
+      // 오프라인·인증 실패 등 — 배너 도배 금지
+    }
+  },
+
+  setPullMode(mode) {
+    savePullMode(mode)
+    set({ pullMode: mode })
+  },
+
   async selectConflict(path) {
     const { repoPath } = get()
     if (!repoPath) return
@@ -1220,9 +1272,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().sync.push(repoPath)
-      // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신
-      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      const result = await git().sync.push(repoPath)
+      // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신. 첫 연결이면 알린다 (E7e ③)
+      set({
+        ...(await fetchSnapshot(repoPath, get().historyLimit)),
+        // linked는 첫 연결뿐 아니라 rename 재연결·반쪽 수리에서도 참 — "만들어"를 피한 중립 문구 (Task 3 리뷰)
+        notice: result.linked
+          ? '이 실험 공간을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.'
+          : null,
+      })
     })
   },
 
