@@ -62,7 +62,8 @@ export function AddWorktreeDialog({
   }
   const chooseMode = (next: AddMode) => {
     setMode(next)
-    suggestFor(next === 'existing' ? branch : newName)
+    // onChange 경로와 같은 trim — 후행 공백이 모드 전환 때만 하이픈 경로가 되는 비일관 방지 (품질 리뷰)
+    suggestFor(next === 'existing' ? branch : newName.trim())
   }
   const effectiveBranch = mode === 'existing' ? branch : newName.trim()
 
