@@ -1615,3 +1615,177 @@ test('터미널 — 접었다 펴도 세션이 유지된다 (E7b)', async () => 
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('워크트리 탭 — 목록에 본체가 보이고 새로 만든다 (E7c)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('🏠')
+    await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('지금 여기')
+    // 새 워크트리 — feature/login 기본 선택·경로 자동 제안
+    await window.getByTestId('worktree-add').click()
+    // 앱의 본체 경로는 git 실경로(/private/var/...)라 repo(/var/...)와 접두가 다르다 — 꼬리로 검증
+    await expect(window.getByTestId('add-worktree-path')).toHaveValue(
+      new RegExp(`${repoName}-feature-login$`),
+    )
+    await window.getByTestId('add-worktree-submit').click()
+    await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toContainText(
+      'feature/login',
+    )
+    const wtList = await execGitOrThrow(['worktree', 'list'], { cwd: repo })
+    expect(wtList.stdout).toContain(`${repo}-feature-login`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('워크트리 탭 — 클릭하면 새 터미널이 그 폴더에서 열린다 (E7c 핵심)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    // 링크드 워크트리 행 클릭 = 활성 지정 + (기본 설정) 터미널 열림
+    await window.getByTestId(`worktree-row-${repoName}-feature-login`).click()
+    await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toContainText(
+      '터미널 대상',
+    )
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await window.locator('.terminal-dock__view').first().click()
+    await window.keyboard.type('pwd')
+    await window.keyboard.press('Enter')
+    // 새 세션의 cwd가 워크트리 폴더 — 터미널 연동의 핵심 검증
+    // (macOS: pwd는 실경로 /private/var/...를 찍지만 repo(/var/...)를 부분 문자열로 포함한다)
+    await expect(window.getByTestId('terminal-body')).toContainText(`${repo}-feature-login`, {
+      timeout: 10_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('설정 — 앱 전체 전환으로 바꾸면 클릭 시 헤더·역사가 그 워크트리로 바뀐다 (E7c)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
+  // 워크트리에서 저장을 하나 더 만들어 역사가 달라지게 한다
+  await writeFile(join(`${repo}-feature-login`, 'wt.txt'), 'w\n')
+  await execGitOrThrow(['add', '-A'], { cwd: `${repo}-feature-login` })
+  await execGitOrThrow(['commit', '-m', '워크트리 전용 저장'], { cwd: `${repo}-feature-login` })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    // 설정 → 앱 전체 전환
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-worktree-switch').click()
+    await window.getByTestId('settings-close').click()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${repoName}-feature-login`).click()
+    // 역사에 워크트리 전용 저장이 보인다 — 앱 전체가 그 워크트리 기준으로 전환됐다
+    await expect(window.getByTestId('history-list')).toContainText('워크트리 전용 저장', {
+      timeout: 5_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('워크트리 탭 — 미저장 변경이 있으면 지우기가 2단 확인이다 (E7c)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
+  await writeFile(join(`${repo}-feature-login`, 'dirty.txt'), 'd\n')
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${repoName}-feature-login`).click({ button: 'right' })
+    await window.getByTestId('context-remove').click()
+    // 1차 확인 → 엔진이 needsForce → 2차(강제) 확인
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByRole('alertdialog')).toContainText('미저장 변경이 있어요')
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toHaveCount(0)
+    const wtList = await execGitOrThrow(['worktree', 'list'], { cwd: repo })
+    expect(wtList.stdout).not.toContain(`${repo}-feature-login`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('감시 — 링크드 워크트리를 앱에서 열면 그 안의 외부 저장도 따라온다 (E7c 실버그 수정)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    // 링크드 워크트리를 앱에서 연다(전체 전환) — 감시가 common-dir로 교체된다
+    await window.getByTestId(`worktree-row-${repoName}-feature-login`).click({ button: 'right' })
+    await window.getByTestId('context-open').click()
+    await expect(window.getByTestId('history-count')).toHaveText('1', { timeout: 5_000 })
+    // 열기(guard) 종료 직후 800ms는 설계된 자기-이벤트 억제 창(WATCH_SUPPRESS_MS=800) —
+    // 그 안에 도착한 외부 이벤트는 버려지므로 창이 지난 뒤 커밋한다 (renderer 모듈은 e2e에서
+    // import하지 않는 관례라 상수를 리터럴로 둔다)
+    await window.waitForTimeout(900)
+    // 그 워크트리에서 밖으로 커밋 — 현행 감시(.git 파일)면 이벤트가 안 온다(실측 H1). common-dir 감시면 따라온다
+    await execGitOrThrow(['commit', '--allow-empty', '-m', '워크트리 외부 저장'], {
+      cwd: `${repo}-feature-login`,
+    })
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 5_000 })
+    await expect(window.getByTestId('history-list')).toContainText('워크트리 외부 저장')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(`${repo}-feature-login`, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
