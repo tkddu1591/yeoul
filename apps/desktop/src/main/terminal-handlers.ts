@@ -1,6 +1,6 @@
 import { app, ipcMain } from 'electron'
 import { TERMINAL_CHANNELS } from '@git-gui/ipc-contract'
-import { assertAllowedRepo, assertString } from './git-handlers'
+import { assertAllowedRepo, assertString, assertWorktreePath } from './git-handlers'
 import { TerminalManager } from './terminal-manager'
 
 export function registerTerminalHandlers(): void {
@@ -26,9 +26,11 @@ export function registerTerminalHandlers(): void {
   // macOS는 창을 닫아도 앱이 살아 고아 쉘이 남는다 (품질 리뷰). sender당 1회만 등록한다
   const cleanupHooked = new WeakSet<Electron.WebContents>()
 
-  ipcMain.handle(TERMINAL_CHANNELS.create, (event, repoPath: unknown) => {
-    const cwd = assertAllowedRepo(repoPath)
-    const created = manager.create(cwd)
+  ipcMain.handle(TERMINAL_CHANNELS.create, async (event, repoPath: unknown, cwd: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    // cwd가 오면 이 저장소의 워크트리 경로인지 검증한다 — 임의 경로 쉘 스폰 차단 (E7c 보안 가드)
+    const target = cwd === undefined ? root : await assertWorktreePath(root, cwd)
+    const created = manager.create(target)
     targets.set(created.sessionId, event.sender)
     if (!cleanupHooked.has(event.sender)) {
       cleanupHooked.add(event.sender)

@@ -73,10 +73,11 @@ export function useTerminalSessions(repoPath: string | null) {
     void window.terminalApi.resize(sessionId, view.terminal.cols, view.terminal.rows)
   }
 
-  const create = async () => {
+  /** 세션 생성 — cwd·label이 오면 그 워크트리 폴더에서 열고 탭 라벨에 병기한다 (E7c) */
+  const create = async (options?: { cwd?: string; label?: string }) => {
     if (repoPath === null) return
     try {
-      const { sessionId } = await window.terminalApi.create(repoPath)
+      const { sessionId } = await window.terminalApi.create(repoPath, options?.cwd)
       counterRef.current += 1
       const terminal = new Terminal({ fontSize: 12, theme: TERMINAL_THEME, scrollback: 1000 })
       const fit = new FitAddon()
@@ -89,7 +90,14 @@ export function useTerminalSessions(repoPath: string | null) {
         pendingRef.current.delete(sessionId)
         for (const chunk of pending) terminal.write(chunk)
       }
-      setTabs((prev) => [...prev, { sessionId, title: `${counterRef.current}: 쉘`, exited: false }])
+      setTabs((prev) => [
+        ...prev,
+        {
+          sessionId,
+          title: `${counterRef.current}: ${options?.label ?? '쉘'}`,
+          exited: false,
+        },
+      ])
       setActiveId(sessionId)
       setError(null)
     } catch (cause) {

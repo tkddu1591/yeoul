@@ -675,6 +675,7 @@ export function App() {
           <div className="app__dock" style={{ display: dockOpen ? 'block' : 'none' }}>
             <TerminalDock
               repoPath={store.repoPath}
+              activeWorktree={null}
               open={dockOpen}
               height={dockHeight}
               onResizeStart={startDockResize}

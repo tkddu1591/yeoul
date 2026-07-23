@@ -159,7 +159,7 @@ const settingsApi: SettingsApi = {
 contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)
 
 const terminalApi: TerminalApi = {
-  create: (repoPath) => ipcRenderer.invoke(TERMINAL_CHANNELS.create, repoPath),
+  create: (repoPath, cwd) => ipcRenderer.invoke(TERMINAL_CHANNELS.create, repoPath, cwd),
   input: (sessionId, data) => ipcRenderer.invoke(TERMINAL_CHANNELS.input, sessionId, data),
   resize: (sessionId, cols, rows) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.resize, sessionId, cols, rows),

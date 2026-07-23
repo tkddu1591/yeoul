@@ -359,8 +359,8 @@ export const SETTINGS_CHANNELS = {
 
 /** 터미널 표면 (E7b) — pty는 main 전용. renderer는 세션 id와 바이트 스트림만 다룬다 */
 export interface TerminalApi {
-  /** 세션 생성 — cwd는 allowlist된 저장소 루트로 고정된다 (E7c에서 워크트리 인자 확장) */
-  create(repoPath: string): Promise<{ sessionId: string }>
+  /** 세션 생성 — cwd 생략 시 저장소 루트. cwd는 그 저장소의 워크트리 경로만 허용(main 검증 — E7c) */
+  create(repoPath: string, cwd?: string): Promise<{ sessionId: string }>
   input(sessionId: string, data: string): Promise<void>
   resize(sessionId: string, cols: number, rows: number): Promise<void>
   kill(sessionId: string): Promise<void>
