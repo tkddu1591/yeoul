@@ -1646,8 +1646,9 @@ test('워크트리 탭 — 목록에 본체가 보이고 새로 만든다 (E7c)'
   try {
     const window = await app.firstWindow()
     await window.getByTestId('left-tab-worktrees').click()
-    await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('🏠')
-    await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('지금 여기')
+    // E7g: 이모지·칩 대신 글리프(➤)·title 툴팁으로 "지금 여기"를 단언(같은 상태, 다른 표시 방식)
+    await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('➤')
+    await expect(window.getByTestId(`worktree-row-${repoName}`)).toHaveAttribute('title', /지금 여기/)
     // 새 워크트리 — feature/login 기본 선택·경로 자동 제안
     await window.getByTestId('worktree-add').click()
     // 앱의 본체 경로는 git 실경로(/private/var/...)라 repo(/var/...)와 접두가 다르다 — 꼬리로 검증
@@ -1684,9 +1685,8 @@ test('워크트리 탭 — 클릭하면 새 터미널이 그 폴더에서 열린
     await window.getByTestId('left-tab-worktrees').click()
     // 링크드 워크트리 행 클릭 = 활성 지정 + (기본 설정) 터미널 열림
     await window.getByTestId(`worktree-row-${repoName}-feature-login`).click()
-    await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toContainText(
-      '터미널 대상',
-    )
+    // E7g: 칩 대신 ❯_ 글리프(제목 툴팁 "터미널 대상")로 단언
+    await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toContainText('❯_')
     await expect(window.getByTestId('terminal-dock')).toBeVisible()
     await window.locator('.terminal-dock__view').first().click()
     await window.keyboard.type('pwd')

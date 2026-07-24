@@ -96,7 +96,7 @@ export function WorktreesPanel({
               key={worktree.path}
               type="button"
               className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
-              title={worktree.path}
+              title={worktree.path === currentPath ? `${worktree.path} — 지금 여기` : worktree.path}
               onClick={(event) =>
                 worktree.prunable
                   ? openMenu(event, worktree)
@@ -109,15 +109,23 @@ export function WorktreesPanel({
               onContextMenu={(event) => openMenu(event, worktree)}
               data-testid={`worktree-row-${folderName(worktree.path)}`}
             >
-              <span className="worktree-row__top">
-                <span className="worktree-row__name">
-                  {worktree.isMain ? '🏠' : '🌳'} {folderName(worktree.path)}
-                </span>
-                {worktree.path === currentPath && <Badge tone="git">지금 여기</Badge>}
-                {worktree.path === activePath && <Badge tone="git">터미널 대상</Badge>}
-                <span className="worktree-row__branch">{branchLabel(worktree)}</span>
+              <span
+                className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
+              >
+                {worktree.path === currentPath ? '➤' : '⌂'}
+              </span>
+              <span
+                className={`worktree-row__name${worktree.path === currentPath ? ' worktree-row__name--here' : ''}`}
+              >
+                {folderName(worktree.path)}
               </span>
               <span className="worktree-row__path">{worktree.path}</span>
+              {worktree.path === activePath && (
+                <span className="worktree-row__terminal" title="터미널 대상 — 새 터미널이 이 폴더에서 열려요">
+                  ❯_
+                </span>
+              )}
+              <span className="worktree-row__branch">{branchLabel(worktree)}</span>
             </button>
           ))}
           <button
