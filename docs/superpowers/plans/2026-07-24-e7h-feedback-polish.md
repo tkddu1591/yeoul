@@ -29,7 +29,7 @@
 - Modify: `packages/git-adapter/src/client.ts` (branches.remove — 567-582행 부근)
 - Test: `packages/git-adapter/test/client.test.ts`
 
-- [ ] **Step 1: 도메인 타입 확장.** `packages/domain/src/repository.ts`의 기존:
+- [x] **Step 1: 도메인 타입 확장.** `packages/domain/src/repository.ts`의 기존:
 
 ```ts
 /** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */
@@ -52,7 +52,7 @@ export interface RemoveBranchResult {
 }
 ```
 
-- [ ] **Step 2: Red.** `packages/git-adapter/test/client.test.ts`에 기존 branches.remove 테스트 근처(실독) 추가:
+- [x] **Step 2: Red.** `packages/git-adapter/test/client.test.ts`에 기존 branches.remove 테스트 근처(실독) 추가:
 
 ```ts
   it('워크트리가 펼쳐 쓰는 실험 공간 지우기는 usedByWorktree로 알린다', async () => {
@@ -84,9 +84,9 @@ export interface RemoveBranchResult {
 
 (테스트 파일의 기존 헬퍼 이름(initRepo·commitFile·execGitOrThrow·createGitClient 등)은 실독으로 정확 이름 확인 — 다르면 같은 취지로 조정·편차 보고. `realpath`는 `node:fs/promises`, `join/dirname/basename`은 `node:path` — import 실독 정리.)
 
-- [ ] **Step 3: Red 확인** — `pnpm --filter @git-gui/git-adapter test` 실행, 새 테스트 2건 실패(usedByWorktree 미존재/메시지 분기 미구현) 확인.
+- [x] **Step 3: Red 확인** — `pnpm --filter @git-gui/git-adapter test` 실행, 새 테스트 2건 실패(usedByWorktree 미존재/메시지 분기 미구현) 확인.
 
-- [ ] **Step 4: 구현.** `packages/git-adapter/src/client.ts`의 기존:
+- [x] **Step 4: 구현.** `packages/git-adapter/src/client.ts`의 기존:
 
 ```ts
       async remove(name, force) {
@@ -143,11 +143,11 @@ export interface RemoveBranchResult {
 
 (`realpath`는 `node:fs/promises`에서 import — 파일 상단 import 실독 정리. 경로 파싱 실패(match null)면 기존 에러로 폴백 — 스펙 "파싱 실패 시 null 경로로도 같은 분기"보다 보수적이지만, 경로 없이는 동반 삭제를 실행할 수 없으므로 에러 폴백이 정직하다 — 스펙 편차로 기록됨.)
 
-- [ ] **Step 5: worktrees.remove 반환도 타입 맞춤.** client.ts의 worktrees.remove(719행 부근)가 같은 `RemoveBranchResult`를 반환한다 — 반환 리터럴 2곳에 `usedByWorktree: null` 추가(실독으로 정확 위치). 다른 RemoveBranchResult 반환처가 더 있으면 전부 동일 처리(typecheck가 잡는다).
+- [x] **Step 5: worktrees.remove 반환도 타입 맞춤.** client.ts의 worktrees.remove(719행 부근)가 같은 `RemoveBranchResult`를 반환한다 — 반환 리터럴 2곳에 `usedByWorktree: null` 추가(실독으로 정확 위치). 다른 RemoveBranchResult 반환처가 더 있으면 전부 동일 처리(typecheck가 잡는다).
 
-- [ ] **Step 6: 게이트** — `pnpm --filter @git-gui/git-adapter test` 전건 통과, 루트 `pnpm test` → **468+2(실측 정정)**, `pnpm typecheck` 전부 Done(도메인 필드 추가로 데스크톱 쪽 컴파일 에러가 나면 해당 사용처는 이 태스크에서 `usedByWorktree` 무시로만 맞추고 UI 흐름은 Task 7이 담당).
+- [x] **Step 6: 게이트** — `pnpm --filter @git-gui/git-adapter test` 전건 통과, 루트 `pnpm test` → **468+2(실측 정정)**, `pnpm typecheck` 전부 Done(도메인 필드 추가로 데스크톱 쪽 컴파일 에러가 나면 해당 사용처는 이 태스크에서 `usedByWorktree` 무시로만 맞추고 UI 흐름은 Task 7이 담당).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/domain/src/repository.ts packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -164,7 +164,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `apps/desktop/src/renderer/src/components/file-tree.ts`
 - Test: `apps/desktop/test/file-tree.test.ts`
 
-- [ ] **Step 1: Red.** `apps/desktop/test/file-tree.test.ts` 신규:
+- [x] **Step 1: Red.** `apps/desktop/test/file-tree.test.ts` 신규:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -221,7 +221,7 @@ describe('buildFileTree + flattenFileTree', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인 후 구현.** `pnpm --filter @git-gui/desktop test -- -t 'buildFileTree'` 실패 확인 → `apps/desktop/src/renderer/src/components/file-tree.ts` 신규:
+- [x] **Step 2: Red 확인 후 구현.** `pnpm --filter @git-gui/desktop test -- -t 'buildFileTree'` 실패 확인 → `apps/desktop/src/renderer/src/components/file-tree.ts` 신규:
 
 ```ts
 /**
@@ -297,9 +297,9 @@ export function flattenFileTree<T extends { path: string }>(
 }
 ```
 
-- [ ] **Step 3: 게이트** — `pnpm --filter @git-gui/desktop test -- -t 'FileTree'`로 4건 통과 확인(이름 매칭이 어긋나면 파일 단위 실행), 루트 `pnpm test` → **468+2+4(실측 정정)**, typecheck Done.
+- [x] **Step 3: 게이트** — `pnpm --filter @git-gui/desktop test -- -t 'FileTree'`로 4건 통과 확인(이름 매칭이 어긋나면 파일 단위 실행), 루트 `pnpm test` → **468+2+4(실측 정정)**, typecheck Done.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/file-tree.ts apps/desktop/test/file-tree.test.ts
@@ -317,7 +317,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/App.tsx` (459-460행 부근 top-stack 렌더)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 1건)
 
-- [ ] **Step 1: layout.css 하드코딩 패딩 제거.** 기존:
+- [x] **Step 1: layout.css 하드코딩 패딩 제거.** 기존:
 
 ```css
 /* E7a — 좌측 탭바(z-41)가 배너 위에 뜬다. 배너 텍스트가 탭 뒤로 숨지 않게 콘텐츠만 탭 구역 오른쪽에서 시작(배경은 전체 폭 유지) */
@@ -335,7 +335,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
    E7a의 padding-left 210px(탭 2개 시절 실측)는 탭이 늘며 깨졌다 — 하드코딩 폐기 */
 ```
 
-- [ ] **Step 2: App top-stack에 inline left.** App.tsx의 기존:
+- [x] **Step 2: App top-stack에 inline left.** App.tsx의 기존:
 
 ```tsx
         <div className="app__top-layer">
@@ -350,7 +350,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
           <div className="app__top-stack" style={{ left: columns.left + 36 }}>
 ```
 
-- [ ] **Step 3: E2E 신규 1건.** smoke.spec.ts 파일 끝(E7g 테스트 뒤)에 추가 — 워크트리 탭을 켠 상태에서 알림을 띄우고, 알림 텍스트와 세 탭이 모두 가려지지 않음을 단언. 픽스처·헬퍼는 기존 스위트 관례(createRepoWithChange 등 실독) 재사용:
+- [x] **Step 3: E2E 신규 1건.** smoke.spec.ts 파일 끝(E7g 테스트 뒤)에 추가 — 워크트리 탭을 켠 상태에서 알림을 띄우고, 알림 텍스트와 세 탭이 모두 가려지지 않음을 단언. 픽스처·헬퍼는 기존 스위트 관례(createRepoWithChange 등 실독) 재사용:
 
 ```ts
 test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 않는다', async () => {
@@ -381,9 +381,9 @@ test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 �
 
 (testid `left-tab-worktrees`/`left-tab-changes`·`branch-create`·prompt testid·openRepo 헬퍼는 실독으로 정확 이름 확인 — 다르면 같은 취지 조정·편차 보고.)
 
-- [ ] **Step 4: 게이트** — typecheck, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **69 passed**(68+1), 루트 `pnpm test` 유지.
+- [x] **Step 4: 게이트** — typecheck, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **69 passed**(68+1), 루트 `pnpm test` 유지.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/layout.css apps/desktop/src/renderer/src/App.tsx apps/desktop/e2e/smoke.spec.ts
@@ -391,6 +391,8 @@ git commit -m "fix(desktop): E7h 알림 비가림 — 배너 스택을 좌측 �
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
+
+**Task 3 실행 편차 (소급 기록 — 리뷰 검증 완료):** E2E 헬퍼·testid 실명 조정 — `createRepoWithChange()`는 무인자, 저장소는 `GIT_GUI_E2E_REPO` env로 즉시 열림(openRepo 헬퍼 없음). notice 유발은 브랜치 생성이 아니라 **커밋 우클릭 태그 만들기**(createBranch는 autoShelved 아니면 notice를 띄우지 않음 — store 실측; 태그는 항상 notice, 기존 스위트 확립 경로). left-tab-* testid는 실재 그대로 사용.
 
 ---
 
@@ -401,7 +403,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/components/commit-detail-panel.css` (폴더 행 스타일 추가 — 실독)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 1건)
 
-- [ ] **Step 1: 트리 행 렌더로 교체.** CommitDetailPanel.tsx에서:
+- [x] **Step 1: 트리 행 렌더로 교체.** CommitDetailPanel.tsx에서:
   1. import 추가: `import { buildFileTree, flattenFileTree } from './file-tree'` + `useState`에 `collapsed` 추가.
   2. 컴포넌트 상단(기존 menu state 근처)에:
 
@@ -472,7 +474,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   (`detail.hash` 필드명은 CommitDetail 도메인 타입 실독 — shortHash만 있으면 그걸 쓴다. useEffect import 추가.)
   6. CommitFileRow 안의 `file-row__dir`(경로 흐림 부분)은 트리에서는 중복 정보다 — 파일 행에서 **디렉터리 표기를 제거**하고 basename만 남긴다(툴팁에는 전체 경로 유지). 단, ⑥의 검색 필터(평면 모드)에서는 전체 경로가 필요하므로 CommitFileRow에 `showDir: boolean` prop을 추가해 트리 모드 false/평면 모드 true로 분기(Task 8에서 평면 모드가 생긴다 — 이번 태스크에서는 항상 false로 렌더).
 
-- [ ] **Step 2: 폴더 행 CSS.** commit-detail-panel.css에 추가(기존 토큰 실독·행 높이는 파일 행과 동일 계열):
+- [x] **Step 2: 폴더 행 CSS.** commit-detail-panel.css에 추가(기존 토큰 실독·행 높이는 파일 행과 동일 계열):
 
 ```css
 /* E7h ② — 파일 트리 폴더 행 */
@@ -509,7 +511,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 }
 ```
 
-- [ ] **Step 3: E2E 신규 1건.** smoke.spec.ts 끝에 추가 — 폴더 2단 커밋을 만들고 상세를 열어: 폴더 행 존재 → 접기 → 하위 파일 행 소멸 → 펼치기 복원. 픽스처는 기존 커밋 상세 테스트(실독) 관례 재사용:
+- [x] **Step 3: E2E 신규 1건.** smoke.spec.ts 끝에 추가 — 폴더 2단 커밋을 만들고 상세를 열어: 폴더 행 존재 → 접기 → 하위 파일 행 소멸 → 펼치기 복원. 픽스처는 기존 커밋 상세 테스트(실독) 관례 재사용:
 
 ```ts
 test('E7h — 커밋 상세 파일 목록이 폴더 트리로 접힌다', async () => {
@@ -544,9 +546,9 @@ test('E7h — 커밋 상세 파일 목록이 폴더 트리로 접힌다', async 
 
 (`history-item-0` 등 testid는 기존 커밋 상세 E2E 실독으로 정확 이름 확인·조정.)
 
-- [ ] **Step 4: 게이트** — typecheck, build, smoke → **70 passed**(69+1), 루트 `pnpm test` 유지. 기존 커밋 상세·보관함 미리보기 E2E가 `commit-file-<path>` testid로 파일 행을 찾으므로 무회귀 예상 — 깨지면 원인 수정(비활성 금지)·편차 보고.
+- [x] **Step 4: 게이트** — typecheck, build, smoke → **70 passed**(69+1), 루트 `pnpm test` 유지. 기존 커밋 상세·보관함 미리보기 E2E가 `commit-file-<path>` testid로 파일 행을 찾으므로 무회귀 예상 — 깨지면 원인 수정(비활성 금지)·편차 보고.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx apps/desktop/src/renderer/src/components/commit-detail-panel.css apps/desktop/e2e/smoke.spec.ts
@@ -554,6 +556,8 @@ git commit -m "feat(desktop): E7h 커밋 상세 파일 목록 depth 트리 — �
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
+
+**Task 4 실행 편차 (소급 기록 — 리뷰 검증 완료):** E2E — `history-item-0`은 미존재(실제 `history-item-<hash>`) → `[data-testid^="history-item-"]` first 관례로 조정, openRepo/인자형 createRepoWithChange는 Task 3 편차와 동일 정정. 리뷰 Minor 2건(폴더 key `d:` 접두 스킴 이론적 취약·chev/glyph 약 2px 정렬 오차)은 무해 판정 — 기록만.
 
 ---
 
@@ -564,7 +568,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/main/index.ts` (titleBarStyle)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 1건 — 전환 동시성)
 
-- [ ] **Step 1: 전환 순서 교체.** App.tsx의 기존:
+- [x] **Step 1: 전환 순서 교체.** App.tsx의 기존:
 
 ```tsx
                   case 'select':
@@ -602,7 +606,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (`store.openWorktree`의 반환 타입 실독 — boolean을 반환하지 않으면(void), then 콜백에서 `store.getState?` 대신 **openWorktree를 성공 여부 boolean 반환으로 바꾸는 최소 수정**을 store에 가한다: guard 결과를 반환(기존 removeWorktree가 boolean 반환하는 관례 실독 후 동일 패턴). 편차 보고.)
 
-- [ ] **Step 2: 신호등 위치.** main/index.ts의 기존:
+- [x] **Step 2: 신호등 위치.** main/index.ts의 기존:
 
 ```ts
     // E7f 한 줄 타이틀바(macOS) — OS 타이틀바 줄을 없애고 신호등만 인셋으로 띄워
@@ -621,7 +625,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
       : {}),
 ```
 
-- [ ] **Step 3: y 좌표 실측 확정.** dev 또는 E2E로 헤더 실높이를 잰다:
+- [x] **Step 3: y 좌표 실측 확정.** dev 또는 E2E로 헤더 실높이를 잰다:
 
 ```bash
 cd apps/desktop && npx electron-vite build && node -e "
@@ -638,7 +642,7 @@ const { _electron } = require('playwright');
 
 `y = Math.round((헤더높이 - 14) / 2)` (신호등 지름 ≈14px 관례)로 Step 2의 `y: 20`을 실측값으로 교체(달라지면 편차 보고). 전체화면 push(E7f)·드래그 무변 확인은 코드 리뷰로(신호등 자체는 OS 크롬이라 E2E 불가).
 
-- [ ] **Step 4: E2E 전환 동시성 1건.** smoke.spec.ts 끝에 추가 — 설정을 "앱 전체 전환"으로 바꾼 뒤 워크트리 행 클릭: 좌측 헤더의 저장소 경로와 도크 라벨이 **같은 시점 이후** 모두 새 워크트리를 가리킴(전환 완료 후 라벨 단언 — 시차 자체의 프레임 단위 검증은 불가하니 "성공 후에만 바뀐다"의 결과를 검증). 기존 E7c 설정 모달·워크트리 E2E 픽스처(실독) 재사용:
+- [x] **Step 4: E2E 전환 동시성 1건.** smoke.spec.ts 끝에 추가 — 설정을 "앱 전체 전환"으로 바꾼 뒤 워크트리 행 클릭: 좌측 헤더의 저장소 경로와 도크 라벨이 **같은 시점 이후** 모두 새 워크트리를 가리킴(전환 완료 후 라벨 단언 — 시차 자체의 프레임 단위 검증은 불가하니 "성공 후에만 바뀐다"의 결과를 검증). 기존 E7c 설정 모달·워크트리 E2E 픽스처(실독) 재사용:
 
 ```ts
 test('E7h — 앱 전체 전환 시 터미널 대상이 전환 완료 후 함께 바뀐다', async () => {
@@ -670,9 +674,9 @@ test('E7h — 앱 전체 전환 시 터미널 대상이 전환 완료 후 함께
 
 (설정 모달·repo-path·도크 라벨 testid 전부 실독 확인·같은 취지 조정. 도크가 닫혀 있으면 라벨 확인 전에 토글.)
 
-- [ ] **Step 5: 게이트** — typecheck, build, smoke → **71 passed**(70+1), 루트 `pnpm test` 유지. 기존 E7c/E7f E2E(설정·타이틀바 관련) 무회귀 — hidden 전환으로 깨지는 창 옵션 단언이 있으면 같은 취지로 갱신·편차 보고.
+- [x] **Step 5: 게이트** — typecheck, build, smoke → **71 passed**(70+1), 루트 `pnpm test` 유지. 기존 E7c/E7f E2E(설정·타이틀바 관련) 무회귀 — hidden 전환으로 깨지는 창 옵션 단언이 있으면 같은 취지로 갱신·편차 보고.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/App.tsx apps/desktop/src/main/index.ts apps/desktop/e2e/smoke.spec.ts
@@ -682,6 +686,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
 (store.openWorktree 반환 변경이 생기면 repository-store.ts도 add — 편차 보고.)
+
+**Task 5 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① store.openWorktree `Promise<void>` → `Promise<boolean>`(guard 반환 그대로 — busy 재진입/에러 false·성공 true; 플랜의 "removeWorktree 동일 패턴" 비유는 부정확했음: 그쪽은 needsForce 반환). ② 신호등 y=**22**(헤더 실측 58px, (58-14)/2 — 산식 주석 유지, CSS 변경 시 재실측 필요). ③ E2E 실명 — `settings-worktree-switch`(실재 testid), openRepo/E2E_ENV 없음(관례 인라인). ④ `repo-path` testid 신설(App 헤더 span — 검증 훅만, 동작 무변). ⑤ 기존 창 옵션 단언 없음(grep) — 갱신 불요. **리뷰 Minor(기록만):** 신규 E2E의 도크 단언이 repoPath 파생 hint라 "성공 후에만" 게이트를 격리 검증하지 못함(핵심은 코드 리뷰로 확인 — 프레임 단위 검증 불가는 플랜 명시 제약).
 
 ---
 
@@ -693,7 +699,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/App.tsx` (removeWorktree 성공 시 그룹 정리 콜백 — 실독 배선)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 2건)
 
-- [ ] **Step 1: 훅에 그룹 키.** use-terminal-sessions.ts 수정 — `TerminalTab`에 `groupKey: string` 추가, `create`가 그룹 키를 계산해 동봉, 그룹별 마지막 활성 기억·그룹 필터 API 노출. 기존 전체 코드는 실독 완료 상태(플랜 사전) — 다음 diff를 같은 취지로 적용:
+- [x] **Step 1: 훅에 그룹 키.** use-terminal-sessions.ts 수정 — `TerminalTab`에 `groupKey: string` 추가, `create`가 그룹 키를 계산해 동봉, 그룹별 마지막 활성 기억·그룹 필터 API 노출. 기존 전체 코드는 실독 완료 상태(플랜 사전) — 다음 diff를 같은 취지로 적용:
 
 ```ts
 export interface TerminalTab {
@@ -780,14 +786,14 @@ export interface TerminalTab {
 
 (주의: `closeGroup`의 연속 close는 stale `tabs` 클로저 문제가 있다 — close를 함수형 setTabs 기반으로 재작성하거나, closeGroup에서 대상 sessionId 목록을 먼저 뽑아 하나씩 close하되 close가 stale해도 kill·dispose·필터는 sessionId 기준이라 안전한지 실측·재작성한다. **구현자는 세션 2개 그룹 정리가 실제로 둘 다 닫히는지 단위 또는 수동 검증하고 결과를 보고할 것.** 필요하면 close를 `setTabs((prev) => …)` 함수형으로 리팩터 — 같은 취지·편차 보고.)
 
-- [ ] **Step 2: 도크 필터 렌더.** TerminalDock.tsx — `activeWorktree` prop과 repoPath로 현재 그룹 키를 정하고 탭바·자동 생성·＋를 그룹 기준으로(전체 코드 실독 후 같은 취지 적용):
+- [x] **Step 2: 도크 필터 렌더.** TerminalDock.tsx — `activeWorktree` prop과 repoPath로 현재 그룹 키를 정하고 탭바·자동 생성·＋를 그룹 기준으로(전체 코드 실독 후 같은 취지 적용):
   1. `const groupKey = activeWorktree?.cwd ?? repoPath` (repoPath null이면 도크 자체가 비활성 — 기존 가드 유지).
   2. 탭바 렌더 `sessions.tabs.map` → `sessions.tabs.filter((tab) => tab.groupKey === groupKey).map` (본문 세션 DOM은 **전체 탭** 유지 — 숨김 그룹도 pty·xterm 살아있어야 한다. display 조건은 기존 activeId 기준 그대로).
   3. 도크 열림 시 자동 생성 effect(기존 `if (sessions.tabs.length === 0) void sessions.create(...)`)를 그룹 기준으로: `if (현재 그룹 탭 0) void sessions.activateGroup(groupKey, activeWorktree ?? undefined)`.
   4. **그룹 키 변화 effect 추가**(이른 반환보다 앞): 도크가 열려 있는 상태에서 groupKey가 바뀌면 `void sessions.activateGroup(groupKey, activeWorktree ?? undefined)` — 복원 또는 자동 생성.
   5. ＋ 버튼 onPress은 기존 그대로 `sessions.create(activeWorktree ?? undefined)`(= 현재 그룹 cwd) — 라벨 유지.
-- [ ] **Step 3: 워크트리 지우기 정리 배선.** removeWorktree 성공 경로(App.tsx confirmingRemoveWorktree onConfirm — 실독)에서 해당 경로 그룹 정리를 호출해야 한다. TerminalDock 내부 훅이라 App에서 직접 못 부른다 — **TerminalDock에 `purgeGroup?: string | null` prop을 추가하고 App이 지운 워크트리 경로를 1회성 상태로 내려보내면 도크 effect가 `sessions.closeGroup(purgeGroup)` 후 App 콜백(`onPurged()`)으로 상태를 비운다**(App 상태: `const [purgeTerminalGroup, setPurgeTerminalGroup] = useState<string | null>(null)` — removeWorktree 성공 시 `setPurgeTerminalGroup(target.path)`). 대안으로 세션 훅을 App으로 끌어올리는 큰 리팩터는 하지 않는다(YAGNI). 정확한 삽입점 실독·같은 취지 적용.
-- [ ] **Step 4: E2E 신규 2건.** smoke.spec.ts 끝에 추가(픽스처는 Task 5와 같은 워크트리 관례):
+- [x] **Step 3: 워크트리 지우기 정리 배선.** removeWorktree 성공 경로(App.tsx confirmingRemoveWorktree onConfirm — 실독)에서 해당 경로 그룹 정리를 호출해야 한다. TerminalDock 내부 훅이라 App에서 직접 못 부른다 — **TerminalDock에 `purgeGroup?: string | null` prop을 추가하고 App이 지운 워크트리 경로를 1회성 상태로 내려보내면 도크 effect가 `sessions.closeGroup(purgeGroup)` 후 App 콜백(`onPurged()`)으로 상태를 비운다**(App 상태: `const [purgeTerminalGroup, setPurgeTerminalGroup] = useState<string | null>(null)` — removeWorktree 성공 시 `setPurgeTerminalGroup(target.path)`). 대안으로 세션 훅을 App으로 끌어올리는 큰 리팩터는 하지 않는다(YAGNI). 정확한 삽입점 실독·같은 취지 적용.
+- [x] **Step 4: E2E 신규 2건.** smoke.spec.ts 끝에 추가(픽스처는 Task 5와 같은 워크트리 관례):
 
 ```ts
 test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다', async () => {
@@ -855,9 +861,9 @@ test('E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다', a
 
 (context-remove-worktree·confirm-confirm 등 testid 실독 확인·조정. 탭 라벨 카운터가 전역 순번이므로 `3:` 가정이 어긋나면 라벨 매치를 유연화(정규식) — 편차 보고.)
 
-- [ ] **Step 5: 게이트** — typecheck, build, smoke → **73 passed**(71+2), 루트 `pnpm test` 유지. 기존 터미널 E2E 7건 무회귀(그룹 도입으로 라벨·자동 생성 동작이 변하는 단언이 있으면 같은 취지 갱신·편차 보고).
+- [x] **Step 5: 게이트** — typecheck, build, smoke → **73 passed**(71+2), 루트 `pnpm test` 유지. 기존 터미널 E2E 7건 무회귀(그룹 도입으로 라벨·자동 생성 동작이 변하는 단언이 있으면 같은 취지 갱신·편차 보고).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/ui/terminal/use-terminal-sessions.ts apps/desktop/src/renderer/src/ui/terminal/TerminalDock.tsx apps/desktop/src/renderer/src/App.tsx apps/desktop/e2e/smoke.spec.ts
@@ -865,6 +871,10 @@ git commit -m "feat(desktop): E7h 워크트리별 터미널 탭 묶음 — 그�
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
+
+**Task 6 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① **플랜 밖 함정 발견·해소**: [open]·[groupKey] 별도 effect가 같은 렌더에서 동시 발화해 세션 2중 생성(도크 닫힌 채 워크트리 클릭 = 기본 경로) → 단일 effect [open, groupKey] 병합(빈 그룹 생성/기억 복원/refit 분기). ② 플랜 예고 함정 실재: 연속 close의 stale tabs 클로저 → close를 함수형 setTabs/setActiveId로 재작성(kill·dispose는 updater 밖·sessionId 기준 — StrictMode 미적용 확인). closeGroup 2세션 정리는 비필터 `.terminal-dock__view` 카운트(3→1) E2E로 실검증. ③ E2E 실명: `context-remove`·`confirm-accept`, createRepoWithChange 무인자, GIT_GUI_USER_DATA 격리. ④ purge 성공 판정: removeWorktree가 needsForce만 반환 → `!needsForce && getState().error === null`(await 후 fresh read — guard busy 직렬화로 경쟁 없음, 강제(2단) 경로에서도 purge 발생 확인). ⑤ closeGroup 단언을 플랜 초안(필터된 탭바 not.toContainText — 공허)보다 강화.
+
+**Task 6 리뷰 Minor 후속 노트(기록만):** (a) 활성 워크트리 자체를 지우면 activeWorktree가 삭제 경로로 남아 빈 탭바 잔존(세션 누수 없음·다른 행 클릭으로 회복 — purge 시 activateGroup 이어 호출이 후속 개선안). (b) 탭 상한 8은 코드베이스에 애초 부재(선행 갭 — 그룹화가 악화시키지 않음). (c) close updater 내 ref 변이 중첩은 StrictMode 도입 시 주석 필요.
 
 ---
 
@@ -875,7 +885,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/App.tsx` (confirmingRemove 연쇄)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 1건)
 
-- [ ] **Step 1: store 반환 확장.** repository-store.ts의 기존:
+- [x] **Step 1: store 반환 확장.** repository-store.ts의 기존:
 
 ```ts
   async removeBranch(name, force) {
@@ -927,7 +937,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   ): Promise<{ needsForce: boolean; usedByWorktree: string | null }>
 ```
 
-- [ ] **Step 2: App 연쇄.** App.tsx — 상태 추가(confirmingRemove 근처):
+- [x] **Step 2: App 연쇄.** App.tsx — 상태 추가(confirmingRemove 근처):
 
 ```tsx
   // E7h ⑤ — 워크트리가 쓰는 실험 공간: 워크트리 동반 삭제 확인
@@ -1001,7 +1011,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (주의: 워크트리에 미저장 변경이 있어 removeWorktree가 needsForce true를 반환하면 기존 워크트리 2단 확인창(confirmingRemoveWorktree force:true)으로 넘어간다 — 그 흐름이 끝나도 브랜치 삭제 재시도까지 자동으로 이어지진 않는다(연쇄 3단은 과설계 — 스펙 에러표: "되돌리지 않음"). 사용자가 워크트리 강제 삭제를 승인해 지워진 뒤 브랜치를 다시 지우면 이번엔 usedByWorktree 없이 평소 흐름. 이 한계를 confirm 문구가 이미 안내한다. ConfirmDialog의 testid 유무 실독 — 없으면 기존 확인창 관례를 따른다.)
 
-- [ ] **Step 3: E2E 신규 1건.** smoke.spec.ts 끝에 추가:
+- [x] **Step 3: E2E 신규 1건.** smoke.spec.ts 끝에 추가:
 
 ```ts
 test('E7h — 워크트리가 쓰는 실험 공간은 동반 삭제로 지운다', async () => {
@@ -1034,9 +1044,9 @@ test('E7h — 워크트리가 쓰는 실험 공간은 동반 삭제로 지운다
 
 (context-remove-branch 등 testid 실독. 두 번째 confirm-confirm이 동반 확인창의 버튼을 정확히 집는지 — 확인창이 겹치지 않고 순차로 뜨는 기존 관례(E3b 확인창 퇴장 즉시화)를 전제로 하되 셀렉터가 모호하면 다이얼로그 title 스코프로 좁힌다.)
 
-- [ ] **Step 4: 게이트** — typecheck, build, smoke → **74 passed**(73+1), 루트 `pnpm test` 유지.
+- [x] **Step 4: 게이트** — typecheck, build, smoke → **74 passed**(73+1), 루트 `pnpm test` 유지.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/store/repository-store.ts apps/desktop/src/renderer/src/App.tsx apps/desktop/e2e/smoke.spec.ts
@@ -1044,6 +1054,48 @@ git commit -m "feat(desktop): E7h 브랜치 삭제 — 워크트리 사용 사�
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
+
+### Task 7-보완: 관리 모달 무음 no-op 해소 (품질 리뷰 Important)
+
+품질 리뷰 발견: ManageBranchesDialog("실험 공간 관리")의 지우기 버튼은 링크드 워크트리 브랜치에서 활성인데, onRemove 어댑터가 `.needsForce`만 반환하며 `usedByWorktree`를 버려 **다이얼로그도 에러도 없는 죽은 클릭**이 된다(Task 1 이전엔 친절 에러가 뜨던 회귀 — 원 피드백 "이유를 안 알려줌" 정면 위반). 수정: 어댑터를 컨텍스트 경로와 동일하게 라우팅 — 모달을 닫고 기존 동반 삭제 확인창을 연다.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/App.tsx` (ManageBranchesDialog onRemove 어댑터)
+
+- [x] **Step 1: 어댑터 라우팅.** 기존:
+
+```tsx
+onRemove={async (name, force) => (await store.removeBranch(name, force)).needsForce}
+```
+
+교체(모달 open 상태 setter 실명은 실독 — setManageOpen이 아니면 같은 취지·편차 보고):
+
+```tsx
+onRemove={async (name, force) => {
+  const result = await store.removeBranch(name, force)
+  if (result.usedByWorktree !== null) {
+    setManageOpen(false)
+    setConfirmingRemoveWithWorktree({ name, force, worktreePath: result.usedByWorktree })
+    return false
+  }
+  return result.needsForce
+}}
+```
+
+- [x] **Step 2: 게이트** — typecheck, build, smoke 전 스위트 74 유지, 루트 474 유지.
+
+- [x] **Step 3: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/App.tsx
+git commit -m "fix(desktop): E7h 보완 — 관리 모달의 워크트리 사용 브랜치 삭제도 동반 확인으로 라우팅(무음 no-op 해소)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+**Task 7 리뷰 Minor 후속 노트(기록만):** 동반 삭제 (a) 분기에서 removeWorktree가 non-needsForce 에러로 실패하면 removeBranch 재시도가 usedByWorktree를 다시 무시하나, store.error가 노출돼 실영향 낮음.
+
+**Task 7 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① testid 실명 — `confirm-accept`·`context-remove`(제네릭 키), 두 확인창 연속은 `getByRole('alertdialog', { name })` title 스코프로 클릭. ② 동반 삭제 성공 분기에 Task 6 purge 배선 패턴(byte 동일) 재사용 — 고아 터미널 그룹 방지. ③ ManageBranchesDialog onRemove 어댑터 타입 파손 발견 → `.needsForce` 최소 수정했다가 리뷰 Important(무음 no-op 회귀) 판정 → Task 7-보완으로 동반 확인 라우팅 완결(ffca230).
 
 ---
 
@@ -1058,7 +1110,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/components/ChangesPanel.tsx` (필터)
 - Test: `apps/desktop/test/find-matches.test.ts`
 
-- [ ] **Step 1: Red — 매치 순수 함수.** `apps/desktop/test/find-matches.test.ts` 신규:
+- [x] **Step 1: Red — 매치 순수 함수.** `apps/desktop/test/find-matches.test.ts` 신규:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -1084,7 +1136,7 @@ describe('cycleIndex', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인 후 구현.** `find-matches.ts` 신규:
+- [x] **Step 2: Red 확인 후 구현.** `find-matches.ts` 신규:
 
 ```ts
 /** ⌘F 패널 검색의 매치 계산 (E7h ⑥) — 대소문자 무시 부분 문자열, 정규식 아님 */
@@ -1105,7 +1157,7 @@ export function cycleIndex(current: number, delta: number, length: number): numb
 }
 ```
 
-- [ ] **Step 3: FindBar 컴포넌트.** `FindBar.tsx` 신규:
+- [x] **Step 3: FindBar 컴포넌트.** `FindBar.tsx` 신규:
 
 ```tsx
 import { useEffect, useRef } from 'react'
@@ -1234,7 +1286,7 @@ export function FindBar({
 
 (FindBar가 붙는 패널 조상은 `position: relative` 필요 — 각 패널 css 실독 후 없으면 해당 패널 루트에 추가·편차 보고.)
 
-- [ ] **Step 4: App ⌘F 라우팅.** App.tsx — 상태·헬퍼:
+- [x] **Step 4: App ⌘F 라우팅.** App.tsx — 상태·헬퍼:
 
 ```tsx
   // E7h ⑥ — ⌘F 검색 대상 패널(마우스 위치의 data-find-scope, 없으면 diff)
@@ -1273,7 +1325,7 @@ keydown 훅에 분기 추가(⌘` 블록과 같은 훅 내부):
 
 각 대상 패널 래퍼에 `data-find-scope` 부여(App 렌더 실독): 히스토리 패널 래퍼 `data-find-scope="history"`, 중앙 diff 영역 `"diff"`, 커밋 상세 `"commit-files"`, 좌측 변경 열 `"changes"`. 각 패널에 `findOpen`/`onFindClose` prop 배선: `findOpen={findScope === 'history'}` 식. diff 파일 전환 시(선택 파일 변경 콜백 실독) `if (findScope === 'diff') setFindScope(null)`.
 
-- [ ] **Step 5: 커밋 상세 필터.** CommitDetailPanel.tsx — props에 `findOpen: boolean`·`onFindClose(): void` 추가. 내부:
+- [x] **Step 5: 커밋 상세 필터.** CommitDetailPanel.tsx — props에 `findOpen: boolean`·`onFindClose(): void` 추가. 내부:
 
 ```tsx
   const [findQuery, setFindQuery] = useState('')
@@ -1308,11 +1360,11 @@ keydown 훅에 분기 추가(⌘` 블록과 같은 훅 내부):
 
 (필터형은 이동 개념이 없다 — onNext/onPrev 무동작, 카운트는 매치 수 표시. position은 count>0이면 0 표기 관례상 `1/N`이 자연스럽지만 필터에는 "위치"가 없으므로 count만 의미 — FindBar 카운트 표기가 부자연스러우면 position -1 유지로 `0/0` 대신 `N`만 보이게 FindBar에 `mode?: 'filter'`를 추가해 카운트만 렌더 — 같은 취지·편차 보고.)
 
-- [ ] **Step 6: 좌측 변경 목록 필터.** ChangesPanel.tsx(실독)에 같은 패턴 — props `findOpen`/`onFindClose`, 내부 findQuery, 두 목록('지금 바뀐 것'·'저장 예정')의 렌더 배열을 `path.toLowerCase().includes(query)` 필터로 좁힌다(가상화 count도 필터 배열 기준). 전체 일괄 버튼(모두 올리기 등)은 필터와 무관하게 기존 전체 대상 유지(핸들러 무변). FindBar는 패널 상단 1개(두 목록 공용 필터). placeholder "파일 찾기".
+- [x] **Step 6: 좌측 변경 목록 필터.** ChangesPanel.tsx(실독)에 같은 패턴 — props `findOpen`/`onFindClose`, 내부 findQuery, 두 목록('지금 바뀐 것'·'저장 예정')의 렌더 배열을 `path.toLowerCase().includes(query)` 필터로 좁힌다(가상화 count도 필터 배열 기준). 전체 일괄 버튼(모두 올리기 등)은 필터와 무관하게 기존 전체 대상 유지(핸들러 무변). FindBar는 패널 상단 1개(두 목록 공용 필터). placeholder "파일 찾기".
 
-- [ ] **Step 7: 게이트** — 루트 `pnpm test` → **+4(실측 정정)**, typecheck, build, smoke 기존 전건(E2E 신규는 Task 9에서 일괄).
+- [x] **Step 7: 게이트** — 루트 `pnpm test` → **+4(실측 정정)**, typecheck, build, smoke 기존 전건(E2E 신규는 Task 9에서 일괄).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/find-matches.ts apps/desktop/src/renderer/src/components/FindBar.tsx apps/desktop/src/renderer/src/components/find-bar.css apps/desktop/src/renderer/src/App.tsx apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx apps/desktop/src/renderer/src/components/ChangesPanel.tsx apps/desktop/test/find-matches.test.ts
@@ -1320,6 +1372,34 @@ git commit -m "feat(desktop): E7h ⌘F 기반 — FindBar·매치 계산·hover 
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
+
+### Task 8-보완: 재⌘F 재포커스 (품질 리뷰 Important — 플랜 누락)
+
+품질 리뷰 발견: 스펙 ⑥ "이미 열려 있으면 그 패널 입력 재포커스"가 플랜에서 빠졌고 구현도 안 됨 — 같은 스코프 재⌘F 시 setFindScope 동일값 bail-out으로 FindBar focus effect(빈 deps)가 재실행되지 않는다. 수정: 포커스 신호 카운터.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/App.tsx` (findNonce 상태·⌘F 분기·패널 프롭)
+- Modify: `apps/desktop/src/renderer/src/components/FindBar.tsx` (focusSignal prop)
+- Modify: `apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx`·`ChangesPanel.tsx` (프롭 관통)
+
+- [x] **Step 1: FindBar에 focusSignal.** props에 `focusSignal: number` 추가, 기존 `useEffect(() => { inputRef.current?.focus() }, [])`의 deps를 `[focusSignal]`로 교체.
+
+- [x] **Step 2: App.** `const [findNonce, setFindNonce] = useState(0)` 추가, ⌘F 분기에서 `setFindScope(scope)` 뒤에 `setFindNonce((n) => n + 1)`. FindBar를 렌더하는 패널들에 `findNonce` prop 관통(CommitDetailPanel·ChangesPanel — Task 9의 HistoryPanel·DiffView도 같은 패턴으로 관통 예정).
+
+- [x] **Step 3: 게이트** — typecheck, 루트 478 유지, build + smoke 74 유지.
+
+- [x] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/App.tsx apps/desktop/src/renderer/src/components/FindBar.tsx apps/desktop/src/renderer/src/components/CommitDetailPanel.tsx apps/desktop/src/renderer/src/components/ChangesPanel.tsx
+git commit -m "fix(desktop): E7h 보완 — 재⌘F 시 검색 입력 재포커스(focusSignal 카운터)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+**Task 8 리뷰 Minor 후속 노트(기록만):** ① ChangesPanel 필터 0매치 시 일괄 헤더·전체 카운트 배지 잔존(외관). ② 비터미널 입력 필드 포커스 중 ⌘F도 패널 검색 오픈(앱 전역 find 관례상 허용).
+
+**Task 8 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① 터미널 가드 플랜 코드(`closest !== null`)는 리뷰 결과 **정당**(activeElement 기본 body — 오류 아님, 주석 기록). ② FindBar `mode?: 'filter'` 채택(필터형 카운트만 — 플랜 권장). ③ `position: relative` 2곳(.ui-panel·.changes-panel — 오프셋 없음, virtual-row 기준점 무변). ④ data-find-scope는 새 wrapper 없이 기존 요소 4곳(.app__center·.app__right 조건부·.app__right-detail·.changes-panel — flex 직계 선택자 파손 회피, closest 최근접 우선). ⑤ diff 해제 지점 3곳으로 확장(onSelect·onSelectFile·onCompareFile). ⑥ FileList `visibleChanges` 렌더 전용 prop(체크·일괄은 전체 기준 무변). 재⌘F 재포커스는 Task 8-보완(b4c609f, focusSignal 카운터)으로 폐쇄.
 
 ---
 
@@ -1331,7 +1411,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: 관련 css (하이라이트 클래스)
 - Test: `apps/desktop/e2e/smoke.spec.ts` (신규 5건)
 
-- [ ] **Step 1: 히스토리 점프+하이라이트.** HistoryPanel.tsx — props `findOpen`/`onFindClose` 추가. 내부(이른 반환보다 앞):
+- [x] **Step 1: 히스토리 점프+하이라이트.** HistoryPanel.tsx — props `findOpen`/`onFindClose` 추가. 내부(이른 반환보다 앞):
 
 ```tsx
   const [findQuery, setFindQuery] = useState('')
@@ -1397,8 +1477,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (행 클래스 부착 지점·기존 클래스명은 실독 — 같은 취지 적용. 스냅샷 갱신으로 history가 줄면 findPos는 위 Math.min 클램프가 흡수.)
 
-- [ ] **Step 2: diff 점프+하이라이트.** DiffView.tsx(가상화 소유자 — DiffPanel이면 그쪽, 실독) — 같은 패턴: rows(buildDiffRows 결과)에서 텍스트를 뽑아 matchIndices(행 텍스트 필드는 diff-rows.ts 실독 — 좌우 나란히면 양쪽 텍스트 연결) → moveFind는 `virtualizer.scrollToIndex(hit, { align: 'center' })` → 현재 매치 행에 `diff-row--find-hit` 클래스(양쪽 셀 공통 래퍼 — 실독) + 행 내 매치 부분 `<mark>`는 **하지 않는다**(가상 행 재사용·성능 — 행 전체 하이라이트로 충분, 스펙 "행 내 매치 부분 마크"에서 후퇴하는 편차 — 리뷰에서 승인받을 것. 반대로 쉽게 가능하면 텍스트 렌더 지점에서 split-마크 적용). FindBar placeholder "diff에서 찾기". css(diff-panel.css)에 `--find-hit` 하이라이트(history와 같은 outline 계열).
-- [ ] **Step 3: E2E 신규 5건.** smoke.spec.ts 끝에 추가 — 4패널 각 1건 + hover 라우팅 1건. 공통 픽스처: 파일 여러 개 커밋 2개. 마우스 hover는 `window.mouse.move(패널 중심)` 후 `window.keyboard.press('Meta+f')`(darwin) — E2E는 darwin 로컬 실행 관례:
+- [x] **Step 2: diff 점프+하이라이트.** DiffView.tsx(가상화 소유자 — DiffPanel이면 그쪽, 실독) — 같은 패턴: rows(buildDiffRows 결과)에서 텍스트를 뽑아 matchIndices(행 텍스트 필드는 diff-rows.ts 실독 — 좌우 나란히면 양쪽 텍스트 연결) → moveFind는 `virtualizer.scrollToIndex(hit, { align: 'center' })` → 현재 매치 행에 `diff-row--find-hit` 클래스(양쪽 셀 공통 래퍼 — 실독) + 행 내 매치 부분 `<mark>`는 **하지 않는다**(가상 행 재사용·성능 — 행 전체 하이라이트로 충분, 스펙 "행 내 매치 부분 마크"에서 후퇴하는 편차 — 리뷰에서 승인받을 것. 반대로 쉽게 가능하면 텍스트 렌더 지점에서 split-마크 적용). FindBar placeholder "diff에서 찾기". css(diff-panel.css)에 `--find-hit` 하이라이트(history와 같은 outline 계열).
+- [x] **Step 3: E2E 신규 5건.** smoke.spec.ts 끝에 추가 — 4패널 각 1건 + hover 라우팅 1건. 공통 픽스처: 파일 여러 개 커밋 2개. 마우스 hover는 `window.mouse.move(패널 중심)` 후 `window.keyboard.press('Meta+f')`(darwin) — E2E는 darwin 로컬 실행 관례:
 
 ```ts
 test('E7h ⌘F — 히스토리에서 커밋을 찾아 점프한다', async () => { /* hover history-panel → ⌘F → 'tree files' 입력 → find-bar-count '1/1' → history-item에 --find-hit 클래스(또는 해당 커밋 가시) → ESC로 닫힘 */ })
@@ -1410,9 +1490,9 @@ test('E7h ⌘F — 마우스 위치의 패널에 열린다', async () => { /* hi
 
 각 테스트는 위 주석 시나리오를 완전한 코드로 구현(픽스처·testid·hover 좌표는 기존 스위트 관례 실독 — `find-bar`·`find-bar-input`·`find-bar-count` testid 사용). 플랜은 시나리오를 정본으로 하고 코드 세부는 같은 취지·편차 보고.
 
-- [ ] **Step 4: 게이트** — typecheck, build, smoke → **79 passed**(74+5), 루트 `pnpm test` 유지, 신규 5건 단독 -g 1회 non-flaky.
+- [x] **Step 4: 게이트** — typecheck, build, smoke → **79 passed**(74+5), 루트 `pnpm test` 유지, 신규 5건 단독 -g 1회 non-flaky.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/HistoryPanel.tsx apps/desktop/src/renderer/src/components/DiffView.tsx apps/desktop/src/renderer/src/components/history-panel.css apps/desktop/src/renderer/src/components/diff-panel.css apps/desktop/src/renderer/src/App.tsx apps/desktop/e2e/smoke.spec.ts
@@ -1423,6 +1503,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (DiffPanel 쪽 수정이면 add 경로 조정 — 편차 보고.)
 
+**Task 9 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① diff 행 내 부분 `<mark>` 후퇴 채택 — 리뷰 **정식 승인**(행 전체 outline+center 점프가 통용 패턴, 공유 컴포넌트 구조상 "쉽게"에 해당 안 함; 후속 개선안: UnifiedLine/SplitCell per-cell Highlight). ② DiffPanel.tsx 관통 추가(가상화 소유자는 DiffView — 플랜 조건 실현). ③ FindBar 기준점 relative는 Task 8의 .ui-panel 전역으로 충족(추가 불요). ④ E2E는 확립 관례(무인자 헬퍼·env 인라인), `hoverAndCmdF` 공용 헬퍼 신설, .changes-panel 클래스 hover. ⑤ HistoryPanel findTexts() DRY. **리뷰 Minor(기록만):** binary/meta/empty diff 조기 반환 분기에서 FindBar 미렌더·findScope 잔존(파일/커밋 선택 시 자가 치유 — 무해).
+
 ---
 
 ### Task 10: 최종 게이트 + README + 공식 스크린샷 3장
@@ -1431,15 +1513,15 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `README.md`
 - Test: 전체
 
-- [ ] **Step 1: 전체 게이트** — 루트 `pnpm test` **482 내외(누적 실측 정정 — Task 1 +2·T2 +4·T8 +4)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **85**(smoke 79 + hosting 6) · last-screen 아티팩트 0건.
-- [ ] **Step 2: README.** 기존 E7g 문단 끝(실독) 뒤에 한 문장 추가:
+- [x] **Step 1: 전체 게이트** — 루트 `pnpm test` **482 내외(누적 실측 정정 — Task 1 +2·T2 +4·T8 +4)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **85**(smoke 79 + hosting 6) · last-screen 아티팩트 0건.
+- [x] **Step 2: README.** 기존 E7g 문단 끝(실독) 뒤에 한 문장 추가:
 
 ```markdown
 E7h 피드백 폴리시: 알림이 좌측 탭을 피해서 뜨고, 커밋 상세 파일 목록이 폴더 트리로 접히며, 워크트리 전환은 앱·터미널이 함께 바뀌고 터미널 탭은 워크트리별 묶음으로 전환·복원됩니다. 워크트리가 쓰는 실험 공간은 사유와 함께 "워크트리도 같이 지우기"를 제안하고, ⌘F로 히스토리·diff(점프)·커밋 상세·변경 목록(필터)을 패널별로 검색하며, macOS 신호등은 헤더 세로 중앙에 정렬됩니다.
 ```
 
-- [ ] **Step 3: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7h.spec.ts`(관례: harness electron·1440×900·finally 정리·scratchpad 사본·촬영 후 삭제·전체 e2e 재실행 금지): **(1) e7h-commit-file-tree.png** — 다단 폴더 커밋 상세(트리 + 폴더 행). **(2) e7h-find-diff.png** — diff 열고 FindBar 검색 중(매치 하이라이트 + N/M). **(3) e7h-notice-clear.png** — 워크트리 탭 + 알림 동시 표시(비가림). 컨트롤러 육안 검수 + 사용자 전송.
-- [ ] **Step 4: Commit** (README만 — 실행 기록은 컨트롤러 별도 docs 커밋)
+- [x] **Step 3: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7h.spec.ts`(관례: harness electron·1440×900·finally 정리·scratchpad 사본·촬영 후 삭제·전체 e2e 재실행 금지): **(1) e7h-commit-file-tree.png** — 다단 폴더 커밋 상세(트리 + 폴더 행). **(2) e7h-find-diff.png** — diff 열고 FindBar 검색 중(매치 하이라이트 + N/M). **(3) e7h-notice-clear.png** — 워크트리 탭 + 알림 동시 표시(비가림). 컨트롤러 육안 검수 + 사용자 전송.
+- [x] **Step 4: Commit** (README만 — 실행 기록은 컨트롤러 별도 docs 커밋)
 
 ```bash
 git add README.md
@@ -1472,3 +1554,21 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 2. **플레이스홀더**: 없음 — "실독·같은 취지·편차 보고"는 프로젝트 관례(E7g)로 명시 목록화됨. T9 Step 3의 E2E 5건은 시나리오 정본+코드화 지시로, 세부 코드는 구현자 몫임을 명시(관례상 편차 보고 대상).
 3. **타입 일관성**: RemoveBranchResult.usedByWorktree(T1)↔store 반환(T7)↔App 연쇄(T7) 동명. FileTreeRow(T2)↔T4 rows. matchIndices/cycleIndex(T8)↔T9 사용. TerminalTab.groupKey·activateGroup·closeGroup(T6) 내부 일관. findScope 값 4종↔data-find-scope 문자열 일치.
 4. **알려진 설계 후퇴 2건(리뷰 승인 대상)**: T9 diff 행 내 부분 `<mark>` 생략(행 하이라이트로 후퇴 가능), T1 경로 파싱 실패 시 에러 폴백(스펙은 null 경로 분기) — 둘 다 본문에 사유 명시.
+
+---
+
+## 통합 리뷰 Minor 후속 노트 (병합 비차단 — 기록만)
+
+1. **M1 — dirty 워크트리 동반 삭제의 continuation 유실**: 동반 삭제에서 워크트리에 미저장 변경이 있어 needsForce 2단(confirmingRemoveWorktree force:true)으로 이관되면, 그 확인창의 onConfirm이 워크트리 강제 제거+터미널 purge까지만 하고 **원래 지우려던 브랜치의 removeBranch 재시도를 잇지 않는다** — 워크트리는 사라지고 브랜치는 남음(스펙 ⑤ "제거 성공 후 재시도" 편차). 데이터 손실 없음·브랜치 재삭제로 정상 완료 가능·clean 경로(주 시나리오)는 완결. 후속: confirmingRemoveWorktree에 브랜치 재시도 continuation 이어붙이기.
+2. Task별 Minor는 각 태스크 소급 기록 참조(ChangesPanel 0매치 헤더 잔존·binary diff FindBar 미렌더 잔존 자가치유·활성 워크트리 자체 삭제 시 빈 탭바·diff 부분 mark 후퇴(per-cell Highlight 후속안)·탭 상한 8 선행 갭 등).
+
+---
+
+## 실행 기록 (부록)
+
+- 실행 방식: 서브에이전트(구현 sonnet, 리뷰 opus) + 태스크별 통합(스펙+품질) 리뷰, Important는 보완 커밋으로 즉시 폐쇄(플랜 선(先)미러링), 편차 전건 소급 미러링.
+- 태스크 → 커밋: T1 `2ec6e5b`(엔진 usedByWorktree — stderr 파싱·realpath 본체/링크드 구분) · T2 `a892b71`(file-tree 순수 함수, byte-exact) · T3 `05af069`(알림 비가림 — top-stack left 파생) · T4 `75640d8`(커밋 상세 depth 트리) · T5 `9177a0f`(전환 동시성 openWorktree boolean + 신호등 hidden/y=22 실측) · T6 `efa526a`(터미널 그룹 — 이중 effect 경쟁 발견·병합, 함수형 close 재작성) · T7 `b13a44e`+보완 `ffca230`(동반 삭제 + 관리 모달 무음 no-op 해소) · T8 `c44acb8`+보완 `b4c609f`(FindBar·⌘F 라우팅·필터 2곳 + 재⌘F 재포커스 focusSignal) · T9 `420ccf1`(⌘F 점프 2곳 + E2E 5건, diff 부분 mark 후퇴 리뷰 승인) · T10 `1addc66`(README).
+- 리뷰에서 잡은 Important 2건: 관리 모달 무음 no-op(T7 보완 — Task 1 이전 친절 에러의 회귀) · 재⌘F 재포커스 미구현(T8 보완 — 플랜 누락 파생). 전부 보완 커밋 폐쇄·재검 Approve.
+- 구현자가 플랜 밖에서 발견·해소한 함정: T6 이중 effect 동시 발화(같은 렌더 open+groupKey 변경 → 세션 2중 생성), T6 stale tabs 클로저(플랜 예고 — 실재 확인), T7 ManageBranchesDialog 타입 파손.
+- 최종 게이트 실측: 루트 478 · typecheck 전부 Done · desktop e2e **85**(smoke 79 + hosting 6) · last-screen 0건. 통합 리뷰 Verdict: Ready to merge.
+- 공식 스크린샷 3장(e7h-commit-file-tree/e7h-find-diff/e7h-notice-clear) 컨트롤러 육안 검수 통과·사용자 전송(1회 촬영 확정).
