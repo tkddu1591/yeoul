@@ -2110,3 +2110,87 @@ test('창 제목이 "Git GUI"다 — 한 줄 타이틀바에서도 창 전환 UI
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('실험 공간 — 한 번 클릭은 선택만, 역사는 그대로다 (E7g)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'quiet-branch'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-quiet-branch').click()
+    // 선택 하이라이트만 — 조회 알약도, 메뉴도, 역사 변화도 없다
+    await expect(window.getByTestId('branch-row-quiet-branch')).toHaveClass(/branch-row--selected/)
+    await expect(window.getByTestId('history-view-pill')).toHaveCount(0)
+    await expect(window.locator('.ui-context-menu')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 — 더블클릭 조회로 역사가 그 계보로 바뀌고 ✕로 복귀한다 (E7g)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 다른 계보 — side에만 있는 저장
+  await execGitOrThrow(['checkout', '-b', 'side-line'], { cwd: repo })
+  await writeFile(join(repo, 'side.txt'), 's\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '옆줄 저장'], { cwd: repo })
+  await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+  await writeFile(join(repo, 'main.txt'), 'm\n')
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '본줄 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 전체 그래프는 둘 다 보인다
+    await expect(window.getByTestId('history-list')).toContainText('옆줄 저장')
+    await expect(window.getByTestId('history-list')).toContainText('본줄 저장')
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-side-line').dblclick()
+    // 조회 모드 — side 계보만
+    await expect(window.getByTestId('history-view-pill')).toContainText('side-line')
+    await expect(window.getByTestId('history-list')).toContainText('옆줄 저장')
+    await expect(window.getByTestId('history-list')).not.toContainText('본줄 저장')
+    await expect(window.getByTestId('branch-row-side-line')).toHaveClass(/branch-row--viewing/)
+    // ✕ 복귀
+    await window.getByTestId('history-view-clear').click()
+    await expect(window.getByTestId('history-view-pill')).toHaveCount(0)
+    await expect(window.getByTestId('history-list')).toContainText('본줄 저장')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('실험 공간 — 폴더를 접으면 하위 브랜치가 숨는다 (E7g)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
+  await execGitOrThrow(['branch', 'feature/signup'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('branch-row-feature/login')).toBeVisible()
+    await window.getByTestId('branch-folder-feature').click()
+    await expect(window.getByTestId('branch-row-feature/login')).toHaveCount(0)
+    await expect(window.getByTestId('branch-row-feature/signup')).toHaveCount(0)
+    await window.getByTestId('branch-folder-feature').click()
+    await expect(window.getByTestId('branch-row-feature/login')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
