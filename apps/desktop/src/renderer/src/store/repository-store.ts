@@ -427,6 +427,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       if (!path) return
       // guard가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.
       // 다른 저장소다 — 히스토리 상한도 첫 페이지로 되돌린다
+      // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
+      // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
+      set({ historyRef: null })
       set({
         repoPath: path,
         historyLimit: HISTORY_LIMIT,
@@ -1085,6 +1088,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 검증·allowlist 등록은 main — 통과하면 정규화 경로가 돌아온다 (E7c 보안 가드)
       const opened = await git().repo.openPath(repoPath, path)
       // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)
+      // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
+      // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
+      set({ historyRef: null })
       set({
         repoPath: opened,
         historyLimit: HISTORY_LIMIT,
