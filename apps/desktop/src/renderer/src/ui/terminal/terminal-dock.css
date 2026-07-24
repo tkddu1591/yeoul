@@ -76,7 +76,7 @@
   margin: 0;
   padding: var(--space-1) 10px;
   font-size: var(--text-sm);
-  color: var(--color-text-faint);
+  color: var(--color-danger);
 }
 .terminal-dock__body {
   flex: 1;
