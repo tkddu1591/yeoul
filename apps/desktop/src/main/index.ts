@@ -9,6 +9,10 @@ import { registerTerminalHandlers } from './terminal-handlers'
 // 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),
 // 패키징 산출물(electron-builder productName)에서 완전히 "Git GUI"가 된다
 app.setName('Git GUI')
+// dev에서도 독에 Electron 아이콘 대신 앱 아이콘 (macOS — 패키징 전에도 정체성 유지)
+if (process.platform === 'darwin') {
+  app.dock?.setIcon(join(__dirname, '../../resources/icon.png'))
+}
 
 // E2E·테스트 격리 — userData를 임시 폴더로 재지정할 수 있게 한다 (설정 파일이 실제 프로필을 오염하지 않게)
 if (process.env.GIT_GUI_USER_DATA) {
