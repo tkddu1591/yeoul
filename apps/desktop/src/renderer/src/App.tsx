@@ -226,6 +226,9 @@ export function App() {
   const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
     null,
   )
+  // E7h ⑥ 보완 — 같은 스코프로 재⌘F해도 findScope 값은 안 바뀌어(bail-out) FindBar가 재마운트도
+  // 재렌더도 안 되니, 재⌘F마다 증가시켜 FindBar의 focusSignal로 흘려보내 재포커스를 강제한다
+  const [findNonce, setFindNonce] = useState(0)
   const pointerRef = useRef({ x: 0, y: 0 })
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
@@ -257,6 +260,7 @@ export function App() {
         const scope = (scopeEl?.getAttribute('data-find-scope') ??
           'diff') as NonNullable<typeof findScope>
         setFindScope(scope)
+        setFindNonce((n) => n + 1)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -607,6 +611,7 @@ export function App() {
                 selected={store.selected}
                 busy={store.busy}
                 findOpen={findScope === 'changes'}
+                findNonce={findNonce}
                 onFindClose={() => setFindScope(null)}
                 onStage={(paths) => void store.stage(paths)}
                 onUnstage={(paths) => void store.unstage(paths)}
@@ -858,6 +863,7 @@ export function App() {
                     selectedFile={store.commitFile}
                     busy={store.busy}
                     findOpen={findScope === 'commit-files'}
+                    findNonce={findNonce}
                     onFindClose={() => setFindScope(null)}
                     onSelectFile={(file) => {
                       // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다

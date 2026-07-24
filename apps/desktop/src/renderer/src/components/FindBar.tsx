@@ -9,6 +9,8 @@ interface FindBarProps {
   placeholder: string
   /** 필터형(E7h ⑥ 편차) — 위치 개념이 없는 목록 필터(CommitDetailPanel·ChangesPanel)에서 카운트만 렌더 */
   mode?: 'filter'
+  /** 이미 열려 있는 상태에서 재⌘F할 때마다 바뀌는 카운터 — 재포커스 트리거 (E7h ⑥ 보완) */
+  focusSignal: number
   onQuery(query: string): void
   onNext(): void
   onPrev(): void
@@ -22,6 +24,7 @@ export function FindBar({
   count,
   placeholder,
   mode,
+  focusSignal,
   onQuery,
   onNext,
   onPrev,
@@ -30,7 +33,7 @@ export function FindBar({
   const inputRef = useRef<HTMLInputElement | null>(null)
   useEffect(() => {
     inputRef.current?.focus()
-  }, [])
+  }, [focusSignal])
   return (
     <div className="find-bar" data-testid="find-bar">
       <input

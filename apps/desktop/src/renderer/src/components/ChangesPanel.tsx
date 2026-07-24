@@ -20,6 +20,8 @@ interface ChangesPanelProps {
   busy: boolean
   /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) — 두 목록('지금 바뀐 것'·'저장 예정') 공용 */
   findOpen: boolean
+  /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
+  findNonce: number
   onFindClose(): void
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
@@ -394,6 +396,7 @@ export function ChangesPanel({
   selected,
   busy,
   findOpen,
+  findNonce,
   onFindClose,
   onStage,
   onUnstage,
@@ -422,6 +425,7 @@ export function ChangesPanel({
           position={visibleTotal === 0 ? -1 : 0}
           count={visibleTotal}
           mode="filter"
+          focusSignal={findNonce}
           placeholder="파일 찾기"
           onQuery={setFindQuery}
           onNext={() => {}}

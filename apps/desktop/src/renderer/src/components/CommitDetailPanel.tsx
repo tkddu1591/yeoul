@@ -23,6 +23,8 @@ interface CommitDetailPanelProps {
   busy: boolean
   /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
   findOpen: boolean
+  /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
+  findNonce: number
   onFindClose(): void
   onSelectFile(file: CommitFileChange): void
   /** 우클릭 → "이 파일만 … 적용 (checkout)" — 확인창을 거친 뒤 호출된다 (E5a 피드백 1) */
@@ -95,6 +97,7 @@ export function CommitDetailPanel({
   selectedFile,
   busy,
   findOpen,
+  findNonce,
   onFindClose,
   onSelectFile,
   onRestoreFile,
@@ -163,6 +166,7 @@ export function CommitDetailPanel({
           position={matched === null || matched.length === 0 ? -1 : 0}
           count={matched?.length ?? 0}
           mode="filter"
+          focusSignal={findNonce}
           placeholder="파일 이름 찾기"
           onQuery={setFindQuery}
           onNext={() => {}}
