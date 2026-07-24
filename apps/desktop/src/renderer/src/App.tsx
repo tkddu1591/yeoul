@@ -104,6 +104,12 @@ export function App() {
   const [confirmingRemove, setConfirmingRemove] = useState<{ name: string; force: boolean } | null>(
     null,
   )
+  // E7h ⑤ — 워크트리가 쓰는 실험 공간: 워크트리 동반 삭제 확인
+  const [confirmingRemoveWithWorktree, setConfirmingRemoveWithWorktree] = useState<{
+    name: string
+    force: boolean
+    worktreePath: string
+  } | null>(null)
   const [confirmingRemoveRemote, setConfirmingRemoveRemote] = useState<{ name: string } | null>(
     null,
   )
@@ -890,7 +896,7 @@ export function App() {
         busy={store.busy}
         errorText={store.error}
         onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
-        onRemove={(name, force) => store.removeBranch(name, force)}
+        onRemove={async (name, force) => (await store.removeBranch(name, force)).needsForce}
         onClearError={() => store.clearError()}
         onCancel={() => setManageOpen(false)}
       />
@@ -1086,9 +1092,17 @@ export function App() {
           setConfirmingRemove(null)
           if (target === null) return
           void (async () => {
-            // 합쳐지지 않은 저장이 있으면 엔진이 지우지 않고 needsForce로 알린다 — 2단 확인 (ManageBranches 관례)
-            if (await store.removeBranch(target.name, target.force)) {
-              if (!target.force) setConfirmingRemove({ name: target.name, force: true })
+            // 합쳐지지 않은 저장 → needsForce 2단 확인(ManageBranches 관례),
+            // 워크트리가 쓰는 중 → 동반 삭제 확인 (E7h ⑤)
+            const result = await store.removeBranch(target.name, target.force)
+            if (result.usedByWorktree !== null) {
+              setConfirmingRemoveWithWorktree({
+                name: target.name,
+                force: target.force,
+                worktreePath: result.usedByWorktree,
+              })
+            } else if (result.needsForce && !target.force) {
+              setConfirmingRemove({ name: target.name, force: true })
             }
           })()
         }}
@@ -1097,6 +1111,36 @@ export function App() {
         {confirmingRemove?.force === true
           ? '이 공간에만 있는 저장은 함께 사라져요. 되돌릴 수 없어요.'
           : '다른 곳에 합쳐진 저장은 남아요. 합쳐지지 않은 저장이 있으면 한 번 더 물어봐요.'}
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmingRemoveWithWorktree !== null}
+        title={`워크트리가 이 실험 공간을 쓰는 중이에요 — 같이 지울까요?`}
+        confirmLabel="워크트리도 지우고 계속"
+        onConfirm={() => {
+          const target = confirmingRemoveWithWorktree
+          setConfirmingRemoveWithWorktree(null)
+          if (target === null) return
+          void (async () => {
+            // 워크트리 제거(미저장 변경은 기존 2단 확인 재사용) → 성공 시 브랜치 삭제 재시도 (E7h ⑤)
+            const needsForce = await store.removeWorktree(target.worktreePath, false)
+            if (needsForce) {
+              setConfirmingRemoveWorktree({ path: target.worktreePath, force: true })
+              return
+            }
+            // needsForce가 아니면 지우기 성공이거나 다른 오류 — 성공했을 때만 터미널 그룹을 정리한다
+            // (confirmingRemoveWorktree onConfirm과 동일 판정 패턴 재사용 — Task 6/E7h ④)
+            if (useRepositoryStore.getState().error === null) setPurgeTerminalGroup(target.worktreePath)
+            const retry = await store.removeBranch(target.name, target.force)
+            if (retry.needsForce && !target.force) {
+              setConfirmingRemove({ name: target.name, force: true })
+            }
+          })()
+        }}
+        onCancel={() => setConfirmingRemoveWithWorktree(null)}
+      >
+        {`"${confirmingRemoveWithWorktree?.name}"은 워크트리 "${
+          confirmingRemoveWithWorktree?.worktreePath.split('/').pop() ?? ''
+        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. 워크트리를 지우면 그 폴더가 사라져요 — 미저장 변경이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveRemote !== null}

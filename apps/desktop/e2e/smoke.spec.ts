@@ -2372,3 +2372,37 @@ test('E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다', a
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('E7h — 워크트리가 쓰는 실험 공간은 동반 삭제로 지운다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-used'], { cwd: repo })
+  const wtPath = `${repo}-used`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'wt-used'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('branch-row-wt-used').click({ button: 'right' })
+    await window.getByTestId('context-remove').click()
+    await window.getByTestId('confirm-accept').click() // 1단: 지울까요?
+    // 동반 삭제 확인 — 두 확인창이 겹치지 않게 순차로 뜨는 기존 관례(E3b) 전제, title 스코프로 좁혀 클릭
+    const withWorktreeDialog = window.getByRole('alertdialog', {
+      name: '워크트리가 이 실험 공간을 쓰는 중이에요 — 같이 지울까요?',
+    })
+    await expect(withWorktreeDialog).toBeVisible()
+    await withWorktreeDialog.getByTestId('confirm-accept').click()
+    // 워크트리·브랜치 모두 소멸
+    await expect(window.getByTestId('branch-row-wt-used')).toHaveCount(0)
+    await window.getByTestId('left-tab-worktrees').click()
+    await expect(window.getByTestId(`worktree-row-${sideName}`)).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true }).catch(() => {})
+  }
+})

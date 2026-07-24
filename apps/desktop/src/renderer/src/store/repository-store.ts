@@ -107,8 +107,11 @@ interface RepositoryStore {
   undoLastCommit(hash: string): Promise<void>
   /** 마지막 저장 메시지 고치기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
   rewordLastCommit(hash: string, message: string): Promise<boolean>
-  /** 실험 공간 지우기. 반환 true면 합쳐지지 않은 저장이 있어 강제 확인이 필요하다 */
-  removeBranch(name: string, force: boolean): Promise<boolean>
+  /** 지우기 — needsForce면 2단 확인, usedByWorktree면 동반 삭제 확인으로 이어진다 (E7h ⑤) */
+  removeBranch(
+    name: string,
+    force: boolean,
+  ): Promise<{ needsForce: boolean; usedByWorktree: string | null }>
   /** 이름 바꾸기 — 성공 여부 반환(실패 시 다이얼로그 유지·입력 보존) */
   renameBranch(oldName: string, newName: string): Promise<boolean>
   /** 비현재 공간을 원격 최신으로(ff-only) — 현재 공간은 UI가 pullLatest로 보낸다 (E7a) */
@@ -896,11 +899,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async removeBranch(name, force) {
     const { repoPath } = get()
-    if (!repoPath) return false
+    if (!repoPath) return { needsForce: false, usedByWorktree: null }
     let needsForce = false
+    let usedByWorktree: string | null = null
     await guard(set, get, async () => {
       const result = await git().branches.remove(repoPath, name, force)
       needsForce = result.needsForce
+      usedByWorktree = result.usedByWorktree
       if (result.removed) {
         set({
           ...(await fetchSnapshot(repoPath, get().historyLimit)),
@@ -908,7 +913,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         })
       }
     })
-    return needsForce
+    return { needsForce, usedByWorktree }
   },
 
   async renameBranch(oldName, newName) {
