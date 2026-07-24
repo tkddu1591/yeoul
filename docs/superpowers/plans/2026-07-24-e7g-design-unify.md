@@ -43,11 +43,11 @@
 | Task 1 후 | +2 → **452** (엔진 ref) |
 | Task 2 후 | 452 유지 + typecheck (배선) |
 | Task 3 후 | +8 → **460** (트리 빌더) |
-| Task 4 후 | +1 → **461** (색 대비) |
-| Task 5 후 | 461 유지 + smoke **65 유지**(우클릭 5건 무회귀 + 좌클릭 1건 전환 포함 — 전 스위트) |
-| Task 6·7 후 | 461 유지 + build (워크트리·터미널 시각) |
+| Task 4 후 | +8 → **468** (색 대비 — PAIRS×2테마 it.each, 플랜 예상 +1은 실측 정정) |
+| Task 5 후 | 468 유지 + smoke **65 유지**(우클릭 5건 무회귀 + 좌클릭 1건 전환 포함 — 전 스위트) |
+| Task 6·7 후 | 468 유지 + build (워크트리·터미널 시각) |
 | Task 8 후 | smoke **68** (신규 3) |
-| 최종 (Task 9) | **461 tests** + typecheck + build + E2E **74**(smoke 68 + hosting 6) + last-screen 0건 + 스크린샷 3장 + README |
+| 최종 (Task 9) | **468 tests** + typecheck + build + E2E **74**(smoke 68 + hosting 6) + last-screen 0건 + 스크린샷 3장 + README |
 
 ---
 
@@ -57,9 +57,9 @@
 - Modify: `packages/git-adapter/src/client.ts`
 - Test: `packages/git-adapter/test/client.test.ts` (+2)
 
-- [ ] **Step 0: 브랜치 생성** — main(e3dbebb)에서 `git checkout -b feature/e7g-design-unify`.
+- [x] **Step 0: 브랜치 생성** — main(e3dbebb)에서 `git checkout -b feature/e7g-design-unify`.
 
-- [ ] **Step 1: Red.** client.test.ts의 E7e 마지막 테스트(`branches.backup — 첫 연결은 linked...` — 실독으로 정확 위치 확인) 바로 뒤에 추가:
+- [x] **Step 1: Red.** client.test.ts의 E7e 마지막 테스트(`branches.backup — 첫 연결은 linked...` — 실독으로 정확 위치 확인) 바로 뒤에 추가:
 
 ```ts
 
@@ -94,9 +94,9 @@
 
 (client.test.ts의 삽입 앵커·헬퍼 import는 실독 — writeFixtureFile 등 기존재. 편차 보고.)
 
-- [ ] **Step 2: Red 확인** — `pnpm vitest run --project @git-gui/git-adapter -t 'history.list — ref'` → 인자 무시로 실패 확인.
+- [x] **Step 2: Red 확인** — `pnpm vitest run --project @git-gui/git-adapter -t 'history.list — ref'` → 인자 무시로 실패 확인.
 
-- [ ] **Step 3: 구현.** client.ts 편집 2곳.
+- [x] **Step 3: 구현.** client.ts 편집 2곳.
 
 (a) 인터페이스 기존:
 
@@ -137,9 +137,9 @@
 
 주의: `--end-of-options`가 args 중간에 오면 이후 `--date-order` 등 옵션이 인자로 오해된다 — **실제 배치는 옵션 전부 뒤·format 앞이 아니라, ref 항목을 args 배열의 맨 끝(-z 뒤)으로**. 구현 시 args 순서를 실독해 `-z` 뒤에 `...(ref === undefined ? [...] : ['--end-of-options', ref])`가 오도록 조정하고, 전체 그래프 모드의 `--all`·exclude는 **원래 위치 유지**(옵션 순서 보존) — 즉 (b)는 두 편집: 원위치 exclude+--all 블록을 `...(ref === undefined ? ['--exclude=refs/stash', '--exclude=refs/notes/*', '--exclude=refs/replace/*', '--all'] : []),`로, `-z',` 뒤에 `...(ref === undefined ? [] : ['--end-of-options', ref]),` 추가. 편차 보고.
 
-- [ ] **Step 4: Green + 게이트** — 신규 2건 + 기존 history 테스트 무회귀. 루트 `pnpm test` → **452 passed**. typecheck Done.
+- [x] **Step 4: Green + 게이트** — 신규 2건 + 기존 history 테스트 무회귀. 루트 `pnpm test` → **452 passed**. typecheck Done.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -158,7 +158,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/preload/index.ts`
 - Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
 
-- [ ] **Step 1: 계약·핸들러·preload.** ipc-contract 기존:
+- [x] **Step 1: 계약·핸들러·preload.** ipc-contract 기존:
 
 ```ts
   history: {
@@ -178,7 +178,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 git-handlers의 historyList 핸들러(실독)에 ref 관통: `(_event, repoPath, limit, ref)` — `ref === undefined ? undefined : assertString(ref)` 후 `history.list(limit 검증값, refValue)` (같은 취지·편차 보고). preload `list: (repoPath, limit, ref) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit, ref)` (현행 실독).
 
-- [ ] **Step 2: store.** 편집 4곳.
+- [x] **Step 2: store.** 편집 4곳.
 
 (a) 상태 필드 — 기존:
 
@@ -259,13 +259,56 @@ git-handlers의 historyList 핸들러(실독)에 ref 관통: `(_event, repoPath,
 
 (e) 저장소 전환은 조회 해제 — openRepository·openWorktree의 `set({ repoPath: ...` 객체에 `historyRef: null,` 추가(실독·2곳·편차 보고).
 
-- [ ] **Step 3: 게이트** — typecheck Done, 루트 `pnpm test` → **452 유지**, desktop build.
+- [x] **Step 3: 게이트** — typecheck Done, 루트 `pnpm test` → **452 유지**, desktop build.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts apps/desktop/src/renderer/src/store/repository-store.ts
 git commit -m "feat(desktop): E7g 조회 배선 — historyRef·viewHistory/clearHistoryView·스냅샷 내부 조회(소멸 조용 복귀)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2-보완: 저장소 전환 시 조회 선(先)해제 (품질 리뷰 Important)
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts`
+
+같은 객체 리터럴 안의 `historyRef: null`은 `...(await fetchSnapshot(...))`보다 **늦게** 적용된다 — loadHistory가 getState()로 읽는 값은 구(舊) 조회 ref. 새 저장소에 같은 이름 브랜치가 있으면(워크트리 전환은 네임스페이스 공유라 사실상 항상) 구 조회가 '성공'해, **알약은 숨고 역사만 필터된 모순 상태**가 된다. viewHistory의 2단 set 패턴과 대칭으로 선해제한다.
+
+- [x] **Step 1.** openRepository·openWorktree 2곳 — 각 액션의 큰 set 직전에 별도 문장 추가(기존 리터럴 안의 `historyRef: null,`은 유지 — 무해):
+
+기존(openRepository — guard 안, `const path = await git().repo.select()` 뒤 set 직전. 실독으로 정확 앵커):
+
+```ts
+      set({
+        repoPath: path,
+        historyLimit: HISTORY_LIMIT,
+        historyRef: null,
+```
+
+교체:
+
+```ts
+      // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
+      // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
+      set({ historyRef: null })
+      set({
+        repoPath: path,
+        historyLimit: HISTORY_LIMIT,
+        historyRef: null,
+```
+
+openWorktree — 같은 형태(`const opened = await git().repo.openPath(...)` 뒤 set 직전, `repoPath: opened,` 리터럴)로 동일 선해제 삽입(실독·같은 취지·편차 보고).
+
+- [x] **Step 2: 게이트·커밋** — typecheck·루트 452·build 후:
+
+```bash
+git add apps/desktop/src/renderer/src/store/repository-store.ts
+git commit -m "fix(desktop): E7g 보완 — 저장소·워크트리 전환 시 조회 선해제(같은 이름 브랜치 모순 상태 차단)
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -278,7 +321,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `apps/desktop/src/renderer/src/components/branch-tree.ts`
 - Test: `apps/desktop/test/branch-tree.test.ts` (신규, +8)
 
-- [ ] **Step 1: Red.** `apps/desktop/test/branch-tree.test.ts` 신규:
+- [x] **Step 1: Red.** `apps/desktop/test/branch-tree.test.ts` 신규:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -364,7 +407,7 @@ describe('flatSearch', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인 후 구현.** `-t 'buildBranchTree'` 실패 확인 → `apps/desktop/src/renderer/src/components/branch-tree.ts` 신규:
+- [x] **Step 2: Red 확인 후 구현.** `-t 'buildBranchTree'` 실패 확인 → `apps/desktop/src/renderer/src/components/branch-tree.ts` 신규:
 
 ```ts
 /**
@@ -429,9 +472,9 @@ export function flatSearch<T extends { name: string }>(branches: T[], query: str
 }
 ```
 
-- [ ] **Step 3: 게이트** — 루트 `pnpm test` → **460 passed**. typecheck Done.
+- [x] **Step 3: 게이트** — 루트 `pnpm test` → **460 passed**. typecheck Done.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/branch-tree.ts apps/desktop/test/branch-tree.test.ts
@@ -448,7 +491,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/ui/tokens.css`
 - Test: `apps/desktop/test/tokens-contrast.test.ts` (+1)
 
-- [ ] **Step 1: Red.** tokens-contrast.test.ts는 PAIRS 테이블을 순회한다 — 기존:
+- [x] **Step 1: Red.** tokens-contrast.test.ts는 PAIRS 테이블을 순회한다 — 기존:
 
 ```ts
   ['--color-danger', '--color-surface', 4.5],
@@ -467,7 +510,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Red: 토큰 부재로 대비 계산 실패(undefined) 확인. (PAIRS 순회가 라이트·다크 두 테마를 도는 구조인지 실독 — it 수 증가가 아니라 기존 it 내 단언 증가면 게이트 카운트는 +0일 수 있음: **실측으로 카운트 확정·게이트 표 편차 보고**.)
 
-- [ ] **Step 2: 토큰 구현.** tokens.css 기존:
+**편차:** PAIRS는 `it.each` — 기존 it 내 순회가 아니라 항목당 별도 `it`. `describe.each(['라이트',...],['다크',...])`와 곱해져 4개 신규 행 × 2테마 = **+8**(플랜 +1 예상과 다름). Red 실측: `--color-ahead`/`--color-behind` 관련 8건 실패(undefined 토큰), 나머지 56건 그대로 green.
+
+- [x] **Step 2: 토큰 구현.** tokens.css 기존:
 
 ```css
   --color-danger: #d92d20;
@@ -492,9 +537,11 @@ Red: 토큰 부재로 대비 계산 실패(undefined) 확인. (PAIRS 순회가 �
 
 (다크 서피스 대비 실측으로 4.5 미달이면 명도 조정·편차 보고.)
 
-- [ ] **Step 3: 게이트** — 대비 테스트 Green(실측 조정 포함). 루트 `pnpm test` → **461 passed**.
+**편차:** 명도 조정 불필요 — 실측 대비 전부 4.5 이상(라이트 ahead/surface 5.69, behind/surface 5.43, ahead/selection-bg 4.91, behind/selection-bg 4.68; 다크 ahead/surface 9.25, behind/surface 8.75, ahead/selection-bg 7.93, behind/selection-bg 7.51). 플랜 값(#067647·#b54708·#4ade80·#fdb022) 그대로 채택.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 3: 게이트** — 대비 테스트 Green(64/64, tokens-contrast.test.ts 단독). 루트 `pnpm test` → **468 passed**(플랜 461 예상과 편차 +7 — Step1 편차의 +8에서 danger 등 무변경 기준 460 대비 순증가 +8 반영, 460+8=468).
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/ui/tokens.css apps/desktop/test/tokens-contrast.test.ts
@@ -514,7 +561,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Modify: `apps/desktop/e2e/smoke.spec.ts` (좌클릭 1건 전환)
 
-- [ ] **Step 1: BranchesPanel.tsx 전체 교체.** 다음 내용으로(compare 뷰·메뉴 빌더·fetch 줄은 현행 유지 — 전체 파일):
+- [x] **Step 1: BranchesPanel.tsx 전체 교체.** 다음 내용으로(compare 뷰·메뉴 빌더·fetch 줄은 현행 유지 — 전체 파일):
 
 ```tsx
 import { useState, type MouseEvent } from 'react'
@@ -943,7 +990,7 @@ export function BranchesPanel({
 
 주의(구현자): `RemoteBranchRef` 타입 이름은 domain 실독(overview.remotes 항목 타입 — 다르면 실제 이름으로·편차 보고). `branchDisplayName`·`groupBranches`·`trackBadgeLabel` import 제거 — trackBadgeLabel이 이 파일 밖 사용처 없으면 branch-badges.ts는 남겨두되(스위처 확인) 미사용 경고는 없다(파일 단위). 실독·편차 보고.
 
-- [ ] **Step 2: branches-panel.css 전체 교체.**
+- [x] **Step 2: branches-panel.css 전체 교체.**
 
 ```css
 /* E7g — 실험 공간 패널: file-row와 같은 행 언어(토큰), depth 트리, 아이콘 상태 */
@@ -1085,7 +1132,7 @@ export function BranchesPanel({
 
 주의(구현자): 토큰 실명(`--text-xs`·`--text-sm`·`--space-1·2·3`·`--radius-sm`·`--font-mono`·`--concept-branch(-bg)`·hover 토큰 유무)은 tokens.css 실독으로 확정 — 없는 토큰은 기존 유사 토큰으로 치환하고 편차 보고. 기존 css의 비교 뷰 클래스와 시각적 등가 유지.
 
-- [ ] **Step 3: HistoryPanel 알약.** HistoryPanel.tsx의 props에 `historyRef: string | null`·`onClearView(): void` 추가(interface 실독), accessory의 기존:
+- [x] **Step 3: HistoryPanel 알약.** HistoryPanel.tsx의 props에 `historyRef: string | null`·`onClearView(): void` 추가(interface 실독), accessory의 기존:
 
 ```tsx
         <>
@@ -1141,9 +1188,9 @@ export function BranchesPanel({
 }
 ```
 
-- [ ] **Step 4: App 배선.** BranchesPanel 렌더(실독)에 `historyRef={store.historyRef}` 추가, onAction 스위치에 `case 'view': void store.viewHistory(action.name); break` 추가(기존 case 뒤·같은 취지). HistoryPanel 렌더(실독)에 `historyRef={store.historyRef}`·`onClearView={() => void store.clearHistoryView()}` 추가.
+- [x] **Step 4: App 배선.** BranchesPanel 렌더(실독)에 `historyRef={store.historyRef}` 추가, onAction 스위치에 `case 'view': void store.viewHistory(action.name); break` 추가(기존 case 뒤·같은 취지). HistoryPanel 렌더(실독)에 `historyRef={store.historyRef}`·`onClearView={() => void store.clearHistoryView()}` 추가.
 
-- [ ] **Step 5: E2E 좌클릭 1건 전환.** smoke.spec.ts 기존:
+- [x] **Step 5: E2E 좌클릭 1건 전환.** smoke.spec.ts 기존:
 
 ```ts
     await window.getByTestId('branch-row-clash').click()
@@ -1158,9 +1205,9 @@ export function BranchesPanel({
     await window.getByTestId('context-merge').click()
 ```
 
-- [ ] **Step 6: 게이트** — typecheck Done, 루트 `pnpm test` → **461 유지**, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **65 passed**(우클릭 5건 + 전환 1건 포함 전 스위트 — 실패 시 원인 수정).
+- [x] **Step 6: 게이트** — typecheck Done, 루트 `pnpm test` → **468 유지**, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **65 passed**(우클릭 5건 + 전환 1건 포함 전 스위트 — 실패 시 원인 수정).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/BranchesPanel.tsx apps/desktop/src/renderer/src/components/branches-panel.css apps/desktop/src/renderer/src/components/HistoryPanel.tsx apps/desktop/src/renderer/src/App.tsx apps/desktop/e2e/smoke.spec.ts
@@ -1171,6 +1218,90 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (HistoryPanel css 파일이 별도면 add 포함 — 편차 보고.)
 
+### Task 5-보완: 조회 중 "지금 여기로" 버튼 숨김 (품질 리뷰 Important)
+
+품질 리뷰 발견: 다른 브랜치 조회 중(historyRef 설정) 현재 HEAD가 그 계보에 없으면 `headIndex < 0`이 되어 "지금 여기로" 버튼이 노출된다. 누르면 `revealHead`가 **비스코프 전체 그래프**를 로드하지만 `historyRef`는 남아 → 알약은 "조회 중"이라 주장하는데 목록은 전체 그래프인 모순 상태. 일반 조작(형제 브랜치 더블클릭 → 버튼 클릭)으로 도달 가능. 수정: 조회 중에는 버튼을 숨긴다 — 다른 계보로 스코프된 상태에서 HEAD 위치 찾기는 무의미.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/HistoryPanel.tsx` (accessory 내 locate-head 조건)
+
+- [x] **Step 1: 조건에 조회 모드 게이트 추가**
+
+기존:
+
+```tsx
+          {headHash !== null && headIndex < 0 && (
+```
+
+교체:
+
+```tsx
+          {headHash !== null && headIndex < 0 && historyRef === null && (
+```
+
+- [x] **Step 2: 게이트** — typecheck Done, 루트 `pnpm test` → **468 유지**, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **65 passed**.
+
+- [x] **Step 3: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/components/HistoryPanel.tsx
+git commit -m "fix(desktop): E7g 보완 — 조회 중 '지금 여기로' 버튼 숨김(알약·목록 모순 상태 차단)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+**Task 5 실행 편차 (소급 기록 — 스펙 리뷰 검증 완료):** 기존 E7a 스모크 5건이 구 칩 텍스트(`지금 여기`/`동기화됨`/`연결 없음`)를 `toContainText`로 단언 → 신 UI에서 텍스트 소멸. 같은 상태를 다른 방식으로 단언하도록 재작성(`title` 속성 정규식 / ahead·behind 배지 부재 확인), `E7g:` 주석 표시, 비활성·삭제 없음. 대상: 목록·상태 배지(E7a), 우클릭 이동, 비현재 업데이트, 원격 가져오기, 백업 자동 연결. 백업 테스트의 배지 부재 단언은 설계상(동기화=무표시) 공허해질 수 있으나 notice 단언이 실동작을 계속 검증 — 알려진 한계로 기록.
+
+**Task 5 품질 리뷰 Minor 후속 노트 (v1 보류 — 기록만):**
+- `branch-badges.ts`(+ 그 단위 테스트)가 고아화 — 마지막 프로덕션 import가 이번에 제거됨. 삭제 시 테스트 카운트가 변해 게이트 숫자가 흔들리므로 에픽 후속으로.
+- `BranchesPanel.tsx`의 `RemoteBranchRef` import 미사용(플랜 원문 유래) — typecheck 무해.
+- `.branch-row:hover`가 미정의 토큰 `--color-hover-bg`의 rgba fallback 사용(플랜 원문 유래) — file-row의 `--color-surface-sunken`으로 통일할 여지.
+- 폴더 행 `aria-expanded` 부재, `selectedName`/`collapsed`/`query` 로컬 상태가 저장소 전환에도 유지(선택은 무동작 하이라이트라 무해).
+
+### Task 5-보완2: 조회 중 페이지네이션 스코프 유지 (품질 재검 Important)
+
+품질 재검 발견: 보완1이 닫은 revealHead 경로와 같은 계열의 두 번째 경로. `loadMoreHistory`(repository-store.ts)가 ref 없이 `history.list(repoPath, next)`를 호출 — 조회 중(historyRef 설정) 커밋 50개 이상인 브랜치를 스크롤 바닥까지 내리면 자동 페이지네이션이 스코프 목록을 **비스코프 전체 그래프로 교체**하는데 알약은 "조회 중"으로 남는다(보완1보다 도달성 높음). 수정: 페이지네이션도 historyRef를 넘겨 스코프 유지, 조회 브랜치가 사라진 경우는 fetchSnapshot과 같은 원칙으로 조용히 전체 그래프 복귀.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (`loadMoreHistory` guard 내부)
+
+- [x] **Step 1: loadMoreHistory에 ref 전달**
+
+기존:
+
+```ts
+      const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
+      const more = await git().history.list(repoPath, next)
+      set({ history: more, historyLimit: next })
+```
+
+교체:
+
+```ts
+      const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
+      const ref = get().historyRef ?? undefined
+      try {
+        set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
+      } catch (error) {
+        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
+        if (ref === undefined) throw error
+        set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
+      }
+```
+
+- [x] **Step 2: 게이트** — typecheck Done, 루트 `pnpm test` → **468 유지**, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **65 passed**.
+
+- [x] **Step 3: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/store/repository-store.ts
+git commit -m "fix(desktop): E7g 보완2 — 조회 중 페이지네이션 스코프 유지(전체 그래프 교체 차단)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+(참고: `revealHead` 내부의 비스코프 list는 보완1의 버튼 게이트로 조회 중 도달 불가 — 수정 대상 아님.)
+
 ---
 
 ### Task 6: 워크트리 톤 통일 (시각만 — 동작·testid 무변)
@@ -1179,7 +1310,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/components/WorktreesPanel.tsx` (행 렌더부)
 - Rewrite: `apps/desktop/src/renderer/src/components/worktrees-panel.css` (행 언어부 — add-worktree 다이얼로그 클래스는 유지)
 
-- [ ] **Step 1: 행 렌더 교체.** WorktreesPanel.tsx의 기존 행 버튼 블록(worktrees.map 내부 — 실독으로 정확 앵커):
+- [x] **Step 1: 행 렌더 교체.** WorktreesPanel.tsx의 기존 행 버튼 블록(worktrees.map 내부 — 실독으로 정확 앵커):
 
 ```tsx
               <span className="worktree-row__top">
@@ -1217,7 +1348,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 행 버튼의 title에 상태 설명 병기(실독 — 현행 `title={worktree.path}`를 `title={worktree.path === currentPath ? \`${worktree.path} — 지금 여기\` : worktree.path}`로). Badge import가 미사용이 되면 제거(실독·편차 보고).
 
-- [ ] **Step 2: css 행 언어부 교체.** worktrees-panel.css의 `.worktree-row` ~ `.worktree-row__path` 블록(실독)을 다음으로 교체(`.add-worktree__*`·`.worktrees-panel__empty`·`.worktrees-panel(스크롤)` 유지·토큰화):
+- [x] **Step 2: css 행 언어부 교체.** worktrees-panel.css의 `.worktree-row` ~ `.worktree-row__path` 블록(실독)을 다음으로 교체(`.add-worktree__*`·`.worktrees-panel__empty`·`.worktrees-panel(스크롤)` 유지·토큰화):
 
 ```css
 .worktree-row {
@@ -1287,9 +1418,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 (기존 `.worktree-row__top` 래퍼는 행이 1줄이 되면서 불필요 — JSX에서 제거되었으므로 css에서도 삭제. 실독·편차 보고.)
 
-- [ ] **Step 3: 게이트** — typecheck·build, 루트 `pnpm test` 461, `npx playwright test e2e/smoke.spec.ts -g "워크트리"` → E7c·E7d 워크트리 E2E 전건 통과(testid·동작 무변 검증).
+- [x] **Step 3: 게이트** — typecheck·build, 루트 `pnpm test` 468, `npx playwright test e2e/smoke.spec.ts -g "워크트리"` → E7c·E7d 워크트리 E2E 전건 통과(testid·동작 무변 검증).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/WorktreesPanel.tsx apps/desktop/src/renderer/src/components/worktrees-panel.css
@@ -1298,6 +1429,8 @@ git commit -m "feat(desktop): E7g 워크트리 톤 — 글리프 상태(➤/⌂/
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
+**Task 6 실행 편차 (소급 기록 — 리뷰 검증 완료):** smoke.spec.ts 2곳 재작성 — E7c 워크트리 목록 테스트의 `🏠`+`지금 여기` toContainText → `➤` toContainText + `title` `/지금 여기/`, E7d 터미널 대상 테스트의 `터미널 대상` toContainText → `❯_` toContainText(span title에 문구 유지). `E7g:` 주석 표시, 비활성·삭제 없음.
+
 ---
 
 ### Task 7: 터미널 톤 통일 (시각만)
@@ -1305,7 +1438,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/desktop/src/renderer/src/ui/terminal/terminal-dock.css`
 
-- [ ] **Step 1: 탭 밑줄형 전환.** 기존:
+- [x] **Step 1: 탭 밑줄형 전환.** 기존:
 
 ```css
 .terminal-dock__tab {
@@ -1342,11 +1475,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 }
 ```
 
-- [ ] **Step 2: 나머지 하드코딩 px 토큰화.** terminal-dock.css 전체를 실독해 px 간격·글꼴 크기를 등가 토큰으로 치환(시각 등가 — 값이 토큰과 1px 이내로 다르면 토큰 채택). 각 치환을 편차 보고. `.terminal-dock__error`·`.terminal-dock__hint`·`.terminal-dock__label`은 `--text-sm`/`--text-xs`·`--color-text-faint` 계열로.
+- [x] **Step 2: 나머지 하드코딩 px 토큰화.** terminal-dock.css 전체를 실독해 px 간격·글꼴 크기를 등가 토큰으로 치환(시각 등가 — 값이 토큰과 1px 이내로 다르면 토큰 채택). 각 치환을 편차 보고. `.terminal-dock__error`·`.terminal-dock__hint`·`.terminal-dock__label`은 `--text-sm`/`--text-xs`·`--color-text-faint` 계열로. (정정 — 품질 리뷰: `__error`의 **색**을 이 묶음에 넣은 것은 플랜 결함 — `role="alert"`(깨진 쉘 안내·세션 실패)라 시각 등가 토큰은 `--color-danger`. Task 7-보완 참조.)
 
-- [ ] **Step 3: 게이트** — build, `npx playwright test e2e/smoke.spec.ts -g "터미널"` → 터미널 E2E 전건 통과. 루트 `pnpm test` 461.
+- [x] **Step 3: 게이트** — build, `npx playwright test e2e/smoke.spec.ts -g "터미널"` → 터미널 E2E 전건 통과. 루트 `pnpm test` 468.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/ui/terminal/terminal-dock.css
@@ -1355,6 +1488,28 @@ git commit -m "feat(desktop): E7g 터미널 톤 — 밑줄형 탭·타이포 토
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
+### Task 7-보완: 터미널 에러색 danger 복원 (품질 리뷰 Important — 플랜 결함)
+
+품질 리뷰 판정: Step 2가 `__error`를 `__hint`·`__label`과 기계적으로 묶어 `--color-text-faint`를 배정한 것은 플랜 결함. `.terminal-dock__error`는 `role="alert"`(깨진 쉘 안내(E7d ②)·IPC 세션 생성 실패 원문)라 놓치면 안 되는 오류 — 원값 `#ff9191`(연한 레드)의 시각 등가 토큰은 `--color-danger`(다크 #f97066와 거의 동일)이며 앱의 다른 에러 텍스트(`.repo-picker__error` 등)와도 일치. `terminal-error`를 단언하는 E2E 없음 — 테스트 무영향.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/ui/terminal/terminal-dock.css` (`.terminal-dock__error`의 color 1줄)
+
+- [x] **Step 1: 색 교체** — `.terminal-dock__error`의 `color: var(--color-text-faint);` → `color: var(--color-danger);`
+
+- [x] **Step 2: 게이트** — typecheck Done, `cd apps/desktop && npx electron-vite build`, `npx playwright test e2e/smoke.spec.ts -g "터미널"` → 7 passed, 루트 `pnpm test` → **468 유지**.
+
+- [x] **Step 3: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/ui/terminal/terminal-dock.css
+git commit -m "fix(desktop): E7g 보완 — 터미널 에러 줄 색 danger 복원(alert 가시성)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+**Task 7 품질 리뷰 Minor 후속 노트 (기록만):** 스펙 ⑤·플랜의 "좌측 탭 = 밑줄형" 전제는 사실과 다름 — 실제 좌측 `app__left-tab`(layout.css)은 알약형(radius 6px·선택 시 surface 배경, 밑줄 없음). 터미널 탭의 밑줄형(밑줄 2px + `--concept-branch`)은 내부적으로 일관되고 시각 결과는 무방하나, "좌측 탭과 같은 규칙" 문구는 성립하지 않음. 좌우 탭 시각 규칙의 실제 통일은 v1 범위 밖 후속으로 기록.
+
 ---
 
 ### Task 8: E2E — 3단 인터랙션·트리 신규 3건
@@ -1362,7 +1517,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/desktop/e2e/smoke.spec.ts` (+3)
 
-- [ ] **Step 1: 파일 끝(E7f 창 제목 테스트 뒤)에 추가.**
+- [x] **Step 1: 파일 끝(E7f 창 제목 테스트 뒤)에 추가.**
 
 ```ts
 
@@ -1451,9 +1606,9 @@ test('실험 공간 — 폴더를 접으면 하위 브랜치가 숨는다 (E7g)'
 })
 ```
 
-- [ ] **Step 2: 게이트** — `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **68 passed**. 신규 3건 단독 -g non-flaky. 루트 461·typecheck.
+- [x] **Step 2: 게이트** — `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **68 passed**. 신규 3건 단독 -g non-flaky. 루트 468·typecheck.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/desktop/e2e/smoke.spec.ts
@@ -1466,9 +1621,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 9: 최종 게이트 + 공식 스크린샷 3장 + README
 
-- [ ] **Step 1: 전체 게이트** — 루트 `pnpm test` **461** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` **74**(smoke 68 + hosting 6) · last-screen 0건.
+- [x] **Step 1: 전체 게이트** — 루트 `pnpm test` **468** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` **74**(smoke 68 + hosting 6) · last-screen 0건.
 
-- [ ] **Step 2: README.** 기존(E7f 문단 끝):
+- [x] **Step 2: README.** 기존(E7f 문단 끝):
 
 ```
 `pnpm --filter @git-gui/desktop package`로 설치 가능한 .app/.dmg를 만들 수 있습니다(이름·아이콘·터미널(node-pty)까지 검증 스크립트로 확인).
@@ -1480,9 +1635,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 `pnpm --filter @git-gui/desktop package`로 설치 가능한 .app/.dmg를 만들 수 있습니다(이름·아이콘·터미널(node-pty)까지 검증 스크립트로 확인). E7g로 디자인이 한 몸이 됐습니다 — 실험 공간이 IntelliJ처럼 접이식 depth 트리가 되고(한 번 클릭=선택, 두 번 클릭=우측 역사가 그 계보로 전환+"조회 중" 알약, 우클릭=메뉴), "지금 여기" 같은 상태는 칩 대신 아이콘(➤)과 이름 옆 컬러 ↑↓(초록=올릴 것·주황=받을 것)로 조용히 표시되며, 워크트리·터미널도 같은 행 언어·토큰으로 통일됐습니다.
 ```
 
-- [ ] **Step 3: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7g.spec.ts`(관례: harness electron·1440×900·finally 정리·scratchpad 사본·촬영 후 삭제·e2e 재실행 금지): **(1) e7g-branches-tree.png** — feature/login·signup + fix/a 픽스처(로컬 bare 원격 + ahead/behind 연출: 원격과 발산시켜 ↑↓ 표시) → 실험 공간 탭, side 브랜치 더블클릭 조회 상태(트리+➤+↑↓+조회 알약). **(2) e7g-worktrees-tone.png** — 워크트리 1개 추가 + 활성 지정 상태(➤·⌂·❯_·한 줄 경로). **(3) e7g-terminal-tone.png** — 터미널 탭 2개(밑줄형 탭). 컨트롤러 육안 검수(시각 결함 시 CSS 보완·재촬영 — E7c 관례) + 사용자 전송.
+- [x] **Step 3: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7g.spec.ts`(관례: harness electron·1440×900·finally 정리·scratchpad 사본·촬영 후 삭제·e2e 재실행 금지): **(1) e7g-branches-tree.png** — feature/login·signup + fix/a 픽스처(로컬 bare 원격 + ahead/behind 연출: 원격과 발산시켜 ↑↓ 표시) → 실험 공간 탭, side 브랜치 더블클릭 조회 상태(트리+➤+↑↓+조회 알약). **(2) e7g-worktrees-tone.png** — 워크트리 1개 추가 + 활성 지정 상태(➤·⌂·❯_·한 줄 경로). **(3) e7g-terminal-tone.png** — 터미널 탭 2개(밑줄형 탭). 컨트롤러 육안 검수(시각 결함 시 CSS 보완·재촬영 — E7c 관례) + 사용자 전송.
 
-- [ ] **Step 4: Commit** (README만 — 실행 기록은 컨트롤러 별도 docs 커밋)
+- [x] **Step 4: Commit** (README만 — 실행 기록은 컨트롤러 별도 docs 커밋)
 
 ```bash
 git add README.md
@@ -1497,7 +1652,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 2. **39곳 호출부 문제**: fetchSnapshot 인자 추가 대신 내부 getState() — 호출부 무변·조회가 모든 갱신 경로에 자동 관통(E7d ⑤ 원칙과 정합). openRepository/openWorktree만 명시 해제.
 3. **E2E 재작성 부담 실측으로 축소**: 좌클릭 의존 1건뿐(실측 1) — 스펙의 "전수 조사" 완료, 5건은 이미 우클릭.
 4. **BranchSwitcher 보존**: groupBranches는 헤더 스위처가 계속 사용(실측 4) — 트리 빌더는 별도 파일.
-5. **테스트 수 재검산**: T1 +2, T3 +8, T4 +1(PAIRS 방식이면 +0일 수 있음 — 게이트 표는 461 기준, 실측 편차 보고 지침 포함) → 450+11=**461**. smoke 65+3=**68**, 전체 74.
+5. **테스트 수 재검산(실측 정정)**: T1 +2, T3 +8, T4 **+8**(PAIRS 4행 × it.each × 2테마 — 예상 +1 정정) → 450+18=**468**. smoke 65+3=**68**, 전체 74.
 6. **타입 일관성**: BranchPanelAction 'view' ↔ App case 'view' ↔ store.viewHistory / historyRef prop 3곳(BranchesPanel·HistoryPanel·store) 동명.
 
 ## 인용 앵커 검증 기록
@@ -1510,5 +1665,20 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - 접기 상태 영속·트리 가상화·조회 중 비교/diff 연동(스펙 범위 밖 재확인), 키보드 트리 탐색(←/→ 접기), trackBadgeLabel·branch-badges 정리(사용처 소멸 시).
 
+---
 
+## 통합 리뷰 Minor 후속 노트 (병합 비차단 — 기록만)
 
+1. **revealHead의 store 레벨 방어 부재** — repository-store.ts의 `revealHead`는 ref 없이 `list(repoPath, limit)`를 호출. 현재는 HistoryPanel의 버튼 게이트(`historyRef === null`)로 조회 중 호출이 불가능해 안전하나, 방어가 UI에만 있어 향후 다른 호출부가 생기면 알약≠목록 모순이 재현될 잠재 취약. store에서도 historyRef를 유지·처리하면 대칭.
+2. **branch-badges.ts 고아화 + 단위 테스트 대체 필요** — `trackBadgeLabel` 프로덕션 참조 0(자체 테스트만 남음). 스펙의 "↑↓ 표시 결정 순수 단위" 요구를 현재 낡은 배지-문자열 테스트가 대신하고, 실제 인라인 ↑↓ 결정(0 숨김)은 E2E로만 커버 — 파일 제거 + 인라인 로직 순수화·단위화가 정리 후보.
+3. **터미널 탭 형태 ≠ 좌측 탭 형태** — 스펙 ⑤ 전제("좌측 탭과 같은 밑줄형")와 달리 실제 좌측 탭은 박스형. 터미널은 밑줄형이나 활성색이 `--concept-branch`로 톤은 정합 — 좌우 탭 시각 규칙의 실제 통일은 후속.
+
+---
+
+## 실행 기록 (부록)
+
+- 실행 방식: 서브에이전트(구현 sonnet, 리뷰 opus) + 태스크별 스펙 byte-match·품질 리뷰, Important는 보완 커밋으로 즉시 폐쇄(플랜 선(先)미러링), 편차 전건 소급 미러링.
+- 태스크 → 커밋: T1 `efac4c3`(엔진 ref) · T2 `5737efb`+보완 `8a6aa5a`(조회 배선·전환 선해제) · T3 `a56353a`(트리 빌더) · T4 `198d0e7`(↑↓ 색 토큰, 카운트 +8 → 468 정정) · T5 `9aab280`(BranchesPanel 개편)+보완 `8a905bb`(조회 중 locate-head 숨김)+보완2 `90a5d7e`(페이지네이션 스코프 유지) · T6 `85f3032`(워크트리 톤) · T7 `adeed73`(터미널 톤)+보완 `2a59b70`(에러색 danger 복원 — 플랜 결함 정정) · T8 `f04f72b`(E2E 3건) · T9 `8766403`(README).
+- 리뷰에서 잡은 Important 4건: 같은 이름 브랜치 전환 모순(T2 보완) · 조회 중 locate-head 전체 그래프 로드(T5 보완) · 조회 중 페이지네이션 비스코프 교체(T5 보완2, 재검에서 발견) · 터미널 에러색 회색화(T7 보완 — 플랜 결함으로 판정). 전부 보완 커밋으로 폐쇄·재검 Approve.
+- 최종 게이트 실측: 루트 468 · typecheck 전부 Done · desktop e2e **74**(smoke 68 + hosting 6) · last-screen 0건. 통합 리뷰 Verdict: Ready to merge.
+- 공식 스크린샷 3장(e7g-branches-tree/e7g-worktrees-tone/e7g-terminal-tone) 컨트롤러 육안 검수 통과·사용자 전송(1회 촬영 확정).
