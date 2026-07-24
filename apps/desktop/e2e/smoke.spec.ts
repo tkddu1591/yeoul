@@ -2194,3 +2194,31 @@ test('실험 공간 — 폴더를 접으면 하위 브랜치가 숨는다 (E7g)'
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 않는다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 알림 유발: 태그 만들기 — 기존 스위트에서 가장 값싼 notice 경로(E7g 태그 테스트 관례 재사용)
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await window.getByTestId('prompt-input').fill('e7h-notice')
+    await window.getByTestId('prompt-submit').click()
+    const notice = window.getByTestId('notice')
+    await expect(notice).toContainText('태그를 만들었어요')
+    // 배너 박스가 좌측 탭 구역(변경/실험 공간/워크트리)과 겹치지 않는다 — 탭 3개 모두 온전히 클릭 가능
+    const noticeBox = (await notice.boundingBox())!
+    const tabBox = (await window.getByTestId('left-tab-worktrees').boundingBox())!
+    expect(noticeBox.x).toBeGreaterThanOrEqual(tabBox.x + tabBox.width)
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId('left-tab-changes').click()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

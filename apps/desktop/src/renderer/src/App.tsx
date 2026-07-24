@@ -457,7 +457,8 @@ export function App() {
         store.error !== null ||
         store.notice !== null) && (
         <div className="app__top-layer">
-          <div className="app__top-stack">
+          {/* E7h ① — 좌측 탭바(z-41)와 아예 안 겹치게 스택을 좌측 열 오른쪽부터(패딩 20 + 열 폭 + gap 16) */}
+          <div className="app__top-stack" style={{ left: columns.left + 36 }}>
             {(status?.state === 'merging' ||
               status?.state === 'reverting' ||
               status?.state === 'cherry-picking' ||

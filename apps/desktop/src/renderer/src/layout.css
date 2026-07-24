@@ -143,12 +143,8 @@ body.is-fullscreen .app__header {
   flex: 1;
   min-width: 0;
 }
-/* E7a — 좌측 탭바(z-41)가 배너 위에 뜬다. 배너 텍스트가 탭 뒤로 숨지 않게 콘텐츠만 탭 구역 오른쪽에서 시작(배경은 전체 폭 유지) */
-.app__error,
-.app__notice,
-.app__merge-bar {
-  padding-left: 210px;
-}
+/* E7h ① — 배너 스택은 좌측 열 오른쪽부터 시작한다(App이 top-stack left를 columns.left에서 파생).
+   E7a의 padding-left 210px(탭 2개 시절 실측)는 탭이 늘며 깨졌다 — 하드코딩 폐기 */
 .app__main {
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (computeColumns — 중앙 380px 보장) — 여기 값은 초기 페인트 폴백 */
