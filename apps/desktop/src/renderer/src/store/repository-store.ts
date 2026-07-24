@@ -1284,8 +1284,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || history.length < historyLimit || historyLimit >= HISTORY_MAX) return
     await guard(set, get, async () => {
       const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
-      const more = await git().history.list(repoPath, next)
-      set({ history: more, historyLimit: next })
+      const ref = get().historyRef ?? undefined
+      try {
+        set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
+      } catch (error) {
+        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
+        if (ref === undefined) throw error
+        set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
+      }
     })
   },
 
