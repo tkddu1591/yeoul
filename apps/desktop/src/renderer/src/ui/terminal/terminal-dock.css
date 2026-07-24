@@ -17,8 +17,8 @@
 .terminal-dock__bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 8px;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
   cursor: row-resize;
   border-bottom: 1px solid var(--color-border-strong);
   background: var(--color-surface);
@@ -30,19 +30,24 @@
 .terminal-dock__tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   cursor: default;
 }
 .terminal-dock__tab {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0 2px;
+  gap: var(--space-1);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 var(--space-1) 2px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 .terminal-dock__tab--on {
-  border-color: var(--color-border-strong);
+  border-bottom-color: var(--concept-branch);
+  color: inherit;
+  font-weight: 600;
 }
 .terminal-dock__tab-name {
   appearance: none;
@@ -69,14 +74,14 @@
 }
 .terminal-dock__error {
   margin: 0;
-  padding: 4px 10px;
+  padding: var(--space-1) 10px;
   font-size: var(--text-sm);
-  color: #ff9191;
+  color: var(--color-text-faint);
 }
 .terminal-dock__body {
   flex: 1;
   min-height: 0;
-  padding: 4px;
+  padding: var(--space-1);
 }
 .terminal-dock__view {
   height: 100%;
