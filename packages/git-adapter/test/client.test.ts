@@ -2455,6 +2455,34 @@ describe('GitClient', () => {
     expect(await client.branches.backup('side-branch')).toEqual({ linked: false })
   })
 
+  it('history.list — ref를 주면 그 브랜치 계보만 본다(--all 아님) (E7g)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('side-view', null)
+    await execGitOrThrow(['checkout', 'side-view'], { cwd: repo })
+    await writeFixtureFile(repo, 'side.txt', 's\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'side-only'], { cwd: repo })
+    await execGitOrThrow(['checkout', 'main'], { cwd: repo })
+    await writeFixtureFile(repo, 'main2.txt', 'm\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'main-only'], { cwd: repo })
+    const viewed = await client.history.list(50, 'side-view')
+    const subjects = viewed.map((commit) => commit.subject)
+    expect(subjects).toContain('side-only')
+    expect(subjects).not.toContain('main-only')
+    // 전체 그래프(무인자)는 둘 다 본다 — 기존 동작 무변
+    const all = (await client.history.list(50)).map((commit) => commit.subject)
+    expect(all).toContain('side-only')
+    expect(all).toContain('main-only')
+  })
+
+  it('history.list — 없는 ref는 에러다(조용한 복귀는 store 몫) (E7g)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.history.list(50, 'vanished-branch')).rejects.toThrow()
+  })
+
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {
     const { repo, remote } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)

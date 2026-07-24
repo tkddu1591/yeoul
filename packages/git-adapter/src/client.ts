@@ -149,8 +149,8 @@ export interface GitClient {
     removeFile(path: string): Promise<void>
   }
   history: {
-    /** 최신순 커밋 요약. limit은 1~10000으로 잘린다 */
-    list(limit: number): Promise<CommitSummary[]>
+    /** 최신순 커밋 요약. limit은 1~10000으로 잘린다. ref를 주면 그 계보만(조회 모드 — E7g), 없으면 전체 그래프(--all) */
+    list(limit: number, ref?: string): Promise<CommitSummary[]>
   }
   sync: {
     /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 — linked로 알린다 (E7e) */
@@ -946,7 +946,7 @@ export function createGitClient(repoPath: string): GitClient {
       },
     },
     history: {
-      async list(limit) {
+      async list(limit, ref) {
         const cwd = await topLevel()
         // NaN은 min/max를 그대로 통과한다 — 유한수가 아니면 기본값으로
         const safeLimit = Number.isFinite(limit)
@@ -962,15 +962,18 @@ export function createGitClient(repoPath: string): GitClient {
           // 전체 그래프(피드백 4) — 로컬·원격·태그를 전부 순회한다. --exclude는 뒤의 --all에만
           // 적용되며, refs/stash를 빼지 않으면 보관함 WIP 커밋 3형제가, refs/notes를 빼지 않으면
           // 노트 커밋이 역사에 등장한다(실측 1). refs/replace는 같은 계열의 예방 제외다
-          '--exclude=refs/stash',
-          '--exclude=refs/notes/*',
-          '--exclude=refs/replace/*',
-          '--all',
+          // 조회 모드(E7g)에서는 --exclude·--all을 빼고 ref의 계보만 본다(맨 끝에서 --end-of-options로 지정)
+          ...(ref === undefined
+            ? ['--exclude=refs/stash', '--exclude=refs/notes/*', '--exclude=refs/replace/*', '--all']
+            : []),
           // 타임스탬프가 같은 커밋(스크립트 연속 커밋 등)에서도 부모가 자식보다 아래에 오도록
           // 고정한다 — 레인 그래프는 "기다리던 커밋이 아래에 나타난다"를 전제한다 (실측: 동률에서 유령 레인)
           '--date-order',
           '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%P%x1f%s',
           '-z',
+          // --end-of-options: 대시로 시작하는 ref가 옵션으로 해석되는 것 차단 (관례). args 중간에 오면
+          // 이후 --date-order 등이 인자로 오해되므로 반드시 맨 끝(옵션 전부·format·-z 뒤)에 둔다
+          ...(ref === undefined ? [] : ['--end-of-options', ref]),
         ]
         const result = await execGit(args, { cwd })
         if (result.exitCode !== 0) {
