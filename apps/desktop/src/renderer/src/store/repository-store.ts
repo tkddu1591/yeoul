@@ -133,8 +133,9 @@ interface RepositoryStore {
   addWorktree(path: string, branch: string, createBranch?: boolean): Promise<boolean>
   /** 워크트리 지우기 — 반환 true면 미저장 변경이 있어 강제 확인 필요 (removeBranch 관례) (E7c) */
   removeWorktree(path: string, force: boolean): Promise<boolean>
-  /** 워크트리를 앱에서 연다(전체 전환) — 경로 검증·allowlist 등록은 main (E7c) */
-  openWorktree(path: string): Promise<void>
+  /** 워크트리를 앱에서 연다(전체 전환) — 경로 검증·allowlist 등록은 main (E7c).
+   *  성공 여부 반환 — 호출부가 전환 완료 후에만 터미널 대상을 같이 바꾼다 (E7h ③) */
+  openWorktree(path: string): Promise<boolean>
   /** Finder에서 보기 (E7c) */
   revealWorktree(path: string): Promise<void>
   /** 수동 원격 새로고침 — guard 경유(에러 배너). 억제 창이 감시 이벤트를 삼키므로 직접 스냅샷 (E7e 실측 6) */
@@ -1083,8 +1084,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async openWorktree(path) {
     const { repoPath } = get()
-    if (!repoPath) return
-    await guard(set, get, async () => {
+    if (!repoPath) return false
+    return guard(set, get, async () => {
       // 검증·allowlist 등록은 main — 통과하면 정규화 경로가 돌아온다 (E7c 보안 가드)
       const opened = await git().repo.openPath(repoPath, path)
       // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)

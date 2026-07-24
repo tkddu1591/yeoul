@@ -287,7 +287,8 @@ export function App() {
       <header className="app__header">
         <div className="app__repo">
           <strong>{repoName}</strong>
-          <span className="app__repo-path" title={store.repoPath}>
+          {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
+          <span className="app__repo-path" title={store.repoPath} data-testid="repo-path">
             {store.repoPath}
           </span>
         </div>
@@ -647,9 +648,13 @@ export function App() {
                 switch (action.kind) {
                   case 'select':
                     // 클릭의 기본 동작은 설정을 따른다 (우클릭엔 두 동작이 따로 있다 — 스펙)
-                    setActiveWorktree({ cwd: action.path, label: action.label })
-                    if (worktreeSelectAction === 'switch-app') void store.openWorktree(action.path)
-                    else {
+                    if (worktreeSelectAction === 'switch-app') {
+                      // E7h ③ — 앱 전환이 끝난 뒤 터미널 대상을 같이 바꾼다(먼저 바꾸면 시차·실패 시 어긋남)
+                      void store.openWorktree(action.path).then((ok) => {
+                        if (ok) setActiveWorktree({ cwd: action.path, label: action.label })
+                      })
+                    } else {
+                      setActiveWorktree({ cwd: action.path, label: action.label })
                       setDockOpen(() => {
                         saveDockOpen(true)
                         return true

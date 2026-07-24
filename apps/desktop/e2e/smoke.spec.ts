@@ -2258,3 +2258,36 @@ test('E7h — 커밋 상세 파일 목록이 폴더 트리로 접힌다', async 
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E7h — 앱 전체 전환 시 터미널 대상이 전환 완료 후 함께 바뀐다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-side'], { cwd: repo })
+  const wtPath = `${repo}-side`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'wt-side'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    // 설정 → 워크트리 클릭 동작: 앱 전체 전환 (E7c 설정 모달 관례)
+    await window.getByTestId('settings-open').click()
+    await window.getByTestId('settings-worktree-switch').click()
+    await window.getByTestId('settings-close').click()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click()
+    // 앱 전환 완료(헤더 경로 표기)까지 기다린다 — 전환이 끝난 뒤에만 아래 터미널 대상도 새 워크트리를 가리켜야 한다 (E7h ③)
+    await expect(window.getByTestId('repo-path')).toContainText(sideName)
+    // 도크가 닫혀 있으니 토글 후 라벨을 본다 — 이 시점의 activeWorktree는 이미 전환 완료 상태(새 세션 생성 시 그 라벨을 쓴다)
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toContainText(sideName)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
