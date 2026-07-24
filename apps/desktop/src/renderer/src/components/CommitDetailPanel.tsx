@@ -1,6 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CommitDetail, CommitFileChange } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
+import { buildFileTree, flattenFileTree } from './file-tree'
 import { formatRelativeTime } from './relative-time'
 import './commit-detail-panel.css'
 import './virtual.css'
@@ -31,12 +32,15 @@ function CommitFileRow({
   file,
   isSelected,
   busy,
+  showDir,
   onSelect,
   onMenu,
 }: {
   file: CommitFileChange
   isSelected: boolean
   busy: boolean
+  /** 경로 흐림 표기 — 트리 모드는 폴더 행이 이미 경로를 보여주므로 false, 평면 모드(Task 8)는 true */
+  showDir: boolean
   onSelect(): void
   onMenu(x: number, y: number): void
 }) {
@@ -69,7 +73,7 @@ function CommitFileRow({
       </span>
       <span className="file-row__name">
         <span className="file-row__base">{basename}</span>
-        {directory && <span className="file-row__dir">{directory}</span>}
+        {showDir && directory && <span className="file-row__dir">{directory}</span>}
       </span>
     </button>
   )
@@ -94,14 +98,22 @@ export function CommitDetailPanel({
   // 우클릭 메뉴·확인창 상태는 패널이 관리한다 (HistoryPanel·다이얼로그 관례)
   const [menu, setMenu] = useState<{ x: number; y: number; file: CommitFileChange } | null>(null)
   const [confirmingRestore, setConfirmingRestore] = useState<CommitFileChange | null>(null)
+  // E7h ② — 파일 목록 depth 트리. 접기 상태는 로컬(커밋 전환 시 리셋 — 아래 effect)
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const rows = flattenFileTree(buildFileTree(detail.files), collapsed)
   // 대형 커밋(수천 파일)에서도 파일 목록은 가시 범위만 렌더한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
-    count: detail.files.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 31,
     overscan: 10,
   })
+
+  // E7h ② — 커밋 전환 시 접기 리셋. 이른 반환보다 앞(Rules of Hooks — E7d 교훈)
+  useEffect(() => {
+    setCollapsed(new Set())
+  }, [detail.hash])
 
   const runRestore = () => {
     const file = confirmingRestore
@@ -145,22 +157,49 @@ export function CommitDetailPanel({
           style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
         >
           {virtualizer.getVirtualItems().map((item) => {
-            const file = detail.files[item.index]!
+            const row = rows[item.index]!
             return (
               <li
-                key={file.path}
+                key={row.kind === 'folder' ? `d:${row.path}` : row.item.path}
                 ref={virtualizer.measureElement}
                 data-index={item.index}
                 className="virtual-row"
                 style={{ transform: `translateY(${item.start}px)` }}
               >
-                <CommitFileRow
-                  file={file}
-                  isSelected={selectedFile?.path === file.path}
-                  busy={busy}
-                  onSelect={() => onSelectFile(file)}
-                  onMenu={(x, y) => setMenu({ x, y, file })}
-                />
+                {row.kind === 'folder' ? (
+                  <button
+                    type="button"
+                    className="commit-file-folder"
+                    style={{ paddingLeft: `${8 + row.depth * 14}px` }}
+                    onClick={() =>
+                      setCollapsed((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(row.path)) next.delete(row.path)
+                        else next.add(row.path)
+                        return next
+                      })
+                    }
+                    aria-expanded={!collapsed.has(row.path)}
+                    data-testid={`commit-folder-${row.path}`}
+                  >
+                    <span className="commit-file-folder__chev" aria-hidden="true">
+                      {collapsed.has(row.path) ? '▸' : '▾'}
+                    </span>
+                    <span className="commit-file-folder__name">{row.name}</span>
+                    <span className="commit-file-folder__count">{row.count}</span>
+                  </button>
+                ) : (
+                  <div style={{ paddingLeft: `${row.depth * 14}px` }}>
+                    <CommitFileRow
+                      file={row.item}
+                      isSelected={selectedFile?.path === row.item.path}
+                      busy={busy}
+                      showDir={false}
+                      onSelect={() => onSelectFile(row.item)}
+                      onMenu={(x, y) => setMenu({ x, y, file: row.item })}
+                    />
+                  </div>
+                )}
               </li>
             )
           })}

@@ -2222,3 +2222,39 @@ test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 �
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E7h — 커밋 상세 파일 목록이 폴더 트리로 접힌다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '.'], { cwd: repo })
+  await execGitOrThrow(
+    ['-c', 'user.email=e2e@test', '-c', 'user.name=E2E', 'commit', '-m', 'base'],
+    { cwd: repo },
+  )
+  const { mkdir } = await import('node:fs/promises')
+  await mkdir(join(repo, 'src/ui'), { recursive: true })
+  await writeFile(join(repo, 'src/ui/deep.txt'), 'deep')
+  await writeFile(join(repo, 'root.txt'), 'root')
+  await execGitOrThrow(['add', '.'], { cwd: repo })
+  await execGitOrThrow(
+    ['-c', 'user.email=e2e@test', '-c', 'user.name=E2E', 'commit', '-m', 'tree files'],
+    { cwd: repo },
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-folder-src')).toBeVisible()
+    await expect(window.getByTestId('commit-file-src/ui/deep.txt')).toBeVisible()
+    await window.getByTestId('commit-folder-src').click()
+    await expect(window.getByTestId('commit-file-src/ui/deep.txt')).toHaveCount(0)
+    await expect(window.getByTestId('commit-file-root.txt')).toBeVisible()
+    await window.getByTestId('commit-folder-src').click()
+    await expect(window.getByTestId('commit-file-src/ui/deep.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
