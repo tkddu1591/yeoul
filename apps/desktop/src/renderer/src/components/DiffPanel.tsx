@@ -12,10 +12,23 @@ interface DiffPanelProps {
   diff: FileDiff | null
   /** in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 */
   busy: boolean
+  /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
+  findOpen: boolean
+  /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
+  findNonce: number
+  onFindClose(): void
   onClose(): void
 }
 
-export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
+export function DiffPanel({
+  path,
+  diff,
+  busy,
+  findOpen,
+  findNonce,
+  onFindClose,
+  onClose,
+}: DiffPanelProps) {
   const [view, setView] = useState<'unified' | 'split'>('unified')
 
   if (!path || diff === null) {
@@ -54,7 +67,14 @@ export function DiffPanel({ path, diff, busy, onClose }: DiffPanelProps) {
       testId="diff-panel"
     >
       {/* key=path — 파일 전환 시 스크롤 위치와 가상 측정 캐시를 리셋한다 (이전 파일 끝에서 열리는 것 방지) */}
-      <DiffView key={path} diff={diff} view={view} />
+      <DiffView
+        key={path}
+        diff={diff}
+        view={view}
+        findOpen={findOpen}
+        findNonce={findNonce}
+        onFindClose={onFindClose}
+      />
     </Panel>
   )
 }

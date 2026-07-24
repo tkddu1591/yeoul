@@ -46,6 +46,11 @@
 .diff-line--note {
   color: var(--color-text-faint);
 }
+/* E7h ⑥ — 검색 현재 매치 행(양쪽 셀 공통 래퍼 — virtual-row) */
+.diff-row--find-hit {
+  outline: 1px solid var(--concept-branch);
+  outline-offset: -1px;
+}
 .diff-split-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

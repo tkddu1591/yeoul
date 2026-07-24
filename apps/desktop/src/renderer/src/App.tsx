@@ -774,6 +774,9 @@ export function App() {
               }
               diff={store.diff}
               busy={store.busy}
+              findOpen={findScope === 'diff'}
+              findNonce={findNonce}
+              onFindClose={() => setFindScope(null)}
               onClose={() =>
                 store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
               }
@@ -822,6 +825,9 @@ export function App() {
                 busy={store.busy}
                 actionsDisabled={status?.state !== 'normal'}
                 historyRef={store.historyRef}
+                findOpen={findScope === 'history'}
+                findNonce={findNonce}
+                onFindClose={() => setFindScope(null)}
                 onSelect={(hash) => void store.selectCommit(hash)}
                 onLoadMore={() => void store.loadMoreHistory()}
                 onLocateHead={() => void store.revealHead()}

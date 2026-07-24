@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 
@@ -55,6 +55,13 @@ async function createTwoBlockConflictRepo(): Promise<string> {
   await writeFile(join(dir, 'app.txt'), 'mine-top\ntwo\nthree\nfour\nfive\nsix\nmine-bottom\n')
   await execGitOrThrow(['commit', '-am', 'mine'], { cwd: dir })
   return dir
+}
+
+/** 대상 요소 중심에 마우스를 올리고 ⌘F를 눌러 그 스코프의 FindBar를 연다 (E7h ⑥ — hover 라우팅) */
+async function hoverAndCmdF(window: Page, selector: string): Promise<void> {
+  const box = (await window.locator(selector).boundingBox())!
+  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await window.keyboard.press('Meta+f')
 }
 
 test('열기 → stage → commit → 역사 반영 → 백업', async () => {
@@ -2404,5 +2411,129 @@ test('E7h — 워크트리가 쓰는 실험 공간은 동반 삭제로 지운다
     await app.close()
     await rm(repo, { recursive: true, force: true })
     await rm(wtPath, { recursive: true, force: true }).catch(() => {})
+  }
+})
+
+test('E7h ⌘F — 히스토리에서 커밋을 찾아 점프한다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v3\n')
+  await execGitOrThrow(['commit', '-am', 'second commit'], { cwd: repo })
+  await writeFile(join(repo, 'app.txt'), 'v4\n')
+  await execGitOrThrow(['commit', '-am', 'third commit'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await hoverAndCmdF(window, '[data-testid="history-panel"]')
+    const findBar = window.getByTestId('find-bar')
+    await expect(findBar).toBeVisible()
+    await window.getByTestId('find-bar-input').fill('second commit')
+    await expect(window.getByTestId('find-bar-count')).toHaveText('1/1')
+    await expect(window.locator('.history-item--find-hit')).toContainText('second commit')
+    await window.keyboard.press('Escape')
+    await expect(findBar).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7h ⌘F — diff에서 단어를 찾아 하이라이트한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('file-unstaged-app.txt').click()
+    await expect(window.getByTestId('diff-panel')).toBeVisible()
+    await hoverAndCmdF(window, '[data-testid="diff-panel"]')
+    await window.getByTestId('find-bar-input').fill('v2')
+    await expect(window.getByTestId('find-bar-count')).toHaveText('1/1')
+    await expect(window.locator('.diff-row--find-hit')).toContainText('v2')
+    await window.keyboard.press('Escape')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7h ⌘F — 커밋 상세 파일 목록을 필터한다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const { mkdir } = await import('node:fs/promises')
+  await mkdir(join(repo, 'src/ui'), { recursive: true })
+  await writeFile(join(repo, 'src/ui/deep.txt'), 'deep')
+  await writeFile(join(repo, 'root.txt'), 'root')
+  await execGitOrThrow(['add', '.'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', 'tree files'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-folder-src')).toBeVisible()
+    await hoverAndCmdF(window, '[data-testid="commit-detail-panel"]')
+    await window.getByTestId('find-bar-input').fill('deep')
+    await expect(window.getByTestId('commit-file-src/ui/deep.txt')).toBeVisible()
+    await expect(window.getByTestId('commit-folder-src')).toHaveCount(0)
+    await expect(window.getByTestId('commit-file-root.txt')).toHaveCount(0)
+    await window.keyboard.press('Escape')
+    await expect(window.getByTestId('commit-folder-src')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7h ⌘F — 좌측 변경 목록을 필터한다', async () => {
+  const repo = await createRepoWithChange()
+  await writeFile(join(repo, 'second.txt'), 'x')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await expect(window.getByTestId('file-unstaged-second.txt')).toBeVisible()
+    await hoverAndCmdF(window, '.changes-panel')
+    await window.getByTestId('find-bar-input').fill('second')
+    await expect(window.getByTestId('file-unstaged-second.txt')).toBeVisible()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+    await window.keyboard.press('Escape')
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7h ⌘F — 마우스 위치의 패널에 열린다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await hoverAndCmdF(window, '[data-testid="history-panel"]')
+    await expect(window.getByTestId('find-bar')).toHaveCount(1)
+    // 히스토리 패널 안에서만 뜬다 — diff 쪽엔 없다
+    await expect(
+      window.locator('[data-testid="history-panel"] [data-testid="find-bar"]'),
+    ).toHaveCount(1)
+    await expect(
+      window.locator('[data-testid="diff-panel"] [data-testid="find-bar"]'),
+    ).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
   }
 })

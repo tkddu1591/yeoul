@@ -159,6 +159,12 @@
   color: var(--color-text-faint);
   flex: none;
 }
+/* E7h ⑥ — 검색 현재 매치 행 */
+.history-item--find-hit {
+  outline: 1px solid var(--concept-branch);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
+}
 /* 자동 더-불러오기 피드백 — 잘림 상태에서만 목록 끝에 보인다 (⑩) */
 .history-panel__more {
   padding: var(--space-2) var(--space-3) var(--space-3);

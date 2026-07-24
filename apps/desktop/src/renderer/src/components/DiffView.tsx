@@ -1,13 +1,27 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { DiffLine, FileDiff } from '@git-gui/domain'
-import { buildDiffRows } from './diff-rows'
+import { buildDiffRows, type DiffRow } from './diff-rows'
+import { FindBar } from './FindBar'
+import { cycleIndex, matchIndices } from './find-matches'
 import './diff-panel.css'
 import './virtual.css'
 
 interface DiffViewProps {
   diff: FileDiff
   view: 'unified' | 'split'
+  /** ⌘F로 diff 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
+  findOpen: boolean
+  /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
+  findNonce: number
+  onFindClose(): void
+}
+
+/** 행 하나의 검색 대상 텍스트 — split은 좌우를 이어붙인다(가상 행 하나가 화면 한 줄이라 좌우 모두 검색된다) */
+function rowText(row: DiffRow): string {
+  if (row.kind === 'hunk') return row.header
+  if (row.kind === 'line') return row.line.text
+  return `${row.left?.text ?? ''} ${row.right?.text ?? ''}`
 }
 
 function UnifiedLine({ line }: { line: DiffLine }) {
@@ -52,7 +66,7 @@ function SplitCell({
  * 구조화된 diff의 본문 렌더 — DiffPanel(작업 diff)과 CommitDetailPanel(커밋 diff)이 공유한다.
  * 행을 평탄화해 가상화한다 (#4) — 수십만 줄 diff에서도 DOM은 가시 범위만 유지된다.
  */
-export function DiffView({ diff, view }: DiffViewProps) {
+export function DiffView({ diff, view, findOpen, findNonce, onFindClose }: DiffViewProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const rows = buildDiffRows(diff.hunks, view)
   const virtualizer = useVirtualizer({
@@ -61,6 +75,18 @@ export function DiffView({ diff, view }: DiffViewProps) {
     estimateSize: () => 21,
     overscan: 20,
   })
+
+  // E7h ⑥ — ⌘F 점프 검색. 이른 반환(바이너리·메타 전용·빈 diff)보다 앞(Rules of Hooks — E7d 교훈)
+  const [findQuery, setFindQuery] = useState('')
+  const [findPos, setFindPos] = useState(0)
+  const findHits = findOpen ? matchIndices(rows.map(rowText), findQuery) : []
+  const currentHit = findHits.length === 0 ? -1 : findHits[Math.min(findPos, findHits.length - 1)]!
+  const moveFind = (delta: number) => {
+    if (findHits.length === 0) return
+    const nextPos = cycleIndex(Math.min(findPos, findHits.length - 1), delta, findHits.length)
+    setFindPos(nextPos)
+    virtualizer.scrollToIndex(findHits[nextPos]!, { align: 'center' })
+  }
 
   if (diff.isBinary) {
     return <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
@@ -81,39 +107,62 @@ export function DiffView({ diff, view }: DiffViewProps) {
     return <p className="diff-panel__empty">변경 내용이 없어요</p>
   }
   return (
-    <div ref={scrollRef} className="virtual-scroll" data-testid={`diff-view-${view}`}>
-      <div
-        className="diff-panel__code"
-        style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
-      >
-        {virtualizer.getVirtualItems().map((item) => {
-          const row = rows[item.index]!
-          return (
-            <div
-              key={item.index}
-              ref={virtualizer.measureElement}
-              data-index={item.index}
-              className="virtual-row"
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              {row.kind === 'hunk' ? (
-                <div className="diff-line diff-line--hunk">{row.header}</div>
-              ) : row.kind === 'line' ? (
-                <UnifiedLine line={row.line} />
-              ) : (
-                <div className="diff-split-row">
-                  <SplitCell line={row.left} side="left" />
-                  <SplitCell
-                    line={row.right}
-                    side="right"
-                    duplicate={row.right !== null && row.left === row.right}
-                  />
-                </div>
-              )}
-            </div>
-          )
-        })}
+    <>
+      {findOpen && (
+        <FindBar
+          query={findQuery}
+          position={findHits.length === 0 ? -1 : Math.min(findPos, findHits.length - 1)}
+          count={findHits.length}
+          focusSignal={findNonce}
+          placeholder="diff에서 찾기"
+          onQuery={(q) => {
+            setFindQuery(q)
+            setFindPos(0)
+            const hits = matchIndices(rows.map(rowText), q)
+            if (hits.length > 0) virtualizer.scrollToIndex(hits[0]!, { align: 'center' })
+          }}
+          onNext={() => moveFind(1)}
+          onPrev={() => moveFind(-1)}
+          onClose={() => {
+            setFindQuery('')
+            onFindClose()
+          }}
+        />
+      )}
+      <div ref={scrollRef} className="virtual-scroll" data-testid={`diff-view-${view}`}>
+        <div
+          className="diff-panel__code"
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+        >
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index]!
+            return (
+              <div
+                key={item.index}
+                ref={virtualizer.measureElement}
+                data-index={item.index}
+                className={`virtual-row${item.index === currentHit ? ' diff-row--find-hit' : ''}`}
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                {row.kind === 'hunk' ? (
+                  <div className="diff-line diff-line--hunk">{row.header}</div>
+                ) : row.kind === 'line' ? (
+                  <UnifiedLine line={row.line} />
+                ) : (
+                  <div className="diff-split-row">
+                    <SplitCell line={row.left} side="left" />
+                    <SplitCell
+                      line={row.right}
+                      side="right"
+                      duplicate={row.right !== null && row.left === row.right}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
-    </div>
+    </>
   )
 }

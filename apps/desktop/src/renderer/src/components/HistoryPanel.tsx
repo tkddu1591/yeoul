@@ -6,6 +6,8 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
+import { FindBar } from './FindBar'
+import { cycleIndex, matchIndices } from './find-matches'
 import { buildGraph, type GraphRow } from './history-graph'
 import { arrangeRefs, isRemoteRef, refBadgeLabel } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
@@ -38,6 +40,11 @@ interface HistoryPanelProps {
   actionsDisabled: boolean
   /** 역사 조회 중인 브랜치 — non-null이면 "조회 중" 알약을 보여준다 (E7g) */
   historyRef: string | null
+  /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
+  findOpen: boolean
+  /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
+  findNonce: number
+  onFindClose(): void
   onSelect(hash: string): void
   onLoadMore(): void
   /** "지금 여기"가 로드 범위 밖일 때 누른다 — 찾을 때까지 더 읽어 스크롤한다 (품질 리뷰) */
@@ -147,6 +154,9 @@ export function HistoryPanel({
   busy,
   actionsDisabled,
   historyRef,
+  findOpen,
+  findNonce,
+  onFindClose,
   onSelect,
   onLoadMore,
   onLocateHead,
@@ -167,6 +177,20 @@ export function HistoryPanel({
   })
   const virtualItems = virtualizer.getVirtualItems()
   const lastRendered = virtualItems[virtualItems.length - 1]?.index ?? -1
+
+  // E7h ⑥ — ⌘F 점프 검색: 메시지·해시 매치 인덱스와 현재 위치(순환). 이른 반환이 없는
+  // 컴포넌트지만(전부 삼항 렌더) 다른 훅과 나란히 최상단에 둔다(Rules of Hooks 관례 — E7d 교훈)
+  const [findQuery, setFindQuery] = useState('')
+  const [findPos, setFindPos] = useState(0)
+  const findTexts = () => history.map((commit) => `${commit.subject} ${commit.hash}`)
+  const findHits = findOpen ? matchIndices(findTexts(), findQuery) : []
+  const currentHit = findHits.length === 0 ? -1 : findHits[Math.min(findPos, findHits.length - 1)]!
+  const moveFind = (delta: number) => {
+    if (findHits.length === 0) return
+    const nextPos = cycleIndex(Math.min(findPos, findHits.length - 1), delta, findHits.length)
+    setFindPos(nextPos)
+    virtualizer.scrollToIndex(findHits[nextPos]!, { align: 'center' })
+  }
 
   // "지금 여기"(HEAD)가 바뀌거나, "지금 여기로"로 로드 범위에 처음 들어온 순간 그 행으로 스크롤한다
   // (품질 리뷰 — 구현 실측 정정: revealHead는 headHash를 바꾸지 않으므로 발견 전이(headFound)도 봐야 한다.
@@ -282,6 +306,27 @@ export function HistoryPanel({
       }
       testId="history-panel"
     >
+      {findOpen && (
+        <FindBar
+          query={findQuery}
+          position={findHits.length === 0 ? -1 : Math.min(findPos, findHits.length - 1)}
+          count={findHits.length}
+          focusSignal={findNonce}
+          placeholder="메시지·해시 찾기"
+          onQuery={(q) => {
+            setFindQuery(q)
+            setFindPos(0)
+            const hits = matchIndices(findTexts(), q)
+            if (hits.length > 0) virtualizer.scrollToIndex(hits[0]!, { align: 'center' })
+          }}
+          onNext={() => moveFind(1)}
+          onPrev={() => moveFind(-1)}
+          onClose={() => {
+            setFindQuery('')
+            onFindClose()
+          }}
+        />
+      )}
       {history.length === 0 ? (
         <div className="history-panel__empty">
           <Pictogram kind="commit" size={20} label="저장 시점" />
@@ -314,6 +359,7 @@ export function HistoryPanel({
                       'history-item',
                       isHead ? 'history-item--head' : '',
                       selectedHash === commit.hash ? 'history-item--selected' : '',
+                      item.index === currentHit ? 'history-item--find-hit' : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
