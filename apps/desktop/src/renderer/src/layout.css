@@ -8,9 +8,22 @@
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-3) var(--space-5);
+  /* E7f 한 줄 타이틀바 — 신호등(닫기·최소화·전체) 폭만큼 왼쪽을 비운다(hiddenInset 인셋).
+     전체화면에서는 신호등이 숨어 body.is-fullscreen이 접는다(실측 2: push 신호) */
+  padding-left: 80px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   flex: none;
+  /* 헤더가 타이틀바를 겸한다 — 빈 곳 드래그로 창 이동·더블클릭 최대화 */
+  -webkit-app-region: drag;
+}
+/* 드래그 영역이 클릭을 삼키면 안 된다 — 헤더 안 인터랙티브 요소 공용 no-drag
+   (개별 나열 금지 — 새 버튼이 추가돼도 자동 적용. 누락은 헤더 클릭 E2E가 잡는다) */
+.app__header :is(button, input, select, a, [role='button']) {
+  -webkit-app-region: no-drag;
+}
+body.is-fullscreen .app__header {
+  padding-left: var(--space-5);
 }
 .app__repo {
   display: flex;

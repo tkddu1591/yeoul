@@ -2075,3 +2075,23 @@ test('설정 — 받아오기 방식·자동 새로고침이 재시작 후에도
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('창 제목이 "Git GUI"다 — 한 줄 타이틀바에서도 창 전환 UI에 쓰인다 (E7f)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('refresh')).toBeVisible()
+    const title = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.getTitle(),
+    )
+    expect(title).toBe('Git GUI')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

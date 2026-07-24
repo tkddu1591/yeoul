@@ -6,6 +6,7 @@ import type {
   HostingApi,
   SettingsApi,
   TerminalApi,
+  WindowApi,
 } from '@git-gui/ipc-contract'
 import {
   CHANNELS,
@@ -16,6 +17,8 @@ import {
   SETTINGS_CHANNELS,
   TERMINAL_API_KEY,
   TERMINAL_CHANNELS,
+  WINDOW_API_KEY,
+  WINDOW_CHANNELS,
 } from '@git-gui/ipc-contract'
 
 const api: GitApi = {
@@ -182,3 +185,14 @@ const terminalApi: TerminalApi = {
 }
 
 contextBridge.exposeInMainWorld(TERMINAL_API_KEY, terminalApi)
+
+const windowApi: WindowApi = {
+  onFullScreen: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, isFullScreen: boolean) =>
+      listener(isFullScreen)
+    ipcRenderer.on(WINDOW_CHANNELS.fullScreen, wrapped)
+    return () => ipcRenderer.removeListener(WINDOW_CHANNELS.fullScreen, wrapped)
+  },
+}
+
+contextBridge.exposeInMainWorld(WINDOW_API_KEY, windowApi)

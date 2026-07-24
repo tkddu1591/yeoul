@@ -1,4 +1,4 @@
-import type { GitApi, HostingApi, SettingsApi, TerminalApi } from '@git-gui/ipc-contract'
+import type { GitApi, HostingApi, SettingsApi, TerminalApi, WindowApi } from '@git-gui/ipc-contract'
 
 declare global {
   interface Window {
@@ -6,6 +6,7 @@ declare global {
     hostingApi: HostingApi
     settingsApi: SettingsApi
     terminalApi: TerminalApi
+    windowApi: WindowApi
   }
 }
 

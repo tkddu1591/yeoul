@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b7abff"/>
+      <stop offset="0.55" stop-color="#9f8fff"/>
+      <stop offset="1" stop-color="#7e6ce0"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Big Sur squircle 근사(824px, 마진 100) -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  <!-- 브랜치 모티프: 본선 + 갈라짐 + 노드 3개 (흰색 라운드 스트로크) -->
+  <g stroke="#ffffff" stroke-width="58" stroke-linecap="round" fill="none">
+    <line x1="430" y1="368" x2="430" y2="700"/>
+    <path d="M 430 560 C 430 440, 594 500, 594 372"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="430" cy="316" r="62"/>
+    <circle cx="594" cy="320" r="62" fill="#f2eeff"/>
+    <circle cx="430" cy="752" r="62"/>
+  </g>
+  <!-- 노드 중심 살짝 비워 링 느낌(과하지 않게) -->
+  <g fill="#9f8fff" opacity="0.35">
+    <circle cx="430" cy="316" r="24"/>
+    <circle cx="594" cy="320" r="24"/>
+    <circle cx="430" cy="752" r="24"/>
+  </g>
+</svg>

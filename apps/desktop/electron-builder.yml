@@ -1,0 +1,24 @@
+# E7f 패키징 — 로컬 사용 목적(서명·공증 없음). electron-vite external 구조(실측 5):
+# main/preload 번들은 out/에 있고 외부 require는 node-pty뿐 — files를 그만큼만 담는다
+appId: dev.gitgui.app
+productName: Git GUI
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+  - "!node_modules/**"
+  - node_modules/node-pty/**
+asar: true
+asarUnpack:
+  - node_modules/node-pty/**
+npmRebuild: false
+mac:
+  target:
+    - dir
+    - dmg
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+  # 로컬 사용(서명·공증 없음) — 서명 없는 배포에 hardenedRuntime은 불필요·번거로움만 는다.
+  # (node-pty는 packed 경로 require 시 정상 — Task 4 실측: unpacked 직접 require만 replace 이중치환으로 죽는다)
+  hardenedRuntime: false

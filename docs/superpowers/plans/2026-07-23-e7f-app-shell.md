@@ -308,7 +308,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `apps/desktop/resources/icon.png` (1024×1024) · `apps/desktop/resources/icon.icns`
 - Modify: `apps/desktop/src/main/index.ts` (dock 아이콘)
 
-- [ ] **Step 1: Codex 위임 생성.** Codex에 이미지 생성 지시 — 프롬프트 요지: "macOS Big Sur 스타일 앱 아이콘, 1024×1024 PNG, 둥근 모서리 스퀘어클, 배경 보라 그라데이션(#9f8fff 계열), 중앙에 미니멀한 흰 브랜치(⎇) 모티프, 비개발자 친화적 친근함, 플랫·미묘한 입체감". 산출 파일을 scratchpad에 저장.
+**(실행 편차 — Codex 폴백):** Codex MCP가 2회 타임아웃(파일 미생성)해 컨트롤러가 합의 지시문 그대로 SVG를 직접 디자인·Electron capturePage로 1024 렌더(scratchpad/icon.svg — 소스 보존). 사용자 승인 v1 획득(2026-07-24). Step 1은 수행 기록으로 남긴다.
+
+- [x] **Step 1: Codex 위임 생성.** Codex에 이미지 생성 지시 — 프롬프트 요지: "macOS Big Sur 스타일 앱 아이콘, 1024×1024 PNG, 둥근 모서리 스퀘어클, 배경 보라 그라데이션(#9f8fff 계열), 중앙에 미니멀한 흰 브랜치(⎇) 모티프, 비개발자 친화적 친근함, 플랫·미묘한 입체감". 산출 파일을 scratchpad에 저장.
 
 - [ ] **Step 2: 검수·사용자 승인 게이트.** 컨트롤러 육안 검수 → 사용자에게 시안 전송(SendUserFile) → **승인 대기**. 불만족이면 지시 조정 후 Step 1 반복.
 
@@ -347,13 +349,13 @@ if (process.platform === 'darwin') {
 
 (경로는 out/main 기준 상대 — dev·패키징 공통 동작을 Step 5에서 실기동 확인, 어긋나면 app.isPackaged 분기·편차 보고.)
 
-- [ ] **Step 5: 확인·게이트** — `pnpm dev` 잠깐 실기동(독 아이콘 확인·스크린샷) 후 종료. 루트 `pnpm test` 450·typecheck·build 무회귀.
+- [x] **Step 5: 확인·게이트** — 실기동으로 setIcon 무에러 확인(**편차: screencapture가 화면 기록 권한 부재로 실패 — 독 육안 확인은 Task 4 패키징 스모크로 이관**). 루트 `pnpm test` 450·typecheck·build 무회귀.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/desktop/resources/icon.png apps/desktop/resources/icon.icns apps/desktop/src/main/index.ts
-git commit -m "feat(desktop): E7f 앱 아이콘 — Codex 생성(사용자 승인)·icns 변환·dev 독 반영
+git add apps/desktop/resources/icon.png apps/desktop/resources/icon.svg apps/desktop/resources/icon.icns apps/desktop/src/main/index.ts
+git commit -m "feat(desktop): E7f 앱 아이콘 — 컨트롤러 SVG 디자인(Codex 타임아웃 폴백)·사용자 승인·icns·dev 독 반영
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -458,11 +460,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 4: 최종 게이트 + 실행 스모크 + README (**스모크는 컨트롤러 수행**)
 
-- [ ] **Step 1: 전체 게이트** — 루트 `pnpm test` → **450**. `pnpm typecheck` Done. `pnpm --filter @git-gui/desktop build`. `pnpm --filter @git-gui/desktop e2e` → **71**(smoke 65 + hosting 6). last-screen 0건. `pnpm --filter @git-gui/desktop package` + verify 재통과.
+- [x] **Step 1: 전체 게이트** — 루트 `pnpm test` → **450**. `pnpm typecheck` Done. `pnpm --filter @git-gui/desktop build`. `pnpm --filter @git-gui/desktop e2e` → **71**(smoke 65 + hosting 6). last-screen 0건. `pnpm --filter @git-gui/desktop package` + verify 재통과.
 
-- [ ] **Step 2: 실행 스모크(컨트롤러).** 산출 앱을 잠깐 실행 — **사용자 화면에 창이 잠깐 뜬다**(패키징 검증 특성상 불가피 — 이 한 번만). `open "apps/desktop/dist/mac-arm64/Git GUI.app"` → 몇 초 뒤 `screencapture`로 전체 화면 캡처(메뉴바 "Git GUI"·독 아이콘 확인) → 앱 종료(`osascript -e 'quit app "Git GUI"'`). 캡처 육안 검수 + 사용자 전송. 터미널 도크 열어 pty 동작 1회 확인(spawn-helper 검증 실전).
+- [x] **Step 2: 실행 스모크(컨트롤러).** 산출 앱을 잠깐 실행 — **사용자 화면에 창이 잠깐 뜬다**(패키징 검증 특성상 불가피 — 이 한 번만). `open "apps/desktop/dist/mac-arm64/Git GUI.app"` → 몇 초 뒤 `screencapture`로 전체 화면 캡처(메뉴바 "Git GUI"·독 아이콘 확인) → 앱 종료(`osascript -e 'quit app "Git GUI"'`). 캡처 육안 검수 + 사용자 전송. 터미널 도크 열어 pty 동작 1회 확인(spawn-helper 검증 실전).
 
-- [ ] **Step 3: README.** 기존(E7e 문단 끝):
+- [x] **Step 3: README.** 기존(E7e 문단 끝):
 
 ```
 연결(upstream) 없는 실험 공간을 백업하면 자동으로 원격에 만들어 연결하고 알려줍니다.
@@ -474,7 +476,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 연결(upstream) 없는 실험 공간을 백업하면 자동으로 원격에 만들어 연결하고 알려줍니다. E7f로 앱이 진짜 앱다워졌습니다 — macOS에서 닫기·최소화·전체 버튼과 헤더가 한 줄이 되고(헤더 드래그로 창 이동·더블클릭 최대화), 앱 이름·아이콘이 "Git GUI"로 바뀌었으며, `pnpm --filter @git-gui/desktop package`로 설치 가능한 .app/.dmg를 만들 수 있습니다(이름·아이콘·터미널(node-pty)까지 검증 스크립트로 확인).
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md
@@ -500,3 +502,15 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ## 후속 노트 (이관 후보)
 
 - Windows/Linux 커스텀 타이틀바, 서명·공증·자동 업데이트, dmg 배경, 메뉴 한글화, 트래픽라이트 y 미세 조정(검수 결과에 따라).
+
+## 실행 기록 (2026-07-24, subagent+컨트롤러 혼합 — T1·T3 서브에이전트, T2 아이콘·T4 스모크 컨트롤러)
+
+- 커밋: 1c67053(T1 타이틀바+이름) · c9ec02a(T2 아이콘) · 966c2a7(T3 electron-builder) · b4906b1(T3 보완 hardenedRuntime) · a04ca5c(T4 README). T1·T3 각 스펙 byte-match+품질 결합 리뷰 **Yes**.
+- 게이트: 단위 **450** · typecheck 전부 Done · E2E **71**(smoke 65 + hosting 6) · last-screen 0 · `package` exit 0 · verify-app-bundle 통과(이름·아이콘·node-pty asarUnpack·spawn-helper 실행권한) · 산출 .app "Git GUI" 부팅 확인(osascript).
+- 구현 편차: ② 아이콘은 **Codex MCP 2회 타임아웃**으로 컨트롤러가 합의 지시문대로 SVG 직접 디자인·렌더(사용자 승인 v1). ③ hardenedRuntime:false 보완(로컬 서명 없는 배포 관례).
+- **T4 스모크의 실전 발견(핵심)**: 패키징 산출물의 node-pty spawn을 프로그램적으로 검증하는 과정에서, `app.asar.unpacked` 실경로를 **직접 require**하면 node-pty의 `helperPath.replace('app.asar','app.asar.unpacked')`가 이미 unpacked인 경로를 **이중 치환**(`app.asar.unpacked.unpacked`)해 존재하지 않는 spawn-helper를 spawn → posix_spawnp 실패. **실제 앱은 packed 경로(`app.asar/node_modules/node-pty`)로 require**하므로 replace가 정확히 1회 일어나 정상(ELECTRON_RUN_AS_NODE로 앱 electron 바이너리+packed require 실증: PACKED-PTY-OK). 즉 실패는 프로브 방법 아티팩트였고 패키징은 정상. hardenedRuntime·서명·권한은 모두 무관(dev/dist spawn-helper CDHash 동일·직접 exec 성공·일반 경로 복사본 성공으로 순차 배제).
+- **미완(환경 제약)**: 한 줄 타이틀바의 신호등은 OS 렌더 레이어라 화면 기록 권한이 없는 이 환경에서 컨트롤러가 캡처 불가 — 신호등 한 줄·독 아이콘의 최종 시각 확인은 사용자 실기동 몫(자동 검증은 전부 통과).
+
+## 후속 노트 추가분
+- **패키징 pty E2E**: 산출 .app을 열어 터미널을 스폰하는 자동 E2E(Playwright electron.launch에 executablePath=산출 앱)로 packed-require 경로를 회귀 가드 검토.
+- **한 줄 타이틀바 시각 회귀**: 화면 기록 가능한 환경에서 신호등·헤더 정렬 스크린샷 확보.
