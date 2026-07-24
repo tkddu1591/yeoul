@@ -273,7 +273,7 @@ export function HistoryPanel({
               {truncated ? `${historyLimit}+` : history.length}
             </span>
           </Badge>
-          {headHash !== null && headIndex < 0 && (
+          {headHash !== null && headIndex < 0 && historyRef === null && (
             <Button variant="ghost" size="sm" isDisabled={busy} onPress={onLocateHead} testId="history-locate-head">
               지금 여기로
             </Button>
