@@ -38,6 +38,11 @@ const PAIRS: Array<[string, string, number]> = [
   ['--color-accent-text', '--color-accent', 4.5],
   ['--color-accent-text', '--color-accent-active', 4.5],
   ['--color-danger', '--color-surface', 4.5],
+  // E7g 인라인 ↑↓ — 평상시·선택 행 양쪽에서 텍스트 대비 (라이트·다크 공통 순회)
+  ['--color-ahead', '--color-surface', 4.5],
+  ['--color-behind', '--color-surface', 4.5],
+  ['--color-ahead', '--color-selection-bg', 4.5],
+  ['--color-behind', '--color-selection-bg', 4.5],
   ['--color-focus', '--color-surface', 3],
   ['--term-badge', '--term-badge-bg', 4.5],
   // 파일명 자체를 변경 종류 색으로 표기한다(IntelliJ식) — 본문 텍스트 기준 대비 필요.

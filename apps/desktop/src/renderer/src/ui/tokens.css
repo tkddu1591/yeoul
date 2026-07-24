@@ -46,6 +46,9 @@
   --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
+  /* E7g 인라인 ↑↓ — 올릴 것(ahead)·받을 것(behind). 서피스 대비 4.5:1 이상(대비 회귀 테스트) */
+  --color-ahead: #067647;
+  --color-behind: #b54708;
   --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
   --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
   --opacity-disabled: 0.45;
@@ -101,6 +104,8 @@
     --color-accent-active: #a8b9fd;
     --color-accent-text: #10131a;
     --color-danger: #f97066;
+    --color-ahead: #4ade80;
+    --color-behind: #fdb022;
     --color-focus: #4d69c9;
     --color-selection-bg: #222c47;
     --term-badge: #7aa2ff;
