@@ -95,6 +95,9 @@ export function App() {
     path: string
     force: boolean
   } | null>(null)
+  // E7h ④ 워크트리 지우기 성공 직후 그 경로를 1회성으로 담아 TerminalDock에 내려보낸다 —
+  // 도크가 closeGroup 후 onPurged로 비운다(세션 훅을 App으로 끌어올리는 큰 리팩터 없이 배선)
+  const [purgeTerminalGroup, setPurgeTerminalGroup] = useState<string | null>(null)
   // E7a 실험 공간 우클릭 다이얼로그 — 재배치 확인·이름 바꾸기·지우기(needsForce 2단)·원격 지우기
   const [confirmingRebase, setConfirmingRebase] = useState<{ name: string } | null>(null)
   const [renamePrompt, setRenamePrompt] = useState<{ name: string } | null>(null)
@@ -440,9 +443,15 @@ export function App() {
           if (target === null) return
           void (async () => {
             // 미저장 변경이 있으면 엔진이 needsForce로 알린다 — 2단 확인 (removeBranch 관례)
-            if (await store.removeWorktree(target.path, target.force)) {
+            const needsForce = await store.removeWorktree(target.path, target.force)
+            if (needsForce) {
               if (!target.force) setConfirmingRemoveWorktree({ path: target.path, force: true })
+              return
             }
+            // needsForce가 아니면 지우기 성공이거나 다른 오류(그 경우 guard가 store.error를 채운다) —
+            // 실제로 성공했을 때만 그 워크트리의 터미널 그룹을 정리한다(store.removeWorktree는
+            // 성공 여부 boolean을 직접 주지 않아 최신 스토어 상태로 판별한다 — E7h ④)
+            if (useRepositoryStore.getState().error === null) setPurgeTerminalGroup(target.path)
           })()
         }}
         onCancel={() => setConfirmingRemoveWorktree(null)}
@@ -832,6 +841,8 @@ export function App() {
               activeWorktree={activeWorktree}
               open={dockOpen}
               height={dockHeight}
+              purgeGroup={purgeTerminalGroup}
+              onPurged={() => setPurgeTerminalGroup(null)}
               onResizeStart={startDockResize}
               onClose={toggleDock}
             />

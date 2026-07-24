@@ -14,6 +14,9 @@ interface TerminalDockProps {
   /** 도크가 보이는가 — 접힘은 숨김일 뿐 언마운트가 아니다(세션 유지 — 스펙) */
   open: boolean
   height: number
+  /** 워크트리 지우기 성공 직후 App이 내려주는 그 경로 — 1회성. 소비하면 onPurged로 돌려준다 (E7h ④) */
+  purgeGroup?: string | null
+  onPurged?(): void
   /** 세로 드래그 시작 — 클램프·영속은 App 소유 (column-resize 관례) */
   onResizeStart(event: React.PointerEvent<HTMLDivElement>): void
   onClose(): void
@@ -26,19 +29,37 @@ export function TerminalDock({
   activeWorktree,
   open,
   height,
+  purgeGroup = null,
+  onPurged,
   onResizeStart,
   onClose,
 }: TerminalDockProps) {
   const sessions = useTerminalSessions(repoPath, theme)
+  // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
+  const groupKey = activeWorktree?.cwd ?? repoPath
 
-  // 처음 "열릴 때" 세션을 만든다 — 앱 시작만으로 쉘을 스폰하지 않는다. 열릴 때마다 크기를 다시 맞춘다
+  // 도크가 열려 있는 상태에서 열리거나(open) 그룹이 바뀌면(groupKey) 그 그룹을 활성화한다 —
+  // 기억된 탭 복원, 없으면 자동 1개 생성. 그룹에 활성 탭이 이미 있으면(재열림, 그룹 불변) refit만 한다.
+  // (주의: open·groupKey를 별개의 두 effect로 나누면 — 워크트리 행을 닫힌 도크에서 클릭하듯
+  // 두 값이 "같은 렌더"에서 동시에 바뀌는 경로에서 — 둘 다 같은 "탭 0개" 스냅숏을 보고 각자
+  // activateGroup을 호출해 세션이 두 개 생기는 함정이 있다(실측). 하나의 effect로 합쳐 막는다)
   useEffect(() => {
-    if (!open) return
-    if (sessions.tabs.length === 0) void sessions.create(activeWorktree ?? undefined)
-    else sessions.refitActive()
-    // open 전이에만 반응한다 — sessions는 렌더마다 새 참조
+    if (!open || groupKey === null) return
+    const groupTabs = sessions.tabs.filter((tab) => tab.groupKey === groupKey)
+    if (groupTabs.length === 0) void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
+    else if (groupTabs.some((tab) => tab.sessionId === sessions.activeId)) sessions.refitActive()
+    else void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
+    // open·groupKey 전이에만 반응한다 — sessions는 렌더마다 새 참조
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, groupKey])
+
+  // 워크트리 지우기 성공 — App이 내려준 경로의 그룹 세션을 전부 정리하고 1회성 상태를 돌려준다 (E7h ④)
+  useEffect(() => {
+    if (purgeGroup === null) return
+    sessions.closeGroup(purgeGroup)
+    onPurged?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purgeGroup])
 
   // 높이·활성 탭이 바뀌면 활성 세션을 다시 맞춘다
   useEffect(() => {
@@ -58,31 +79,33 @@ export function TerminalDock({
       >
         <span className="terminal-dock__label">터미널</span>
         <div className="terminal-dock__tabs" onPointerDown={(event) => event.stopPropagation()}>
-          {sessions.tabs.map((tab) => (
-            <span
-              key={tab.sessionId}
-              className={`terminal-dock__tab${
-                tab.sessionId === sessions.activeId ? ' terminal-dock__tab--on' : ''
-              }`}
-            >
-              <button
-                type="button"
-                className="terminal-dock__tab-name"
-                onClick={() => sessions.select(tab.sessionId)}
+          {sessions.tabs
+            .filter((tab) => tab.groupKey === groupKey)
+            .map((tab) => (
+              <span
+                key={tab.sessionId}
+                className={`terminal-dock__tab${
+                  tab.sessionId === sessions.activeId ? ' terminal-dock__tab--on' : ''
+                }`}
               >
-                {tab.title}
-                {tab.exited ? ' (종료)' : ''}
-              </button>
-              <button
-                type="button"
-                className="terminal-dock__tab-close"
-                aria-label={`${tab.title} 닫기`}
-                onClick={() => sessions.close(tab.sessionId)}
-              >
-                <X size={11} aria-hidden="true" />
-              </button>
-            </span>
-          ))}
+                <button
+                  type="button"
+                  className="terminal-dock__tab-name"
+                  onClick={() => sessions.select(tab.sessionId)}
+                >
+                  {tab.title}
+                  {tab.exited ? ' (종료)' : ''}
+                </button>
+                <button
+                  type="button"
+                  className="terminal-dock__tab-close"
+                  aria-label={`${tab.title} 닫기`}
+                  onClick={() => sessions.close(tab.sessionId)}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
           <Button
             variant="ghost"
             size="sm"

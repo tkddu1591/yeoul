@@ -2291,3 +2291,84 @@ test('E7h — 앱 전체 전환 시 터미널 대상이 전환 완료 후 함께
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'grp-side'], { cwd: repo })
+  const wtPath = `${repo}-grp`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'grp-side'], { cwd: repo })
+  // dockOpen 영속 격리 — 이전 터미널 테스트의 열림 상태를 물려받지 않게 (E7b 관례)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    // 본체 그룹: 도크 열면 자동 1탭, ＋로 2탭
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
+    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click()
+    await expect(window.getByTestId('terminal-dock')).toContainText(`3: ${sideName}`)
+    await expect(window.getByTestId('terminal-dock')).not.toContainText('1: 쉘')
+    // 본체로 복귀 → 본체 탭 2개 복원
+    await window.getByTestId(`worktree-row-${repoName}`).click()
+    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
+    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
+    await expect(window.getByTestId('terminal-dock')).not.toContainText(`3: ${sideName}`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'purge-side'], { cwd: repo })
+  const wtPath = `${repo}-purge`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'purge-side'], { cwd: repo })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  const repoName = repo.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click() // 터미널 대상 → 그룹 탭 1개 생성
+    await expect(window.getByTestId('terminal-dock')).toContainText(sideName)
+    // closeGroup의 "세션 2개 정리" 실측(플랜 명시 요구) — 이 그룹에 탭을 하나 더 만든다
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab')).toHaveCount(2)
+    // 본체로 대상 복귀 → groupKey가 바뀌어 본체 그룹 탭 1개가 자동 생성된다(탭바는 필터되지만
+    // .terminal-dock__view는 전체 세션을 유지 — 숨은 사이드 그룹 2개 포함 총 3개가 진짜 개수)
+    await window.getByTestId(`worktree-row-${repoName}`).click()
+    await expect(window.locator('.terminal-dock__view')).toHaveCount(3)
+    // 워크트리 지우기(우클릭 메뉴 — context-remove·confirm-accept 실측 testid)
+    await window.getByTestId(`worktree-row-${sideName}`).click({ button: 'right' })
+    await window.getByTestId('context-remove').click()
+    await window.getByTestId('confirm-accept').click()
+    await expect(window.getByTestId(`worktree-row-${sideName}`)).toHaveCount(0)
+    // 지워진 그룹의 세션 2개가 실제로 전부 정리됐다 — 숨은 세션까지 포함한 전체 view 개수로 검증
+    // (탭바 텍스트만 보면 애초에 필터돼 있어 closeGroup이 실패해도 통과해버리는 약한 단언이 된다)
+    await expect(window.locator('.terminal-dock__view')).toHaveCount(1)
+    await expect(window.getByTestId('terminal-dock')).not.toContainText(`: ${sideName}`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

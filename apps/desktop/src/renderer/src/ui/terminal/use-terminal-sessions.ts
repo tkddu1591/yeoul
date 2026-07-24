@@ -11,6 +11,8 @@ export interface TerminalTab {
   /** 탭 라벨 — "1: 쉘" 형태 */
   title: string
   exited: boolean
+  /** 이 터미널이 열린 워크트리 경로(본체는 repoPath) — 도크가 그룹별로 필터한다 (E7h ④) */
+  groupKey: string
 }
 
 interface SessionView {
@@ -41,6 +43,8 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   /** 사용자가 닫아서(kill) 죽는 세션 — 프롬프트 도착 전 닫기가 깨진 쉘 오경보가 되는 것 방지 (E7d ② 보완) */
   const closingRef = useRef(new Set<string>())
   const counterRef = useRef(0)
+  /** 그룹별 마지막 활성 탭 — 그룹 전환 시 복원한다 (E7h ④) */
+  const lastActiveRef = useRef(new Map<string, string>())
 
   // push 구독은 훅 수명 1회 — sessionId로 해당 xterm에 라우팅한다
   useEffect(() => {
@@ -101,30 +105,76 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
         pendingRef.current.delete(sessionId)
         for (const chunk of pending) terminal.write(chunk)
       }
+      const groupKey = options?.cwd ?? repoPath
       setTabs((prev) => [
         ...prev,
         {
           sessionId,
           title: `${counterRef.current}: ${options?.label ?? '쉘'}`,
           exited: false,
+          groupKey,
         },
       ])
       setActiveId(sessionId)
+      lastActiveRef.current.set(groupKey, sessionId)
       setError(null)
     } catch (cause) {
       setError(stripIpcPrefix(cause instanceof Error ? cause.message : String(cause)))
     }
   }
 
+  /** 탭 선택 — 그 그룹의 마지막 활성으로 기억한다 (E7h ④) */
+  const select = (sessionId: string) => {
+    setActiveId(sessionId)
+    const tab = tabs.find((t) => t.sessionId === sessionId)
+    if (tab !== undefined) lastActiveRef.current.set(tab.groupKey, sessionId)
+  }
+
+  // close는 closeGroup에서 같은 렌더 안에 연속 호출된다 — setTabs(next)처럼 바깥 tabs 클로저로
+  // "다음 상태"를 미리 계산하면 두 번째 호출이 첫 번째 호출의 아직 반영 안 된 결과를 못 보고 되살려버린다
+  // (React가 이벤트 핸들러 내 setState를 배치하기 때문). setTabs/setActiveId 둘 다 함수형 업데이터로 써서
+  // 연속 호출이 서로의 결과 위에 누적되게 한다 (E7h ④ 실측 — closeGroup 2세션 정리 검증으로 확인)
   const close = (sessionId: string) => {
     closingRef.current.add(sessionId)
     void window.terminalApi.kill(sessionId)
     const view = viewsRef.current.get(sessionId)
     viewsRef.current.delete(sessionId)
     view?.terminal.dispose()
-    const next = tabs.filter((tab) => tab.sessionId !== sessionId)
-    setTabs(next)
-    if (activeId === sessionId) setActiveId(next[next.length - 1]?.sessionId ?? null)
+    setTabs((prev) => {
+      const closedGroup = prev.find((tab) => tab.sessionId === sessionId)?.groupKey
+      const next = prev.filter((tab) => tab.sessionId !== sessionId)
+      setActiveId((prevActive) => {
+        if (prevActive !== sessionId) return prevActive
+        const sameGroup = next.filter((tab) => tab.groupKey === closedGroup)
+        const fallback = sameGroup[sameGroup.length - 1]?.sessionId ?? null
+        if (closedGroup !== undefined) {
+          if (fallback !== null) lastActiveRef.current.set(closedGroup, fallback)
+          else lastActiveRef.current.delete(closedGroup)
+        }
+        return fallback
+      })
+      return next
+    })
+  }
+
+  /** 그룹 전환 (E7h ④) — 그 그룹의 기억된(없으면 마지막) 탭을 활성, 탭이 없으면 자동 1개 생성 */
+  const activateGroup = async (
+    groupKey: string,
+    createOptions?: { cwd?: string; label?: string },
+  ) => {
+    const group = tabs.filter((tab) => tab.groupKey === groupKey)
+    if (group.length === 0) {
+      await create(createOptions)
+      return
+    }
+    const remembered = lastActiveRef.current.get(groupKey)
+    const target = group.find((tab) => tab.sessionId === remembered) ?? group[group.length - 1]!
+    setActiveId(target.sessionId)
+  }
+
+  /** 그룹 세션 전부 정리 — 워크트리 지우기 성공 시 (E7h ④). close가 함수형이라 연속 호출도 안전하다 */
+  const closeGroup = (groupKey: string) => {
+    for (const tab of tabs.filter((t) => t.groupKey === groupKey)) close(tab.sessionId)
   }
 
   /** 세션 뷰를 DOM에 붙인다 — 숨김 탭에서 붙으면 크기가 0이라, 보이는 시점의 refit이 바로잡는다 */
@@ -144,5 +194,16 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
     if (activeId !== null) refit(activeId)
   }
 
-  return { tabs, activeId, error, create, close, select: setActiveId, attach, refitActive }
+  return {
+    tabs,
+    activeId,
+    error,
+    create,
+    close,
+    select,
+    activateGroup,
+    closeGroup,
+    attach,
+    refitActive,
+  }
 }
