@@ -395,3 +395,16 @@ export const TERMINAL_CHANNELS = {
   data: 'terminal:data',
   exit: 'terminal:exit',
 } as const
+
+/** 창 상태 표면 (E7f) — 전체화면 여부 push. 신호등 패딩 접기에 쓴다(실측 2: CSS 신호 불가) */
+export interface WindowApi {
+  /** 전체화면 전환 push 구독 — 해제 함수를 반환한다 */
+  onFullScreen(listener: (isFullScreen: boolean) => void): () => void
+}
+
+export const WINDOW_API_KEY = 'windowApi' as const
+
+export const WINDOW_CHANNELS = {
+  /** push(main→renderer) — enter/leave-full-screen (E7f) */
+  fullScreen: 'window:full-screen',
+} as const

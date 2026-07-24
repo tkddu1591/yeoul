@@ -1,9 +1,14 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { WINDOW_CHANNELS } from '@git-gui/ipc-contract'
 import { registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { registerSettingsHandlers } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
+
+// 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),
+// 패키징 산출물(electron-builder productName)에서 완전히 "Git GUI"가 된다
+app.setName('Git GUI')
 
 // E2E·테스트 격리 — userData를 임시 폴더로 재지정할 수 있게 한다 (설정 파일이 실제 프로필을 오염하지 않게)
 if (process.env.GIT_GUI_USER_DATA) {
@@ -25,6 +30,10 @@ function createWindow(): void {
     height: 800,
     minWidth: 960,
     minHeight: 600,
+    title: 'Git GUI',
+    // E7f 한 줄 타이틀바(macOS) — OS 타이틀바 줄을 없애고 신호등만 인셋으로 띄워
+    // 앱 헤더가 타이틀바를 겸한다(드래그·패딩은 renderer CSS). 숨김 캡처와 공존(실측 1)
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제
     show: !isE2E || isE2EShow,
     webPreferences: {
@@ -35,6 +44,14 @@ function createWindow(): void {
       // 숨김 창의 타이머·rAF 스로틀로 E2E 대기가 길어지지 않게 — E2E에서만 해제
       backgroundThrottling: !isE2E,
     },
+  })
+
+  // 전체화면에서는 신호등이 숨는다 — 헤더의 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가)
+  window.on('enter-full-screen', () => {
+    window.webContents.send(WINDOW_CHANNELS.fullScreen, true)
+  })
+  window.on('leave-full-screen', () => {
+    window.webContents.send(WINDOW_CHANNELS.fullScreen, false)
   })
 
   // 이 창은 preload로 git 조작 API를 갖는 특권 창이다 — 외부 네비게이션과 새 창을 차단한다

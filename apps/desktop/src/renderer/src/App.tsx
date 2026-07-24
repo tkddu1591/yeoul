@@ -258,6 +258,13 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFetch, repoPathForFetch])
 
+  // E7f 전체화면 전환 — 신호등이 숨는 동안 헤더의 신호등 패딩을 접는다 (body 클래스 — CSS 몫)
+  useEffect(() => {
+    return window.windowApi.onFullScreen((isFullScreen) => {
+      document.body.classList.toggle('is-fullscreen', isFullScreen)
+    })
+  }, [])
+
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
   }
