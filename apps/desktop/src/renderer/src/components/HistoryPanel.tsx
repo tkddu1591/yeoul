@@ -36,11 +36,15 @@ interface HistoryPanelProps {
   busy: boolean
   /** merging 등 진행 중에는 이력 조작(이동·가져오기·되돌리기·실행취소·메시지 고치기)을 비활성 */
   actionsDisabled: boolean
+  /** 역사 조회 중인 브랜치 — non-null이면 "조회 중" 알약을 보여준다 (E7g) */
+  historyRef: string | null
   onSelect(hash: string): void
   onLoadMore(): void
   /** "지금 여기"가 로드 범위 밖일 때 누른다 — 찾을 때까지 더 읽어 스크롤한다 (품질 리뷰) */
   onLocateHead(): void
   onAction(action: HistoryAction): void
+  /** 조회 해제 — 전체 그래프로 복귀 (E7g) */
+  onClearView(): void
 }
 
 /** 레인 간격·행 높이 — 행 높이는 고정이라 그래프 좌표가 단순해진다 (measureElement 불필요) */
@@ -142,10 +146,12 @@ export function HistoryPanel({
   selectedHash,
   busy,
   actionsDisabled,
+  historyRef,
   onSelect,
   onLoadMore,
   onLocateHead,
   onAction,
+  onClearView,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
   const truncated = history.length >= historyLimit
@@ -247,6 +253,20 @@ export function HistoryPanel({
       title="저장된 역사"
       accessory={
         <>
+          {historyRef !== null && (
+            <span className="history-view-pill" data-testid="history-view-pill">
+              조회 중: {historyRef}
+              <button
+                type="button"
+                className="history-view-pill__clear"
+                aria-label="조회 해제 — 전체 그래프로"
+                onClick={onClearView}
+                data-testid="history-view-clear"
+              >
+                ✕
+              </button>
+            </span>
+          )}
           <Badge tone="git">log</Badge>
           <Badge tone="count">
             <span data-testid="history-count">

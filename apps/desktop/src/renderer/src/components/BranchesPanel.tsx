@@ -1,12 +1,11 @@
 import { useState, type MouseEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
-import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus } from '@git-gui/domain'
+import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
-import { trackBadgeLabel } from './branch-badges'
-import { branchDisplayName, groupBranches } from './branch-groups'
+import { buildBranchTree, flatSearch, flattenBranchTree } from './branch-tree'
 import { formatRelativeTime } from './relative-time'
 import './branches-panel.css'
 
@@ -22,12 +21,16 @@ export type BranchPanelAction =
   | { kind: 'remove'; name: string }
   | { kind: 'checkout-remote'; name: string }
   | { kind: 'remove-remote'; name: string }
+  /** 더블클릭 조회 — 우측 역사가 이 계보로 (E7g) */
+  | { kind: 'view'; name: string }
 
 interface BranchesPanelProps {
   overview: BranchOverview | null
   /** "지금과 비교" 결과 — non-null이면 목록 대신 비교 뷰를 보여준다 */
   compare: { name: string; result: BranchCompare } | null
   currentBranch: string | null
+  /** 역사 조회 중인 브랜치 — 해당 행을 보라 하이라이트 (E7g) */
+  historyRef: string | null
   busy: boolean
   /** 진행 중 작업(merging 등) — 파괴적 항목을 사유와 함께 비활성한다 */
   actionsDisabled: boolean
@@ -45,11 +48,15 @@ interface MenuState {
   target: { kind: 'local'; branch: LocalBranchStatus } | { kind: 'remote'; name: string }
 }
 
-/** IntelliJ식 실험 공간 패널 (E7a) — 검색·폴더 그룹·상태 배지·우클릭 관리. 빠른 전환은 헤더 스위처가 담당 */
+/**
+ * 실험 공간 패널 (E7a → E7g 개편) — depth 트리·3단 인터랙션.
+ * 1클릭=선택만(중립) · 더블클릭=조회(view) · 우클릭=메뉴. 빠른 전환은 헤더 스위처가 담당
+ */
 export function BranchesPanel({
   overview,
   compare,
   currentBranch,
+  historyRef,
   busy,
   actionsDisabled,
   lastFetchAt,
@@ -59,6 +66,8 @@ export function BranchesPanel({
 }: BranchesPanelProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [selectedName, setSelectedName] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   // 불가 항목은 숨기지 않고 사유와 함께 비활성한다 (HistoryPanel undo/reword 관례)
   const buildLocalMenu = (branch: LocalBranchStatus): ContextMenuEntry[] => {
@@ -173,7 +182,7 @@ export function BranchesPanel({
     const section = (title: string, commits: CommitSummary[], overflow: boolean, empty: string) => (
       <>
         <p className="branch-compare__section">
-          {title} <span className="branch-row__badge">{commits.length}</span>
+          {title} <span className="branch-row__count">{commits.length}</span>
         </p>
         {commits.length === 0 ? (
           <p className="branches-panel__empty">{empty}</p>
@@ -230,31 +239,120 @@ export function BranchesPanel({
     )
   }
 
-  const locals = (overview?.locals ?? []).filter((branch) => branch.name.includes(query))
-  const remotes = (overview?.remotes ?? []).filter((remote) => remote.name.includes(query))
-  const grouped = groupBranches(locals)
-  const remoteGroups = new Map<string, typeof remotes>()
-  for (const remote of remotes) {
-    const list = remoteGroups.get(remote.remote) ?? []
-    list.push(remote)
-    remoteGroups.set(remote.remote, list)
+  const locals = overview?.locals ?? []
+  const remotes = overview?.remotes ?? []
+  const toggleFolder = (path: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
   }
 
-  const localRow = (branch: LocalBranchStatus, displayName: string) => (
+  /** 상태 툴팁 — 칩 대신 아이콘·타이포이므로 설명은 여기서 (스펙 ③) */
+  const localTitle = (branch: LocalBranchStatus): string => {
+    if (branch.name === currentBranch) return `${branch.name} — 지금 여기(현재 작업 중)`
+    if (branch.upstreamGone) return `${branch.name} — 원격에서 사라진 연결. 백업하면 다시 만들어져요`
+    if (branch.upstream === null) return `${branch.name} — 아직 원격과 연결 안 됨`
+    return branch.name
+  }
+
+  /** 인라인 컬러 ↑↓ — 0이거나 알 수 없으면(연결 없음) 숨김 (스펙 ③) */
+  const aheadBehind = (branch: LocalBranchStatus) => (
+    <>
+      {branch.ahead !== null && branch.ahead > 0 && (
+        <span className="branch-row__ahead">↑{branch.ahead}</span>
+      )}
+      {branch.behind !== null && branch.behind > 0 && (
+        <span className="branch-row__behind">↓{branch.behind}</span>
+      )}
+    </>
+  )
+
+  const localRow = (branch: LocalBranchStatus, displayName: string, depth: number) => {
+    const isCurrent = branch.name === currentBranch
+    const dimmed = branch.upstream === null || branch.upstreamGone
+    return (
+      <button
+        key={branch.name}
+        type="button"
+        className={[
+          'branch-row',
+          selectedName === branch.name ? 'branch-row--selected' : '',
+          historyRef === branch.name ? 'branch-row--viewing' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+        title={localTitle(branch)}
+        onClick={() => setSelectedName(branch.name)}
+        onDoubleClick={() => onAction({ kind: 'view', name: branch.name })}
+        onContextMenu={(event) => openMenu(event, { kind: 'local', branch })}
+        data-testid={`branch-row-${branch.name}`}
+      >
+        <span className={`branch-row__glyph${isCurrent ? ' branch-row__glyph--here' : ''}`}>
+          {isCurrent ? '➤' : '⎇'}
+        </span>
+        <span
+          className={[
+            'branch-row__name',
+            isCurrent ? 'branch-row__name--here' : '',
+            dimmed ? 'branch-row__name--dim' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          {displayName}
+        </span>
+        {aheadBehind(branch)}
+      </button>
+    )
+  }
+
+  const remoteRow = (name: string, displayName: string, depth: number) => (
     <button
-      key={branch.name}
+      key={name}
       type="button"
-      className="branch-row"
-      title={branch.name}
-      onClick={(event) => openMenu(event, { kind: 'local', branch })}
-      onContextMenu={(event) => openMenu(event, { kind: 'local', branch })}
-      data-testid={`branch-row-${branch.name}`}
+      className={[
+        'branch-row',
+        'branch-row--remote',
+        selectedName === name ? 'branch-row--selected' : '',
+        historyRef === name ? 'branch-row--viewing' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={{ paddingLeft: `${8 + depth * 16}px` }}
+      title={name}
+      onClick={() => setSelectedName(name)}
+      onDoubleClick={() => onAction({ kind: 'view', name })}
+      onContextMenu={(event) => openMenu(event, { kind: 'remote', name })}
+      data-testid={`branch-row-${name}`}
     >
-      <span className="branch-row__name">⎇ {displayName}</span>
-      {branch.name === currentBranch && <Badge tone="git">지금 여기</Badge>}
-      <span className="branch-row__badge">{trackBadgeLabel(branch)}</span>
+      <span className="branch-row__glyph">☁</span>
+      <span className="branch-row__name">{displayName}</span>
     </button>
   )
+
+  const folderRow = (path: string, name: string, count: number, depth: number) => (
+    <button
+      key={`folder:${path}`}
+      type="button"
+      className="branch-row branch-row--folder"
+      style={{ paddingLeft: `${8 + depth * 16}px` }}
+      onClick={() => toggleFolder(path)}
+      data-testid={`branch-folder-${path}`}
+    >
+      <span className="branch-row__glyph">{collapsed.has(path) ? '▸' : '▾'}</span>
+      <span className="branch-row__name branch-row__name--folder">{name}</span>
+      <span className="branch-row__count">{count}</span>
+    </button>
+  )
+
+  const searchLocals = flatSearch(locals, query)
+  const searchRemotes = flatSearch(remotes, query)
+  const localRows = flattenBranchTree(buildBranchTree(locals), collapsed)
+  const remoteRows = flattenBranchTree(buildBranchTree(remotes), collapsed)
 
   return (
     <Panel title="실험 공간" accessory={<Badge tone="git">branch</Badge>} testId="branches-panel">
@@ -280,36 +378,29 @@ export function BranchesPanel({
         <div className="branches-panel__scroll" data-testid="branches-list">
           {locals.length === 0 && remotes.length === 0 ? (
             <p className="branches-panel__empty">보여줄 실험 공간이 없어요.</p>
+          ) : searchLocals !== null ? (
+            <>
+              {/* 검색 중엔 평면 매치 — 전체 경로 표시 (스펙 ①) */}
+              {searchLocals.map((branch) => localRow(branch, branch.name, 0))}
+              {(searchRemotes ?? []).map((remote) => remoteRow(remote.name, remote.name, 0))}
+              {searchLocals.length === 0 && (searchRemotes ?? []).length === 0 && (
+                <p className="branches-panel__empty">일치하는 이름이 없어요.</p>
+              )}
+            </>
           ) : (
             <>
               {locals.length > 0 && <p className="branches-panel__group">내 공간 (로컬)</p>}
-              {grouped.loose.map((branch) => localRow(branch, branch.name))}
-              {grouped.folders.map((folder) => (
-                <div key={folder.name}>
-                  <p className="branches-panel__folder">📁 {folder.name}/</p>
-                  {folder.branches.map((branch) =>
-                    localRow(branch, branchDisplayName(branch.name)),
-                  )}
-                </div>
-              ))}
-              {[...remoteGroups.entries()].map(([remoteName, refs]) => (
-                <div key={remoteName}>
-                  <p className="branches-panel__group">{remoteName} (원격)</p>
-                  {refs.map((ref) => (
-                    <button
-                      key={ref.name}
-                      type="button"
-                      className="branch-row branch-row--remote"
-                      title={ref.name}
-                      onClick={(event) => openMenu(event, { kind: 'remote', name: ref.name })}
-                      onContextMenu={(event) => openMenu(event, { kind: 'remote', name: ref.name })}
-                      data-testid={`branch-row-${ref.name}`}
-                    >
-                      <span className="branch-row__name">☁ {ref.name}</span>
-                    </button>
-                  ))}
-                </div>
-              ))}
+              {localRows.map((row) =>
+                row.node.kind === 'folder'
+                  ? folderRow(row.node.path, row.node.name, row.node.count, row.depth)
+                  : localRow(row.node.branch, row.node.name, row.depth),
+              )}
+              {remotes.length > 0 && <p className="branches-panel__group">원격</p>}
+              {remoteRows.map((row) =>
+                row.node.kind === 'folder'
+                  ? folderRow(row.node.path, row.node.name, row.node.count, row.depth)
+                  : remoteRow(row.node.branch.name, row.node.name, row.depth),
+              )}
             </>
           )}
         </div>

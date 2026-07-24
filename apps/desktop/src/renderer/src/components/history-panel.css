@@ -1,3 +1,26 @@
+/* E7g 조회 알약 — 우측 역사가 어느 계보인지 상시 표시 */
+.history-view-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  border: 1px solid var(--concept-branch);
+  border-radius: 10px;
+  background: var(--concept-branch-bg);
+  color: var(--concept-branch);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-view-pill__clear {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
 .history-panel__empty {
   display: flex;
   flex-direction: column;

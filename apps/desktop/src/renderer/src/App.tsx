@@ -586,6 +586,7 @@ export function App() {
               overview={store.branchOverview}
               compare={store.branchCompare}
               currentBranch={status?.branch.name ?? null}
+              historyRef={store.historyRef}
               busy={store.busy}
               actionsDisabled={status?.state !== 'normal'}
               onCloseCompare={() => store.clearBranchCompare()}
@@ -628,6 +629,9 @@ export function App() {
                     break
                   case 'remove-remote':
                     setConfirmingRemoveRemote({ name: action.name })
+                    break
+                  case 'view':
+                    void store.viewHistory(action.name)
                     break
                 }
               }}
@@ -754,6 +758,7 @@ export function App() {
                 selectedHash={store.commitDetail?.hash ?? null}
                 busy={store.busy}
                 actionsDisabled={status?.state !== 'normal'}
+                historyRef={store.historyRef}
                 onSelect={(hash) => void store.selectCommit(hash)}
                 onLoadMore={() => void store.loadMoreHistory()}
                 onLocateHead={() => void store.revealHead()}
@@ -785,6 +790,7 @@ export function App() {
                       break
                   }
                 }}
+                onClearView={() => void store.clearHistoryView()}
               />
               {store.commitDetail !== null && (
                 <div className="app__right-detail">

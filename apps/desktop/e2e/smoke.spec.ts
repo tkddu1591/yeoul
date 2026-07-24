@@ -1305,9 +1305,15 @@ test('실험 공간 탭 — 목록·상태 배지·검색 (E7a)', async () => {
     const window = await app.firstWindow()
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branches-panel')).toBeVisible()
-    await expect(window.getByTestId('branch-row-main')).toContainText('지금 여기')
-    await expect(window.getByTestId('branch-row-main')).toContainText('동기화됨')
-    await expect(window.getByTestId('branch-row-feature/login')).toContainText('연결 없음')
+    // E7g: 상태는 칩 텍스트 대신 아이콘(➤)·title 툴팁·인라인 ↑↓로 표시된다
+    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('title', /지금 여기/)
+    await expect(
+      window.getByTestId('branch-row-main').locator('.branch-row__ahead, .branch-row__behind'),
+    ).toHaveCount(0)
+    await expect(window.getByTestId('branch-row-feature/login')).toHaveAttribute(
+      'title',
+      /아직 원격과 연결 안 됨/,
+    )
     await expect(window.getByTestId('branch-row-origin/main')).toBeVisible()
     // 검색 — login만 남는다
     await window.getByTestId('branches-search').fill('login')
@@ -1336,7 +1342,8 @@ test('실험 공간 탭 — 우클릭 이동(checkout)에 현재 표시가 따�
     await window.getByTestId('left-tab-branches').click()
     await window.getByTestId('branch-row-sidework').click({ button: 'right' })
     await window.getByTestId('context-switch').click()
-    await expect(window.getByTestId('branch-row-sidework')).toContainText('지금 여기')
+    // E7g: "지금 여기"는 title 툴팁 — 행 텍스트는 아이콘(➤)
+    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('title', /지금 여기/)
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('sidework')
   } finally {
@@ -1450,7 +1457,10 @@ test('실험 공간 탭 — 비현재 공간을 원격 최신으로 업데이트
     await window.getByTestId('branch-row-old').click({ button: 'right' })
     await window.getByTestId('context-update').click()
     await expect(window.getByTestId('notice')).toContainText('원격 최신으로 업데이트했어요')
-    await expect(window.getByTestId('branch-row-old')).toContainText('동기화됨')
+    // E7g: "동기화됨" 칩 대신 침묵(인라인 ↑↓ 배지가 없음)이 신호
+    await expect(
+      window.getByTestId('branch-row-old').locator('.branch-row__ahead, .branch-row__behind'),
+    ).toHaveCount(0)
     const localOld = await execGitOrThrow(['rev-parse', 'old'], { cwd: repo })
     const remoteOld = await execGitOrThrow(['rev-parse', 'old'], { cwd: remote })
     expect(localOld.stdout.trim()).toBe(remoteOld.stdout.trim())
@@ -1479,7 +1489,8 @@ test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추�
     await window.getByTestId('branch-row-origin/incoming').click({ button: 'right' })
     await window.getByTestId('context-checkout-remote').click()
     await expect(window.getByTestId('notice')).toContainText('가져와 이동했어요')
-    await expect(window.getByTestId('branch-row-incoming')).toContainText('지금 여기')
+    // E7g: "지금 여기"는 title 툴팁 — 행 텍스트는 아이콘(➤)
+    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('title', /지금 여기/)
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('incoming')
   } finally {
@@ -1818,7 +1829,8 @@ test('충돌이 생기면 변경 탭으로 자동 전환된다 (E7d ①)', async
     // 실험 공간 탭에서 합치기 → 충돌 → 변경 탭으로 자동 이동해 ! 파일이 보인다
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('left-tab-branches')).toHaveAttribute('aria-selected', 'true')
-    await window.getByTestId('branch-row-clash').click()
+    // E7g: 좌클릭은 선택만 — 메뉴는 우클릭 (3단 인터랙션)
+    await window.getByTestId('branch-row-clash').click({ button: 'right' })
     await window.getByTestId('context-merge').click()
     await expect(window.getByTestId('left-tab-changes')).toHaveAttribute('aria-selected', 'true', {
       timeout: 5_000,
@@ -2040,7 +2052,10 @@ test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E
     await window.getByTestId('backup').click()
     await expect(window.getByTestId('notice')).toContainText('연결하며 백업했어요', { timeout: 10_000 })
     await window.getByTestId('left-tab-branches').click()
-    await expect(window.getByTestId('branch-row-fresh-space')).toContainText('동기화됨')
+    // E7g: "동기화됨" 칩 대신 침묵(인라인 ↑↓ 배지가 없음)이 신호
+    await expect(
+      window.getByTestId('branch-row-fresh-space').locator('.branch-row__ahead, .branch-row__behind'),
+    ).toHaveCount(0)
   } finally {
     await app.close()
     await rm(base, { recursive: true, force: true })
