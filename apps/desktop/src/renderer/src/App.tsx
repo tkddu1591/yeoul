@@ -896,7 +896,15 @@ export function App() {
         busy={store.busy}
         errorText={store.error}
         onRename={(oldName, newName) => store.renameBranch(oldName, newName)}
-        onRemove={async (name, force) => (await store.removeBranch(name, force)).needsForce}
+        onRemove={async (name, force) => {
+          const result = await store.removeBranch(name, force)
+          if (result.usedByWorktree !== null) {
+            setManageOpen(false)
+            setConfirmingRemoveWithWorktree({ name, force, worktreePath: result.usedByWorktree })
+            return false
+          }
+          return result.needsForce
+        }}
         onClearError={() => store.clearError()}
         onCancel={() => setManageOpen(false)}
       />
