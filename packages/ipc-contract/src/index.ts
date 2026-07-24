@@ -146,8 +146,8 @@ export interface GitApi {
     reword(repoPath: string, hash: string, message: string): Promise<void>
   }
   history: {
-    /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어) */
-    list(repoPath: string, limit: number): Promise<CommitSummary[]>
+    /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어). ref는 조회 모드(E7g) */
+    list(repoPath: string, limit: number, ref?: string): Promise<CommitSummary[]>
   }
   sync: {
     /** 현재 브랜치를 원격으로 백업(push) — 첫 연결이면 linked (E7e). 원격이 없으면 에러 */

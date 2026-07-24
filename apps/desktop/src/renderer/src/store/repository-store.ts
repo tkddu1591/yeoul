@@ -48,6 +48,8 @@ interface RepositoryStore {
   worktrees: WorktreeInfo[]
   /** 마지막 원격 새로고침(fetch) 성공 시각 — 자동·수동 공통, 영속 안 함 (E7e) */
   lastFetchAt: number | null
+  /** 역사 조회 모드(E7g) — 더블클릭한 브랜치. null이면 전체 그래프(지금 여기 기준) */
+  historyRef: string | null
   /** 받아오기 방식 — 설정 영속. syncAfterMerge 등 내부 호출자도 이 값을 읽는다 (E7e) */
   pullMode: PullMode
   shelf: ShelfEntry[]
@@ -141,6 +143,10 @@ interface RepositoryStore {
   autoFetchRemotes(): Promise<void>
   /** 받아오기 방식 변경 — 즉시 영속 (E7e) */
   setPullMode(mode: PullMode): void
+  /** 브랜치 더블클릭 조회 — 우측 역사가 그 계보로 바뀐다 (E7g) */
+  viewHistory(ref: string): Promise<void>
+  /** 조회 해제 — 전체 그래프 복귀 (E7g) */
+  clearHistoryView(): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
   /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
@@ -235,9 +241,21 @@ async function fetchSnapshot(
     'status' | 'history' | 'branches' | 'shelf' | 'branchOverview' | 'rebaseProgress' | 'worktrees'
   >
 > {
+  // 조회 모드(E7g) — 호출부 39곳을 바꾸지 않도록 스냅샷이 store에서 직접 읽는다.
+  // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(스펙 — 오류 아님)
+  const loadHistory = async (): Promise<CommitSummary[]> => {
+    const ref = useRepositoryStore.getState().historyRef
+    if (ref === null) return git().history.list(repoPath, limit)
+    try {
+      return await git().history.list(repoPath, limit, ref)
+    } catch {
+      useRepositoryStore.setState({ historyRef: null })
+      return git().history.list(repoPath, limit)
+    }
+  }
   const [status, history, branches, shelf, branchOverview, worktrees] = await Promise.all([
     git().repo.status(repoPath),
-    git().history.list(repoPath, limit),
+    loadHistory(),
     git().branches.list(repoPath),
     git().shelf.list(repoPath),
     git().branches.overview(repoPath),
@@ -377,6 +395,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   rebaseProgress: null,
   worktrees: [],
   lastFetchAt: null,
+  historyRef: null,
   pullMode: loadPullMode(),
   pulls: [],
   pullDetail: null,
@@ -411,6 +430,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         repoPath: path,
         historyLimit: HISTORY_LIMIT,
+        historyRef: null,
         hostingStatus: await hosting().status(path),
         pulls: [],
         ...CLEAR_SELECTIONS,
@@ -1068,6 +1088,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         repoPath: opened,
         historyLimit: HISTORY_LIMIT,
+        historyRef: null,
         hostingStatus: await hosting().status(opened),
         pulls: [],
         ...CLEAR_SELECTIONS,
@@ -1122,6 +1143,24 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   setPullMode(mode) {
     savePullMode(mode)
     set({ pullMode: mode })
+  },
+
+  async viewHistory(ref) {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      set({ historyRef: ref })
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
+  },
+
+  async clearHistoryView() {
+    const { repoPath } = get()
+    if (!repoPath) return
+    await guard(set, get, async () => {
+      set({ historyRef: null })
+      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+    })
   },
 
   async selectConflict(path) {

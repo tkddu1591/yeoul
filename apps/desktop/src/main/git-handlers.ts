@@ -440,8 +440,11 @@ export function registerGitHandlers(): void {
     createGitClient(assertAllowedRepo(repoPath)).changes.removeFile(assertString(path)),
   )
 
-  ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).history.list(assertLimit(limit)),
+  ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown, ref: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).history.list(
+      assertLimit(limit),
+      ref === undefined ? undefined : assertString(ref),
+    ),
   )
 
   ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown) =>

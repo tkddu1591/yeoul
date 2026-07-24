@@ -119,7 +119,7 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.commitsReword, repoPath, hash, message),
   },
   history: {
-    list: (repoPath, limit) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit),
+    list: (repoPath, limit, ref) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit, ref),
   },
   sync: {
     push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),
