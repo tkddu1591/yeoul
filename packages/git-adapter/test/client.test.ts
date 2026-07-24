@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -1830,6 +1830,7 @@ describe('GitClient', () => {
     expect(await client.branches.remove('merged-one', false)).toEqual({
       removed: true,
       needsForce: false,
+      usedByWorktree: null,
     })
 
     await client.branches.create('doomed', null)
@@ -1841,10 +1842,12 @@ describe('GitClient', () => {
     expect(await client.branches.remove('doomed', false)).toEqual({
       removed: false,
       needsForce: true,
+      usedByWorktree: null,
     })
     expect(await client.branches.remove('doomed', true)).toEqual({
       removed: true,
       needsForce: false,
+      usedByWorktree: null,
     })
     expect((await client.branches.list()).map((b) => b.name)).toEqual(['main'])
   })
@@ -1853,6 +1856,25 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await expect(client.branches.remove('main', false)).rejects.toThrow(/다른 공간으로 이동/)
+  })
+
+  it('branches.remove — 워크트리가 펼쳐 쓰는 실험 공간 지우기는 usedByWorktree로 알린다 (E7h ⑤)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('wt-branch', null)
+    await client.worktrees.add(`${repo}-wt`, 'wt-branch')
+    const result = await client.branches.remove('wt-branch', false)
+    expect(result.removed).toBe(false)
+    expect(result.needsForce).toBe(false)
+    expect(result.usedByWorktree).not.toBeNull()
+    // macOS 실경로(/private/var) 차이를 realpath로 흡수한다 (E7c 관례)
+    expect(await realpath(result.usedByWorktree!)).toBe(await realpath(`${repo}-wt`))
+  })
+
+  it('branches.remove — 본체가 쓰는(현재) 실험 공간 지우기는 기존 친절 에러를 던진다 (E7h ⑤)', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await expect(client.branches.remove('main', false)).rejects.toThrow('지금 있는 실험 공간')
   })
 
   it('branches.rename — 이름을 바꾸고, 중복·잘못된 이름은 읽히는 메시지로 거부한다', async () => {
@@ -2288,10 +2310,12 @@ describe('GitClient', () => {
     expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
       removed: false,
       needsForce: true,
+      usedByWorktree: null,
     })
     expect(await client.worktrees.remove(`${repo}-feat`, true)).toEqual({
       removed: true,
       needsForce: false,
+      usedByWorktree: null,
     })
     expect((await client.worktrees.list()).length).toBe(1)
   })
@@ -2305,6 +2329,7 @@ describe('GitClient', () => {
     expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
       removed: true,
       needsForce: false,
+      usedByWorktree: null,
     })
     expect((await client.worktrees.list()).length).toBe(1)
   })

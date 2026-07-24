@@ -226,10 +226,13 @@ export interface CherryPickResult {
   autoShelved: boolean
 }
 
-/** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다 */
+/** 실험 공간 지우기 결과 — 합쳐지지 않은 저장이 있으면 지우지 않고 needsForce로 알린다.
+ *  워크트리가 그 공간을 펼쳐 쓰는 중이면 usedByWorktree에 그 워크트리 경로를 담아 알린다(E7h ⑤) */
 export interface RemoveBranchResult {
   removed: boolean
   needsForce: boolean
+  /** 브랜치를 쓰는 링크드 워크트리 경로 — 없으면 null */
+  usedByWorktree: string | null
 }
 
 /** 리뷰 요청(PR) 전 검사용 — 현재 브랜치와 원격 연결(upstream) 여부 */

@@ -24,7 +24,7 @@ import {
   type WorktreeInfo,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
-import { lstat, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
@@ -568,11 +568,24 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         const args = ['branch', force ? '-D' : '-d', '--end-of-options', name]
         const result = await execGit(args, { cwd })
-        if (result.exitCode === 0) return { removed: true, needsForce: false }
+        if (result.exitCode === 0) return { removed: true, needsForce: false, usedByWorktree: null }
         if (result.stderr.includes('not fully merged')) {
-          return { removed: false, needsForce: true }
+          return { removed: false, needsForce: true, usedByWorktree: null }
         }
         if (result.stderr.includes('used by worktree')) {
+          // 실측(git 2.50): "cannot delete branch '<name>' used by worktree at '<path>'" — HEAD 케이스도 동일 형식.
+          // 본체(현재 저장소)가 쓰면 기존 친절 에러, 링크드 워크트리면 경로를 구조화해 UI가 동반 삭제를 제안한다(E7h ⑤)
+          const match = result.stderr.match(/used by worktree at '([^']+)'/)
+          const worktreePath = match?.[1] ?? null
+          if (worktreePath !== null) {
+            const [wtReal, cwdReal] = await Promise.all([
+              realpath(worktreePath).catch(() => worktreePath),
+              realpath(cwd).catch(() => cwd),
+            ])
+            if (wtReal !== cwdReal) {
+              return { removed: false, needsForce: false, usedByWorktree: worktreePath }
+            }
+          }
           throw new Error('지금 있는 실험 공간은 지울 수 없어요. 다른 공간으로 이동한 뒤 지워 주세요.')
         }
         if (result.stderr.includes('not found')) {
@@ -718,10 +731,10 @@ export function createGitClient(repoPath: string): GitClient {
           ? ['worktree', 'remove', '--force', '--end-of-options', path]
           : ['worktree', 'remove', '--end-of-options', path]
         const result = await execGit(args, { cwd })
-        if (result.exitCode === 0) return { removed: true, needsForce: false }
+        if (result.exitCode === 0) return { removed: true, needsForce: false, usedByWorktree: null }
         // 실측 E: 미저장 변경 거부 — 강제 확인은 UI 책임 (branches.remove 관례)
         if (result.stderr.includes('contains modified or untracked files')) {
-          return { removed: false, needsForce: true }
+          return { removed: false, needsForce: true, usedByWorktree: null }
         }
         throw new GitError(args, result)
       },
