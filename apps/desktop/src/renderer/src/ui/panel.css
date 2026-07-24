@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* E7h ⑥ 편차 — FindBar(position: absolute) 오버레이의 기준점. 오프셋 없는 relative라 기존 레이아웃은 무변 */
+  position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);

@@ -9,6 +9,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { buildFileTree, flattenFileTree } from './file-tree'
+import { FindBar } from './FindBar'
 import { formatRelativeTime } from './relative-time'
 import './commit-detail-panel.css'
 import './virtual.css'
@@ -20,6 +21,9 @@ interface CommitDetailPanelProps {
   /** 상세 안에서 선택된 파일 — diff는 좌측 흐름과 동일하게 중앙 패널(공용 diff 슬롯)에 뜬다 */
   selectedFile: CommitFileChange | null
   busy: boolean
+  /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
+  findOpen: boolean
+  onFindClose(): void
   onSelectFile(file: CommitFileChange): void
   /** 우클릭 → "이 파일만 … 적용 (checkout)" — 확인창을 거친 뒤 호출된다 (E5a 피드백 1) */
   onRestoreFile(file: CommitFileChange): void
@@ -90,6 +94,8 @@ export function CommitDetailPanel({
   shelfPreview,
   selectedFile,
   busy,
+  findOpen,
+  onFindClose,
   onSelectFile,
   onRestoreFile,
   onCompareFile,
@@ -100,7 +106,17 @@ export function CommitDetailPanel({
   const [confirmingRestore, setConfirmingRestore] = useState<CommitFileChange | null>(null)
   // E7h ② — 파일 목록 depth 트리. 접기 상태는 로컬(커밋 전환 시 리셋 — 아래 effect)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const rows = flattenFileTree(buildFileTree(detail.files), collapsed)
+  // E7h ⑥ — ⌘F 필터. 검색어가 있는 동안은 트리 대신 평면 매치 목록으로 바뀐다(findOpen이
+  // 닫히거나 검색어를 비우면 collapsed는 건드리지 않았으므로 트리 상태가 그대로 돌아온다)
+  const [findQuery, setFindQuery] = useState('')
+  const filterActive = findOpen && findQuery !== ''
+  const matched = filterActive
+    ? detail.files.filter((file) => file.path.toLowerCase().includes(findQuery.toLowerCase()))
+    : null
+  const rows =
+    matched !== null
+      ? matched.map((item) => ({ kind: 'file' as const, item, depth: 0 }))
+      : flattenFileTree(buildFileTree(detail.files), collapsed)
   // 대형 커밋(수천 파일)에서도 파일 목록은 가시 범위만 렌더한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
@@ -141,6 +157,22 @@ export function CommitDetailPanel({
       }
       testId="commit-detail-panel"
     >
+      {findOpen && (
+        <FindBar
+          query={findQuery}
+          position={matched === null || matched.length === 0 ? -1 : 0}
+          count={matched?.length ?? 0}
+          mode="filter"
+          placeholder="파일 이름 찾기"
+          onQuery={setFindQuery}
+          onNext={() => {}}
+          onPrev={() => {}}
+          onClose={() => {
+            setFindQuery('')
+            onFindClose()
+          }}
+        />
+      )}
       <div className="commit-detail__files-head">
         바뀐 파일 <span data-testid="commit-detail-file-count">{detail.files.length}</span>개
         {detail.files.length > 0
@@ -194,7 +226,7 @@ export function CommitDetailPanel({
                       file={row.item}
                       isSelected={selectedFile?.path === row.item.path}
                       busy={busy}
-                      showDir={false}
+                      showDir={matched !== null}
                       onSelect={() => onSelectFile(row.item)}
                       onMenu={(x, y) => setMenu({ x, y, file: row.item })}
                     />

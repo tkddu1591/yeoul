@@ -222,7 +222,22 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.notice])
 
-  // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다
+  // E7h ⑥ — ⌘F 검색 대상 패널(마우스 위치의 data-find-scope, 없으면 diff)
+  const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
+    null,
+  )
+  const pointerRef = useRef({ x: 0, y: 0 })
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      pointerRef.current = { x: event.clientX, y: event.clientY }
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    return () => window.removeEventListener('pointermove', onPointerMove)
+  }, [])
+
+  // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다.
+  // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
+  // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === '`') {
@@ -231,6 +246,17 @@ export function App() {
           saveDockOpen(!prev)
           return !prev
         })
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 'f' || event.key === 'F')) {
+        // 터미널(xterm) 포커스면 쉘의 자체 검색을 존중 — 가로채지 않는다. closest는 매치가
+        // 없으면 null을 돌려주므로, activeElement가 .terminal-dock 안에 있을 때만(= 매치 있음
+        // = null이 아님) 이 분기가 참이 되어 return한다 — "터미널 안이면 가로채지 않는다"와 일치
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        const { x, y } = pointerRef.current
+        const scopeEl = document.elementFromPoint(x, y)?.closest('[data-find-scope]')
+        const scope = (scopeEl?.getAttribute('data-find-scope') ??
+          'diff') as NonNullable<typeof findScope>
+        setFindScope(scope)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -580,13 +606,19 @@ export function App() {
                 changes={status?.changes ?? []}
                 selected={store.selected}
                 busy={store.busy}
+                findOpen={findScope === 'changes'}
+                onFindClose={() => setFindScope(null)}
                 onStage={(paths) => void store.stage(paths)}
                 onUnstage={(paths) => void store.unstage(paths)}
                 onDiscard={(trackedPaths, untrackedPaths) =>
                   void store.discard(trackedPaths, untrackedPaths)
                 }
                 onRemoveFile={(path) => void store.removeFile(path)}
-                onSelect={(selected) => void store.selectFile(selected)}
+                onSelect={(selected) => {
+                  // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
+                  if (findScope === 'diff') setFindScope(null)
+                  void store.selectFile(selected)
+                }}
               />
               <CommitForm
                 stagedCount={stagedCount}
@@ -702,7 +734,7 @@ export function App() {
             />
           ) : null}
         </div>
-        <div className="app__center">
+        <div className="app__center" data-find-scope="diff">
           {store.conflictFile !== null ? (
             <ConflictPanel
               key={store.conflictFile.path}
@@ -756,7 +788,12 @@ export function App() {
         {/* 우측 열 — 평소엔 트리 전체, 커밋 클릭 시에만 하단에 상세가 열린다 (E6a 사용자 제안).
             리뷰(PR) 상세만 대화형 화면이라 기존의 우측 전체 전환을 유지한다 (사용자 동의).
             store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다 */}
-        <div className="app__right">
+        <div
+          className="app__right"
+          // E7h ⑥ — 리뷰 상세가 열린 동안은 히스토리 스코프가 아니다(그 아래 commit-files
+          // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다)
+          data-find-scope={store.pullDetail === null ? 'history' : undefined}
+        >
           {store.pullDetail !== null ? (
             <ReviewDetailPanel
               key={store.pullDetail.detail.number}
@@ -814,23 +851,30 @@ export function App() {
                 onClearView={() => void store.clearHistoryView()}
               />
               {store.commitDetail !== null && (
-                <div className="app__right-detail">
+                <div className="app__right-detail" data-find-scope="commit-files">
                   <CommitDetailPanel
                     detail={store.commitDetail}
                     shelfPreview={shelfPreview}
                     selectedFile={store.commitFile}
                     busy={store.busy}
-                    onSelectFile={(file) => void store.selectCommitFile(file)}
+                    findOpen={findScope === 'commit-files'}
+                    onFindClose={() => setFindScope(null)}
+                    onSelectFile={(file) => {
+                      // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
+                      if (findScope === 'diff') setFindScope(null)
+                      void store.selectCommitFile(file)
+                    }}
                     onRestoreFile={(file) =>
                       void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
                     }
-                    onCompareFile={(file) =>
+                    onCompareFile={(file) => {
+                      if (findScope === 'diff') setFindScope(null)
                       void store.compareFileWithWorktree(
                         store.commitDetail!.hash,
                         file.path,
                         file.origPath,
                       )
-                    }
+                    }}
                     onBack={() => store.clearCommit()}
                   />
                 </div>
