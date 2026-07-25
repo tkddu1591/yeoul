@@ -60,7 +60,7 @@ function assertDiffOptions(value: unknown): DiffOptions {
 }
 
 function assertLimit(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 10000) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 50000) {
     throw new Error('잘못된 요청 형식이에요.')
   }
   return value

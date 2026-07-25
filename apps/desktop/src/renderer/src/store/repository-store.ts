@@ -8,6 +8,7 @@ import type {
   CommitSummary,
   FileChange,
   FileDiff,
+  HistorySearchResult,
   RebaseProgress,
   RepositoryStatus,
   ShelfEntry,
@@ -26,6 +27,8 @@ export const HISTORY_LIMIT = 50
 const HISTORY_PAGE = 200
 /** IPC assertLimit와 동일한 상한 — 이 이상은 더 불러오지 않는다 */
 const HISTORY_MAX = 10000
+/** 검색 점프 전용 로드 상한 (E7i) — 스크롤 페이지네이션(HISTORY_MAX)보다 깊은 매치로도 이동할 수 있게 */
+const SEARCH_JUMP_MAX = 50000
 /** notice 자동 소멸 시간(ms) — 타이머는 renderer(App)가 건다. 에러·머지 바에는 적용하지 않는다 (E1d 후속) */
 export const NOTICE_TTL_MS = 10_000
 
@@ -200,6 +203,10 @@ interface RepositoryStore {
   externalRefresh(): Promise<void>
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
   loadMoreHistory(): Promise<void>
+  /** 저장소 전체 커밋 검색 (E7i) — 스코프(조회 중 ref)는 store가 넣는다. 실패는 조용히 빈 결과 */
+  searchHistory(query: string): Promise<HistorySearchResult>
+  /** 검색 점프용 — 그 인덱스가 목록에 들어오도록 필요한 만큼 더 불러온다 (E7i) */
+  ensureHistoryLoaded(index: number): Promise<void>
   /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
   revealHead(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
@@ -1295,6 +1302,34 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
       } catch (error) {
         // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
+        if (ref === undefined) throw error
+        set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
+      }
+    })
+  },
+
+  async searchHistory(query) {
+    const { repoPath } = get()
+    if (!repoPath) return { indices: [], hashes: [], truncated: false }
+    // 검색은 조회성 — guard(busy 잠금·에러 배너)를 쓰지 않고, 실패해도 조용히 빈 결과를 준다
+    try {
+      return await git().history.search(repoPath, query, get().historyRef ?? undefined)
+    } catch {
+      return { indices: [], hashes: [], truncated: false }
+    }
+  },
+
+  async ensureHistoryLoaded(index) {
+    const { repoPath, history, historyLimit } = get()
+    if (!repoPath || index < history.length) return
+    const next = Math.min(Math.max(index + 1, historyLimit + HISTORY_PAGE), SEARCH_JUMP_MAX)
+    if (next <= historyLimit) return
+    await guard(set, get, async () => {
+      const ref = get().historyRef ?? undefined
+      try {
+        set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
+      } catch (error) {
+        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀 (loadMoreHistory와 같은 원칙)
         if (ref === undefined) throw error
         set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
       }

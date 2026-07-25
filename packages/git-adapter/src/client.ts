@@ -150,7 +150,7 @@ export interface GitClient {
     removeFile(path: string): Promise<void>
   }
   history: {
-    /** 최신순 커밋 요약. limit은 1~10000으로 잘린다. ref를 주면 그 계보만(조회 모드 — E7g), 없으면 전체 그래프(--all) */
+    /** 최신순 커밋 요약. limit은 1~50000으로 잘린다. ref를 주면 그 계보만(조회 모드 — E7g), 없으면 전체 그래프(--all) */
     list(limit: number, ref?: string): Promise<CommitSummary[]>
     /**
      * 저장소 전체에서 커밋을 찾는다 (E7i) — 목록이 아직 안 불러온 뒤쪽 커밋까지 git이 검색한다.
@@ -971,7 +971,7 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         // NaN은 min/max를 그대로 통과한다 — 유한수가 아니면 기본값으로
         const safeLimit = Number.isFinite(limit)
-          ? Math.min(Math.max(Math.trunc(limit), 1), 10000)
+          ? Math.min(Math.max(Math.trunc(limit), 1), 50000)
           : 50
         const args = [
           'log',

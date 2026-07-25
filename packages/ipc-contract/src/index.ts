@@ -147,7 +147,7 @@ export interface GitApi {
     reword(repoPath: string, hash: string, message: string): Promise<void>
   }
   history: {
-    /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어). ref는 조회 모드(E7g) */
+    /** 최신순 커밋 요약. limit은 1~50000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어). ref는 조회 모드(E7g) */
     list(repoPath: string, limit: number, ref?: string): Promise<CommitSummary[]>
     /** 저장소 전체 커밋 검색 (E7i) — 로드 범위 밖 커밋도 찾는다. indices는 list 정렬 기준 위치 */
     search(repoPath: string, query: string, ref?: string): Promise<HistorySearchResult>
