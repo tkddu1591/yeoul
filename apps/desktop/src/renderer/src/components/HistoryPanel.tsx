@@ -1,13 +1,13 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useEffect, useRef, useState } from 'react'
-import type { CommitSummary } from '@git-gui/domain'
+import type { CommitSummary, HistorySearchResult } from '@git-gui/domain'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { FindBar } from './FindBar'
-import { cycleIndex, matchIndices } from './find-matches'
+import { cycleIndex } from './find-matches'
 import { buildGraph, type GraphRow } from './history-graph'
 import { arrangeRefs, isRemoteRef, refBadgeLabel } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
@@ -47,6 +47,10 @@ interface HistoryPanelProps {
   onFindClose(): void
   onSelect(hash: string): void
   onLoadMore(): void
+  /** 저장소 전체 검색 (E7i) — 스코프는 store가 넣는다 */
+  onSearch(query: string): Promise<HistorySearchResult>
+  /** 검색 점프 — 그 인덱스가 목록에 들어오도록 더 불러온다 (E7i) */
+  onEnsureLoaded(index: number): Promise<void>
   /** "지금 여기"가 로드 범위 밖일 때 누른다 — 찾을 때까지 더 읽어 스크롤한다 (품질 리뷰) */
   onLocateHead(): void
   onAction(action: HistoryAction): void
@@ -159,6 +163,8 @@ export function HistoryPanel({
   onFindClose,
   onSelect,
   onLoadMore,
+  onSearch,
+  onEnsureLoaded,
   onLocateHead,
   onAction,
   onClearView,
@@ -178,18 +184,63 @@ export function HistoryPanel({
   const virtualItems = virtualizer.getVirtualItems()
   const lastRendered = virtualItems[virtualItems.length - 1]?.index ?? -1
 
-  // E7h ⑥ — ⌘F 점프 검색: 메시지·해시 매치 인덱스와 현재 위치(순환). 이른 반환이 없는
-  // 컴포넌트지만(전부 삼항 렌더) 다른 훅과 나란히 최상단에 둔다(Rules of Hooks 관례 — E7d 교훈)
+  // E7i — ⌘F 전체 검색: 매칭은 git이 한다(로컬 배열 매칭 폐기 — 안 불러온 커밋이 안 걸리던 문제).
+  // 200ms 디바운스 + 요청 순번(seq)으로 늦게 온 응답을 버려 타이핑 중 카운터 역전을 막는다.
+  // 이른 반환이 없는 컴포넌트지만 다른 훅과 나란히 최상단에 둔다(Rules of Hooks 관례 — E7d 교훈)
   const [findQuery, setFindQuery] = useState('')
   const [findPos, setFindPos] = useState(0)
-  const findTexts = () => history.map((commit) => `${commit.subject} ${commit.hash}`)
-  const findHits = findOpen ? matchIndices(findTexts(), findQuery) : []
+  const [findHits, setFindHits] = useState<number[]>([])
+  const [findTruncated, setFindTruncated] = useState(false)
+  const findSeqRef = useRef(0)
   const currentHit = findHits.length === 0 ? -1 : findHits[Math.min(findPos, findHits.length - 1)]!
+
+  // history는 렌더 시점 prop이라 onEnsureLoaded await 이후엔 최신값이 아닐 수 있다 — 렌더마다
+  // 최신 길이를 ref에 반영해 async 연속 실행 시점에도 store가 반영한 값을 읽게 한다 (리뷰 가드 — E7i)
+  const historyLenRef = useRef(history.length)
+  historyLenRef.current = history.length
+
+  // 검색 실행 — 쿼리·스코프(historyRef)·목록 갱신에 반응한다. 닫히면 결과를 비운다
+  useEffect(() => {
+    if (!findOpen || findQuery === '') {
+      setFindHits([])
+      setFindTruncated(false)
+      return
+    }
+    const seq = findSeqRef.current + 1
+    findSeqRef.current = seq
+    const timer = setTimeout(() => {
+      void onSearch(findQuery).then((result) => {
+        // 늦게 온 응답 폐기 — 마지막 요청만 화면에 반영한다
+        if (findSeqRef.current !== seq) return
+        setFindHits(result.indices)
+        setFindTruncated(result.truncated)
+        if (result.indices.length > 0) {
+          void jumpTo(result.indices[Math.min(findPos, result.indices.length - 1)]!)
+        }
+      })
+    }, 200)
+    return () => clearTimeout(timer)
+    // findPos는 이동 핸들러가 직접 점프하므로 의존성에서 뺀다(재검색 유발 방지)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, findQuery, historyRef, history.length])
+
+  /** 그 인덱스로 이동 — 로드 범위 밖이면 먼저 더 불러온다 (E7i) */
+  const jumpTo = async (index: number) => {
+    if (index >= historyLenRef.current) {
+      await onEnsureLoaded(index)
+      // ensureHistoryLoaded는 busy(guard)면 조용히 아무것도 안 하고 끝난다 — 로드 후에도
+      // 범위 밖이면 스크롤을 건너뛴다(안 그러면 가상 목록이 바닥으로 튄다). historyLenRef는
+      // 렌더마다 갱신되므로 이 시점에 store가 반영한 최신 길이를 읽는다 (리뷰 가드 — E7i)
+      if (index >= historyLenRef.current) return
+    }
+    virtualizer.scrollToIndex(index, { align: 'center' })
+  }
+
   const moveFind = (delta: number) => {
     if (findHits.length === 0) return
     const nextPos = cycleIndex(Math.min(findPos, findHits.length - 1), delta, findHits.length)
     setFindPos(nextPos)
-    virtualizer.scrollToIndex(findHits[nextPos]!, { align: 'center' })
+    void jumpTo(findHits[nextPos]!)
   }
 
   // "지금 여기"(HEAD)가 바뀌거나, "지금 여기로"로 로드 범위에 처음 들어온 순간 그 행으로 스크롤한다
@@ -311,18 +362,20 @@ export function HistoryPanel({
           query={findQuery}
           position={findHits.length === 0 ? -1 : Math.min(findPos, findHits.length - 1)}
           count={findHits.length}
+          countTruncated={findTruncated}
           focusSignal={findNonce}
-          placeholder="메시지·해시 찾기"
+          placeholder="메시지·해시 찾기 (전체)"
           onQuery={(q) => {
+            // 매칭은 이펙트(디바운스 검색)가 한다 — 여기서는 쿼리·위치만 초기화
             setFindQuery(q)
             setFindPos(0)
-            const hits = matchIndices(findTexts(), q)
-            if (hits.length > 0) virtualizer.scrollToIndex(hits[0]!, { align: 'center' })
           }}
           onNext={() => moveFind(1)}
           onPrev={() => moveFind(-1)}
           onClose={() => {
             setFindQuery('')
+            setFindHits([])
+            setFindTruncated(false)
             onFindClose()
           }}
         />

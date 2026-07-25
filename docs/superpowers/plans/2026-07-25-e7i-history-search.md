@@ -543,7 +543,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/renderer/src/components/HistoryPanel.tsx`
 - Modify: `apps/desktop/src/renderer/src/App.tsx` (HistoryPanel 배선 — 819-832행)
 
-- [ ] **Step 1: props 추가.** HistoryPanelProps에서 기존 `onLoadMore(): void` 선언 줄(실독) 뒤에 추가:
+- [x] **Step 1: props 추가.** HistoryPanelProps에서 기존 `onLoadMore(): void` 선언 줄(실독) 뒤에 추가:
 
 ```ts
   /** 저장소 전체 검색 (E7i) — 스코프는 store가 넣는다 */
@@ -554,7 +554,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 컴포넌트 구조 분해 목록(155-164행 부근 — `onLoadMore,` 줄)에도 `onSearch,`·`onEnsureLoaded,`를 같은 자리에 추가한다. `HistorySearchResult`를 `@git-gui/domain` import에 추가.
 
-- [ ] **Step 2: 검색 상태·이펙트 교체.** 기존 블록(181-193행):
+- [x] **Step 2: 검색 상태·이펙트 교체.** 기존 블록(181-193행):
 
 ```tsx
   // E7h ⑥ — ⌘F 점프 검색: 메시지·해시 매치 인덱스와 현재 위치(순환). 이른 반환이 없는
@@ -626,7 +626,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 `useRef`가 이미 import돼 있는지 확인하고(실독 — 이 파일은 `scrollRef`로 이미 쓴다), `matchIndices` import가 이 파일에서 더 이상 안 쓰이면 import에서 제거한다(`cycleIndex`는 계속 쓴다 — 실독 후 정리).
 
-- [ ] **Step 3: FindBar 렌더 교체.** 기존(309-329행):
+- [x] **Step 3: FindBar 렌더 교체.** 기존(309-329행):
 
 ```tsx
       {findOpen && (
@@ -680,7 +680,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
       )}
 ```
 
-- [ ] **Step 4: App 배선.** App.tsx의 HistoryPanel 렌더에서 기존:
+- [x] **Step 4: App 배선.** App.tsx의 HistoryPanel 렌더에서 기존:
 
 ```tsx
                 onLoadMore={() => void store.loadMoreHistory()}
@@ -694,9 +694,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
                 onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
 ```
 
-- [ ] **Step 5: 게이트** — `pnpm typecheck` Done, 루트 `pnpm test` 유지, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **79 유지**(기존 ⌘F 5건 무회귀 — 히스토리 검색 테스트가 디바운스 때문에 깨지면 `toHaveText` 자동 재시도가 흡수하는지 확인하고, 안 되면 그 테스트의 단언을 같은 취지로 조정·편차 보고). E2E는 포그라운드 동기(timeout 600000).
+- [x] **Step 5: 게이트** — `pnpm typecheck` Done, 루트 `pnpm test` 유지, `cd apps/desktop && npx electron-vite build && npx playwright test e2e/smoke.spec.ts` → **79 유지**(기존 ⌘F 5건 무회귀 — 히스토리 검색 테스트가 디바운스 때문에 깨지면 `toHaveText` 자동 재시도가 흡수하는지 확인하고, 안 되면 그 테스트의 단언을 같은 취지로 조정·편차 보고). E2E는 포그라운드 동기(timeout 600000).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/HistoryPanel.tsx apps/desktop/src/renderer/src/App.tsx
@@ -704,6 +704,8 @@ git commit -m "feat(desktop): E7i 히스토리 ⌘F 전체 검색 — 엔진 위
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
+
+**Task 5 실행 편차 (리뷰 요구 반영):** ① `jumpTo`에 플랜에 없던 재확인 가드를 추가했다 — `onEnsureLoaded`는 busy(guard)면 조용히 아무것도 안 하고 끝나므로, 로드 후에도 `index`가 범위 밖이면 `scrollToIndex`를 건너뛴다(안 그러면 가상 목록이 바닥으로 튄다). `history`는 렌더 시점 prop이라 await 이후 최신값이 아닐 수 있어, 렌더마다(함수 본문에서 직접, `useEffect` 아님) 갱신하는 `historyLenRef`로 최신 길이를 읽는다 — 렌더 본문 대입은 React에서 "최신 값을 async 콜백에 전달"하는 표준 관용구(부수효과 없는 순수 대입)이며, `useEffect` 방식보다 커밋 타이밍에 더 가깝다. 늦게 도착하는 `set()`(zustand)→리렌더 사이의 근본적 경합(마이크로태스크 순서)은 완전히 없앨 수 없지만, 원래 플랜(가드 없음)보다 엄격히 안전한 방향이며 실무적으로 스토어의 `history.list` IPC 왕복(수 ms~수십 ms)이 리렌더보다 훨씬 느려 사실상 충분하다. ② 기존 ⌘F 5건(E7h) 포함 smoke 79건 전부 재시도 없이 1회 통과 — 히스토리 검색 테스트(`E7h ⌘F — 히스토리에서 커밋을 찾아 점프한다`, 2.1s)도 `toHaveText` web-first assertion이 200ms 디바운스를 흡수해 단언 조정 불필요.
 
 ---
 

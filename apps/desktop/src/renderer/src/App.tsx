@@ -830,6 +830,8 @@ export function App() {
                 onFindClose={() => setFindScope(null)}
                 onSelect={(hash) => void store.selectCommit(hash)}
                 onLoadMore={() => void store.loadMoreHistory()}
+                onSearch={(query) => store.searchHistory(query)}
+                onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
                 onLocateHead={() => void store.revealHead()}
                 onAction={(action) => {
                   switch (action.kind) {
