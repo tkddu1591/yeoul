@@ -25,7 +25,8 @@ const hosting = () => window.hostingApi
 /** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
 const HISTORY_PAGE = 200
-/** IPC assertLimit와 동일한 상한 — 이 이상은 더 불러오지 않는다 */
+/** 스크롤 페이지네이션 상한(IPC 상한과 별개, E7i) — 이 이상은 스크롤로 더 불러오지 않는다.
+ *  IPC `assertLimit`는 50000까지 허용(검색 점프용, SEARCH_JUMP_MAX 참조) — 이 상수와 값이 다르다 */
 const HISTORY_MAX = 10000
 /** 검색 점프 전용 로드 상한 (E7i) — 스크롤 페이지네이션(HISTORY_MAX)보다 깊은 매치로도 이동할 수 있게 */
 const SEARCH_JUMP_MAX = 50000

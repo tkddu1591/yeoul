@@ -9,6 +9,8 @@ interface FindBarProps {
   placeholder: string
   /** 필터형(E7h ⑥ 편차) — 위치 개념이 없는 목록 필터(CommitDetailPanel·ChangesPanel)에서 카운트만 렌더 */
   mode?: 'filter'
+  /** 검색 범위가 상한에 걸려 총계가 더 클 수 있음 (E7i) — 카운트 뒤에 + 를 붙인다 */
+  countTruncated?: boolean
   /** 이미 열려 있는 상태에서 재⌘F할 때마다 바뀌는 카운터 — 재포커스 트리거 (E7h ⑥ 보완) */
   focusSignal: number
   onQuery(query: string): void
@@ -24,6 +26,7 @@ export function FindBar({
   count,
   placeholder,
   mode,
+  countTruncated,
   focusSignal,
   onQuery,
   onNext,
@@ -58,7 +61,11 @@ export function FindBar({
         data-testid="find-bar-input"
       />
       <span className="find-bar__count" data-testid="find-bar-count">
-        {mode === 'filter' ? `${count}개` : count === 0 ? '0/0' : `${position + 1}/${count}`}
+        {mode === 'filter'
+          ? `${count}개`
+          : count === 0
+            ? '0/0'
+            : `${position + 1}/${count}${countTruncated === true ? '+' : ''}`}
       </span>
       <button type="button" className="find-bar__nav" onClick={onPrev} aria-label="이전 결과">
         ↑

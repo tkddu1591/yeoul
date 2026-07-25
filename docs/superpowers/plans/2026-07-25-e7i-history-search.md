@@ -30,7 +30,7 @@
 - Modify: `packages/git-adapter/src/client.ts` (history 네임스페이스 — 961-998행)
 - Test: `packages/git-adapter/test/client.test.ts`
 
-- [ ] **Step 1: 도메인 타입 추가.** `packages/domain/src/repository.ts`에서 `CommitSummary` 선언 블록 바로 뒤(실독)에 추가:
+- [x] **Step 1: 도메인 타입 추가.** `packages/domain/src/repository.ts`에서 `CommitSummary` 선언 블록 바로 뒤(실독)에 추가:
 
 ```ts
 /** 히스토리 전체 검색 결과 (E7i) — 목록에 아직 안 불러온 커밋까지 git이 찾는다.
@@ -47,7 +47,7 @@ export interface HistorySearchResult {
 
 `packages/domain/src/index.ts`(또는 배럴 파일 — 실독)에서 `CommitSummary`가 export되는 방식과 동일하게 `HistorySearchResult`도 export한다.
 
-- [ ] **Step 2: Red — 엔진 테스트 8건.** `packages/git-adapter/test/client.test.ts`의 기존 `history.list` describe 블록 뒤(실독)에 추가. 헬퍼 실명은 실독으로 맞춘다(E7h 실측: `createFixtureRepo()` + `createGitClient(repo)` + `execGitOrThrow`):
+- [x] **Step 2: Red — 엔진 테스트 8건.** `packages/git-adapter/test/client.test.ts`의 기존 `history.list` describe 블록 뒤(실독)에 추가. 헬퍼 실명은 실독으로 맞춘다(E7h 실측: `createFixtureRepo()` + `createGitClient(repo)` + `execGitOrThrow`):
 
 ```ts
   describe('history.search (E7i)', () => {
@@ -157,9 +157,9 @@ export interface HistorySearchResult {
 
 (픽스처 기본 브랜치가 `main`이 아니면 checkout 대상 이름을 실독으로 맞춘다 — 편차 보고. `writeFile`·`join` import가 없으면 파일 상단에 추가.)
 
-- [ ] **Step 3: Red 확인** — `pnpm --filter @git-gui/git-adapter test` 실행. 새 8건이 "search is not a function" 계열로 실패하는 것을 확인한다.
+- [x] **Step 3: Red 확인** — `pnpm --filter @git-gui/git-adapter test` 실행. 새 8건이 "search is not a function" 계열로 실패하는 것을 확인한다.
 
-- [ ] **Step 4: 인터페이스 선언 추가.** client.ts의 기존:
+- [x] **Step 4: 인터페이스 선언 추가.** client.ts의 기존:
 
 ```ts
     list(limit: number, ref?: string): Promise<CommitSummary[]>
@@ -180,7 +180,7 @@ export interface HistorySearchResult {
 
 `HistorySearchResult`를 `@git-gui/domain` import 목록에 추가한다(파일 상단 실독).
 
-- [ ] **Step 5: 구현.** client.ts의 history 네임스페이스에서 기존:
+- [x] **Step 5: 구현.** client.ts의 history 네임스페이스에서 기존:
 
 ```ts
         return parseLog(result.stdout)
@@ -250,11 +250,11 @@ export interface HistorySearchResult {
 const SEARCH_SCAN_MAX = 50000
 ```
 
-- [ ] **Step 6: Green 확인** — `pnpm --filter @git-gui/git-adapter test` 전건 통과.
+- [x] **Step 6: Green 확인** — `pnpm --filter @git-gui/git-adapter test` 전건 통과.
 
-- [ ] **Step 7: 게이트** — 루트 `pnpm test` → **478+8(실측 정정)**, `pnpm typecheck` 전부 Done.
+- [x] **Step 7: 게이트** — 루트 `pnpm test` → **478+8(실측 정정)**, `pnpm typecheck` 전부 Done.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/domain/src packages/git-adapter/src/client.ts packages/git-adapter/test/client.test.ts
@@ -262,6 +262,8 @@ git commit -m "feat(git-adapter): E7i history.search — 저장소 전체 커밋
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
+
+**Task 1 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① `pnpm --filter @git-gui/git-adapter test`는 no-op(패키지에 test 스크립트 없음 — 루트 vitest projects 구조) → `npx vitest run packages/git-adapter/test/client.test.ts`로 대체. 이후 태스크도 같은 방식. ② 테스트는 별도 history.list describe가 없어 E7g ref 테스트 뒤에 삽입. ③ `writeFile` import 추가, domain은 `export *`라 배럴 수정 불요, 상수는 COMPARE_LIMIT 뒤. **리뷰 실측 확정:** list/search 인자 차이(decorate-refs-exclude·--max-count 위치·-z)는 순서·집합에 무영향 — 441커밋 전수 대조 `ORDER IDENTICAL`. `--grep=-foo`는 `=`결합 단일 argv라 옵션 오인 없음(git 2.50.1 실측) — 구현자 concern 종결. **리뷰 Minor(기록만):** grep 호출에 `--max-count`가 없어 초대형 저장소에서는 Task 5의 200ms 디바운스가 성능 안전망 — 반드시 유지할 것.
 
 ---
 
@@ -272,7 +274,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/desktop/src/preload/index.ts` (history — 121-123행)
 - Modify: `apps/desktop/src/main/git-handlers.ts` (historyList 핸들러 뒤 — 443-448행)
 
-- [ ] **Step 1: contract.** 기존:
+- [x] **Step 1: contract.** 기존:
 
 ```ts
   history: {
@@ -307,7 +309,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   historySearch: 'history:search',
 ```
 
-- [ ] **Step 2: preload.** 기존:
+- [x] **Step 2: preload.** 기존:
 
 ```ts
   history: {
@@ -325,7 +327,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   },
 ```
 
-- [ ] **Step 3: main 핸들러.** git-handlers.ts의 기존 historyList 핸들러 블록:
+- [x] **Step 3: main 핸들러.** git-handlers.ts의 기존 historyList 핸들러 블록:
 
 ```ts
   ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown, ref: unknown) =>
@@ -356,9 +358,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   )
 ```
 
-- [ ] **Step 4: 게이트** — `pnpm typecheck` 전부 Done(계약·preload·핸들러 3면 일치 여부를 타입이 잡는다), 루트 `pnpm test` 유지(카운트 변화 없음), `cd apps/desktop && npx electron-vite build` 성공.
+- [x] **Step 4: 게이트** — `pnpm typecheck` 전부 Done(계약·preload·핸들러 3면 일치 여부를 타입이 잡는다), 루트 `pnpm test` 유지(카운트 변화 없음), `cd apps/desktop && npx electron-vite build` 성공.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/ipc-contract/src/index.ts apps/desktop/src/preload/index.ts apps/desktop/src/main/git-handlers.ts
@@ -367,6 +369,8 @@ git commit -m "feat(desktop): E7i history.search IPC 배선 — contract·preloa
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
+**Task 2 실행 편차 (소급 기록 — 리뷰 검증 완료):** `HistorySearchResult` re-export는 ipc-contract의 domain import 블록에 알파벳 순(FileDiff↔MergeResult 사이) 삽입 — 기존 관례 그대로. 그 외 편차 없음.
+
 ---
 
 ### Task 3: store — `searchHistory` + `ensureHistoryLoaded`
@@ -374,7 +378,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/desktop/src/renderer/src/store/repository-store.ts` (상수·인터페이스·loadMoreHistory 뒤)
 
-- [ ] **Step 1: 상수.** 기존:
+- [x] **Step 1: 상수.** 기존:
 
 ```ts
 const HISTORY_MAX = 10000
@@ -388,7 +392,7 @@ const HISTORY_MAX = 10000
 const SEARCH_JUMP_MAX = 50000
 ```
 
-- [ ] **Step 2: 인터페이스 선언.** 인터페이스의 `loadMoreHistory(): Promise<void>` 선언 줄(실독) 바로 뒤에 추가:
+- [x] **Step 2: 인터페이스 선언.** 인터페이스의 `loadMoreHistory(): Promise<void>` 선언 줄(실독) 바로 뒤에 추가:
 
 ```ts
   /** 저장소 전체 커밋 검색 (E7i) — 스코프(조회 중 ref)는 store가 넣는다. 실패는 조용히 빈 결과 */
@@ -399,7 +403,7 @@ const SEARCH_JUMP_MAX = 50000
 
 `HistorySearchResult`를 이 파일의 `@git-gui/domain`(또는 ipc-contract) import 목록에 추가한다(기존 CommitSummary import 위치 실독).
 
-- [ ] **Step 3: 구현.** `loadMoreHistory` 구현 블록이 끝나는 지점의 기존:
+- [x] **Step 3: 구현.** `loadMoreHistory` 구현 블록이 끝나는 지점의 기존:
 
 ```ts
   async revealHead() {
@@ -441,15 +445,15 @@ const SEARCH_JUMP_MAX = 50000
 
 **주의**: `history.list`의 어댑터 clamp는 10000이고 IPC `assertLimit`도 1~10000을 강제한다(Task 2 Step 3 인용 주석 참조). `SEARCH_JUMP_MAX`(50000)로 부르면 IPC에서 거부된다 — Step 4에서 상한을 함께 올린다.
 
-- [ ] **Step 4: 상한 3곳 정합.** 검색 점프가 10000보다 깊은 매치로도 가려면 세 곳의 상한을 같이 올려야 한다(실독 후 교체):
+- [x] **Step 4: 상한 3곳 정합.** 검색 점프가 10000보다 깊은 매치로도 가려면 세 곳의 상한을 같이 올려야 한다(실독 후 교체):
   1. `packages/ipc-contract`의 limit 문서 주석과 `apps/desktop/src/main/git-handlers.ts`의 `assertLimit` 상한(현행 10000 — 실독)을 `50000`으로.
   2. `packages/git-adapter/src/client.ts`의 `history.list` clamp `Math.min(Math.max(Math.trunc(limit), 1), 10000)`을 `50000`으로.
   3. 관련 주석("1~10000")을 "1~50000"으로 갱신.
   스크롤 페이지네이션의 `HISTORY_MAX = 10000`은 **그대로 둔다**(일반 스크롤 상한은 유지, 검색 점프만 더 깊이 간다).
 
-- [ ] **Step 5: 게이트** — `pnpm typecheck` 전부 Done, 루트 `pnpm test` 유지(assertLimit 상한을 단언하는 기존 테스트가 있으면 같은 취지로 갱신 — 편차 보고), build 성공.
+- [x] **Step 5: 게이트** — `pnpm typecheck` 전부 Done, 루트 `pnpm test` 유지(assertLimit 상한을 단언하는 기존 테스트가 있으면 같은 취지로 갱신 — 편차 보고), build 성공.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/store/repository-store.ts packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts packages/git-adapter/src/client.ts
@@ -458,6 +462,12 @@ git commit -m "feat(desktop): E7i store 검색·점프 로드 — searchHistory�
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
+**Task 3 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① store의 `HistorySearchResult`는 ipc-contract가 아닌 `@git-gui/domain`에서 직접 import(CommitSummary 등 기존 관례). ② 플랜이 우려한 "`assertLimit` 상한 단언 테스트"는 전 저장소 grep 결과 **부재** — 갱신 대상 없음.
+
+**Task 3 리뷰 실측(기록):** 60,000커밋 합성 저장소에서 limit=50000 실측 — `git log` 0.22s·stdout 9.35MB·parseLog 21ms·직렬화 44ms·buildGraph 12ms·heap ~86MB. 권한 상승 경로 없음(인자는 전부 main 조립), `assertLimit` 소비처는 historyList 1곳. 상한 값 6곳(assertLimit·contract 주석·client 주석·client clamp·SEARCH_JUMP_MAX·SEARCH_SCAN_MAX) 전부 50000 정합 — 엔진 index < 50000이라 `next = index+1 ≤ 50000`이 상한과 정확히 맞물림(off-by-one 없음). guard 미사용 검색의 동시성: `git log`는 인덱스 무접촉 + `GIT_OPTIONAL_LOCKS=0`, checkout 80회 × log 200회 동시 실행 실패 0건.
+
+**Task 3 리뷰 Minor 후속 노트:** ① `HISTORY_MAX` 위 주석("IPC assertLimit와 동일한 상한")이 거짓이 됨 → Task 4에서 함께 정정. ② **historyLimit 끈적임**: 깊은 점프 뒤 historyLimit이 최대 50000으로 남아 `fetchSnapshot` 호출부 40곳이 매 갱신마다 그 규모를 재조회(회당 9.35MB·~77ms) — 1만 커밋 초과 저장소에서만 발생. 후속안: FindBar 닫힘 시 되돌리기 또는 스냅샷 갱신 인자를 `min(historyLimit, HISTORY_MAX)`로. ③ `revealHead`의 `limit += 2000` × 10회에 상한 체크 없음(기존 결함 — 50000 이후 요청이 거부될 수 있으나 조기 반환이 사실상 차단). ④ `ensureHistoryLoaded`에 "끝까지 다 봤음" 조기 반환 없음(실질 도달 불가). ⑤ index는 git 실시간 기준·history는 스냅샷이라 사이에 커밋이 생기면 한 줄 어긋남 — Task 5의 `history.length` 변화 재검색이 완화책.
+
 ---
 
 ### Task 4: FindBar — 전체 기준 카운터(`+` 표기)
@@ -465,7 +475,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/desktop/src/renderer/src/components/FindBar.tsx`
 
-- [ ] **Step 1: prop 추가.** 기존:
+- [x] **Step 1: prop 추가.** 기존:
 
 ```ts
   /** 필터형(E7h ⑥ 편차) — 위치 개념이 없는 목록 필터(CommitDetailPanel·ChangesPanel)에서 카운트만 렌더 */
@@ -481,7 +491,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   countTruncated?: boolean
 ```
 
-- [ ] **Step 2: 구조 분해에 추가.** 기존:
+- [x] **Step 2: 구조 분해에 추가.** 기존:
 
 ```ts
   mode,
@@ -496,7 +506,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   focusSignal,
 ```
 
-- [ ] **Step 3: 카운트 렌더.** 기존:
+- [x] **Step 3: 카운트 렌더.** 기존:
 
 ```tsx
         {mode === 'filter' ? `${count}개` : count === 0 ? '0/0' : `${position + 1}/${count}`}
@@ -512,9 +522,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
             : `${position + 1}/${count}${countTruncated === true ? '+' : ''}`}
 ```
 
-- [ ] **Step 4: 게이트** — `pnpm typecheck` Done(선택 prop이라 기존 4개 호출부 무변), 루트 `pnpm test` 유지, build 성공.
+- [x] **Step 4: 게이트** — `pnpm typecheck` Done(선택 prop이라 기존 4개 호출부 무변), 루트 `pnpm test` 유지, build 성공.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/FindBar.tsx
@@ -522,6 +532,8 @@ git commit -m "feat(desktop): E7i FindBar countTruncated — 검색 상한 초�
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
+
+**Task 4 실행 편차 (리뷰 발 정정 반영):** `repository-store.ts`의 `HISTORY_MAX` 위 주석이 "IPC assertLimit와 동일한 상한"이라 되어 있었으나 Task 3에서 `assertLimit` 상한이 50000으로 올라가면서 거짓이 됨 — "스크롤 페이지네이션 상한(IPC 상한과 별개) — IPC `assertLimit`는 50000까지 허용(검색 점프용, SEARCH_JUMP_MAX 참조)" 취지로 정정. 같은 커밋에 포함.
 
 ---
 
