@@ -120,6 +120,8 @@ const api: GitApi = {
   },
   history: {
     list: (repoPath, limit, ref) => ipcRenderer.invoke(CHANNELS.historyList, repoPath, limit, ref),
+    search: (repoPath, query, ref) =>
+      ipcRenderer.invoke(CHANNELS.historySearch, repoPath, query, ref),
   },
   sync: {
     push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),

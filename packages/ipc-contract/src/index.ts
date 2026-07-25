@@ -8,6 +8,7 @@ import type {
   CommitSummary,
   DiffOptions,
   FileDiff,
+  HistorySearchResult,
   MergeResult,
   PullResult,
   RebaseContinueResult,
@@ -148,6 +149,8 @@ export interface GitApi {
   history: {
     /** 최신순 커밋 요약. limit은 1~10000 정수 — 범위 밖은 IPC에서 거부된다 (adapter의 clamp는 심층 방어). ref는 조회 모드(E7g) */
     list(repoPath: string, limit: number, ref?: string): Promise<CommitSummary[]>
+    /** 저장소 전체 커밋 검색 (E7i) — 로드 범위 밖 커밋도 찾는다. indices는 list 정렬 기준 위치 */
+    search(repoPath: string, query: string, ref?: string): Promise<HistorySearchResult>
   }
   sync: {
     /** 현재 브랜치를 원격으로 백업(push) — 첫 연결이면 linked (E7e). 원격이 없으면 에러 */
@@ -220,6 +223,7 @@ export const CHANNELS = {
   commitsUndoLast: 'commits:undo-last',
   commitsReword: 'commits:reword',
   historyList: 'history:list',
+  historySearch: 'history:search',
   syncPush: 'sync:push',
   syncPull: 'sync:pull',
 } as const

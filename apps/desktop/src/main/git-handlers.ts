@@ -447,6 +447,15 @@ export function registerGitHandlers(): void {
     ),
   )
 
+  ipcMain.handle(
+    CHANNELS.historySearch,
+    (_event, repoPath: unknown, query: unknown, ref: unknown) =>
+      createGitClient(assertAllowedRepo(repoPath)).history.search(
+        assertString(query),
+        ref === undefined ? undefined : assertString(ref),
+      ),
+  )
+
   ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).sync.push(),
   )
