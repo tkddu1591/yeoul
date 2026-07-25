@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -2506,6 +2506,110 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await expect(client.history.list(50, 'vanished-branch')).rejects.toThrow()
+  })
+
+  describe('history.search (E7i)', () => {
+    /** 제목·본문이 다른 커밋 4개 — 검색 대상 픽스처 */
+    const seedSearchRepo = async (repo: string) => {
+      const commits: Array<[string, string]> = [
+        ['Alpha feature', '첫 저장'],
+        ['beta FIX urgent', '두 번째 — magicword 포함'],
+        ['gamma a*b literal', '세 번째'],
+        ['delta last', '네 번째'],
+      ]
+      for (const [subject, body] of commits) {
+        await writeFile(join(repo, 'f.txt'), `${subject}\n`)
+        await execGitOrThrow(['add', 'f.txt'], { cwd: repo })
+        await execGitOrThrow(
+          ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', subject, '-m', body],
+          { cwd: repo },
+        )
+      }
+    }
+
+    it('제목 매치를 목록 순서 인덱스로 돌려준다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const client = createGitClient(repo)
+      const result = await client.history.search('alpha')
+      const list = await client.history.list(50)
+      expect(result.indices).toHaveLength(1)
+      expect(list[result.indices[0]!]!.subject).toBe('Alpha feature')
+      expect(result.hashes[0]).toBe(list[result.indices[0]!]!.hash)
+      expect(result.truncated).toBe(false)
+    })
+
+    it('대소문자를 무시한다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const result = await createGitClient(repo).history.search('FIX')
+      const lower = await createGitClient(repo).history.search('fix')
+      expect(result.indices).toEqual(lower.indices)
+      expect(result.indices).toHaveLength(1)
+    })
+
+    it('정규식 메타문자는 고정 문자열로 찾는다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const client = createGitClient(repo)
+      const literal = await client.history.search('a*b')
+      expect(literal.indices).toHaveLength(1)
+      // 정규식이었다면 'ab'·'aab' 등에도 걸린다 — 'a*' 자체로는 아무것도 안 걸려야 한다
+      const notRegex = await client.history.search('gamma a*b literalX')
+      expect(notRegex.indices).toEqual([])
+    })
+
+    it('본문도 매치한다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const result = await createGitClient(repo).history.search('magicword')
+      expect(result.indices).toHaveLength(1)
+    })
+
+    it('해시 접두로도 찾는다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const client = createGitClient(repo)
+      const list = await client.history.list(50)
+      const target = list[2]!
+      const result = await client.history.search(target.hash.slice(0, 7))
+      expect(result.hashes).toContain(target.hash)
+      expect(result.indices).toContain(2)
+    })
+
+    it('인덱스는 오름차순이고 중복이 없다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      // 모든 커밋 본문에 '저장'이 없으므로 공통 매치는 만든 뒤 확인한다 — 'a'는 여러 제목에 있다
+      const result = await createGitClient(repo).history.search('a')
+      expect(result.indices.length).toBeGreaterThan(1)
+      expect([...result.indices].sort((x, y) => x - y)).toEqual(result.indices)
+      expect(new Set(result.indices).size).toBe(result.indices.length)
+    })
+
+    it('ref 스코프면 그 계보만 본다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const client = createGitClient(repo)
+      await execGitOrThrow(['checkout', '-q', '-b', 'side'], { cwd: repo })
+      await writeFile(join(repo, 'f.txt'), 'side only\n')
+      await execGitOrThrow(['add', 'f.txt'], { cwd: repo })
+      await execGitOrThrow(
+        ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'sideonly commit'],
+        { cwd: repo },
+      )
+      await execGitOrThrow(['checkout', '-q', 'main'], { cwd: repo })
+      expect((await client.history.search('sideonly')).indices).toHaveLength(1)
+      expect((await client.history.search('sideonly', 'main')).indices).toEqual([])
+      expect((await client.history.search('sideonly', 'side')).indices).toHaveLength(1)
+    })
+
+    it('빈 검색어는 git을 부르지 않고 빈 결과다', async () => {
+      const repo = await createFixtureRepo()
+      await seedSearchRepo(repo)
+      const result = await createGitClient(repo).history.search('')
+      expect(result).toEqual({ indices: [], hashes: [], truncated: false })
+    })
   })
 
   it('push — push.default=matching이어도 현재 브랜치만 올린다', async () => {

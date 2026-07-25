@@ -67,6 +67,17 @@ export interface CommitSummary {
   parents: string[]
 }
 
+/** 히스토리 전체 검색 결과 (E7i) — 목록에 아직 안 불러온 커밋까지 git이 찾는다.
+ *  indices는 history.list와 같은 정렬(--date-order·같은 스코프) 기준 위치다 */
+export interface HistorySearchResult {
+  /** 매치 커밋의 목록 순서 위치(오름차순) */
+  indices: number[]
+  /** indices와 같은 순서의 커밋 해시 */
+  hashes: string[]
+  /** 순서 스캔 상한에 걸려 뒤쪽을 못 본 경우 true */
+  truncated: boolean
+}
+
 /** 커밋에 담긴 파일 하나의 변경 — 커밋 상세에서 사용한다 */
 export interface CommitFileChange {
   path: string

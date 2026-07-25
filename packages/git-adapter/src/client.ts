@@ -9,6 +9,7 @@ import {
   type CommitSummary,
   type DiffOptions,
   type FileDiff,
+  type HistorySearchResult,
   type MergeResult,
   type PullResult,
   type RebaseContinueResult,
@@ -151,6 +152,11 @@ export interface GitClient {
   history: {
     /** 최신순 커밋 요약. limit은 1~10000으로 잘린다. ref를 주면 그 계보만(조회 모드 — E7g), 없으면 전체 그래프(--all) */
     list(limit: number, ref?: string): Promise<CommitSummary[]>
+    /**
+     * 저장소 전체에서 커밋을 찾는다 (E7i) — 목록이 아직 안 불러온 뒤쪽 커밋까지 git이 검색한다.
+     * 메시지(제목+본문) 고정 문자열·대소문자 무시 매치 + 해시 접두. indices는 list와 같은 정렬 기준 위치
+     */
+    search(query: string, ref?: string): Promise<HistorySearchResult>
   }
   sync: {
     /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 — linked로 알린다 (E7e) */
@@ -269,6 +275,8 @@ const REBASE_SHELF_MESSAGE = '저장 재배치 자동 보관'
 
 /** "지금과 비교" 한 방향 상한 — 초과분은 overflow 플래그로만 알린다 (E7a) */
 const COMPARE_LIMIT = 100
+/** 검색 순서 스캔 상한 (E7i) — 이보다 깊은 매치는 위치를 모른다(truncated로 알린다) */
+const SEARCH_SCAN_MAX = 50000
 
 /**
  * 원격이 앞서 거부된 push (E5b 후속·E6b 실측) — stderr 4케이스 전부 "! [rejected] …
@@ -995,6 +1003,51 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, result)
         }
         return parseLog(result.stdout)
+      },
+      async search(query, ref) {
+        if (query === '') return { indices: [], hashes: [], truncated: false }
+        const cwd = await topLevel()
+        // 스코프는 list와 동일해야 인덱스가 목록과 맞는다 — 같은 옵션 조합을 공유한다
+        const scope = [
+          '--no-show-signature',
+          ...(ref === undefined
+            ? ['--exclude=refs/stash', '--exclude=refs/notes/*', '--exclude=refs/replace/*', '--all']
+            : []),
+          '--date-order',
+        ]
+        const tail = ref === undefined ? [] : ['--end-of-options', ref]
+        // 1) 순서 스캔 — 해시→인덱스. 상한을 넘으면 뒤쪽은 못 본다(truncated)
+        const orderArgs = ['log', ...scope, `--max-count=${SEARCH_SCAN_MAX}`, '--format=%H', ...tail]
+        const order = await execGit(orderArgs, { cwd })
+        if (order.exitCode !== 0) {
+          // 아직 커밋이 없는 저장소는 빈 결과다 (list와 같은 방어)
+          if (order.stderr.includes('does not have any commits')) {
+            return { indices: [], hashes: [], truncated: false }
+          }
+          throw new GitError(orderArgs, order)
+        }
+        const ordered = order.stdout.split('\n').filter((line) => line !== '')
+        const indexOf = new Map(ordered.map((hash, index) => [hash, index]))
+        // 2) 메시지 매치 — -F(고정 문자열)라 정규식 메타문자가 들어와도 오류·오작동이 없다
+        const grepArgs = ['log', ...scope, '-i', '-F', `--grep=${query}`, '--format=%H', ...tail]
+        const grep = await execGit(grepArgs, { cwd })
+        if (grep.exitCode !== 0) throw new GitError(grepArgs, grep)
+        const matched = new Set(grep.stdout.split('\n').filter((line) => line !== ''))
+        // 3) 해시 접두 — 현행 UI가 해시로도 찾으므로 동등 유지
+        if (/^[0-9a-fA-F]{4,40}$/.test(query)) {
+          const prefix = query.toLowerCase()
+          for (const hash of ordered) if (hash.startsWith(prefix)) matched.add(hash)
+        }
+        const indices: number[] = []
+        const hashes: string[] = []
+        for (const hash of matched) {
+          const index = indexOf.get(hash)
+          // 스캔 상한 밖 매치는 위치를 모른다 — truncated로 알리고 버린다
+          if (index !== undefined) indices.push(index)
+        }
+        indices.sort((a, b) => a - b)
+        for (const index of indices) hashes.push(ordered[index]!)
+        return { indices, hashes, truncated: ordered.length >= SEARCH_SCAN_MAX }
       },
     },
     sync: {
