@@ -32,7 +32,7 @@ E7g ④가 만든 한 줄 배치를 두 줄로 되돌리되, 정보 우선순위
 - `ui/Tooltip.tsx` — 자식(트리거)을 감싸 마우스오버·포커스 시 카드로 띄운다. 지연 400ms(포커스는 즉시), 이탈·ESC·스크롤·클릭 시 닫힘, `position: fixed` + 화면 밖이면 반대편으로 뒤집기, 마우스를 툴팁 위로 옮겨도 유지되지 않음(정보 전용 — 클릭 대상 없음).
 - **접근성**: 트리거에 `aria-describedby`로 연결하고 툴팁 노드는 `role="tooltip"`. 기존 `aria-label`이 있는 트리거는 그대로 둔다(중복 낭독 방지).
 - **E2E 가시성**: 트리거에 `data-tooltip="<평문>"`을 남긴다 — 렌더 없이도 문구를 단언할 수 있어 hover 플레이크를 피한다. 리치(다중 줄) 툴팁은 `data-tooltip`에 요약 한 줄만 넣는다.
-- **네이티브 `title` 전면 교체(41곳)**: 렌더러의 실제 DOM `title` 속성을 전부 Tooltip으로 옮긴다(컴포넌트 prop인 `title`(Panel·ConfirmDialog 등)은 대상 아님). 교체 후 그 요소에 네이티브 `title`을 남기지 않는다(OS 툴팁 이중 표시 방지).
+- **네이티브 `title` 전면 교체(19곳 — 플랜 실측 정정: 처음 센 41은 컴포넌트 prop인 `title=`까지 포함한 오산)**: 렌더러의 실제 DOM `title` 속성을 전부 Tooltip으로 옮긴다(컴포넌트 prop인 `title`(Panel·ConfirmDialog 등)은 대상 아님). 교체 후 그 요소에 네이티브 `title`을 남기지 않는다(OS 툴팁 이중 표시 방지).
 - **E2E 4곳 전환**: `toHaveAttribute('title', /지금 여기/)`(브랜치 행 3건·워크트리 행 1건)을 `data-tooltip` 기준으로 재작성한다 — 같은 상태를 같은 강도로 단언(비활성·삭제 금지).
 
 ## ③ 워크트리 리치 호버 카드
@@ -71,10 +71,10 @@ main에서 갈라짐 · 12개 앞섬 · 3개 뒤처짐
 ## 테스트
 
 - **순수 단위**: `shortenPath`(홈 축약·뒤 조각 보존·한 조각·홈 밖), `sourceChip`(dot 폴더·홈 직속·홈 밖), `uniqueNames`(겹침 1단·2단 확장·미겹침 유지), `shortenBranch`(앞 생략·짧으면 그대로).
-- **컴포넌트 단위**: Tooltip 지연·ESC 닫힘·`aria-describedby` 연결(jsdom).
+- **컴포넌트 단위**: 채택하지 않는다(플랜 실측 정정 — desktop 테스트에 jsdom·testing-library 인프라가 없다). Tooltip은 배치 계산(`placeTooltip`)을 순수 함수로 분리해 단위 테스트하고, 지연·ESC·`aria-describedby`는 E2E로 검증한다.
 - **E2E**: ① 같은 이름 워크트리 2개(다른 출처)가 목록에서 서로 구분됨(유일화된 이름·출처 칩) ② 행 호버 시 카드에 전체 경로가 잘림 없이 보임 ③ 기존 `title` 단언 4곳을 `data-tooltip`으로 전환(무회귀) ④ 워크트리·브랜치 기존 E2E 전건 무회귀.
 - **스크린샷**: 워크트리 목록(같은 이름 2개 구분 상태)·호버 카드 — 컨트롤러 육안 + 사용자 확인.
-- **플랜 사전 실측**: 현재 41개 `title` 사용처 목록화(컴포넌트 prop 제외 확정), `origin/HEAD` symref 존재 여부별 기준 브랜치 결정 실측, jsdom에서 Tooltip 타이머 테스트 관례(E6b `page.clock` 대응물), 두 줄 행이 E7g 워크트리 CSS·가상 스크롤 높이에 주는 영향.
+- **플랜 사전 실측(완료)**: `title` 사용처 19곳 목록화(컴포넌트 prop 38개 제외 확정), `origin/HEAD` symref 존재 여부별 기준 브랜치 결정 실측, jsdom에서 Tooltip 타이머 테스트 관례(E6b `page.clock` 대응물), 두 줄 행이 E7g 워크트리 CSS·가상 스크롤 높이에 주는 영향.
 
 ## 범위 밖 (후속)
 
