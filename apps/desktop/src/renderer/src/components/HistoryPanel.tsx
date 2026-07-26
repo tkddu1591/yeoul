@@ -192,6 +192,8 @@ export function HistoryPanel({
   const [findHits, setFindHits] = useState<number[]>([])
   const [findTruncated, setFindTruncated] = useState(false)
   const findSeqRef = useRef(0)
+  /** 마지막으로 점프한 검색(쿼리+스코프) — 스냅샷발 재검색은 재점프하지 않는다 (E7i 보완 I-3) */
+  const lastJumpKeyRef = useRef('')
   const currentHit = findHits.length === 0 ? -1 : findHits[Math.min(findPos, findHits.length - 1)]!
 
   // history는 렌더 시점 prop이라 onEnsureLoaded await 이후엔 최신값이 아닐 수 있다 — 렌더마다
@@ -202,8 +204,14 @@ export function HistoryPanel({
   // 검색 실행 — 쿼리·스코프(historyRef)·목록 갱신에 반응한다. 닫히면 결과를 비운다
   useEffect(() => {
     if (!findOpen || findQuery === '') {
-      setFindHits([])
-      setFindTruncated(false)
+      // 진행 중 응답을 폐기한다 — 안 그러면 닫은 뒤에 하이라이트·스크롤이 되살아난다 (보완 I-1)
+      findSeqRef.current += 1
+      lastJumpKeyRef.current = ''
+      // 닫힌 상태에서 매 스냅샷마다 새 배열을 넣어 헛렌더하지 않는다
+      if (findHits.length > 0) {
+        setFindHits([])
+        setFindTruncated(false)
+      }
       return
     }
     const seq = findSeqRef.current + 1
@@ -214,7 +222,11 @@ export function HistoryPanel({
         if (findSeqRef.current !== seq) return
         setFindHits(result.indices)
         setFindTruncated(result.truncated)
-        if (result.indices.length > 0) {
+        // 쿼리·스코프가 바뀐 검색에서만 점프한다 — 스냅샷발 재검색은 결과만 갱신(보완 I-3:
+        // 안 그러면 사용자가 스크롤할 때마다 화면이 매치로 되감긴다)
+        const jumpKey = `${findQuery}\u0000${historyRef ?? ''}`
+        if (lastJumpKeyRef.current !== jumpKey && result.indices.length > 0) {
+          lastJumpKeyRef.current = jumpKey
           void jumpTo(result.indices[Math.min(findPos, result.indices.length - 1)]!)
         }
       })
@@ -222,7 +234,7 @@ export function HistoryPanel({
     return () => clearTimeout(timer)
     // findPos는 이동 핸들러가 직접 점프하므로 의존성에서 뺀다(재검색 유발 방지)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, findQuery, historyRef, history.length])
+  }, [findOpen, findQuery, historyRef, history.length, history[0]?.hash])
 
   /** 그 인덱스로 이동 — 로드 범위 밖이면 먼저 더 불러온다 (E7i) */
   const jumpTo = async (index: number) => {

@@ -304,6 +304,12 @@ export function App() {
     })
   }, [])
 
+  // 저장소 전환 시 열려 있던 ⌘F 검색을 닫는다 — 옛 저장소 기준 검색 상태가 새 저장소 화면에
+  // 남지 않도록 (E7i 보완 Step 4). 훅 순서 불변 — 이른 반환보다 앞 (E7d ① 교훈)
+  useEffect(() => {
+    setFindScope(null)
+  }, [store.repoPath])
+
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
   }
