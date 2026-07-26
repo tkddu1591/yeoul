@@ -53,3 +53,15 @@ export function computeColumns(
   }
   return { left, right }
 }
+
+/**
+ * 헤더 접힘 임계 폭 (E7k) — 이 아래에서는 액션 버튼이 아이콘만 남는다.
+ * 실측: 1200px 창에서 상태 394 + 액션 683 + gap 40 + padding 100 = 1217이라
+ * 저장소 이름 자리가 0으로 뭉개졌다. 이름 자리를 지키는 지점이 1180이다.
+ */
+export const HEADER_COMPACT_WIDTH = 1180
+
+/** 창이 좁아 헤더 라벨을 접어야 하는가 — 판정만 하고 숨김은 CSS가 한다 (E7k) */
+export function isCompactHeader(viewportWidth: number): boolean {
+  return viewportWidth < HEADER_COMPACT_WIDTH
+}

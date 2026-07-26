@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   clampRightWidth,
   computeColumns,
+  isCompactHeader,
   parseStoredWidth,
   RIGHT_COLUMN_DEFAULT,
 } from '../src/renderer/src/ui/column-resize'
@@ -47,5 +48,19 @@ describe('computeColumns (E6a 반응형)', () => {
 
   it('과대 저장값은 기존 45% 클램프가 먼저 자르고, 남으면 좌측이 줄어든다', () => {
     expect(computeColumns(1440, 2000)).toEqual({ left: 318, right: 648 })
+  })
+})
+
+describe('isCompactHeader (E7k)', () => {
+  it('임계값 미만이면 접는다', () => {
+    expect(isCompactHeader(1179)).toBe(true)
+  })
+
+  it('임계값과 같으면 펴 둔다', () => {
+    expect(isCompactHeader(1180)).toBe(false)
+  })
+
+  it('넓으면 펴 둔다', () => {
+    expect(isCompactHeader(1600)).toBe(false)
   })
 })
