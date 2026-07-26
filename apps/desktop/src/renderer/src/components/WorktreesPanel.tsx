@@ -3,6 +3,7 @@ import type { WorktreeInfo } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
+import { Tooltip } from '../ui/Tooltip'
 import './worktrees-panel.css'
 
 export type WorktreeAction =
@@ -121,9 +122,12 @@ export function WorktreesPanel({
               </span>
               <span className="worktree-row__path">{worktree.path}</span>
               {worktree.path === activePath && (
-                <span className="worktree-row__terminal" title="터미널 대상 — 새 터미널이 이 폴더에서 열려요">
-                  ❯_
-                </span>
+                <Tooltip
+                  content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                  summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                >
+                  <span className="worktree-row__terminal">❯_</span>
+                </Tooltip>
               )}
               <span className="worktree-row__branch">{branchLabel(worktree)}</span>
             </button>

@@ -1312,13 +1312,13 @@ test('실험 공간 탭 — 목록·상태 배지·검색 (E7a)', async () => {
     const window = await app.firstWindow()
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branches-panel')).toBeVisible()
-    // E7g: 상태는 칩 텍스트 대신 아이콘(➤)·title 툴팁·인라인 ↑↓로 표시된다
-    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('title', /지금 여기/)
+    // E7g: 상태는 칩 텍스트 대신 아이콘(➤)·Tooltip(data-tooltip)·인라인 ↑↓로 표시된다 (E7j 전환)
+    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('data-tooltip', /지금 여기/)
     await expect(
       window.getByTestId('branch-row-main').locator('.branch-row__ahead, .branch-row__behind'),
     ).toHaveCount(0)
     await expect(window.getByTestId('branch-row-feature/login')).toHaveAttribute(
-      'title',
+      'data-tooltip',
       /아직 원격과 연결 안 됨/,
     )
     await expect(window.getByTestId('branch-row-origin/main')).toBeVisible()
@@ -1349,8 +1349,8 @@ test('실험 공간 탭 — 우클릭 이동(checkout)에 현재 표시가 따�
     await window.getByTestId('left-tab-branches').click()
     await window.getByTestId('branch-row-sidework').click({ button: 'right' })
     await window.getByTestId('context-switch').click()
-    // E7g: "지금 여기"는 title 툴팁 — 행 텍스트는 아이콘(➤)
-    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('title', /지금 여기/)
+    // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
+    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('data-tooltip', /지금 여기/)
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('sidework')
   } finally {
@@ -1496,8 +1496,8 @@ test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추�
     await window.getByTestId('branch-row-origin/incoming').click({ button: 'right' })
     await window.getByTestId('context-checkout-remote').click()
     await expect(window.getByTestId('notice')).toContainText('가져와 이동했어요')
-    // E7g: "지금 여기"는 title 툴팁 — 행 텍스트는 아이콘(➤)
-    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('title', /지금 여기/)
+    // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
+    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('data-tooltip', /지금 여기/)
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('incoming')
   } finally {
@@ -1654,6 +1654,8 @@ test('워크트리 탭 — 목록에 본체가 보이고 새로 만든다 (E7c)'
     const window = await app.firstWindow()
     await window.getByTestId('left-tab-worktrees').click()
     // E7g: 이모지·칩 대신 글리프(➤)·title 툴팁으로 "지금 여기"를 단언(같은 상태, 다른 표시 방식)
+    // E7j 편차: WorktreesPanel.tsx:99는 Task 6이 리치 카드로 대체할 예정이라 이번엔 네이티브 title을
+    // 그대로 둔다(플랜 명시 예외) — 그래서 이 단언만 data-tooltip이 아니라 title로 남긴다
     await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('➤')
     await expect(window.getByTestId(`worktree-row-${repoName}`)).toHaveAttribute('title', /지금 여기/)
     // 새 워크트리 — feature/login 기본 선택·경로 자동 제안

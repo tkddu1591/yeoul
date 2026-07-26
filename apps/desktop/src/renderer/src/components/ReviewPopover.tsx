@@ -5,6 +5,7 @@ import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import type { HostingStatus, PullSummary } from '@git-gui/ipc-contract'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { Tooltip } from '../ui/Tooltip'
 import './review-popover.css'
 
 interface ReviewPopoverProps {
@@ -147,29 +148,31 @@ export function ReviewPopover({
                     <ul className="review-popover__list">
                       {pulls.map((pull) => (
                         <li key={pull.number} className="review-popover__row">
-                          <button
-                            type="button"
-                            className="review-popover__pull"
-                            title="코멘트·승인·병합 보기"
-                            onClick={() => openDialog(() => onSelectPull(pull.number))}
-                            data-testid={`review-pull-${pull.number}`}
-                          >
-                            <span className="review-popover__pull-title">
-                              #{pull.number} {pull.title}
-                              {pull.isDraft && <Badge>초안</Badge>}
-                            </span>
-                            <span className="review-popover__pull-branch">{pull.headBranch}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="review-popover__pull-external"
-                            title="브라우저에서 열기"
-                            aria-label={`#${pull.number} 브라우저에서 열기`}
-                            onClick={() => onOpenPull(pull.number)}
-                            data-testid={`review-pull-open-${pull.number}`}
-                          >
-                            <ExternalLink size={12} aria-hidden="true" />
-                          </button>
+                          <Tooltip content="코멘트·승인·병합 보기" summary="코멘트·승인·병합 보기">
+                            <button
+                              type="button"
+                              className="review-popover__pull"
+                              onClick={() => openDialog(() => onSelectPull(pull.number))}
+                              data-testid={`review-pull-${pull.number}`}
+                            >
+                              <span className="review-popover__pull-title">
+                                #{pull.number} {pull.title}
+                                {pull.isDraft && <Badge>초안</Badge>}
+                              </span>
+                              <span className="review-popover__pull-branch">{pull.headBranch}</span>
+                            </button>
+                          </Tooltip>
+                          <Tooltip content="브라우저에서 열기" summary="브라우저에서 열기">
+                            <button
+                              type="button"
+                              className="review-popover__pull-external"
+                              aria-label={`#${pull.number} 브라우저에서 열기`}
+                              onClick={() => onOpenPull(pull.number)}
+                              data-testid={`review-pull-open-${pull.number}`}
+                            >
+                              <ExternalLink size={12} aria-hidden="true" />
+                            </button>
+                          </Tooltip>
                         </li>
                       ))}
                     </ul>

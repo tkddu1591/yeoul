@@ -5,6 +5,7 @@ import type { BranchSummary } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { PromptDialog } from '../ui/PromptDialog'
+import { Tooltip } from '../ui/Tooltip'
 import './manage-branches.css'
 import '../ui/confirm-dialog.css'
 
@@ -58,10 +59,12 @@ export function ManageBranchesDialog({
             <ul className="manage-branches__list">
               {branches.map((branch) => (
                 <li key={branch.name} className="manage-branches__row">
-                  <span className="manage-branches__name" title={branch.name}>
-                    {branch.name}
-                    {branch.isCurrent && <span className="manage-branches__here">지금 여기</span>}
-                  </span>
+                  <Tooltip content={branch.name} summary={branch.name}>
+                    <span className="manage-branches__name">
+                      {branch.name}
+                      {branch.isCurrent && <span className="manage-branches__here">지금 여기</span>}
+                    </span>
+                  </Tooltip>
                   <Button
                     variant="ghost"
                     size="sm"

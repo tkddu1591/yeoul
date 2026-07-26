@@ -45,6 +45,7 @@ import { applyTheme, initTheme, type Theme } from './ui/theme'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
+import { Tooltip } from './ui/Tooltip'
 import { PromptDialog } from './ui/PromptDialog'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { ListDialog } from './ui/ListDialog'
@@ -333,9 +334,11 @@ export function App() {
         <div className="app__repo">
           <strong>{repoName}</strong>
           {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
-          <span className="app__repo-path" title={store.repoPath} data-testid="repo-path">
-            {store.repoPath}
-          </span>
+          <Tooltip content={store.repoPath} summary={store.repoPath}>
+            <span className="app__repo-path" data-testid="repo-path">
+              {store.repoPath}
+            </span>
+          </Tooltip>
         </div>
         {status && (
           <div className="app__status">

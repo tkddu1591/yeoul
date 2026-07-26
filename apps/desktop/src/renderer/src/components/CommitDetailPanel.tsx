@@ -7,6 +7,7 @@ import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
+import { Tooltip } from '../ui/Tooltip'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { buildFileTree, flattenFileTree } from './file-tree'
 import { FindBar } from './FindBar'
@@ -59,29 +60,30 @@ function CommitFileRow({
   const directory = slashIndex >= 0 ? file.path.slice(0, slashIndex) : ''
   const basename = slashIndex >= 0 ? file.path.slice(slashIndex + 1) : file.path
   return (
-    <button
-      type="button"
-      className={`file-row__main file-row__main--${file.kind} commit-file-row${
-        isSelected ? ' commit-file-row--selected' : ''
-      }`}
-      disabled={busy}
-      onClick={onSelect}
-      onContextMenu={(event) => {
-        event.preventDefault()
-        onMenu(event.clientX, event.clientY)
-      }}
-      title={tooltip}
-      aria-label={tooltip}
-      data-testid={`commit-file-${file.path}`}
-    >
-      <span className="file-row__kind" aria-hidden="true">
-        {KIND_GLYPHS[file.kind]}
-      </span>
-      <span className="file-row__name">
-        <span className="file-row__base">{basename}</span>
-        {showDir && directory && <span className="file-row__dir">{directory}</span>}
-      </span>
-    </button>
+    <Tooltip content={tooltip} summary={tooltip}>
+      <button
+        type="button"
+        className={`file-row__main file-row__main--${file.kind} commit-file-row${
+          isSelected ? ' commit-file-row--selected' : ''
+        }`}
+        disabled={busy}
+        onClick={onSelect}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          onMenu(event.clientX, event.clientY)
+        }}
+        aria-label={tooltip}
+        data-testid={`commit-file-${file.path}`}
+      >
+        <span className="file-row__kind" aria-hidden="true">
+          {KIND_GLYPHS[file.kind]}
+        </span>
+        <span className="file-row__name">
+          <span className="file-row__base">{basename}</span>
+          {showDir && directory && <span className="file-row__dir">{directory}</span>}
+        </span>
+      </button>
+    </Tooltip>
   )
 }
 

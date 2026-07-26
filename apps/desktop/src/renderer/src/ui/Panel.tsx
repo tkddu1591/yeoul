@@ -13,7 +13,7 @@ export function Panel({ title, accessory, children, testId }: PanelProps) {
   return (
     <section className="ui-panel" data-testid={testId}>
       <header className="ui-panel__head">
-        <h2 title={title}>{title}</h2>
+        <h2>{title}</h2>
         {accessory}
       </header>
       <div className="ui-panel__body">{children}</div>

@@ -4,6 +4,7 @@ import type { PullComment, PullDetailView } from '@git-gui/ipc-contract'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
+import { Tooltip } from '../ui/Tooltip'
 import { formatRelativeTime } from './relative-time'
 import './review-detail-panel.css'
 
@@ -97,12 +98,14 @@ export function ReviewDetailPanel({
       testId="review-detail-panel"
     >
       <div className="review-detail__meta">
-        <span
-          className="review-detail__branches"
-          title={`${view.detail.headBranch} → ${view.detail.baseBranch}`}
+        <Tooltip
+          content={`${view.detail.headBranch} → ${view.detail.baseBranch}`}
+          summary={`${view.detail.headBranch} → ${view.detail.baseBranch}`}
         >
-          {view.detail.headBranch} → {view.detail.baseBranch}
-        </span>
+          <span className="review-detail__branches">
+            {view.detail.headBranch} → {view.detail.baseBranch}
+          </span>
+        </Tooltip>
         <Button
           variant="ghost"
           size="sm"

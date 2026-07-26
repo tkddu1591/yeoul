@@ -5,6 +5,7 @@ import { useEscapeFallback } from '../ui/use-escape-fallback'
 import type { BranchSummary } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { Pictogram } from '../ui/Pictogram'
+import { Tooltip } from '../ui/Tooltip'
 import { branchDisplayName, groupBranches } from './branch-groups'
 import { formatRelativeTime } from './relative-time'
 import './branch-switcher.css'
@@ -38,9 +39,9 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
       <span className="branch-switcher__check" aria-hidden="true">
         {branch.isCurrent ? <Check size={12} /> : null}
       </span>
-      <span className="branch-switcher__name" title={branch.name}>
-        {display}
-      </span>
+      <Tooltip content={branch.name} summary={branch.name}>
+        <span className="branch-switcher__name">{display}</span>
+      </Tooltip>
       <span className="branch-switcher__time">
         {formatRelativeTime(branch.committedAt, Date.now())}
       </span>

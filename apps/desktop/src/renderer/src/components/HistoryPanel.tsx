@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
+import { Tooltip } from '../ui/Tooltip'
 import { FindBar } from './FindBar'
 import { cycleIndex } from './find-matches'
 import { buildGraph, type GraphRow } from './history-graph'
@@ -418,80 +419,95 @@ export function HistoryPanel({
                   className="virtual-row"
                   style={{ height: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
                 >
-                  <button
-                    type="button"
-                    className={[
-                      'history-item',
-                      isHead ? 'history-item--head' : '',
-                      selectedHash === commit.hash ? 'history-item--selected' : '',
-                      item.index === currentHit ? 'history-item--find-hit' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    disabled={busy}
-                    onClick={() => onSelect(commit.hash)}
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      setMenu({ x: event.clientX, y: event.clientY, commit })
-                    }}
-                    title={`${commit.subject}\n${formatAbsoluteTime(commit.committedAt)} · ${commit.authorName}`}
-                    aria-current={selectedHash === commit.hash ? 'true' : undefined}
-                    data-testid={`history-item-${commit.hash}`}
+                  <Tooltip
+                    content={
+                      <>
+                        <div className="ui-tooltip__title">{commit.subject}</div>
+                        <div className="ui-tooltip__meta">
+                          {formatAbsoluteTime(commit.committedAt)} · {commit.authorName}
+                        </div>
+                      </>
+                    }
+                    summary={commit.subject}
                   >
-                    <GraphCell row={graph[item.index]!} isHead={isHead} />
-                    <div className="history-item__body">
-                      <span className="history-item__title">
-                        {isHead && <span className="history-item__here">지금 여기</span>}
-                        {(() => {
-                          // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
-                          const arranged = arrangeRefs(commit.refs, currentBranch, commit.tags)
-                          return (
-                            <>
-                              {arranged.visible.map((ref) => (
-                                <span
-                                  key={ref}
-                                  title={ref}
-                                  className={[
-                                    'history-item__ref',
-                                    ref === currentBranch ? 'history-item__ref--head' : '',
-                                    // 원격은 ☁ 접두 + 점선, 태그는 🏷 접두(실선 유지) — 3분 구분 (E4·E5b 후속)
-                                    !commit.tags.includes(ref) && isRemoteRef(ref)
-                                      ? 'history-item__ref--remote'
-                                      : '',
-                                  ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                >
-                                  {refBadgeLabel(ref, commit.tags)}
-                                </span>
-                              ))}
-                              {arranged.hidden.length > 0 && (
-                                <span
-                                  className="history-item__ref history-item__ref--more"
-                                  title={arranged.hidden
-                                    .map((ref) => refBadgeLabel(ref, commit.tags))
-                                    .join('\n')}
-                                  data-testid={`history-refs-more-${commit.hash}`}
-                                >
-                                  +{arranged.hidden.length}
-                                </span>
-                              )}
-                            </>
-                          )
-                        })()}
-                        {commit.parents.length >= 2 && (
-                          <span className="history-item__mergemark">병합</span>
-                        )}
-                        <span className="history-item__subject" title={commit.subject}>
-                          {commit.subject}
+                    <button
+                      type="button"
+                      className={[
+                        'history-item',
+                        isHead ? 'history-item--head' : '',
+                        selectedHash === commit.hash ? 'history-item--selected' : '',
+                        item.index === currentHit ? 'history-item--find-hit' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      disabled={busy}
+                      onClick={() => onSelect(commit.hash)}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        setMenu({ x: event.clientX, y: event.clientY, commit })
+                      }}
+                      aria-current={selectedHash === commit.hash ? 'true' : undefined}
+                      data-testid={`history-item-${commit.hash}`}
+                    >
+                      <GraphCell row={graph[item.index]!} isHead={isHead} />
+                      <div className="history-item__body">
+                        <span className="history-item__title">
+                          {isHead && <span className="history-item__here">지금 여기</span>}
+                          {(() => {
+                            // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
+                            const arranged = arrangeRefs(commit.refs, currentBranch, commit.tags)
+                            return (
+                              <>
+                                {arranged.visible.map((ref) => (
+                                  <Tooltip key={ref} content={ref} summary={ref}>
+                                    <span
+                                      className={[
+                                        'history-item__ref',
+                                        ref === currentBranch ? 'history-item__ref--head' : '',
+                                        // 원격은 ☁ 접두 + 점선, 태그는 🏷 접두(실선 유지) — 3분 구분 (E4·E5b 후속)
+                                        !commit.tags.includes(ref) && isRemoteRef(ref)
+                                          ? 'history-item__ref--remote'
+                                          : '',
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' ')}
+                                    >
+                                      {refBadgeLabel(ref, commit.tags)}
+                                    </span>
+                                  </Tooltip>
+                                ))}
+                                {arranged.hidden.length > 0 && (
+                                  <Tooltip
+                                    content={arranged.hidden
+                                      .map((ref) => refBadgeLabel(ref, commit.tags))
+                                      .join('\n')}
+                                    summary={refBadgeLabel(arranged.hidden[0]!, commit.tags)}
+                                  >
+                                    <span
+                                      className="history-item__ref history-item__ref--more"
+                                      data-testid={`history-refs-more-${commit.hash}`}
+                                    >
+                                      +{arranged.hidden.length}
+                                    </span>
+                                  </Tooltip>
+                                )}
+                              </>
+                            )
+                          })()}
+                          {commit.parents.length >= 2 && (
+                            <span className="history-item__mergemark">병합</span>
+                          )}
+                          <Tooltip content={commit.subject} summary={commit.subject}>
+                            <span className="history-item__subject">{commit.subject}</span>
+                          </Tooltip>
                         </span>
-                      </span>
-                      <span className="history-item__meta">
-                        {formatRelativeTime(commit.committedAt, Date.now())} · {commit.authorName}
-                      </span>
-                    </div>
-                    <span className="history-item__hash">{commit.shortHash}</span>
-                  </button>
+                        <span className="history-item__meta">
+                          {formatRelativeTime(commit.committedAt, Date.now())} · {commit.authorName}
+                        </span>
+                      </div>
+                      <span className="history-item__hash">{commit.shortHash}</span>
+                    </button>
+                  </Tooltip>
                 </li>
               )
             })}

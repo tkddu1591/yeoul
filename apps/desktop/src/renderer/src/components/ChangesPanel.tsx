@@ -8,6 +8,7 @@ import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
+import { Tooltip } from '../ui/Tooltip'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { FindBar } from './FindBar'
 import './changes-panel.css'
@@ -87,27 +88,28 @@ function FileRow({
           data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
         />
       </span>
-      <button
-        type="button"
-        className={`file-row__main file-row__main--${kind ?? 'none'}`}
-        disabled={busy}
-        onClick={onSelect}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          onMenu(event.clientX, event.clientY)
-        }}
-        title={tooltip}
-        aria-label={tooltip}
-        data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
-      >
-        <span className="file-row__kind" aria-hidden="true">
-          {kind ? KIND_GLYPHS[kind] : ''}
-        </span>
-        <span className="file-row__name">
-          <span className="file-row__base">{basename}</span>
-          {directory && <span className="file-row__dir">{directory}</span>}
-        </span>
-      </button>
+      <Tooltip content={tooltip} summary={tooltip}>
+        <button
+          type="button"
+          className={`file-row__main file-row__main--${kind ?? 'none'}`}
+          disabled={busy}
+          onClick={onSelect}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            onMenu(event.clientX, event.clientY)
+          }}
+          aria-label={tooltip}
+          data-testid={`file-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+        >
+          <span className="file-row__kind" aria-hidden="true">
+            {kind ? KIND_GLYPHS[kind] : ''}
+          </span>
+          <span className="file-row__name">
+            <span className="file-row__base">{basename}</span>
+            {directory && <span className="file-row__dir">{directory}</span>}
+          </span>
+        </button>
+      </Tooltip>
     </div>
   )
 }

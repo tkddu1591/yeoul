@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
+import { Tooltip } from '../ui/Tooltip'
 import { buildBranchTree, flatSearch, flattenBranchTree } from './branch-tree'
 import { formatRelativeTime } from './relative-time'
 import './branches-panel.css'
@@ -274,64 +275,64 @@ export function BranchesPanel({
     const isCurrent = branch.name === currentBranch
     const dimmed = branch.upstream === null || branch.upstreamGone
     return (
-      <button
-        key={branch.name}
-        type="button"
-        className={[
-          'branch-row',
-          selectedName === branch.name ? 'branch-row--selected' : '',
-          historyRef === branch.name ? 'branch-row--viewing' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}
-        title={localTitle(branch)}
-        onClick={() => setSelectedName(branch.name)}
-        onDoubleClick={() => onAction({ kind: 'view', name: branch.name })}
-        onContextMenu={(event) => openMenu(event, { kind: 'local', branch })}
-        data-testid={`branch-row-${branch.name}`}
-      >
-        <span className={`branch-row__glyph${isCurrent ? ' branch-row__glyph--here' : ''}`}>
-          {isCurrent ? '➤' : '⎇'}
-        </span>
-        <span
+      <Tooltip key={branch.name} content={localTitle(branch)} summary={localTitle(branch)}>
+        <button
+          type="button"
           className={[
-            'branch-row__name',
-            isCurrent ? 'branch-row__name--here' : '',
-            dimmed ? 'branch-row__name--dim' : '',
+            'branch-row',
+            selectedName === branch.name ? 'branch-row--selected' : '',
+            historyRef === branch.name ? 'branch-row--viewing' : '',
           ]
             .filter(Boolean)
             .join(' ')}
+          style={{ paddingLeft: `${8 + depth * 16}px` }}
+          onClick={() => setSelectedName(branch.name)}
+          onDoubleClick={() => onAction({ kind: 'view', name: branch.name })}
+          onContextMenu={(event) => openMenu(event, { kind: 'local', branch })}
+          data-testid={`branch-row-${branch.name}`}
         >
-          {displayName}
-        </span>
-        {aheadBehind(branch)}
-      </button>
+          <span className={`branch-row__glyph${isCurrent ? ' branch-row__glyph--here' : ''}`}>
+            {isCurrent ? '➤' : '⎇'}
+          </span>
+          <span
+            className={[
+              'branch-row__name',
+              isCurrent ? 'branch-row__name--here' : '',
+              dimmed ? 'branch-row__name--dim' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {displayName}
+          </span>
+          {aheadBehind(branch)}
+        </button>
+      </Tooltip>
     )
   }
 
   const remoteRow = (name: string, displayName: string, depth: number) => (
-    <button
-      key={name}
-      type="button"
-      className={[
-        'branch-row',
-        'branch-row--remote',
-        selectedName === name ? 'branch-row--selected' : '',
-        historyRef === name ? 'branch-row--viewing' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      style={{ paddingLeft: `${8 + depth * 16}px` }}
-      title={name}
-      onClick={() => setSelectedName(name)}
-      onDoubleClick={() => onAction({ kind: 'view', name })}
-      onContextMenu={(event) => openMenu(event, { kind: 'remote', name })}
-      data-testid={`branch-row-${name}`}
-    >
-      <span className="branch-row__glyph">☁</span>
-      <span className="branch-row__name">{displayName}</span>
-    </button>
+    <Tooltip key={name} content={name} summary={name}>
+      <button
+        type="button"
+        className={[
+          'branch-row',
+          'branch-row--remote',
+          selectedName === name ? 'branch-row--selected' : '',
+          historyRef === name ? 'branch-row--viewing' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+        onClick={() => setSelectedName(name)}
+        onDoubleClick={() => onAction({ kind: 'view', name })}
+        onContextMenu={(event) => openMenu(event, { kind: 'remote', name })}
+        data-testid={`branch-row-${name}`}
+      >
+        <span className="branch-row__glyph">☁</span>
+        <span className="branch-row__name">{displayName}</span>
+      </button>
+    </Tooltip>
   )
 
   const folderRow = (path: string, name: string, count: number, depth: number) => (

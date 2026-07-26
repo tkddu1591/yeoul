@@ -6,6 +6,7 @@ import type { ShelfEntry } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { Tooltip } from '../ui/Tooltip'
 import { formatRelativeTime } from './relative-time'
 import { parseShelfMessage } from './shelf-message'
 import './shelf-popover.css'
@@ -54,28 +55,31 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
               <ul className="shelf-popover__list">
                 {shelf.map((entry) => (
                   <li key={entry.ref} className="shelf-popover__row">
-                    <button
-                      type="button"
-                      className="shelf-popover__meta"
-                      title="무엇이 담겼는지 미리보기"
-                      onClick={() => {
-                        setOpen(false)
-                        onPreview(entry.hash)
-                      }}
-                      data-testid={`shelf-preview-${entry.ref}`}
-                    >
-                      <span className="shelf-popover__message" title={entry.message}>
-                        {parseShelfMessage(entry.message).text}
-                      </span>
-                      <span className="shelf-popover__time">
-                        {parseShelfMessage(entry.message).branch !== null && (
-                          <span className="shelf-popover__branch">
-                            {parseShelfMessage(entry.message).branch}
+                    <Tooltip content="무엇이 담겼는지 미리보기" summary="무엇이 담겼는지 미리보기">
+                      <button
+                        type="button"
+                        className="shelf-popover__meta"
+                        onClick={() => {
+                          setOpen(false)
+                          onPreview(entry.hash)
+                        }}
+                        data-testid={`shelf-preview-${entry.ref}`}
+                      >
+                        <Tooltip content={entry.message} summary={entry.message}>
+                          <span className="shelf-popover__message">
+                            {parseShelfMessage(entry.message).text}
                           </span>
-                        )}
-                        {formatRelativeTime(entry.savedAt, Date.now())}
-                      </span>
-                    </button>
+                        </Tooltip>
+                        <span className="shelf-popover__time">
+                          {parseShelfMessage(entry.message).branch !== null && (
+                            <span className="shelf-popover__branch">
+                              {parseShelfMessage(entry.message).branch}
+                            </span>
+                          )}
+                          {formatRelativeTime(entry.savedAt, Date.now())}
+                        </span>
+                      </button>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="sm"
