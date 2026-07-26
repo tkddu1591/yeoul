@@ -68,3 +68,7 @@
 .branch-switcher__section .branch-switcher__item {
   padding-left: 24px;
 }
+/* E7k — 좁은 창에서는 브랜치 이름 자리도 줄인다(전체 이름은 Tooltip·스위처 목록에서 본다) */
+.app__header--compact .branch-switcher__current {
+  max-width: 120px;
+}

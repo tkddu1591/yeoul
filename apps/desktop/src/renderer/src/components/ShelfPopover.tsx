@@ -32,7 +32,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
         <Button variant="ghost" size="sm" testId="shelf-open">
-          <Archive size={13} aria-hidden="true" /> 보관함{' '}
+          <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">보관함</span>{' '}
           <Badge tone="count">
             <span data-testid="shelf-count">{shelf.length}</span>
           </Badge>

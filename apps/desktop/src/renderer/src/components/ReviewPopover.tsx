@@ -65,7 +65,8 @@ export function ReviewPopover({
       }}
     >
       <Button variant="ghost" size="sm" className="review-popover__trigger" testId="review-open">
-        <GitPullRequest size={13} aria-hidden="true" /> 리뷰 <Badge tone="git">PR</Badge>
+        <GitPullRequest size={13} aria-hidden="true" /> <span className="app__btn-label">리뷰</span>{' '}
+        <Badge tone="git">PR</Badge>
       </Button>
       <Popover className="review-popover">
         <Dialog className="review-popover__dialog" aria-label="리뷰 요청">

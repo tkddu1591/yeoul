@@ -20,6 +20,7 @@ import { WorktreesPanel } from './components/WorktreesPanel'
 import {
   clampRightWidth,
   computeColumns,
+  isCompactHeader,
   loadRightWidth,
   resetRightWidth,
   RIGHT_COLUMN_DEFAULT,
@@ -207,6 +208,8 @@ export function App() {
   // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
   // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
   const columns = computeColumns(viewportWidth, rightWidth)
+  // E7k — 창이 좁으면 헤더 액션이 아이콘만 남는다(이름은 Tooltip이 담당). 판정만 여기서, 숨김은 CSS
+  const compactHeader = isCompactHeader(viewportWidth)
 
   useEffect(() => {
     void store.init()
@@ -339,7 +342,7 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app__header">
+      <header className={`app__header${compactHeader ? ' app__header--compact' : ''}`}>
         <div className="app__repo">
           <strong>{repoName}</strong>
           {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
@@ -372,7 +375,8 @@ export function App() {
               onPress={() => setMergePicker(true)}
               testId="merge-open"
             >
-              <GitMerge size={13} aria-hidden="true" /> 합치기 <Badge tone="git">merge</Badge>
+              <GitMerge size={13} aria-hidden="true" /> <span className="app__btn-label">합치기</span>{' '}
+              <Badge tone="git">merge</Badge>
             </Button>
             {status.state !== 'normal' && (
               <span className="app__state">
@@ -396,7 +400,8 @@ export function App() {
             onPress={() => void store.pullLatest()}
             testId="pull"
           >
-            <DownloadCloud size={14} aria-hidden="true" /> 받아오기 <Badge tone="git">pull</Badge>
+            <DownloadCloud size={14} aria-hidden="true" />{' '}
+            <span className="app__btn-label">받아오기</span> <Badge tone="git">pull</Badge>
           </Button>
           <ShelfPopover
             shelf={store.shelf}
@@ -433,7 +438,8 @@ export function App() {
             onPress={() => void store.backup()}
             testId="backup"
           >
-            <CloudUpload size={14} aria-hidden="true" /> 백업 <Badge tone="git">push</Badge>
+            <CloudUpload size={14} aria-hidden="true" /> <span className="app__btn-label">백업</span>{' '}
+            <Badge tone="git">push</Badge>
           </Button>
           <Button
             variant="ghost"
@@ -442,10 +448,10 @@ export function App() {
             onPress={() => void store.refresh()}
             testId="refresh"
           >
-            <RefreshCw size={13} aria-hidden="true" /> 새로고침
+            <RefreshCw size={13} aria-hidden="true" /> <span className="app__btn-label">새로고침</span>
           </Button>
           <Button variant="ghost" size="sm" onPress={toggleDock} testId="terminal-toggle">
-            <Terminal size={13} aria-hidden="true" /> 터미널
+            <Terminal size={13} aria-hidden="true" /> <span className="app__btn-label">터미널</span>
           </Button>
           <Button variant="ghost" size="sm" onPress={() => setSettingsOpen(true)} testId="settings-open">
             <Settings size={13} aria-hidden="true" />
