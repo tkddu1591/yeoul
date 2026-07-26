@@ -8,6 +8,7 @@ import type {
   CommitSummary,
   FileChange,
   FileDiff,
+  ForkPoint,
   HistorySearchResult,
   RebaseProgress,
   RepositoryStatus,
@@ -208,6 +209,9 @@ interface RepositoryStore {
   searchHistory(query: string): Promise<HistorySearchResult>
   /** 검색 점프용 — 그 인덱스가 목록에 들어오도록 필요한 만큼 더 불러온다 (E7i) */
   ensureHistoryLoaded(index: number): Promise<void>
+  /** 워크트리 분기점 — 호버 시점에만 계산하고 경로+HEAD로 캐시한다 (E7j) */
+  forkPoints: Record<string, ForkPoint | null>
+  loadForkPoint(path: string, headHash: string | null): Promise<void>
   /** "지금 여기"(HEAD)가 로드 범위 밖일 때 — 찾을 때까지 역사 상한을 넓혀 다시 읽는다 (품질 리뷰) */
   revealHead(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
@@ -406,6 +410,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   branchCompare: null,
   rebaseProgress: null,
   worktrees: [],
+  forkPoints: {},
   lastFetchAt: null,
   historyRef: null,
   pullMode: loadPullMode(),
@@ -1317,6 +1322,19 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       return await git().history.search(repoPath, query, get().historyRef ?? undefined)
     } catch {
       return { indices: [], hashes: [], truncated: false }
+    }
+  },
+
+  async loadForkPoint(path, headHash) {
+    const { repoPath, forkPoints } = get()
+    const key = `${path}::${headHash ?? ''}`
+    if (!repoPath || key in forkPoints) return
+    // 조회성 — guard(busy 잠금·에러 배너)를 쓰지 않고 실패는 조용히 null로 캐시한다
+    try {
+      const fork = await git().worktrees.forkPoint(repoPath, path)
+      set({ forkPoints: { ...get().forkPoints, [key]: fork } })
+    } catch {
+      set({ forkPoints: { ...get().forkPoints, [key]: null } })
     }
   },
 

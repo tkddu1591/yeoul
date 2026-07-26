@@ -181,6 +181,16 @@ export interface WorktreeInfo {
   locked: boolean
 }
 
+/** 워크트리가 어느 브랜치에서 갈라졌는지 (E7j) — git이 기록하지 않아 merge-base로 계산한다 */
+export interface ForkPoint {
+  /** 기준 브랜치 이름(origin/HEAD → main → master 순으로 결정) */
+  base: string
+  /** 기준 대비 내가 앞선 저장 수 */
+  ahead: number
+  /** 기준 대비 내가 뒤처진 저장 수 */
+  behind: number
+}
+
 /** 보관함(stash) 항목 하나 */
 export interface ShelfEntry {
   /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */

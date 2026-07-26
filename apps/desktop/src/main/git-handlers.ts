@@ -205,6 +205,12 @@ export function registerGitHandlers(): void {
     shell.showItemInFolder(target)
   })
 
+  ipcMain.handle(CHANNELS.worktreeForkPoint, async (_event, repoPath: unknown, path: unknown) => {
+    const root = assertAllowedRepo(repoPath)
+    const target = await assertWorktreePath(root, path)
+    return createGitClient(root).worktrees.forkPoint(target)
+  })
+
   ipcMain.handle(CHANNELS.remotesFetch, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).remotes.fetch(),
   )

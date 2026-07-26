@@ -44,6 +44,7 @@ const api: GitApi = {
     remove: (repoPath, path, force) =>
       ipcRenderer.invoke(CHANNELS.worktreesRemove, repoPath, path, force),
     reveal: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreesReveal, repoPath, path),
+    forkPoint: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreeForkPoint, repoPath, path),
   },
   branches: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.branchesList, repoPath),

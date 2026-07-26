@@ -8,6 +8,7 @@ import type {
   CommitSummary,
   DiffOptions,
   FileDiff,
+  ForkPoint,
   HistorySearchResult,
   MergeResult,
   PullResult,
@@ -23,7 +24,7 @@ import type {
   WorktreeInfo,
 } from '@git-gui/domain'
 
-export type { DiffOptions } from '@git-gui/domain'
+export type { DiffOptions, ForkPoint } from '@git-gui/domain'
 export type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 
 import type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
@@ -63,6 +64,8 @@ export interface GitApi {
     remove(repoPath: string, path: string, force: boolean): Promise<RemoveBranchResult>
     /** Finder에서 보기 — 경로는 워크트리 목록 검증 경유 (E7c) */
     reveal(repoPath: string, path: string): Promise<void>
+    /** 이 워크트리가 기준 브랜치에서 갈라진 지점 — 경로는 워크트리 목록 검증 경유 (E7j) */
+    forkPoint(repoPath: string, path: string): Promise<ForkPoint | null>
   }
   branches: {
     list(repoPath: string): Promise<BranchSummary[]>
@@ -182,6 +185,7 @@ export const CHANNELS = {
   worktreesAdd: 'worktrees:add',
   worktreesRemove: 'worktrees:remove',
   worktreesReveal: 'worktrees:reveal',
+  worktreeForkPoint: 'worktree:fork-point',
   branchesList: 'branches:list',
   branchesCreate: 'branches:create',
   branchesSwitch: 'branches:switch',
