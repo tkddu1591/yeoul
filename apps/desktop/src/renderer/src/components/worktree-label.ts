@@ -61,11 +61,14 @@ export function uniqueNames(paths: string[]): Map<string, string> {
 }
 
 /**
- * 브랜치 이름 — 길면 **앞의 네임스페이스**(`claude/`·`feature/` 등)를 생략한다.
- * 구분 정보(티켓 번호 등)는 네임스페이스 바로 뒤에 오므로 남은 부분의 앞쪽을 유지한다.
+ * 브랜치 이름 — 길면 **선행 네임스페이스**(`claude/`·`codex/`·`feature/`)를 생략한다.
+ * 목록의 모든 워크트리가 접두를 공유하므로 그건 노이즈고, 구분 정보는 그 뒤에 있다.
  */
 export function shortenBranch(branch: string, max: number): string {
   if (branch.length <= max) return branch
-  const rest = branch.slice(branch.indexOf('/') + 1)
+  const slash = branch.indexOf('/')
+  // 네임스페이스가 없으면 잘리는 쪽(꼬리)에 표시를 남긴다 — 앞에 …를 붙이면 거짓말이 된다
+  if (slash === -1) return `${branch.slice(0, max - 1)}…`
+  const rest = branch.slice(slash + 1)
   return `…${rest.length <= max - 1 ? rest : rest.slice(0, max - 1)}`
 }

@@ -75,4 +75,12 @@ describe('shortenBranch', () => {
   it('길면 앞을 생략해 뒤(구분 정보)를 살린다', () => {
     expect(shortenBranch('claude/dw-1051-work-review-final', 20)).toBe('…dw-1051-work-review')
   })
+
+  it('네임스페이스가 없으면 잘린 꼬리 쪽에 표시를 남긴다', () => {
+    const long = 'a-very-long-branch-name-without-any-namespace'
+    const short = shortenBranch(long, 28)
+    expect(short.endsWith('…')).toBe(true)
+    expect(short.startsWith('…')).toBe(false)
+    expect(short).toBe('a-very-long-branch-name-wit…')
+  })
 })

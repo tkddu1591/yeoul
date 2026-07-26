@@ -85,7 +85,7 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
   const trigger = cloneElement(children, {
     ref: (node: HTMLElement | null) => {
       triggerRef.current = node
-      const original = (children as { ref?: unknown }).ref
+      const original = (children.props as { ref?: unknown }).ref
       if (typeof original === 'function') (original as (n: HTMLElement | null) => void)(node)
       else if (original !== null && typeof original === 'object')
         (original as { current: HTMLElement | null }).current = node
@@ -93,6 +93,7 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
     'data-tooltip': summary,
     'aria-describedby': place !== null ? id : undefined,
     onMouseEnter: (event: MouseEvent) => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(open, delay)
       ;(children.props as { onMouseEnter?: (e: MouseEvent) => void }).onMouseEnter?.(event)
     },
