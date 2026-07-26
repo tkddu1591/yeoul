@@ -1,0 +1,29 @@
+/* E7j — 공용 호버 툴팁 카드. 네이티브 title 대체(앱 톤·여러 줄·즉시성) */
+.ui-tooltip {
+  position: fixed;
+  z-index: 200;
+  max-width: 420px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  color: inherit;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-tooltip__title {
+  font-weight: 600;
+}
+.ui-tooltip__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.ui-tooltip__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
