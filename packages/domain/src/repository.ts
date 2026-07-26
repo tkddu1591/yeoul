@@ -191,6 +191,20 @@ export interface ForkPoint {
   behind: number
 }
 
+/** 워크트리 HEAD 요약 (E7k) — 호버 카드 한 장에 필요한 것을 한 번에 모은다 */
+export interface WorktreeHeadInfo {
+  /** HEAD 커밋 제목(첫 줄) */
+  subject: string
+  /** HEAD 커밋 시각(epoch 초) */
+  committedAt: number
+  /** 이 커밋을 포함하는 로컬 브랜치(최대 3개) — 분리됨 워크트리에서만 의미가 있다 */
+  containedIn: string[]
+  /** 포함 브랜치가 3개를 넘어 잘렸는가 */
+  containedTruncated: boolean
+  /** 기준 브랜치에서 갈라진 지점 — 없으면 null (E7j 규칙 그대로) */
+  fork: ForkPoint | null
+}
+
 /** 보관함(stash) 항목 하나 */
 export interface ShelfEntry {
   /** git stash ref — "stash@{n}". 목록 갱신 직후에만 유효하다(변이는 busy로 직렬화됨) */

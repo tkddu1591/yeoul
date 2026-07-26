@@ -23,6 +23,7 @@ import {
   type ShelfEntry,
   type SwitchResult,
   type SyncBranchStatus,
+  type WorktreeHeadInfo,
   type WorktreeInfo,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
@@ -102,8 +103,11 @@ export interface GitClient {
     add(path: string, branch: string, options?: { createBranch?: boolean }): Promise<void>
     /** 지우기 — 미저장 변경이 있으면 needsForce로 알린다(확인창은 UI). prunable도 그대로 정리된다(실측 F) */
     remove(path: string, force: boolean): Promise<RemoveBranchResult>
-    /** 이 워크트리가 기준 브랜치에서 갈라진 지점 — 계산 비용이 있어 호출부가 필요할 때만 부른다 (E7j) */
-    forkPoint(path: string): Promise<ForkPoint | null>
+    /**
+     * 워크트리 HEAD 요약 (E7k) — 제목·시각·포함 브랜치·분기점을 한 번에.
+     * 계산 비용이 있어 호출부(호버)가 필요할 때만 부른다
+     */
+    headInfo(path: string): Promise<WorktreeHeadInfo | null>
   }
   merge: {
     /** 합치기 취소 — 충돌 상태를 버리고 합치기 전으로 되돌린다 */
@@ -313,6 +317,50 @@ export function createGitClient(repoPath: string): GitClient {
       (result) => result.stdout.trim(),
     )
     return topLevelPromise
+  }
+
+  /** 기준 브랜치에서 갈라진 지점 (E7j) — headInfo가 감싸 쓴다 */
+  async function forkPointOf(path: string): Promise<ForkPoint | null> {
+    // 기준 브랜치: origin/HEAD symref → main → master (실측 3)
+    const symref = await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: path })
+    let base: string | null = null
+    if (symref.exitCode === 0) {
+      base = symref.stdout.trim().replace(/^refs\/remotes\//, '')
+    } else {
+      for (const candidate of ['main', 'master']) {
+        const exists = await execGit(['rev-parse', '--verify', '-q', candidate], { cwd: path })
+        if (exists.exitCode === 0) {
+          base = candidate
+          break
+        }
+      }
+    }
+    if (base === null) return null
+    const current = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path })
+    // 기준 그 자신이면 분기점이라는 개념이 없다
+    if (current.exitCode === 0 && current.stdout.trim() === base) return null
+    // 기준과 HEAD가 같은 커밋이면 분기라는 개념이 없다(origin/main과 로컬 main이 같은 경우 포함 — I-3)
+    const [baseSha, headSha] = await Promise.all([
+      execGit(['rev-parse', base], { cwd: path }),
+      execGit(['rev-parse', 'HEAD'], { cwd: path }),
+    ])
+    if (baseSha.exitCode === 0 && headSha.exitCode === 0 && baseSha.stdout.trim() === headSha.stdout.trim()) {
+      return null
+    }
+    // 공통 조상이 없으면(고아 계보) 갈라진 지점 자체가 없다 — 카운트는 나오지만 거짓말이 된다 (I-2)
+    const mergeBase = await execGit(['merge-base', base, 'HEAD'], { cwd: path })
+    if (mergeBase.exitCode !== 0) return null
+    const counts = await execGit(
+      ['rev-list', '--left-right', '--count', `${base}...HEAD`],
+      { cwd: path },
+    )
+    if (counts.exitCode !== 0) return null
+    // 출력은 "<behind>\t<ahead>" — 왼쪽이 기준만 가진 수 (실측 4)
+    const [left, right] = counts.stdout.trim().split(/\s+/)
+    const behind = Number(left)
+    const ahead = Number(right)
+    if (!Number.isFinite(behind) || !Number.isFinite(ahead)) return null
+    return { base, ahead, behind }
   }
 
   return {
@@ -749,47 +797,32 @@ export function createGitClient(repoPath: string): GitClient {
         }
         throw new GitError(args, result)
       },
-      async forkPoint(path) {
-        // 기준 브랜치: origin/HEAD symref → main → master (실측 3)
-        const symref = await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: path })
-        let base: string | null = null
-        if (symref.exitCode === 0) {
-          base = symref.stdout.trim().replace(/^refs\/remotes\//, '')
-        } else {
-          for (const candidate of ['main', 'master']) {
-            const exists = await execGit(['rev-parse', '--verify', '-q', candidate], { cwd: path })
-            if (exists.exitCode === 0) {
-              base = candidate
-              break
-            }
-          }
-        }
-        if (base === null) return null
-        const current = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path })
-        // 기준 그 자신이면 분기점이라는 개념이 없다
-        if (current.exitCode === 0 && current.stdout.trim() === base) return null
-        // 기준과 HEAD가 같은 커밋이면 분기라는 개념이 없다(origin/main과 로컬 main이 같은 경우 포함 — I-3)
-        const [baseSha, headSha] = await Promise.all([
-          execGit(['rev-parse', base], { cwd: path }),
-          execGit(['rev-parse', 'HEAD'], { cwd: path }),
-        ])
-        if (baseSha.exitCode === 0 && headSha.exitCode === 0 && baseSha.stdout.trim() === headSha.stdout.trim()) {
-          return null
-        }
-        // 공통 조상이 없으면(고아 계보) 갈라진 지점 자체가 없다 — 카운트는 나오지만 거짓말이 된다 (I-2)
-        const mergeBase = await execGit(['merge-base', base, 'HEAD'], { cwd: path })
-        if (mergeBase.exitCode !== 0) return null
-        const counts = await execGit(
-          ['rev-list', '--left-right', '--count', `${base}...HEAD`],
+      async headInfo(path) {
+        // 제목·시각 — 커밋이 없으면(unborn) 카드에 담을 게 없다
+        const head = await execGit(['log', '-1', '--format=%s%x1f%ct'], { cwd: path })
+        if (head.exitCode !== 0) return null
+        const [subject = '', rawTime = ''] = head.stdout.trim().split('\x1f')
+        const committedAt = Number(rawTime)
+        if (!Number.isFinite(committedAt)) return null
+        // 포함 브랜치 — 분리됨 워크트리에서 "어디 소속인지"를 알려준다. 상한 3개
+        const contains = await execGit(
+          ['branch', '--contains', 'HEAD', '--format=%(refname:short)'],
           { cwd: path },
         )
-        if (counts.exitCode !== 0) return null
-        // 출력은 "<behind>\t<ahead>" — 왼쪽이 기준만 가진 수 (실측 4)
-        const [left, right] = counts.stdout.trim().split(/\s+/)
-        const behind = Number(left)
-        const ahead = Number(right)
-        if (!Number.isFinite(behind) || !Number.isFinite(ahead)) return null
-        return { base, ahead, behind }
+        const all =
+          contains.exitCode === 0
+            ? contains.stdout
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line !== '')
+            : []
+        return {
+          subject,
+          committedAt,
+          containedIn: all.slice(0, 3),
+          containedTruncated: all.length > 3,
+          fork: await forkPointOf(path),
+        }
       },
     },
     merge: {

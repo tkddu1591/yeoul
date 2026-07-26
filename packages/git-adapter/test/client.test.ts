@@ -2369,7 +2369,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', message], { cwd: repo })
   }
 
-  describe('worktrees.forkPoint (E7j)', () => {
+  describe('worktrees.headInfo (E7k)', () => {
     it('기본 브랜치에서 갈라진 지점과 앞섬/뒤처짐을 센다', async () => {
       const repo = await createFixtureRepo()
       await commitFile(repo, 'a.txt', 'a', 'base')
@@ -2380,7 +2380,7 @@ describe('GitClient', () => {
       // E7j 보완 M-1 — ahead/behind가 1/1 대칭이면 뒤바뀌어도 테스트가 못 잡는다. main 쪽을 2회로 늘려 방향 고정
       await commitFile(repo, 'c.txt', 'c', 'main 저장 1')
       await commitFile(repo, 'd.txt', 'd', 'main 저장 2')
-      const fork = await createGitClient(repo).worktrees.forkPoint(wtPath)
+      const fork = (await createGitClient(repo).worktrees.headInfo(wtPath))?.fork
       expect(fork).not.toBeNull()
       expect(fork!.base).toBe('main')
       expect(fork!.ahead).toBe(1)
@@ -2393,13 +2393,13 @@ describe('GitClient', () => {
       await commitFile(repo, 'a.txt', 'a', 'base')
       await execGitOrThrow(['checkout', '-q', '--orphan', 'lonely'], { cwd: repo })
       await commitFile(repo, 'b.txt', 'b', '고아 저장')
-      expect(await createGitClient(repo).worktrees.forkPoint(repo)).toBeNull()
+      expect((await createGitClient(repo).worktrees.headInfo(repo))?.fork).toBeNull()
     })
 
     it('기준 브랜치 자신인 워크트리는 null이다', async () => {
       const repo = await createFixtureRepo()
       await commitFile(repo, 'a.txt', 'a', 'base')
-      expect(await createGitClient(repo).worktrees.forkPoint(repo)).toBeNull()
+      expect((await createGitClient(repo).worktrees.headInfo(repo))?.fork).toBeNull()
     })
 
     it('분리된(detached) 워크트리도 HEAD 기준으로 센다', async () => {
@@ -2413,7 +2413,7 @@ describe('GitClient', () => {
       // "detached도 abbrev-ref가 아니라 HEAD 기준으로 정상 카운트된다"는 테스트 취지를 살리려면
       // base와는 다른 커밋이어야 하므로, 분리 직후 한 저장을 더 쌓아 실제로 갈라지게 한다
       await commitFile(wtPath, 'b.txt', 'b', 'detached 저장')
-      const fork = await createGitClient(repo).worktrees.forkPoint(wtPath)
+      const fork = (await createGitClient(repo).worktrees.headInfo(wtPath))?.fork
       expect(fork).not.toBeNull()
       expect(fork!.ahead).toBe(1)
       expect(fork!.behind).toBe(0)
@@ -2424,7 +2424,48 @@ describe('GitClient', () => {
       const repo = await createFixtureRepo()
       await commitFile(repo, 'a.txt', 'a', 'base')
       await execGitOrThrow(['branch', '-m', 'main', 'trunk'], { cwd: repo })
-      expect(await createGitClient(repo).worktrees.forkPoint(repo)).toBeNull()
+      expect((await createGitClient(repo).worktrees.headInfo(repo))?.fork).toBeNull()
+    })
+
+    it('HEAD 커밋 제목과 시각을 담는다', async () => {
+      const repo = await createFixtureRepo()
+      await commitFile(repo, 'a.txt', 'a', '로그인 폼 검증 추가')
+      const info = await createGitClient(repo).worktrees.headInfo(repo)
+      expect(info).not.toBeNull()
+      expect(info!.subject).toBe('로그인 폼 검증 추가')
+      expect(info!.committedAt).toBeGreaterThan(1_600_000_000)
+    })
+
+    it('분리됨 워크트리는 그 커밋을 포함하는 브랜치를 담는다', async () => {
+      const repo = await createFixtureRepo()
+      await commitFile(repo, 'a.txt', 'a', 'base')
+      const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+      await execGitOrThrow(['branch', 'holder'], { cwd: repo })
+      const wtPath = `${repo}-detached`
+      await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], { cwd: repo })
+      const info = await createGitClient(repo).worktrees.headInfo(wtPath)
+      expect(info!.containedIn).toContain('holder')
+      expect(info!.containedTruncated).toBe(false)
+      await execGitOrThrow(['worktree', 'remove', '--force', '--end-of-options', wtPath], { cwd: repo })
+    })
+
+    it('포함 브랜치가 많으면 3개까지만 담고 잘렸다고 알린다', async () => {
+      const repo = await createFixtureRepo()
+      await commitFile(repo, 'a.txt', 'a', 'base')
+      for (const name of ['b1', 'b2', 'b3', 'b4']) {
+        await execGitOrThrow(['branch', name], { cwd: repo })
+      }
+      const info = await createGitClient(repo).worktrees.headInfo(repo)
+      expect(info!.containedIn).toHaveLength(3)
+      expect(info!.containedTruncated).toBe(true)
+    })
+
+    it('커밋이 없는 저장소는 null이다', async () => {
+      // E7k 편차 — createFixtureRepo()는 항상 'init' 씨앗 커밋을 심는다(실독). unborn을 실제로
+      // 재현하려면 history.list의 unborn 테스트(1227행)와 같은 방식으로 커밋 없이 init만 한다
+      const repo = await mkdtemp(join(tmpdir(), 'git-gui-unborn-'))
+      await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+      expect(await createGitClient(repo).worktrees.headInfo(repo)).toBeNull()
     })
   })
 
