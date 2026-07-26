@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
@@ -2605,6 +2605,65 @@ test('E7i ⌘F — 카운터가 로드된 범위가 아니라 저장소 전체 �
     await window.getByTestId('find-bar-input').fill('e7i-mark')
     // 로드된 목록은 50개지만 총계는 60 — 전체 기준
     await expect(window.getByTestId('find-bar-count')).toHaveText('1/60')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7j — 같은 이름 워크트리가 출처·이름으로 구분된다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-one'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-two'], { cwd: repo })
+  // 같은 리프 이름을 서로 다른 부모 아래에 만든다(codex·claude 구조 재현)
+  const base = dirname(repo)
+  const leaf = basename(repo)
+  const oneParent = join(base, 'holder-one')
+  const twoParent = join(base, 'holder-two')
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(oneParent, leaf), 'wt-one'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(twoParent, leaf), 'wt-two'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    // 브랜치가 1줄 주 식별자로 보이고, 2줄 이름이 부모까지 붙어 구분된다
+    await expect(window.getByText('wt-one')).toBeVisible()
+    await expect(window.getByText('wt-two')).toBeVisible()
+    await expect(window.getByText(`holder-one/${leaf}`)).toBeVisible()
+    await expect(window.getByText(`holder-two/${leaf}`)).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(oneParent, { recursive: true, force: true })
+    await rm(twoParent, { recursive: true, force: true })
+  }
+})
+
+test('E7j — 워크트리에 호버하면 전체 경로가 잘림 없이 보인다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    const row = window.getByTestId(`worktree-row-${basename(repo)}`)
+    // macOS: git이 보고하는 워크트리 경로는 실경로(/private/var/...)다 — repo(/var/...)는 심볼릭 링크를
+    // 거친 경로라 그대로 비교하면 접두가 어긋난다(1667행과 동일 사유). realpath로 맞춰 비교한다
+    const realRepo = realpathSync(repo)
+    await expect(row).toHaveAttribute('data-tooltip', realRepo)
+    await row.hover()
+    const tip = window.getByTestId('tooltip')
+    await expect(tip).toBeVisible()
+    await expect(tip).toContainText(realRepo)
+    await window.keyboard.press('Escape')
+    await expect(tip).toHaveCount(0)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
