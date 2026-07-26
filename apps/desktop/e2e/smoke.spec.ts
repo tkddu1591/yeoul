@@ -1653,11 +1653,15 @@ test('워크트리 탭 — 목록에 본체가 보이고 새로 만든다 (E7c)'
   try {
     const window = await app.firstWindow()
     await window.getByTestId('left-tab-worktrees').click()
-    // E7g: 이모지·칩 대신 글리프(➤)·title 툴팁으로 "지금 여기"를 단언(같은 상태, 다른 표시 방식)
-    // E7j 편차: WorktreesPanel.tsx:99는 Task 6이 리치 카드로 대체할 예정이라 이번엔 네이티브 title을
-    // 그대로 둔다(플랜 명시 예외) — 그래서 이 단언만 data-tooltip이 아니라 title로 남긴다
+    // E7g: 이모지·칩 대신 글리프(➤)로 "지금 여기"를 단언(같은 상태, 다른 표시 방식)
+    // E7j Task 6: 네이티브 title → 리치 카드 Tooltip 전환 — "지금 여기"는 이제 카드 본문에 있고,
+    // data-tooltip(summary)은 전체 경로다(macOS는 tmp 경로가 /private/var로 실경로 해석돼 접두가
+    // 달라질 수 있어 꼬리로 검증 — 1663행 주석과 동일 사유).
     await expect(window.getByTestId(`worktree-row-${repoName}`)).toContainText('➤')
-    await expect(window.getByTestId(`worktree-row-${repoName}`)).toHaveAttribute('title', /지금 여기/)
+    await expect(window.getByTestId(`worktree-row-${repoName}`)).toHaveAttribute(
+      'data-tooltip',
+      new RegExp(`${repoName}$`),
+    )
     // 새 워크트리 — feature/login 기본 선택·경로 자동 제안
     await window.getByTestId('worktree-add').click()
     // 앱의 본체 경로는 git 실경로(/private/var/...)라 repo(/var/...)와 접두가 다르다 — 꼬리로 검증

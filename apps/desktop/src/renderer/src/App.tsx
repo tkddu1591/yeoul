@@ -714,6 +714,8 @@ export function App() {
               currentPath={store.repoPath}
               activePath={activeWorktree?.cwd ?? null}
               home={home}
+              forkPoints={store.forkPoints}
+              onHoverWorktree={(path, headHash) => void store.loadForkPoint(path, headHash)}
               busy={store.busy}
               onAction={(action) => {
                 switch (action.kind) {

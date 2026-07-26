@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from 'react'
-import type { WorktreeInfo } from '@git-gui/domain'
+import type { ForkPoint, WorktreeInfo } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
@@ -25,6 +25,10 @@ interface WorktreesPanelProps {
   activePath: string | null
   /** OS 홈 디렉터리 — `~` 축약·출처 칩에 쓴다(못 구하면 빈 문자열, 축약 없이 동작) (E7j) */
   home: string
+  /** 분기점 캐시 — 키는 `경로::HEAD해시` (E7j) */
+  forkPoints: Record<string, ForkPoint | null>
+  /** 행에 마우스가 머물면 그 워크트리 하나만 분기점을 계산한다 */
+  onHoverWorktree(path: string, headHash: string | null): void
   busy: boolean
   onAction(action: WorktreeAction): void
 }
@@ -35,6 +39,8 @@ export function WorktreesPanel({
   currentPath,
   activePath,
   home,
+  forkPoints,
+  onHoverWorktree,
   busy,
   onAction,
 }: WorktreesPanelProps) {
@@ -103,64 +109,93 @@ export function WorktreesPanel({
     <Panel title="워크트리" accessory={<Badge tone="git">worktree</Badge>} testId="worktrees-panel">
       <div className="worktrees-panel">
         <div className="worktrees-panel__scroll" data-testid="worktrees-list">
-          {worktrees.map((worktree) => (
-            <button
-              key={worktree.path}
-              type="button"
-              className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
-              // E7j 편차: Task 6이 리치 카드로 대체할 때까지 네이티브 title을 그대로 둔다(플랜 명시 예외 —
-              // smoke.spec.ts가 이 title 단언을 유지한다). Task 6에서 data-tooltip 전환과 같은 커밋으로 지울 것
-              title={worktree.path === currentPath ? `${worktree.path} — 지금 여기` : worktree.path}
-              onClick={(event) =>
-                worktree.prunable
-                  ? openMenu(event, worktree)
-                  : onAction({
-                      kind: 'select',
-                      path: worktree.path,
-                      label: names.get(worktree.path) ?? folderName(worktree.path),
-                    })
-              }
-              onContextMenu={(event) => openMenu(event, worktree)}
-              data-testid={`worktree-row-${folderName(worktree.path)}`}
-            >
-              <span className="worktree-row__lines">
-                <span className="worktree-row__line">
-                  <span
-                    className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
-                  >
-                    {worktree.path === currentPath ? '➤' : '⌂'}
-                  </span>
-                  <span
-                    className={`worktree-row__branch${worktree.path === currentPath ? ' worktree-row__branch--here' : ''}`}
-                  >
-                    {branchLabel(worktree)}
-                  </span>
-                  <span className="worktree-row__source">{sourceChip(worktree.path, home)}</span>
-                  {worktree.path === activePath && (
-                    <Tooltip
-                      content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
-                      summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
-                    >
-                      <span className="worktree-row__terminal">❯_</span>
-                    </Tooltip>
-                  )}
-                </span>
-                <span className="worktree-row__line worktree-row__line--sub">
-                  <span className="worktree-row__name">
-                    {names.get(worktree.path) ?? folderName(worktree.path)}
-                  </span>
-                  <span className="worktree-row__dot">·</span>
-                  <span className="worktree-row__path">
-                    {shortenAbove(
-                      worktree.path,
-                      home,
-                      (names.get(worktree.path) ?? '').split('/').length,
+          {worktrees.map((worktree) => {
+            // E7j — store의 forkPoints와 문자 단위로 일치해야 하는 캐시 키. 한 번만 계산해 재사용한다
+            const forkKey = `${worktree.path}::${worktree.headHash ?? ''}`
+            const fork = forkPoints[forkKey]
+            return (
+              <Tooltip
+                key={worktree.path}
+                summary={worktree.path}
+                content={
+                  <>
+                    <div className="ui-tooltip__title">{branchLabel(worktree)}</div>
+                    <div className="ui-tooltip__path">{worktree.path}</div>
+                    <div className="ui-tooltip__meta">
+                      출처 {sourceChip(worktree.path, home)}
+                      {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
+                      {worktree.path === currentPath && ' · 지금 여기'}
+                      {worktree.locked && ' · 잠김'}
+                    </div>
+                    {worktree.prunable && (
+                      <div className="ui-tooltip__meta">
+                        폴더가 없어졌어요 — 목록에서 정리할 수 있어요
+                      </div>
                     )}
+                    {fork != null && (
+                      <div className="ui-tooltip__meta">
+                        {fork.base}에서 갈라짐 · {fork.ahead}개 앞섬 · {fork.behind}개 뒤처짐
+                      </div>
+                    )}
+                  </>
+                }
+              >
+                <button
+                  type="button"
+                  className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
+                  onClick={(event) =>
+                    worktree.prunable
+                      ? openMenu(event, worktree)
+                      : onAction({
+                          kind: 'select',
+                          path: worktree.path,
+                          label: names.get(worktree.path) ?? folderName(worktree.path),
+                        })
+                  }
+                  onContextMenu={(event) => openMenu(event, worktree)}
+                  onMouseEnter={() => onHoverWorktree(worktree.path, worktree.headHash)}
+                  data-testid={`worktree-row-${folderName(worktree.path)}`}
+                >
+                  <span className="worktree-row__lines">
+                    <span className="worktree-row__line">
+                      <span
+                        className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
+                      >
+                        {worktree.path === currentPath ? '➤' : '⌂'}
+                      </span>
+                      <span
+                        className={`worktree-row__branch${worktree.path === currentPath ? ' worktree-row__branch--here' : ''}`}
+                      >
+                        {branchLabel(worktree)}
+                      </span>
+                      <span className="worktree-row__source">{sourceChip(worktree.path, home)}</span>
+                      {worktree.path === activePath && (
+                        <Tooltip
+                          content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                          summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                        >
+                          <span className="worktree-row__terminal">❯_</span>
+                        </Tooltip>
+                      )}
+                    </span>
+                    <span className="worktree-row__line worktree-row__line--sub">
+                      <span className="worktree-row__name">
+                        {names.get(worktree.path) ?? folderName(worktree.path)}
+                      </span>
+                      <span className="worktree-row__dot">·</span>
+                      <span className="worktree-row__path">
+                        {shortenAbove(
+                          worktree.path,
+                          home,
+                          (names.get(worktree.path) ?? '').split('/').length,
+                        )}
+                      </span>
+                    </span>
                   </span>
-                </span>
-              </span>
-            </button>
-          ))}
+                </button>
+              </Tooltip>
+            )
+          })}
           <button
             type="button"
             className="worktree-row worktree-row--add"
