@@ -1,7 +1,20 @@
-import { cloneElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import {
+  cloneElement,
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { placeTooltip, type TooltipPlacement } from './tooltip-position'
 import './tooltip.css'
+
+/** 중첩 트리거에서 바깥 카드가 남아 2장이 겹치는 것을 막는다 — 안쪽이 열리면 조상을 닫는다 (E7j 보완 I-1) */
+const NestContext = createContext<(() => void) | null>(null)
 
 interface TooltipProps {
   /** 카드 본문 — 여러 줄·요소 가능 */
@@ -15,18 +28,21 @@ interface TooltipProps {
   children: ReactElement
   /** 마우스 지연(ms) — 포커스는 즉시 */
   delay?: number
+  /** 트리거에 이미 같은 문구의 aria-label이 있으면 끈다 — 중복 낭독 방지 (E7j 보완) */
+  describedBy?: boolean
 }
 
 /**
  * 공용 호버 툴팁 (E7j) — 네이티브 title을 대체한다.
  * title은 OS가 1초쯤 뒤에 스타일 없이 그려서 앱 톤과 어긋나고 여러 줄·강조를 못 쓴다.
  */
-export function Tooltip({ content, summary, children, delay = 400 }: TooltipProps) {
+export function Tooltip({ content, summary, children, delay = 400, describedBy }: TooltipProps) {
   const id = useId()
   const [place, setPlace] = useState<TooltipPlacement | null>(null)
   const triggerRef = useRef<HTMLElement | null>(null)
   const tipRef = useRef<HTMLDivElement | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeAncestor = useContext(NestContext)
 
   const close = () => {
     if (timerRef.current !== null) clearTimeout(timerRef.current)
@@ -35,6 +51,8 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
   }
 
   const open = () => {
+    // 중첩 트리거(행 버튼 안의 span 등)에서 안쪽이 열리면 바깥 카드부터 닫는다 — 2장 겹침 방지
+    closeAncestor?.()
     const element = triggerRef.current
     if (element === null) return
     const rect = element.getBoundingClientRect()
@@ -91,7 +109,7 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
         (original as { current: HTMLElement | null }).current = node
     },
     'data-tooltip': summary,
-    'aria-describedby': place !== null ? id : undefined,
+    'aria-describedby': describedBy !== false && place !== null ? id : undefined,
     onMouseEnter: (event: MouseEvent) => {
       if (timerRef.current !== null) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(open, delay)
@@ -116,7 +134,7 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
   } as Record<string, unknown>)
 
   return (
-    <>
+    <NestContext.Provider value={close}>
       {trigger}
       {place !== null &&
         createPortal(
@@ -132,6 +150,6 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
           </div>,
           document.body,
         )}
-    </>
+    </NestContext.Provider>
   )
 }

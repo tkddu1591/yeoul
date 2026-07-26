@@ -88,7 +88,7 @@ function FileRow({
           data-testid={`check-${staged ? 'staged' : 'unstaged'}-${change.path}`}
         />
       </span>
-      <Tooltip content={tooltip} summary={tooltip}>
+      <Tooltip content={tooltip} summary={tooltip} describedBy={false}>
         <button
           type="button"
           className={`file-row__main file-row__main--${kind ?? 'none'}`}

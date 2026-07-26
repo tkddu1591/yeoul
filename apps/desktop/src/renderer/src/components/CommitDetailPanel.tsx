@@ -60,7 +60,7 @@ function CommitFileRow({
   const directory = slashIndex >= 0 ? file.path.slice(0, slashIndex) : ''
   const basename = slashIndex >= 0 ? file.path.slice(slashIndex + 1) : file.path
   return (
-    <Tooltip content={tooltip} summary={tooltip}>
+    <Tooltip content={tooltip} summary={tooltip} describedBy={false}>
       <button
         type="button"
         className={`file-row__main file-row__main--${file.kind} commit-file-row${

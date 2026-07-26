@@ -497,9 +497,7 @@ export function HistoryPanel({
                           {commit.parents.length >= 2 && (
                             <span className="history-item__mergemark">병합</span>
                           )}
-                          <Tooltip content={commit.subject} summary={commit.subject}>
-                            <span className="history-item__subject">{commit.subject}</span>
-                          </Tooltip>
+                          <span className="history-item__subject">{commit.subject}</span>
                         </span>
                         <span className="history-item__meta">
                           {formatRelativeTime(commit.committedAt, Date.now())} · {commit.authorName}
