@@ -2537,3 +2537,70 @@ test('E7h ⌘F — 마우스 위치의 패널에 열린다', async () => {
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E7i ⌘F — 아직 안 불러온 커밋도 검색해 점프한다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 초기 로드(50개)보다 깊은 곳에 표적을 심는다 — 표적 → 그 위로 60개
+  await writeFile(join(repo, 'deep.txt'), 'deep\n')
+  await execGitOrThrow(['add', 'deep.txt'], { cwd: repo })
+  await execGitOrThrow(
+    ['-c', 'user.email=e2e@test', '-c', 'user.name=E2E', 'commit', '-m', 'e7i-needle 깊은 저장'],
+    { cwd: repo },
+  )
+  for (let i = 0; i < 60; i += 1) {
+    await writeFile(join(repo, 'filler.txt'), `${i}\n`)
+    await execGitOrThrow(['add', 'filler.txt'], { cwd: repo })
+    await execGitOrThrow(
+      ['-c', 'user.email=e2e@test', '-c', 'user.name=E2E', 'commit', '-m', `filler ${i}`],
+      { cwd: repo },
+    )
+  }
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    // 초기 로드 범위(50)에는 표적이 없다
+    await expect(window.getByText('e7i-needle 깊은 저장')).toHaveCount(0)
+    await hoverAndCmdF(window, '[data-testid="history-panel"]')
+    await window.getByTestId('find-bar-input').fill('e7i-needle')
+    // 전체 검색이 찾아 그 커밋까지 불러오고 점프한다
+    await expect(window.getByTestId('find-bar-count')).toHaveText('1/1')
+    await expect(window.locator('.history-item--find-hit')).toContainText('e7i-needle 깊은 저장')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7i ⌘F — 카운터가 로드된 범위가 아니라 저장소 전체 기준이다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 같은 낱말을 60개 커밋에 심는다 — 초기 로드(50)보다 많아야 전체 기준임이 드러난다
+  for (let i = 0; i < 60; i += 1) {
+    await writeFile(join(repo, 'filler.txt'), `${i}\n`)
+    await execGitOrThrow(['add', 'filler.txt'], { cwd: repo })
+    await execGitOrThrow(
+      ['-c', 'user.email=e2e@test', '-c', 'user.name=E2E', 'commit', '-m', `e7i-mark ${i}`],
+      { cwd: repo },
+    )
+  }
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    await hoverAndCmdF(window, '[data-testid="history-panel"]')
+    await window.getByTestId('find-bar-input').fill('e7i-mark')
+    // 로드된 목록은 50개지만 총계는 60 — 전체 기준
+    await expect(window.getByTestId('find-bar-count')).toHaveText('1/60')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
