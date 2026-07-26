@@ -102,12 +102,3 @@
   background: var(--color-surface-sunken);
   color: var(--color-text);
 }
-
-/* 960px 최소 창에서 헤더 한 줄 보장(E1c) — 좁은 창에서는 원어 배지를 접는다
-   (품질 리뷰 실측: 리뷰 버튼 추가로 36px 가로 오버플로) */
-@media (max-width: 1180px) {
-  .review-popover__trigger .ui-badge,
-  .app__actions .ui-badge--git {
-    display: none;
-  }
-}

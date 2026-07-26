@@ -54,6 +54,8 @@ body.is-fullscreen .app__header {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  /* E7k 보완 — 긴 브랜치명이 헤더를 밀어내 버튼이 잘리던 회귀. 스위처가 먼저 양보한다 */
+  min-width: 0;
 }
 .app__branch {
   display: inline-flex;
@@ -93,12 +95,17 @@ body.is-fullscreen .app__header {
   white-space: nowrap;
   flex: none;
 }
-/* E7k — 좁은 창: 액션 라벨과 버튼 안 배지를 접어 아이콘만 남긴다.
-   이름은 E7j Tooltip이 담당하므로 정보 손실이 없다. ↑↓ 배지는 버튼 밖이라 살아남는다 */
+.app__status .ui-button[data-testid='header-branch'] {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* E7k — 좁은 창: 액션 라벨과 버튼 안 git 배지를 접어 아이콘만 남긴다.
+   이름은 E7j Tooltip이 담당하므로 정보 손실이 없다(E7k 보완 — 실제로 Tooltip을 감쌌다).
+   개수 배지(보관함)는 남긴다(E7k 보완 I-1 — 기존 E1c 규칙과 같은 취지). ↑↓ 배지는 버튼 밖이라 살아남는다 */
 .app__header--compact .app__btn-label {
   display: none;
 }
-.app__header--compact .ui-button .ui-badge {
+.app__header--compact .ui-button .ui-badge--git {
   display: none;
 }
 .app__header--compact .app__status,

@@ -64,10 +64,18 @@ export function ReviewPopover({
         if (next) onOpen()
       }}
     >
-      <Button variant="ghost" size="sm" className="review-popover__trigger" testId="review-open">
-        <GitPullRequest size={13} aria-hidden="true" /> <span className="app__btn-label">리뷰</span>{' '}
-        <Badge tone="git">PR</Badge>
-      </Button>
+      <Tooltip content="리뷰" summary="리뷰" describedBy={false}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="review-popover__trigger"
+          testId="review-open"
+          aria-label="리뷰"
+        >
+          <GitPullRequest size={13} aria-hidden="true" /> <span className="app__btn-label">리뷰</span>{' '}
+          <Badge tone="git">PR</Badge>
+        </Button>
+      </Tooltip>
       <Popover className="review-popover">
         <Dialog className="review-popover__dialog" aria-label="리뷰 요청">
           {status === null || !status.connected ? (

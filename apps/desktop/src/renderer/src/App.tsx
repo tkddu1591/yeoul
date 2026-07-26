@@ -368,16 +368,19 @@ export function App() {
                 setManageOpen(true)
               }}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              isDisabled={store.busy || status.state !== 'normal'}
-              onPress={() => setMergePicker(true)}
-              testId="merge-open"
-            >
-              <GitMerge size={13} aria-hidden="true" /> <span className="app__btn-label">합치기</span>{' '}
-              <Badge tone="git">merge</Badge>
-            </Button>
+            <Tooltip content="합치기" summary="합치기" describedBy={false}>
+              <Button
+                variant="ghost"
+                size="sm"
+                isDisabled={store.busy || status.state !== 'normal'}
+                onPress={() => setMergePicker(true)}
+                testId="merge-open"
+                aria-label="합치기"
+              >
+                <GitMerge size={13} aria-hidden="true" /> <span className="app__btn-label">합치기</span>{' '}
+                <Badge tone="git">merge</Badge>
+              </Button>
+            </Tooltip>
             {status.state !== 'normal' && (
               <span className="app__state">
                 <Pictogram kind="conflict" size={13} label="진행 중 작업" />
@@ -393,16 +396,19 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={store.busy || status?.state !== 'normal'}
-            onPress={() => void store.pullLatest()}
-            testId="pull"
-          >
-            <DownloadCloud size={14} aria-hidden="true" />{' '}
-            <span className="app__btn-label">받아오기</span> <Badge tone="git">pull</Badge>
-          </Button>
+          <Tooltip content="받아오기" summary="받아오기" describedBy={false}>
+            <Button
+              variant="neutral"
+              size="sm"
+              isDisabled={store.busy || status?.state !== 'normal'}
+              onPress={() => void store.pullLatest()}
+              testId="pull"
+              aria-label="받아오기"
+            >
+              <DownloadCloud size={14} aria-hidden="true" />{' '}
+              <span className="app__btn-label">받아오기</span> <Badge tone="git">pull</Badge>
+            </Button>
+          </Tooltip>
           <ShelfPopover
             shelf={store.shelf}
             busy={store.busy}
@@ -431,28 +437,42 @@ export function App() {
             onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
           />
-          <Button
-            variant="neutral"
-            size="sm"
-            isDisabled={store.busy}
-            onPress={() => void store.backup()}
-            testId="backup"
-          >
-            <CloudUpload size={14} aria-hidden="true" /> <span className="app__btn-label">백업</span>{' '}
-            <Badge tone="git">push</Badge>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={store.busy}
-            onPress={() => void store.refresh()}
-            testId="refresh"
-          >
-            <RefreshCw size={13} aria-hidden="true" /> <span className="app__btn-label">새로고침</span>
-          </Button>
-          <Button variant="ghost" size="sm" onPress={toggleDock} testId="terminal-toggle">
-            <Terminal size={13} aria-hidden="true" /> <span className="app__btn-label">터미널</span>
-          </Button>
+          <Tooltip content="백업" summary="백업" describedBy={false}>
+            <Button
+              variant="neutral"
+              size="sm"
+              isDisabled={store.busy}
+              onPress={() => void store.backup()}
+              testId="backup"
+              aria-label="백업"
+            >
+              <CloudUpload size={14} aria-hidden="true" /> <span className="app__btn-label">백업</span>{' '}
+              <Badge tone="git">push</Badge>
+            </Button>
+          </Tooltip>
+          <Tooltip content="새로고침" summary="새로고침" describedBy={false}>
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={store.busy}
+              onPress={() => void store.refresh()}
+              testId="refresh"
+              aria-label="새로고침"
+            >
+              <RefreshCw size={13} aria-hidden="true" /> <span className="app__btn-label">새로고침</span>
+            </Button>
+          </Tooltip>
+          <Tooltip content="터미널" summary="터미널" describedBy={false}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={toggleDock}
+              testId="terminal-toggle"
+              aria-label="터미널"
+            >
+              <Terminal size={13} aria-hidden="true" /> <span className="app__btn-label">터미널</span>
+            </Button>
+          </Tooltip>
           <Button variant="ghost" size="sm" onPress={() => setSettingsOpen(true)} testId="settings-open">
             <Settings size={13} aria-hidden="true" />
           </Button>

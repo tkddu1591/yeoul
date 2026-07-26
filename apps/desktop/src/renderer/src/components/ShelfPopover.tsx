@@ -31,12 +31,14 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
   return (
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-        <Button variant="ghost" size="sm" testId="shelf-open">
-          <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">보관함</span>{' '}
-          <Badge tone="count">
-            <span data-testid="shelf-count">{shelf.length}</span>
-          </Badge>
-        </Button>
+        <Tooltip content="보관함" summary="보관함" describedBy={false}>
+          <Button variant="ghost" size="sm" testId="shelf-open" aria-label="보관함">
+            <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">보관함</span>{' '}
+            <Badge tone="count">
+              <span data-testid="shelf-count">{shelf.length}</span>
+            </Badge>
+          </Button>
+        </Tooltip>
         <Popover className="shelf-popover">
           <Dialog className="shelf-popover__dialog" aria-label="보관함">
             <div className="shelf-popover__head">
