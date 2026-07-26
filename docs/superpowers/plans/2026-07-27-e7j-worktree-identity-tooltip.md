@@ -31,7 +31,7 @@
 - Create: `apps/desktop/src/renderer/src/components/worktree-label.ts`
 - Test: `apps/desktop/test/worktree-label.test.ts`
 
-- [ ] **Step 1: Red — 단위 테스트.** `apps/desktop/test/worktree-label.test.ts` 신규:
+- [x] **Step 1: Red — 단위 테스트.** `apps/desktop/test/worktree-label.test.ts` 신규:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -114,9 +114,9 @@ describe('shortenBranch', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인** — `npx vitest run apps/desktop/test/worktree-label.test.ts` 실행, 모듈 없음으로 전건 실패 확인.
+- [x] **Step 2: Red 확인** — `npx vitest run apps/desktop/test/worktree-label.test.ts` 실행, 모듈 없음으로 전건 실패 확인.
 
-- [ ] **Step 3: 구현.** `apps/desktop/src/renderer/src/components/worktree-label.ts` 신규:
+- [x] **Step 3: 구현.** `apps/desktop/src/renderer/src/components/worktree-label.ts` 신규:
 
 ```ts
 /**
@@ -181,18 +181,26 @@ export function uniqueNames(paths: string[]): Map<string, string> {
   return names
 }
 
-/** 브랜치 이름 — 길면 **앞을** 생략한다(뒤쪽이 구분 정보) */
+/**
+ * 브랜치 이름 — 길면 **선행 네임스페이스**(`claude/`·`codex/`·`feature/`)를 생략한다.
+ * 목록의 모든 워크트리가 접두를 공유하므로 그건 노이즈고, 구분 정보는 그 뒤에 있다.
+ * (플랜 초판의 "문자열 뒤쪽 보존" 구현은 자기 테스트와 모순이었다 — 리뷰 판정으로 정정)
+ */
 export function shortenBranch(branch: string, max: number): string {
   if (branch.length <= max) return branch
-  return `…${branch.slice(branch.length - max + 1)}`
+  const slash = branch.indexOf('/')
+  // 네임스페이스가 없으면 잘리는 쪽(꼬리)에 표시를 남긴다 — 앞에 …를 붙이면 거짓말이 된다
+  if (slash === -1) return `${branch.slice(0, max - 1)}…`
+  const rest = branch.slice(slash + 1)
+  return `…${rest.length <= max - 1 ? rest : rest.slice(0, max - 1)}`
 }
 ```
 
-- [ ] **Step 4: Green 확인** — `npx vitest run apps/desktop/test/worktree-label.test.ts` 전건 통과.
+- [x] **Step 4: Green 확인** — `npx vitest run apps/desktop/test/worktree-label.test.ts` 전건 통과.
 
-- [ ] **Step 5: 게이트** — 루트 `pnpm test` → **486+13(실측 정정)**, `pnpm typecheck` 전부 Done.
+- [x] **Step 5: 게이트** — 루트 `pnpm test` → **486+12 = 498(실측 확정)**, `pnpm typecheck` 전부 Done.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/components/worktree-label.ts apps/desktop/test/worktree-label.test.ts
@@ -211,7 +219,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Create: `apps/desktop/src/renderer/src/ui/tooltip.css`
 - Test: `apps/desktop/test/tooltip-position.test.ts`
 
-- [ ] **Step 1: Red — 위치 계산 단위 테스트.** `apps/desktop/test/tooltip-position.test.ts` 신규:
+- [x] **Step 1: Red — 위치 계산 단위 테스트.** `apps/desktop/test/tooltip-position.test.ts` 신규:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -271,7 +279,7 @@ describe('placeTooltip', () => {
 })
 ```
 
-- [ ] **Step 2: Red 확인 후 구현.** `npx vitest run apps/desktop/test/tooltip-position.test.ts` 실패 확인 → `apps/desktop/src/renderer/src/ui/tooltip-position.ts` 신규:
+- [x] **Step 2: Red 확인 후 구현.** `npx vitest run apps/desktop/test/tooltip-position.test.ts` 실패 확인 → `apps/desktop/src/renderer/src/ui/tooltip-position.ts` 신규:
 
 ```ts
 /** 툴팁 배치 계산 (E7j) — 렌더와 분리된 순수 함수라 단위 테스트가 된다 */
@@ -310,7 +318,7 @@ export function placeTooltip(
 }
 ```
 
-- [ ] **Step 3: Tooltip 컴포넌트.** `apps/desktop/src/renderer/src/ui/Tooltip.tsx` 신규:
+- [x] **Step 3: Tooltip 컴포넌트.** `apps/desktop/src/renderer/src/ui/Tooltip.tsx` 신규:
 
 ```tsx
 import { cloneElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react'
@@ -451,7 +459,7 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
 }
 ```
 
-- [ ] **Step 4: CSS.** `apps/desktop/src/renderer/src/ui/tooltip.css` 신규(토큰 실명은 tokens.css 실독 — 없으면 유사 토큰 치환·편차 보고):
+- [x] **Step 4: CSS.** `apps/desktop/src/renderer/src/ui/tooltip.css` 신규(토큰 실명은 tokens.css 실독 — 없으면 유사 토큰 치환·편차 보고):
 
 ```css
 /* E7j — 공용 호버 툴팁 카드. 네이티브 title 대체(앱 톤·여러 줄·즉시성) */
@@ -485,9 +493,9 @@ export function Tooltip({ content, summary, children, delay = 400 }: TooltipProp
 }
 ```
 
-- [ ] **Step 5: 게이트** — `npx vitest run apps/desktop/test/tooltip-position.test.ts` 5건 통과, 루트 `pnpm test` → **+5(실측 정정)**, typecheck Done, `cd apps/desktop && npx electron-vite build` 성공.
+- [x] **Step 5: 게이트** — `npx vitest run apps/desktop/test/tooltip-position.test.ts` 5건 통과, 루트 `pnpm test` → **+5(실측 정정)**, typecheck Done, `cd apps/desktop && npx electron-vite build` 성공.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/ui/Tooltip.tsx apps/desktop/src/renderer/src/ui/tooltip-position.ts apps/desktop/src/renderer/src/ui/tooltip.css apps/desktop/test/tooltip-position.test.ts
@@ -495,6 +503,51 @@ git commit -m "feat(desktop): E7j 공용 Tooltip — 포털 카드·뒤집기/�
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
+
+### Task 2-보완: shortenBranch 꼬리 표시 + Tooltip 잔가지 (품질 리뷰 Important 1 + Minor 2)
+
+품질 리뷰 판정: `shortenBranch`의 의미론은 **구현자가 맞다**(스펙 ①의 예시 `…/dw-1051-work-review` 자체가 네임스페이스 제거 결과 — 뒤 보존 알고리즘으로는 어떤 입력으로도 못 만든다). 플랜 구현 블록은 위에서 정정했다. 다만 그 알고리즘의 빈틈 1건과 Tooltip 잔가지 2건을 닫는다.
+
+- **Important**: `/`가 없는 긴 브랜치는 `indexOf('/') === -1` → 원문 앞쪽을 남기면서 **앞에 `…`를 붙인다** — 자르지 않은 쪽에 생략 표시가 붙고 실제 잘린 꼬리는 무표기. 사용자가 제기한 불만("어디가 잘렸는지 몰라 구분이 안 된다")과 동종 결함.
+- **Minor**: `Tooltip.tsx`의 `(children as { ref?: unknown }).ref`가 React 19의 deprecated 게터를 때린다(자식에 ref가 있으면 console.error) → `children.props`에서 읽는다. `onMouseEnter`가 기존 타이머를 clear하지 않아 hover→focus 조합에서 중복 open이 1회 돈다.
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/components/worktree-label.ts`
+- Modify: `apps/desktop/test/worktree-label.test.ts`
+- Modify: `apps/desktop/src/renderer/src/ui/Tooltip.tsx`
+
+- [x] **Step 1: Red — 꼬리 표시 테스트 1건.** `shortenBranch` describe에 추가:
+
+```ts
+  it('네임스페이스가 없으면 잘린 꼬리 쪽에 표시를 남긴다', () => {
+    const long = 'a-very-long-branch-name-without-any-namespace'
+    const short = shortenBranch(long, 28)
+    expect(short.endsWith('…')).toBe(true)
+    expect(short.startsWith('…')).toBe(false)
+    expect(short).toBe('a-very-long-branch-name-wit…')
+  })
+```
+
+- [x] **Step 2: Red 확인 후 구현.** `worktree-label.ts`의 `shortenBranch`를 위(Task 1 Step 3) 정정본과 동일하게 만든다 — `slash === -1`이면 `` `${branch.slice(0, max - 1)}…` ``.
+
+- [x] **Step 3: Tooltip 잔가지 2건.** `Tooltip.tsx`에서:
+  - `const original = (children as { ref?: unknown }).ref` → `const original = (children.props as { ref?: unknown }).ref`
+  - `onMouseEnter` 핸들러 첫 줄에 `if (timerRef.current !== null) clearTimeout(timerRef.current)` 추가.
+
+- [x] **Step 4: 게이트** — `npx vitest run apps/desktop/test/worktree-label.test.ts` 13건 통과, 루트 `pnpm test` → **504**(503+1), typecheck Done, `cd apps/desktop && npx electron-vite build` 성공.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add apps/desktop/src/renderer/src/components/worktree-label.ts apps/desktop/test/worktree-label.test.ts apps/desktop/src/renderer/src/ui/Tooltip.tsx
+git commit -m "fix(desktop): E7j 보완 — 네임스페이스 없는 긴 브랜치의 꼬리 생략 표시·Tooltip ref/타이머 잔가지
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+**Task 1·2 리뷰 후속 노트(기록만):** ① 네임스페이스 제거 후에도 잘리는 경우 꼬리가 무표기(JS가 이미 max로 맞춰 CSS ellipsis가 안 뜬다) — 양끝 표시(`…head…`)는 기대값 변경이 필요해 후속. ② 접두·앞부분이 같고 꼬리만 다른 형제 브랜치는 같은 축약이 될 수 있다(이 저장소 네이밍에서는 티켓·세션이 앞에 와 지배적으로 유리). ③ Task 3 리스크 예고: `aria-describedby` 무조건 덮어쓰기(현재 사용처 0), react-aria 모달(`ManageBranchesDialog`) 안에서는 body 포털 툴팁이 `ariaHideOutside`로 스크린리더에 숨는다(시각·E2E는 정상), 툴팁 ESC가 전파를 막지 않아 다이얼로그와 동시에 닫힌다.
+
+**Task 1·2 실행 편차 (소급 기록 — 리뷰 검증 완료):** ① 단위 테스트는 13이 아니라 **12건**(보완으로 13) — 게이트 표 전 열 정정. ② **플랜의 `shortenBranch` 구현이 자기 테스트와 모순**이었다(뒤 보존 알고리즘은 기대값 `…dw-1051-work-review`를 만들 수 없음). 구현자가 TDD Green을 위해 "네임스페이스 제거 + 앞쪽 유지"로 교정 → 리뷰가 **구현자 손을 들어줌**(스펙 ①의 예시값 자체가 그 알고리즘의 산출물이고, 실제 브랜치 목록에서 `claude/`·`codex/` 접두는 100% 중복 정보). 플랜 구현 블록을 정정본으로 교체. ③ tooltip.css 토큰 11개 전부 실존(치환 0). ④ Tooltip의 cloneElement ref 병합은 React 19.2.7에서 실동 확인(타입만 통과가 아님).
 
 ---
 
@@ -1092,7 +1145,7 @@ test('E7j — 워크트리에 호버하면 전체 경로가 잘림 없이 보인
 
 - [ ] **Step 2: 게이트** — build + `npx playwright test e2e/smoke.spec.ts` → **83 passed**(81+2), 신규 2건 각각 단독 `-g` 1회 non-flaky, 루트 `pnpm test` 유지, typecheck Done. 포그라운드 동기(timeout 600000).
 
-- [ ] **Step 3: 전체 게이트** — 루트 `pnpm test` **508 내외(486+13+5+4 — 실측 정정)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **89**(smoke 83 + hosting 6) · last-screen 아티팩트 0건.
+- [ ] **Step 3: 전체 게이트** — 루트 `pnpm test` **508(486+12+5+1+4 — 실측 확정)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **89**(smoke 83 + hosting 6) · last-screen 아티팩트 0건.
 
 - [ ] **Step 4: 공식 스크린샷 2장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7j.spec.ts`(관례: harness electron·1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **(1) e7j-worktree-rows.png** — 같은 리프 이름 워크트리 2~3개가 출처 칩·유일화 이름·경로 뒤 조각으로 구분되는 목록. **(2) e7j-worktree-hover.png** — 행 호버 카드(전체 경로·출처·HEAD, 가능하면 분기점 줄까지). 스크래치패드에 사본을 남긴다(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`).
 
@@ -1118,13 +1171,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 | 시점 | 루트 테스트 | smoke |
 | --- | --- | --- |
 | 시작 | 486 | 81 |
-| Task 1 후 | +13 → 499 | 81 |
-| Task 2 후 | +5 → 504 | 81 |
+| Task 1 후 | +12 → 498 | 81 |
+| Task 2 후 | +5 → 503 | 81 |
+| Task 2-보완 후 | +1 → 504 | 81 |
 | Task 3 후 | 504 | 81 유지 |
 | Task 4 후 | 504 | 81 유지 |
 | Task 5 후 | +4 → 508 | 81 유지 |
 | Task 6 후 | 508 | 81 유지 |
-| Task 7 후 | 508 · e2e **89**(83+6) | +2 → 83 |
+| Task 7 후 | 508 · e2e **90**(84+6) | +2 → 83 |
 
 ## Self-Review (플랜 자체 점검)
 
