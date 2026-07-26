@@ -51,6 +51,8 @@ export interface GitApi {
      * 검증한 뒤 allowlist에 등록하고 정규화 경로를 돌려준다 (E7c 보안 가드: select 없는 경로 열기)
      */
     openPath(repoPath: string, worktreePath: string): Promise<string>
+    /** OS 홈 디렉터리 절대 경로 — 워크트리 행의 `~` 축약에 쓴다 (E7j) */
+    home(): Promise<string>
   }
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
@@ -174,6 +176,7 @@ export const CHANNELS = {
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
   repoOpenPath: 'repo:open-path',
+  repoHome: 'repo:home',
   remotesFetch: 'remotes:fetch',
   worktreesList: 'worktrees:list',
   worktreesAdd: 'worktrees:add',

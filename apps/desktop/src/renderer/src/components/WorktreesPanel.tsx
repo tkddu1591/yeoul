@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
+import { shortenBranch, shortenParent, sourceChip, uniqueNames } from './worktree-label'
 import './worktrees-panel.css'
 
 export type WorktreeAction =
@@ -22,6 +23,8 @@ interface WorktreesPanelProps {
   currentPath: string | null
   /** 활성(터미널 대상) 워크트리 경로 */
   activePath: string | null
+  /** OS 홈 디렉터리 — `~` 축약·출처 칩에 쓴다(못 구하면 빈 문자열, 축약 없이 동작) (E7j) */
+  home: string
   busy: boolean
   onAction(action: WorktreeAction): void
 }
@@ -31,12 +34,16 @@ export function WorktreesPanel({
   worktrees,
   currentPath,
   activePath,
+  home,
   busy,
   onAction,
 }: WorktreesPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; worktree: WorktreeInfo } | null>(null)
 
   const folderName = (path: string) => path.split('/').filter(Boolean).pop() ?? path
+
+  // E7j — 리프 이름이 겹치면(codex·claude 구조에서 흔하다) 구분되는 조상까지 붙여 유일화한다
+  const names = uniqueNames(worktrees.map((worktree) => worktree.path))
 
   const buildMenu = (worktree: WorktreeInfo): ContextMenuEntry[] => {
     const isCurrent = worktree.path === currentPath
@@ -86,7 +93,11 @@ export function WorktreesPanel({
   }
 
   const branchLabel = (worktree: WorktreeInfo) =>
-    worktree.prunable ? '없어진 폴더' : (worktree.branch ?? '분리됨')
+    worktree.prunable
+      ? '없어진 폴더'
+      : worktree.branch !== null
+        ? shortenBranch(worktree.branch, 28)
+        : `분리됨 (${worktree.headHash?.slice(0, 7) ?? '?'})`
 
   return (
     <Panel title="워크트리" accessory={<Badge tone="git">worktree</Badge>} testId="worktrees-panel">
@@ -97,6 +108,8 @@ export function WorktreesPanel({
               key={worktree.path}
               type="button"
               className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
+              // E7j 편차: Task 6이 리치 카드로 대체할 때까지 네이티브 title을 그대로 둔다(플랜 명시 예외 —
+              // smoke.spec.ts가 이 title 단언을 유지한다). Task 6에서 data-tooltip 전환과 같은 커밋으로 지울 것
               title={worktree.path === currentPath ? `${worktree.path} — 지금 여기` : worktree.path}
               onClick={(event) =>
                 worktree.prunable
@@ -104,32 +117,41 @@ export function WorktreesPanel({
                   : onAction({
                       kind: 'select',
                       path: worktree.path,
-                      label: folderName(worktree.path),
+                      label: names.get(worktree.path) ?? folderName(worktree.path),
                     })
               }
               onContextMenu={(event) => openMenu(event, worktree)}
               data-testid={`worktree-row-${folderName(worktree.path)}`}
             >
-              <span
-                className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
-              >
-                {worktree.path === currentPath ? '➤' : '⌂'}
+              <span className="worktree-row__lines">
+                <span className="worktree-row__line">
+                  <span
+                    className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
+                  >
+                    {worktree.path === currentPath ? '➤' : '⌂'}
+                  </span>
+                  <span
+                    className={`worktree-row__branch${worktree.path === currentPath ? ' worktree-row__branch--here' : ''}`}
+                  >
+                    {branchLabel(worktree)}
+                  </span>
+                  <span className="worktree-row__source">{sourceChip(worktree.path, home)}</span>
+                  {worktree.path === activePath && (
+                    <Tooltip
+                      content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                      summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                    >
+                      <span className="worktree-row__terminal">❯_</span>
+                    </Tooltip>
+                  )}
+                </span>
+                <span className="worktree-row__line worktree-row__line--sub">
+                  <span className="worktree-row__name">
+                    {names.get(worktree.path) ?? folderName(worktree.path)}
+                  </span>
+                  <span className="worktree-row__path">{shortenParent(worktree.path, home)}</span>
+                </span>
               </span>
-              <span
-                className={`worktree-row__name${worktree.path === currentPath ? ' worktree-row__name--here' : ''}`}
-              >
-                {folderName(worktree.path)}
-              </span>
-              <span className="worktree-row__path">{worktree.path}</span>
-              {worktree.path === activePath && (
-                <Tooltip
-                  content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
-                  summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
-                >
-                  <span className="worktree-row__terminal">❯_</span>
-                </Tooltip>
-              )}
-              <span className="worktree-row__branch">{branchLabel(worktree)}</span>
             </button>
           ))}
           <button

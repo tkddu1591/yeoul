@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
@@ -172,6 +172,9 @@ export function registerGitHandlers(): void {
     assertOpenableWorktree(list, path)
     return registerRepoPath(path)
   })
+
+  // 워크트리 행 `~` 축약용 — repoPath 신뢰 규칙과 무관한 OS 정보라 별도 검증이 필요 없다 (E7j)
+  ipcMain.handle(CHANNELS.repoHome, () => app.getPath('home'))
 
   ipcMain.handle(CHANNELS.worktreesList, (_event, repoPath: unknown) =>
     createGitClient(assertAllowedRepo(repoPath)).worktrees.list(),

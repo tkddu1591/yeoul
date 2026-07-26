@@ -15,19 +15,19 @@
   font-size: var(--text-sm);
   color: var(--color-text-faint);
 }
+/* E7j — 두 줄 행: 1줄 브랜치(주 식별자)+출처, 2줄 이름+경로. 잘리는 쪽을 뒤가 아니라 앞으로 */
 .worktree-row {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-start;
   width: 100%;
-  padding: 2px var(--space-2);
-  border: none;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  font-size: var(--text-sm);
 }
 .worktree-row:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));
@@ -38,32 +38,44 @@
 .worktree-row--add {
   color: var(--color-text-faint);
 }
-.worktree-row__glyph {
-  width: 15px;
-  flex: none;
-  text-align: center;
+.worktree-row__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+.worktree-row__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.worktree-row__line--sub {
+  font-size: var(--text-xs);
   color: var(--color-text-faint);
 }
+.worktree-row__glyph {
+  width: 15px;
+  text-align: center;
+  opacity: 0.7;
+}
 .worktree-row__glyph--here {
+  opacity: 1;
   color: var(--concept-branch);
-  font-weight: 700;
 }
-.worktree-row__name {
-  flex: none;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.worktree-row__name--here {
-  font-weight: 700;
-}
-.worktree-row__path {
+.worktree-row__branch {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.worktree-row__branch--here {
+  font-weight: 600;
+}
+.worktree-row__source {
+  flex: none;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
 }
@@ -71,12 +83,21 @@
   flex: none;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--concept-branch);
 }
-.worktree-row__branch {
+.worktree-row__name {
   flex: none;
-  font-size: var(--text-xs);
-  color: var(--color-text-faint);
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree-row__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
 }
 .add-worktree__mode {
   margin-bottom: 10px;

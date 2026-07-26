@@ -91,6 +91,8 @@ export function App() {
   const [leftTab, setLeftTab] = useState<'changes' | 'branches' | 'worktrees'>('changes')
   // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함)
   const [activeWorktree, setActiveWorktree] = useState<{ cwd: string; label: string } | null>(null)
+  // E7j — 워크트리 행 `~` 축약용 홈 경로. 못 구하면 빈 문자열(순수 함수가 축약 없이 처리)
+  const [home, setHome] = useState('')
   const [addWorktreeOpen, setAddWorktreeOpen] = useState(false)
   const [confirmingRemoveWorktree, setConfirmingRemoveWorktree] = useState<{
     path: string
@@ -208,6 +210,13 @@ export function App() {
 
   useEffect(() => {
     void store.init()
+    // 마운트 시 1회만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // 실패해도 빈 문자열 유지 — 축약 없이 전체 경로가 보일 뿐 기능은 죽지 않는다 (E7j)
+    void window.gitApi.repo.home().then(setHome).catch(() => {})
     // 마운트 시 1회만 실행
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -704,6 +713,7 @@ export function App() {
               worktrees={store.worktrees}
               currentPath={store.repoPath}
               activePath={activeWorktree?.cwd ?? null}
+              home={home}
               busy={store.busy}
               onAction={(action) => {
                 switch (action.kind) {
