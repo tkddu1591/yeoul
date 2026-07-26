@@ -119,7 +119,9 @@ export function WorktreesPanel({
                 summary={worktree.path}
                 content={
                   <>
-                    <div className="ui-tooltip__title">{branchLabel(worktree)}</div>
+                    <div className="ui-tooltip__title">
+                      {worktree.branch ?? `분리됨 (${worktree.headHash?.slice(0, 7) ?? '?'})`}
+                    </div>
                     <div className="ui-tooltip__path">{worktree.path}</div>
                     <div className="ui-tooltip__meta">
                       출처 {sourceChip(worktree.path, home)}
