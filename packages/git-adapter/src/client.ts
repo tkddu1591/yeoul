@@ -768,6 +768,17 @@ export function createGitClient(repoPath: string): GitClient {
         const current = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path })
         // 기준 그 자신이면 분기점이라는 개념이 없다
         if (current.exitCode === 0 && current.stdout.trim() === base) return null
+        // 기준과 HEAD가 같은 커밋이면 분기라는 개념이 없다(origin/main과 로컬 main이 같은 경우 포함 — I-3)
+        const [baseSha, headSha] = await Promise.all([
+          execGit(['rev-parse', base], { cwd: path }),
+          execGit(['rev-parse', 'HEAD'], { cwd: path }),
+        ])
+        if (baseSha.exitCode === 0 && headSha.exitCode === 0 && baseSha.stdout.trim() === headSha.stdout.trim()) {
+          return null
+        }
+        // 공통 조상이 없으면(고아 계보) 갈라진 지점 자체가 없다 — 카운트는 나오지만 거짓말이 된다 (I-2)
+        const mergeBase = await execGit(['merge-base', base, 'HEAD'], { cwd: path })
+        if (mergeBase.exitCode !== 0) return null
         const counts = await execGit(
           ['rev-list', '--left-right', '--count', `${base}...HEAD`],
           { cwd: path },

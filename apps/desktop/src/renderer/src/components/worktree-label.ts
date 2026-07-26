@@ -70,5 +70,23 @@ export function shortenBranch(branch: string, max: number): string {
   // 네임스페이스가 없으면 잘리는 쪽(꼬리)에 표시를 남긴다 — 앞에 …를 붙이면 거짓말이 된다
   if (slash === -1) return `${branch.slice(0, max - 1)}…`
   const rest = branch.slice(slash + 1)
-  return `…${rest.length <= max - 1 ? rest : rest.slice(0, max - 1)}`
+  // 네임스페이스를 지운 뒤에도 길면 꼬리도 잘리는 것 — 양끝에 표시를 남긴다(E7j 보완 I-1).
+  // 앞만 …로 표시하면 꼬리가 무표시로 잘려 실제 문자가 아닌 곳에서 끝난 것처럼 읽힌다
+  return `…${rest.length <= max - 1 ? rest : `${rest.slice(0, max - 2)}…`}`
+}
+
+/**
+ * 2줄 경로 — 이름(uniqueNames)이 이미 보여주는 조각 위쪽만 표기한다 (E7j 보완 M-4).
+ * 이름이 `goofy/repo`면 경로는 `~/.claude/worktree/`까지만 — 같은 조각을 두 번 보여주지 않는다.
+ */
+export function shortenAbove(path: string, home: string, nameDepth: number, keep = 2): string {
+  const parts = segments(path)
+  const above = parts.slice(0, Math.max(0, parts.length - nameDepth))
+  if (above.length === 0) return '/'
+  const homeParts = segments(home)
+  const underHome = homeParts.length > 0 && homeParts.every((part, index) => above[index] === part)
+  const rest = underHome ? above.slice(homeParts.length) : above
+  if (underHome && rest.length === 0) return '~/'
+  if (rest.length <= keep) return `${underHome ? '~/' : '/'}${rest.join('/')}/`
+  return `…/${rest.slice(-keep).join('/')}/`
 }

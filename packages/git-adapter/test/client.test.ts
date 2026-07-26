@@ -2377,13 +2377,23 @@ describe('GitClient', () => {
       const wtPath = `${repo}-fork`
       await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'side'], { cwd: repo })
       await commitFile(wtPath, 'b.txt', 'b', 'side 저장')
-      await commitFile(repo, 'c.txt', 'c', 'main 저장')
+      // E7j 보완 M-1 — ahead/behind가 1/1 대칭이면 뒤바뀌어도 테스트가 못 잡는다. main 쪽을 2회로 늘려 방향 고정
+      await commitFile(repo, 'c.txt', 'c', 'main 저장 1')
+      await commitFile(repo, 'd.txt', 'd', 'main 저장 2')
       const fork = await createGitClient(repo).worktrees.forkPoint(wtPath)
       expect(fork).not.toBeNull()
       expect(fork!.base).toBe('main')
       expect(fork!.ahead).toBe(1)
-      expect(fork!.behind).toBe(1)
+      expect(fork!.behind).toBe(2)
       await execGitOrThrow(['worktree', 'remove', '--force', '--end-of-options', wtPath], { cwd: repo })
+    })
+
+    it('공통 조상이 없는 계보는 null이다', async () => {
+      const repo = await createFixtureRepo()
+      await commitFile(repo, 'a.txt', 'a', 'base')
+      await execGitOrThrow(['checkout', '-q', '--orphan', 'lonely'], { cwd: repo })
+      await commitFile(repo, 'b.txt', 'b', '고아 저장')
+      expect(await createGitClient(repo).worktrees.forkPoint(repo)).toBeNull()
     })
 
     it('기준 브랜치 자신인 워크트리는 null이다', async () => {
@@ -2398,9 +2408,14 @@ describe('GitClient', () => {
       const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
       const wtPath = `${repo}-detached`
       await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], { cwd: repo })
+      // E7j 보완 편차 — I-3(기준과 HEAD가 같은 커밋이면 null)이 생기면서 base와 완전히 같은 SHA에서
+      // 분리된 이 픽스처는 이제 정확히 null이 정답이 된다(원래 0/0 기대값은 I-3이 고치려던 바로 그 버그였다).
+      // "detached도 abbrev-ref가 아니라 HEAD 기준으로 정상 카운트된다"는 테스트 취지를 살리려면
+      // base와는 다른 커밋이어야 하므로, 분리 직후 한 저장을 더 쌓아 실제로 갈라지게 한다
+      await commitFile(wtPath, 'b.txt', 'b', 'detached 저장')
       const fork = await createGitClient(repo).worktrees.forkPoint(wtPath)
       expect(fork).not.toBeNull()
-      expect(fork!.ahead).toBe(0)
+      expect(fork!.ahead).toBe(1)
       expect(fork!.behind).toBe(0)
       await execGitOrThrow(['worktree', 'remove', '--force', '--end-of-options', wtPath], { cwd: repo })
     })

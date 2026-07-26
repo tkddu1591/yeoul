@@ -28,6 +28,8 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
+  /* E7j 보완 M-2 — 소실되어 워크트리 탭만 14px이던 것을 좌측 패널 공통 크기로 복구 */
+  font-size: var(--text-sm);
 }
 .worktree-row:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));
@@ -50,10 +52,14 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  /* E7j 보완 M-3 — 굵은 텍스트 줄만 살짝 더 높아져 생기던 0.5px 행 높이 튐을 명시적 최소 높이로 제거 */
+  min-height: 20px;
 }
 .worktree-row__line--sub {
   font-size: var(--text-xs);
   color: var(--color-text-faint);
+  /* E7j 보완 M-5 — 글리프(15px) + gap(8px)만큼 들여써 브랜치와 같은 x에서 시작 */
+  padding-left: 23px;
 }
 .worktree-row__glyph {
   width: 15px;
@@ -70,9 +76,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* E7j 보완 M-6 — 브랜치는 모든 행의 주 식별자라 굵기는 공통, "지금 여기"는 색으로만 구분 */
+  font-weight: 600;
 }
 .worktree-row__branch--here {
-  font-weight: 600;
+  color: var(--concept-branch);
 }
 .worktree-row__source {
   flex: none;
@@ -90,6 +98,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.worktree-row__dot {
+  flex: none;
+  opacity: 0.5;
 }
 .worktree-row__path {
   flex: 1;

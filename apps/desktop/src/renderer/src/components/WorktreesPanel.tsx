@@ -4,7 +4,7 @@ import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
-import { shortenBranch, shortenParent, sourceChip, uniqueNames } from './worktree-label'
+import { shortenAbove, shortenBranch, sourceChip, uniqueNames } from './worktree-label'
 import './worktrees-panel.css'
 
 export type WorktreeAction =
@@ -149,7 +149,14 @@ export function WorktreesPanel({
                   <span className="worktree-row__name">
                     {names.get(worktree.path) ?? folderName(worktree.path)}
                   </span>
-                  <span className="worktree-row__path">{shortenParent(worktree.path, home)}</span>
+                  <span className="worktree-row__dot">·</span>
+                  <span className="worktree-row__path">
+                    {shortenAbove(
+                      worktree.path,
+                      home,
+                      (names.get(worktree.path) ?? '').split('/').length,
+                    )}
+                  </span>
                 </span>
               </span>
             </button>

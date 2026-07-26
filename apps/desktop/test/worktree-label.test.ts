@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  shortenAbove,
   shortenBranch,
   shortenParent,
   sourceChip,
@@ -73,7 +74,9 @@ describe('shortenBranch', () => {
   })
 
   it('길면 앞을 생략해 뒤(구분 정보)를 살린다', () => {
-    expect(shortenBranch('claude/dw-1051-work-review-final', 20)).toBe('…dw-1051-work-review')
+    // E7j 보완 I-1 — 네임스페이스를 지운 뒤에도 길면 꼬리도 잘린다. 앞만 …로 표시하면
+    // 실제 문자가 아닌 곳에서 끝난 것처럼 읽혀 양끝에 표시를 남기도록 갱신(편차 보고 대상)
+    expect(shortenBranch('claude/dw-1051-work-review-final', 20)).toBe('…dw-1051-work-revie…')
   })
 
   it('네임스페이스가 없으면 잘린 꼬리 쪽에 표시를 남긴다', () => {
@@ -82,5 +85,21 @@ describe('shortenBranch', () => {
     expect(short.endsWith('…')).toBe(true)
     expect(short.startsWith('…')).toBe(false)
     expect(short).toBe('a-very-long-branch-name-wit…')
+  })
+
+  it('네임스페이스를 지운 뒤에도 길면 꼬리에도 표시를 남긴다', () => {
+    expect(shortenBranch('claude/dw-1051-work-review-final', 20)).toBe('…dw-1051-work-revie…')
+  })
+})
+
+describe('shortenAbove', () => {
+  // E7j 보완 편차: 플랜 예시값 '…/.claude/worktree/'는 함수 자체의 doc 주석 예시(~/.claude/worktree/)와
+  // 모순된다 — rest.length(2)<=keep(2)라 tilde 분기가 맞는 실제 동작이라 doc 주석 값으로 갱신
+  it('이름이 담은 조각 위쪽만 보여준다', () => {
+    expect(shortenAbove(`${HOME}/.claude/worktree/goofy/repo`, HOME, 2)).toBe('~/.claude/worktree/')
+  })
+
+  it('이름이 리프 하나면 부모까지 보여준다', () => {
+    expect(shortenAbove(`${HOME}/projects/repo`, HOME, 1)).toBe('~/projects/')
   })
 })
