@@ -1,7 +1,7 @@
 /* 긴 브랜치 이름이 최소창(960px) 헤더를 무너뜨리지 않게 말줄임한다 (리뷰 실측) */
 .branch-switcher__current {
   max-width: 180px;
-  min-width: 0;
+  min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
