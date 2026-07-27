@@ -2669,3 +2669,103 @@ test('E7j — 워크트리에 호버하면 전체 경로가 잘림 없이 보인
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E7k — 좁은 창에서도 앱이 가로로 스크롤되지 않는다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 긴 브랜치 이름이 방아쇠였다 — 그 상태로도 넘치지 않아야 한다
+  await execGitOrThrow(
+    ['checkout', '-q', '-b', 'feature/DW-1051-very-long-branch-name-for-header-overflow'],
+    { cwd: repo },
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    for (const width of [1200, 970]) {
+      await window.setViewportSize({ width, height: 800 })
+      // `.app { overflow: hidden }` 때문에 documentElement.scrollWidth는 항상 clientWidth와 같다 —
+      // 잘려도 통과하는 공허한 단언이 된다(리뷰 실측). 헤더 자체의 넘침과 마지막 버튼의
+      // 화면 안 여부로 본다 (E7k 보완)
+      const box = await window.evaluate(() => {
+        const header = document.querySelector('.app__header') as HTMLElement
+        const settings = document.querySelector('[data-testid="settings-open"]') as HTMLElement
+        return {
+          headerScrollW: header.scrollWidth,
+          headerClientW: header.clientWidth,
+          settingsRight: Math.round(settings.getBoundingClientRect().right),
+          innerW: window.innerWidth,
+          repoW: Math.round(
+            (document.querySelector('.app__repo') as HTMLElement).getBoundingClientRect().width,
+          ),
+        }
+      })
+      expect(box.headerScrollW).toBeLessThanOrEqual(box.headerClientW)
+      expect(box.settingsRight).toBeLessThanOrEqual(box.innerW)
+      expect(box.repoW).toBeGreaterThan(0)
+    }
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7k — 좁은 창에서는 헤더 라벨이 접히고 버튼은 계속 눌린다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 터미널 토글은 dockOpen을 settings.json에 영속한다(1533행 E7b 선례와 동일 사유) — 격리된
+  // userData가 없으면 이전 터미널 테스트가 남긴 열림 상태를 물려받아 이번 클릭이 반대로
+  // 닫아버린다 (실측: 전체 스위트·단독 재실행 모두에서 재현되는 결정적 실패 — E7k 편차 보정)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    await window.setViewportSize({ width: 1400, height: 800 })
+    await expect(window.getByTestId('pull').locator('.app__btn-label')).toBeVisible()
+    await window.setViewportSize({ width: 970, height: 800 })
+    await expect(window.getByTestId('pull').locator('.app__btn-label')).toBeHidden()
+    // 접힌 상태에서도 아이콘 버튼은 그대로 동작한다(터미널 도크 토글로 확인)
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치가 뜬다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'holder'], { cwd: repo })
+  const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+  const wtPath = `${repo}-detached`
+  await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    const row = window.getByTestId(`worktree-row-${wtPath.split('/').pop()}`)
+    await row.hover()
+    const tip = window.getByTestId('tooltip')
+    await expect(tip).toBeVisible()
+    // 제목(첫 저장 메시지)·포함 브랜치가 카드에 있다
+    await expect(tip).toContainText('holder')
+    await expect(tip).toContainText('에 포함된 저장')
+    // E7k 보완 — 분리 HEAD 자신이 (no branch) 유령으로 섞이지 않는다(회귀 방지)
+    await expect(tip).not.toContainText('(no branch)')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true }).catch(() => {})
+  }
+})
