@@ -1,5 +1,6 @@
 import { useState, type MouseEvent } from 'react'
-import type { ForkPoint, WorktreeInfo } from '@git-gui/domain'
+import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
+import { formatRelativeTime } from './relative-time'
 import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
@@ -25,9 +26,9 @@ interface WorktreesPanelProps {
   activePath: string | null
   /** OS 홈 디렉터리 — `~` 축약·출처 칩에 쓴다(못 구하면 빈 문자열, 축약 없이 동작) (E7j) */
   home: string
-  /** 분기점 캐시 — 키는 `경로::HEAD해시` (E7j) */
-  forkPoints: Record<string, ForkPoint | null>
-  /** 행에 마우스가 머물면 그 워크트리 하나만 분기점을 계산한다 */
+  /** HEAD 요약 캐시 — 키는 `경로::HEAD해시` (E7k) */
+  headInfos: Record<string, WorktreeHeadInfo | null>
+  /** 행에 마우스가 머물면 그 워크트리 하나만 조회한다 */
   onHoverWorktree(path: string, headHash: string | null): void
   busy: boolean
   onAction(action: WorktreeAction): void
@@ -39,7 +40,7 @@ export function WorktreesPanel({
   currentPath,
   activePath,
   home,
-  forkPoints,
+  headInfos,
   onHoverWorktree,
   busy,
   onAction,
@@ -110,9 +111,10 @@ export function WorktreesPanel({
       <div className="worktrees-panel">
         <div className="worktrees-panel__scroll" data-testid="worktrees-list">
           {worktrees.map((worktree) => {
-            // E7j — store의 forkPoints와 문자 단위로 일치해야 하는 캐시 키. 한 번만 계산해 재사용한다
-            const forkKey = `${worktree.path}::${worktree.headHash ?? ''}`
-            const fork = forkPoints[forkKey]
+            // E7j/E7k — store의 headInfos와 문자 단위로 일치해야 하는 캐시 키. 한 번만 계산해 재사용한다
+            const headKey = `${worktree.path}::${worktree.headHash ?? ''}`
+            const head = headInfos[headKey] ?? null
+            const fork = head?.fork ?? null
             return (
               <Tooltip
                 key={worktree.path}
@@ -126,6 +128,8 @@ export function WorktreesPanel({
                     <div className="ui-tooltip__meta">
                       출처 {sourceChip(worktree.path, home)}
                       {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
+                      {head !== null && ` · ${head.subject}`}
+                      {head !== null && ` · ${formatRelativeTime(head.committedAt, Date.now())}`}
                       {worktree.path === currentPath && ' · 지금 여기'}
                       {worktree.locked && ' · 잠김'}
                     </div>
@@ -137,6 +141,12 @@ export function WorktreesPanel({
                     {fork != null && (
                       <div className="ui-tooltip__meta">
                         {fork.base}에서 갈라짐 · {fork.ahead}개 앞섬 · {fork.behind}개 뒤처짐
+                      </div>
+                    )}
+                    {worktree.branch === null && head !== null && head.containedIn.length > 0 && (
+                      <div className="ui-tooltip__meta">
+                        {head.containedIn.join('·')}
+                        {head.containedTruncated && ' 외 여러 곳'}에 포함된 저장
                       </div>
                     )}
                   </>
