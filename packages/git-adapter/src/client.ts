@@ -801,12 +801,16 @@ export function createGitClient(repoPath: string): GitClient {
         // 제목·시각 — 커밋이 없으면(unborn) 카드에 담을 게 없다
         const head = await execGit(['log', '-1', '--format=%s%x1f%ct'], { cwd: path })
         if (head.exitCode !== 0) return null
-        const [subject = '', rawTime = ''] = head.stdout.trim().split('\x1f')
-        const committedAt = Number(rawTime)
+        // E7k 보완 — 제목에 US(\x1f) 구분자가 섞이면 2-요소 구조분해로는 시각이 NaN이 되어
+        // headInfo 전체가 null로 죽는다. 마지막 구분자 기준으로 나눠 제목 쪽 오염을 흡수한다
+        const raw = head.stdout.trim()
+        const cut = raw.lastIndexOf('\x1f')
+        const subject = cut >= 0 ? raw.slice(0, cut) : ''
+        const committedAt = Number(cut >= 0 ? raw.slice(cut + 1) : NaN)
         if (!Number.isFinite(committedAt)) return null
         // 포함 브랜치 — 분리됨 워크트리에서 "어디 소속인지"를 알려준다. 상한 3개
         const contains = await execGit(
-          ['branch', '--contains', 'HEAD', '--format=%(refname:short)'],
+          ['branch', '--contains', 'HEAD', '--format=%(refname)'],
           { cwd: path },
         )
         const all =
@@ -814,7 +818,9 @@ export function createGitClient(repoPath: string): GitClient {
             ? contains.stdout
                 .split('\n')
                 .map((line) => line.trim())
-                .filter((line) => line !== '')
+                // 분리 HEAD 자신은 `(no branch)`로 나온다 — refs/heads/ 접두가 아니라서 걸러진다 (E7k 보완)
+                .filter((line) => line.startsWith('refs/heads/'))
+                .map((line) => line.slice('refs/heads/'.length))
             : []
         return {
           subject,

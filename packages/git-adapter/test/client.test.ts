@@ -2467,6 +2467,18 @@ describe('GitClient', () => {
       await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
       expect(await createGitClient(repo).worktrees.headInfo(repo)).toBeNull()
     })
+
+    it('분리됨 워크트리의 포함 브랜치에 (no branch) 유령이 섞이지 않는다', async () => {
+      const repo = await createFixtureRepo()
+      await commitFile(repo, 'a.txt', 'a', 'base')
+      const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+      const wtPath = `${repo}-ghost`
+      await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], { cwd: repo })
+      const info = await createGitClient(repo).worktrees.headInfo(wtPath)
+      expect(info!.containedIn).not.toContain('(no branch)')
+      expect(info!.containedIn.every((name) => !name.includes('('))).toBe(true)
+      await execGitOrThrow(['worktree', 'remove', '--force', '--end-of-options', wtPath], { cwd: repo })
+    })
   })
 
   /** 원격에 to-vanish 브랜치가 있고 이 클론이 그것을 아는 상태 — prune 재현용 (E7e) */
