@@ -399,7 +399,7 @@ export function App() {
         <div className="app__actions">
           <Tooltip content={`${T.pull} (pull)`} summary={T.pull} describedBy={false}>
             <Button
-              variant="neutral"
+              variant="ghost"
               size="sm"
               isDisabled={store.busy || status?.state !== 'normal'}
               onPress={() => void store.pullLatest()}
@@ -440,7 +440,7 @@ export function App() {
           />
           <Tooltip content={`${T.push} (push)`} summary={T.push} describedBy={false}>
             <Button
-              variant="neutral"
+              variant="ghost"
               size="sm"
               isDisabled={store.busy}
               onPress={() => void store.backup()}

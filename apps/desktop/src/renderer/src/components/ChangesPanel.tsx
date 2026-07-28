@@ -251,7 +251,7 @@ function FileList({
                 onPress={() => setConfirmingDiscard(true)}
                 testId="discard-selected"
               >
-                변경 취소 ({validChecked.length})
+                변경 취소{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
               </Button>
             )}
             <Button
@@ -266,7 +266,7 @@ function FileList({
               ) : (
                 <CirclePlus size={13} aria-hidden="true" />
               )}
-              선택 {bulkLabel} ({validChecked.length})
+              선택 {bulkLabel}{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
             </Button>
           </div>
           <div ref={scrollRef} className="virtual-scroll" data-testid={`file-scroll-${side}`}>
@@ -337,14 +337,14 @@ function FileList({
                     ? [
                         {
                           key: 'unstage-file',
-                          label: '내리기 (unstage)',
+                          label: '내리기',
                           onSelect: () => onAction(actionPaths(menu.change, true)),
                         },
                       ]
                     : [
                         {
                           key: 'stage-file',
-                          label: '올리기 (stage)',
+                          label: '올리기',
                           onSelect: () => onAction(actionPaths(menu.change, false)),
                         },
                         {

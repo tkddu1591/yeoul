@@ -6,6 +6,10 @@
   padding: var(--space-3) var(--space-1) 0;
   border-top: 1px solid var(--color-border);
   flex: none;
+  /* E8 Task 5 — 위 목록이 content-sized(flex: 0 1 auto)로 바뀌면서 파일이 적을 때 좌측 열에
+     남는 여백이 생긴다. margin-top: auto로 그 여백을 폼 위로 모아 흡수시켜 폼을 항상
+     하단에 고정한다(실측: 269px 여백이 폼 아래로 새 버려 폼이 중간에 뜨는 문제를 이걸로 없앴다) */
+  margin-top: auto;
 }
 .commit-form__label {
   display: inline-flex;

@@ -184,8 +184,9 @@ body.is-fullscreen .app__header {
 .app__resizer:hover {
   background: var(--color-border-strong);
 }
-/* 좌측 열 = 변경 목록(flex 1) + 저장 폼(고정 푸터) — 세로 축소는 두 목록의 가상 스크롤이 흡수한다 (E6a).
-   두 목록('지금 바뀐 것'·'저장 예정')은 changes-panel.css의 flex 1로 남은 세로를 반씩 나눈다 */
+/* 좌측 열 = 변경 목록(flex 1, 뷰포트 기준 확정 높이) + 저장 폼(고정 푸터) — 세로 축소는
+   두 목록의 가상 스크롤이 흡수한다 (E6a). 두 목록('변경 사항'·'스테이지')은 changes-panel.css의
+   flex 0 1 auto로 내용만큼만 차지하다가, 합이 넘치면 그때 남은 세로를 나눠 갖는다 (E8) */
 .app__left {
   display: flex;
   flex-direction: column;
@@ -194,11 +195,19 @@ body.is-fullscreen .app__header {
   /* 좌측 관리 존은 도크 행까지 전체 높이 — 도크는 중앙+우측 아래에만 (E7b 스펙 v2) */
   grid-row: 1 / 3;
 }
+/* E8 — 반반 고정이라 파일 2~3개일 때 좌측에 수백 px가 비었다. 이 레벨(.changes-panel)은
+   원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다 — 가상 스크롤(react-virtual)의
+   스크롤포트가 자기 높이를 재려면 조상 중 어딘가는 반드시 "확정된" 높이여야 한다.
+   확정 높이가 아니라 이 레벨까지 내용 기준(auto)으로 바꿨더니 파일 1개+리사이즈 조합에서
+   가상 스크롤 컨테이너의 clientHeight가 0으로 굳어 행이 아예 안 그려지는 순환 참조 버그가
+   났다(실측: e2e '960px 최소 창' 케이스에서 재현, resize 이벤트 후 결정적으로 깨짐).
+   "내용만큼만 차지"는 대신 changes-panel.css의 안쪽 두 카드(.ui-panel)가 flex-grow:0으로
+   맡는다 — 바깥은 확정 높이, 안쪽은 내용 기준 축소만 허용해 순환을 끊는다 */
 .app__left > .changes-panel {
   flex: 1;
   min-height: 0;
 }
-/* 좌측 탭바 (E7a) — [변경 | 실험 공간]. 기본은 변경(커밋 흐름 무변), 워크트리 탭은 E7c 예약석.
+/* 좌측 탭바 (E7a) — [변경 | 브랜치]. 기본은 변경(커밋 흐름 무변), 워크트리 탭은 E7c 예약석.
    position+z-index — app__top-layer(머지/재배치 바, z-index 40)가 절대 위치로 app__main 상단을 덮는데,
    좌측 열의 첫 자식인 이 탭바가 바로 그 자리다. 겹치면 탭 클릭이 막힌다(E7a rebase 충돌 흐름 실측) —
    탭바를 그 위로 올려 상태 바가 떠 있어도 항상 눌린다 */
