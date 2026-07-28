@@ -51,7 +51,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
   return (
     <MenuTrigger isOpen={open} onOpenChange={setOpen}>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
-        <Pictogram kind="branch" size={13} label={`${T.branch} (branch)`} />
+        <Pictogram kind="branch" size={13} label={T.branch} />
         <span className="branch-switcher__current">{currentName ?? '(브랜치 없음)'}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>

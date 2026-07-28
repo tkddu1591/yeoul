@@ -1418,7 +1418,7 @@ test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속�
     await window.getByTestId('left-tab-branches').click()
     await window.getByTestId('branch-row-main').click({ button: 'right' })
     await window.getByTestId('context-rebase').click()
-    await window.getByRole('button', { name: `${T.rebase} (rebase)` }).click()
+    await window.getByRole('button', { name: T.rebase }).click()
     // 충돌 — 4겸용 상태 바 + 진행 표시(실측 2: msgnum/end)
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.commit} ${T.rebase} 중 (1개 중 1번째)`)
     // 변경 탭의 ! 파일에서 해결 — rebase 라벨 반전(초록=새 기반, 보라=재배치 중인 내 저장)
@@ -2772,5 +2772,142 @@ test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치�
     await app.close()
     await rm(repo, { recursive: true, force: true })
     await rm(wtPath, { recursive: true, force: true }).catch(() => {})
+  }
+})
+
+/** 여러 파일을 만들고 그중 일부만 올린(staged) 저장소 — 목록 길이 비대칭 재현용 (E8) */
+async function createRepoWithManyChanges(total: number, stagedCount: number): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'git-gui-e2e-'))
+  await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: dir })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: dir })
+  for (let i = 0; i < total; i += 1) {
+    await writeFile(join(dir, `file-${i}.txt`), 'v1\n')
+  }
+  await execGitOrThrow(['add', '-A'], { cwd: dir })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: dir })
+  for (let i = 0; i < total; i += 1) {
+    await writeFile(join(dir, `file-${i}.txt`), 'v2\n')
+  }
+  const stagedFiles = Array.from({ length: stagedCount }, (_, i) => `file-${i}.txt`)
+  if (stagedFiles.length > 0) {
+    await execGitOrThrow(['add', '--', ...stagedFiles], { cwd: dir })
+  }
+  return dir
+}
+
+test('E8 — 커밋 버튼은 스테이지가 비면 사유와 함께 비활성이다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('commit-button')).toBeDisabled()
+    await expect(window.getByTestId('commit-hint')).toContainText('올린 파일이 없어요')
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('commit-button')).toBeEnabled()
+    await expect(window.getByTestId('commit-button')).toHaveText(T.commit)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E8 — 화면에 영문 개념 배지가 남아 있지 않다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    const words = [
+      'unstaged',
+      'staged',
+      'commit',
+      'log',
+      'merge',
+      'pull',
+      'push',
+      'stash',
+      'branch',
+      'worktree',
+      'diff',
+      'conflict',
+      'PR',
+    ]
+    for (const word of words) {
+      await expect(window.locator('.ui-badge', { hasText: new RegExp(`^${word}$`) })).toHaveCount(0)
+    }
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E8 — 변경이 없으면 목록이 빈 상자로 자리를 먹지 않는다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    // E8 — 내용 기반 크기는 .changes-panel 자신(flex:1, 열 전체를 채우는 확정 높이)이 아니라
+    // 그 안의 두 카드(.ui-panel)가 flex:0 1 auto로 담당한다 (changes-panel.css 실측)
+    const heights = await window.evaluate(() =>
+      Array.from(document.querySelectorAll('.app__left > .changes-panel .ui-panel')).map(
+        (el) => (el as HTMLElement).getBoundingClientRect().height,
+      ),
+    )
+    expect(heights.length).toBe(2)
+    // 첫 카드('변경 사항', last-child 아님)는 flex:0 1 auto — 빈 문구 하나만큼만 차지한다.
+    // 예전에는 두 카드 모두 flex:1이라 빈 목록도 컨테이너 절반을 억지로 차지했다(실측 회귀 방지).
+    // 마지막 카드('스테이지', 커밋 버튼 바로 위)는 반대로 flex-grow:1로 남는 공간을 의도적으로
+    // 흡수해 그 아래 빈 배경이 남지 않게 한다(changes-panel.css 주석 실측) — 그래서 여기서는
+    // 검사하지 않는다: 크게 나오는 게 정상이다
+    expect(heights[0]).toBeLessThan(200)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E8 — 목록 길이가 크게 다를 때 짧은 쪽 카드가 눌려 사라지지 않는다', async () => {
+  const repo = await createRepoWithManyChanges(30, 2)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    // 스테이지 패널 제목·개수 배지가 보인다 — 0 높이로 눌리면 h2/배지 자체가 attached여도 안 보인다
+    await expect(window.getByRole('heading', { name: T.staged })).toBeVisible()
+    await expect(window.getByTestId('staged-count')).toBeVisible()
+    await expect(window.getByTestId('staged-count')).toHaveText('2')
+    // 짧은 쪽(스테이지) 행이 실제로 그려진다 — 가상 스크롤 clientHeight 0이면 attached라도 행이 없다
+    await expect(window.getByTestId('file-staged-file-0.txt')).toBeVisible()
+    const box = await window.evaluate(() => {
+      const container = document.querySelector('.changes-panel') as HTMLElement
+      const panels = Array.from(document.querySelectorAll('.app__left > .changes-panel .ui-panel')) as HTMLElement[]
+      return {
+        containerHeight: container.getBoundingClientRect().height,
+        panelHeights: panels.map((p) => p.getBoundingClientRect().height),
+      }
+    })
+    expect(box.panelHeights.length).toBe(2)
+    for (const h of box.panelHeights) {
+      expect(h).toBeLessThanOrEqual(box.containerHeight * 0.7 + 1)
+    }
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
   }
 })

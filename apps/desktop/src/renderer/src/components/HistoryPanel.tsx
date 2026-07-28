@@ -302,13 +302,13 @@ export function HistoryPanel({
       },
       {
         key: 'revert',
-        label: `이 ${T.commit} ${T.revert} (revert)`,
+        label: `이 ${T.commit} ${T.revert}`,
         disabled: actionsDisabled,
         onSelect: () => onAction({ kind: 'revert', hash: commit.hash }),
       },
       {
         key: 'undo-last',
-        label: isHead ? `${T.undoCommit} (undo)` : `${T.undoCommit} (undo) — 가장 최근 ${T.commit}에서만`,
+        label: isHead ? T.undoCommit : `${T.undoCommit} — 가장 최근 ${T.commit}에서만`,
         disabled: actionsDisabled || !isHead,
         onSelect: () => onAction({ kind: 'undo', hash: commit.hash }),
       },
@@ -322,7 +322,7 @@ export function HistoryPanel({
       },
       {
         key: 'tag-here',
-        label: '태그 만들기… (tag)',
+        label: '태그 만들기…',
         onSelect: () => onAction({ kind: 'tag', hash: commit.hash }),
       },
       { key: 'sep-2', separator: true },

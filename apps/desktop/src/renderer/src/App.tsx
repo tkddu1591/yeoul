@@ -1163,7 +1163,7 @@ export function App() {
       <ConfirmDialog
         isOpen={confirmingRebase !== null}
         title={`"${confirmingRebase?.name}" 위로 ${T.rebase}할까요?`}
-        confirmLabel={`${T.rebase} (rebase)`}
+        confirmLabel={T.rebase}
         onConfirm={() => {
           const name = confirmingRebase?.name ?? null
           setConfirmingRebase(null)

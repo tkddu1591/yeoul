@@ -93,16 +93,16 @@ export function BranchesPanel({
       {
         key: 'merge',
         label: isCurrent
-          ? `지금 것과 ${T.merge} (merge) — 자기 자신이에요`
-          : `지금 것과 ${T.merge} (merge)`,
+          ? `지금 것과 ${T.merge} — 자기 자신이에요`
+          : `지금 것과 ${T.merge}`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'merge', name: branch.name }),
       },
       {
         key: 'rebase',
         label: isCurrent
-          ? `지금 것을 이 위로 ${T.rebase} (rebase) — 자기 자신이에요`
-          : `지금 것을 이 위로 ${T.rebase} (rebase)`,
+          ? `지금 것을 이 위로 ${T.rebase} — 자기 자신이에요`
+          : `지금 것을 이 위로 ${T.rebase}`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'rebase', name: branch.name }),
       },
@@ -127,7 +127,7 @@ export function BranchesPanel({
       },
       {
         key: 'backup',
-        label: `${T.push} (push)`,
+        label: T.push,
         disabled: busy || actionsDisabled,
         onSelect: () => onAction({ kind: 'backup', name: branch.name }),
       },
