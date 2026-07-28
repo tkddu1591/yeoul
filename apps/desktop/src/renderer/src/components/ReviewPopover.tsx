@@ -158,7 +158,10 @@ export function ReviewPopover({
                     <ul className="review-popover__list">
                       {pulls.map((pull) => (
                         <li key={pull.number} className="review-popover__row">
-                          <Tooltip content="코멘트·승인·병합 보기" summary="코멘트·승인·병합 보기">
+                          <Tooltip
+                            content={`코멘트·${T.approve}·${T.merge} 보기`}
+                            summary={`코멘트·${T.approve}·${T.merge} 보기`}
+                          >
                             <button
                               type="button"
                               className="review-popover__pull"

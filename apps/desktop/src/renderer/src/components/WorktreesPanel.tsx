@@ -80,7 +80,7 @@ export function WorktreesPanel({
         label: worktree.isMain
           ? '지우기 — 본체는 지울 수 없어요'
           : isCurrent
-            ? '지우기 — 지금 열고 있는 워크트리예요'
+            ? `지우기 — 지금 열고 있는 ${T.worktree}예요`
             : '지우기… (worktree remove)',
         disabled: busy || worktree.isMain || isCurrent,
         onSelect: () => onAction({ kind: 'remove', path: worktree.path }),
@@ -214,7 +214,7 @@ export function WorktreesPanel({
             onClick={() => onAction({ kind: 'add' })}
             data-testid="worktree-add"
           >
-            ＋ 새 워크트리…
+            ＋ 새 {T.worktree}…
           </button>
         </div>
       </div>

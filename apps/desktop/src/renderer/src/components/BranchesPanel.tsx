@@ -78,8 +78,8 @@ export function BranchesPanel({
       {
         key: 'switch',
         label: isCurrent
-          ? `이 공간으로 이동 — ${T.head}예요`
-          : '이 공간으로 이동',
+          ? `이 ${T.branch}로 이동 — ${T.head}예요`
+          : `이 ${T.branch}로 이동`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'switch', name: branch.name }),
       },
@@ -140,7 +140,7 @@ export function BranchesPanel({
       },
       {
         key: 'remove',
-        label: isCurrent ? '지우기 — 지금 있는 공간이에요' : '지우기…',
+        label: isCurrent ? `지우기 — 지금 있는 ${T.branch}예요` : '지우기…',
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'remove', name: branch.name }),
       },
@@ -150,7 +150,7 @@ export function BranchesPanel({
   const buildRemoteMenu = (name: string): ContextMenuEntry[] => [
     {
       key: 'checkout-remote',
-      label: '내 공간으로 가져오기',
+      label: `내 ${T.branch}로 가져오기`,
       disabled: busy || actionsDisabled,
       onSelect: () => onAction({ kind: 'checkout-remote', name }),
     },
@@ -205,7 +205,7 @@ export function BranchesPanel({
       </>
     )
     return (
-      <Panel title={`지금 ↔ "${compare.name}"`} testId="branches-panel">
+      <Panel title={`지금 ↔ "${compare.name}"`} titleHint="compare" testId="branches-panel">
         <div className="branches-panel">
           <div>
             {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
@@ -224,13 +224,13 @@ export function BranchesPanel({
               `"${compare.name}"에만 있는 ${T.commit}`,
               result.onlyInSelected,
               result.selectedOverflow,
-              '없어요 — 전부 지금 공간에도 있어요.',
+              `없어요 — 전부 지금 ${T.branch}에도 있어요.`,
             )}
             {section(
-              `지금 공간에만 있는 ${T.commit}`,
+              `지금 ${T.branch}에만 있는 ${T.commit}`,
               result.onlyInCurrent,
               result.currentOverflow,
-              '없어요 — 전부 그 공간에도 있어요.',
+              `없어요 — 전부 그 ${T.branch}에도 있어요.`,
             )}
           </div>
         </div>
@@ -389,7 +389,7 @@ export function BranchesPanel({
             </>
           ) : (
             <>
-              {locals.length > 0 && <p className="branches-panel__group">내 공간 (로컬)</p>}
+              {locals.length > 0 && <p className="branches-panel__group">로컬 {T.branch}</p>}
               {localRows.map((row) =>
                 row.node.kind === 'folder'
                   ? folderRow(row.node.path, row.node.name, row.node.count, row.depth)

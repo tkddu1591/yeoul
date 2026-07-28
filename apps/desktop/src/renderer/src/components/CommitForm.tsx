@@ -18,17 +18,16 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
   const effectiveMessage = message.trim().length > 0 ? message : suggestion
   const disabled = busy || (stagedCount === 0 && !allowEmpty) || effectiveMessage.trim().length === 0
 
-  // E8 — 버튼을 못 누르는 이유, 또는(누를 수는 있지만) 빈 채로 저장하면 위 제안 문구가 대신 쓰인다는 안내.
-  // 두 개념을 한 줄로 합쳐 "말로 상태를 알린다" — 카드 안에 늘 떠 있는 회색 줄 대신, 필요할 때만 뜬다.
+  // E8 마무리 — 버튼을 못 누르는 이유만 알린다. "빈 채로 저장하면 제안이 쓰인다"는 안내는
+  // placeholder가 이미 보여주고 있어(비워 두면: ...) 같은 뜻을 두 곳에 동시에 띄우던 걸 걷어냈다.
+  // 그래서 누를 수 있는 상태(제안이 있어 비워 둬도 되는 경우 포함)에는 이 줄이 빈 문자열이다.
   const reason = busy
     ? '작업 중이에요'
     : stagedCount === 0 && !allowEmpty
       ? `${T.staged}에 올린 파일이 없어요`
       : effectiveMessage.trim().length === 0
         ? `${T.commitMessage}를 적어 주세요`
-        : message.trim().length === 0 && suggestion.length > 0
-          ? `비워 두고 ${T.commit}하면 위 제안 문구로 ${T.commit}돼요`
-          : ''
+        : ''
 
   return (
     <form

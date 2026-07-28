@@ -12,15 +12,13 @@
    전부를 빼앗겨 헤더 아래로 눌린다(E8 Task 5 보완 실측: 200/3에서 스테이지 카드가
    14.9px까지 눌려 제목·배지·행이 전부 사라졌다 — overflow:hidden이라 잘리는 게 아니라
    가상 스크롤이 clientHeight 0을 재서 행을 아예 안 그린다). max-height로 한쪽이
-   70%를 넘게 눌리는 걸 막고, 스테이지 카드(:last-child, 커밋 버튼 바로 위)가 나머지를
-   흡수해 남는 배경도 없앤다 (E8 Task 5 보완 — Blocking 리뷰 실측) */
+   70%를 넘게 눌리는 걸 막는다. 남는 배경은 두 카드 아래(커밋 폼의 border-top 위)에
+   모이며 흡수되지 않는다 — 그쪽이 빈 카드를 늘려 채우는 것보다 낫다는 판단
+   (E8 마무리 — flex-grow:1 삭제, 이전 주석의 "나머지를 흡수" 주장은 실측과 달랐다) */
 .changes-panel > .ui-panel {
   flex: 0 1 auto;
   min-height: 0;
   max-height: 70%;
-}
-.changes-panel > .ui-panel:last-child {
-  flex-grow: 1;
 }
 .changes-panel__list {
   list-style: none;

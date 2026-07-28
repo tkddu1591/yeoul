@@ -27,7 +27,7 @@ function statusOf(view: PullDetailView): { label: string; raw: string } {
   if (view.detail.merged) return { label: '병합됨', raw: 'merged' }
   if (view.detail.state === 'closed') return { label: '닫힘', raw: 'closed' }
   if (view.comments.some((comment) => comment.state === 'approved')) {
-    return { label: '승인됨', raw: 'approved' }
+    return { label: `${T.approve}됨`, raw: 'approved' }
   }
   return { label: '열림', raw: 'open' }
 }
@@ -38,7 +38,7 @@ function CommentRow({ comment }: { comment: PullComment }) {
       <p className="review-detail__comment-meta">
         <strong>@{comment.author}</strong>
         <span>{formatRelativeTime(comment.createdAt, Date.now())}</span>
-        {comment.state === 'approved' && <Badge>승인했어요</Badge>}
+        {comment.state === 'approved' && <Badge>{T.approve}했어요</Badge>}
       </p>
       {comment.body !== '' && <p className="review-detail__comment-body">{comment.body}</p>}
     </li>

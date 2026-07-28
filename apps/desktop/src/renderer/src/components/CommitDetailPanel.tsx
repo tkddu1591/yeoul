@@ -145,6 +145,7 @@ export function CommitDetailPanel({
   return (
     <Panel
       title={shelfPreview ? `${T.stash} 내용` : `${T.commit} 내용`}
+      titleHint={shelfPreview ? 'stash' : 'commit'}
       accessory={
         <Button
           variant="ghost"

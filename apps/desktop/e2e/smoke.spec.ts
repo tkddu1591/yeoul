@@ -149,11 +149,11 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
       'placeholder',
       '비워 두면: app.txt 수정',
     )
-    // E8 — commit-hint는 "못 누르는 사유"와 "빈 채로 저장하면 제안이 쓰인다는 안내"를 한 줄로 합쳤다.
-    // 지금 상태(1개 스테이지·메시지 비움·제안 있음)는 후자라 정확한 안내 문구가 그대로 보여야 한다.
-    await expect(window.getByTestId('commit-hint')).toHaveText(
-      '비워 두고 커밋하면 위 제안 문구로 커밋돼요',
-    )
+    // E8 마무리 — commit-hint는 이제 "못 누르는 사유"만 나타낸다. 제안이 쓰인다는 안내는
+    // placeholder 하나로 합쳐졌으므로(위 단언), 지금 상태(1개 스테이지·메시지 비움·제안 있음)는
+    // 누를 수 있는 상태라 힌트가 비어 있고 버튼도 눌려야 정상이다.
+    await expect(window.getByTestId('commit-hint')).toHaveText('')
+    await expect(window.getByTestId('commit-button')).toBeEnabled()
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
     await window.getByTestId('commit-button').click()
@@ -2867,12 +2867,12 @@ test('E8 — 변경이 없으면 목록이 빈 상자로 자리를 먹지 않는
       ),
     )
     expect(heights.length).toBe(2)
-    // 첫 카드('변경 사항', last-child 아님)는 flex:0 1 auto — 빈 문구 하나만큼만 차지한다.
-    // 예전에는 두 카드 모두 flex:1이라 빈 목록도 컨테이너 절반을 억지로 차지했다(실측 회귀 방지).
-    // 마지막 카드('스테이지', 커밋 버튼 바로 위)는 반대로 flex-grow:1로 남는 공간을 의도적으로
-    // 흡수해 그 아래 빈 배경이 남지 않게 한다(changes-panel.css 주석 실측) — 그래서 여기서는
-    // 검사하지 않는다: 크게 나오는 게 정상이다
+    // 두 카드 모두 flex:0 1 auto — 빈 문구 하나만큼만 차지한다(E8 마무리: flex-grow:1 삭제).
+    // 예전에는 두 카드 모두 flex:1이라 빈 목록도 컨테이너 절반을 억지로 차지했고,
+    // 그 다음엔 마지막 카드만 flex-grow:1로 남는 공간을 흡수해 430px까지 늘어났다 —
+    // 둘 다 회귀다(실측 회귀 방지)
     expect(heights[0]).toBeLessThan(200)
+    expect(heights[1]).toBeLessThan(200)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

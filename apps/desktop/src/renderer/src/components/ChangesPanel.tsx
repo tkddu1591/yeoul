@@ -218,6 +218,7 @@ function FileList({
   return (
     <Panel
       title={title}
+      titleHint={side}
       accessory={
         <Badge tone="count">
           <span data-testid={countTestId}>{changes.length}</span>

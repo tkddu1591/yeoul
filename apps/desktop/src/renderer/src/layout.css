@@ -184,12 +184,13 @@ body.is-fullscreen .app__header {
 .app__resizer:hover {
   background: var(--color-border-strong);
 }
-/* 좌측 열 = 변경 목록(flex 1, 뷰포트 기준 확정 높이) + 저장 폼(고정 푸터) — 세로 축소는
+/* 좌측 열 = 변경 목록(flex 1, 뷰포트 기준 확정 높이) + 커밋 폼(고정 푸터) — 세로 축소는
    두 목록의 가상 스크롤이 흡수한다 (E6a). 두 목록('변경 사항'·'스테이지')은 changes-panel.css의
    flex 0 1 auto로 내용만큼만 차지한다. 합이 넘치면 "남은 세로를 나눠 갖는" 게 아니라
    flex-shrink가 flex-basis 비율로 깎아 짧은 쪽을 거의 다 눌러버린다 — 그래서
-   changes-panel.css가 max-height:70%로 하한을 걸고, 스테이지 카드(:last-child)만
-   flex-grow:1로 남는 공간을 흡수한다 (E8 Task 5 보완 — Blocking 리뷰 실측) */
+   changes-panel.css가 max-height:70%로 짧은 쪽이 눌리는 하한을 건다. 남는 세로는 두 카드
+   아래(커밋 폼의 border-top 위)에 그대로 남는다 — 흡수하지 않는다(E8 마무리 —
+   flex-grow:1 삭제, changes-panel.css 실측 참조) */
 .app__left {
   display: flex;
   flex-direction: column;

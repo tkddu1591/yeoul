@@ -134,7 +134,7 @@ export function ConflictPanel({
   }
 
   return (
-    <Panel title={`${path} — ${T.conflict} 해결`} testId="conflict-panel">
+    <Panel title={`${path} — ${T.conflict} 해결`} titleHint="conflict" testId="conflict-panel">
       {view === 'cards' ? (
         <>
           <p className="conflict-panel__hint">
@@ -298,7 +298,7 @@ export function ConflictPanel({
       ) : (
         <>
           <p className="conflict-panel__hint">
-            합쳐진 결과를 직접 고칠 수 있어요. 남은 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)도
+            병합 결과를 직접 고칠 수 있어요. 남은 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)도
             그대로 보여요 — 표시 줄까지 지우고 원하는 내용만 남긴 뒤 저장해 주세요. 저장해도 확정은
             아니에요.
           </p>
@@ -332,7 +332,7 @@ export function ConflictPanel({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             spellCheck={false}
-            aria-label="합쳐진 결과 직접 수정"
+            aria-label="병합 결과 직접 수정"
             data-testid="conflict-edit-text"
           />
         </>

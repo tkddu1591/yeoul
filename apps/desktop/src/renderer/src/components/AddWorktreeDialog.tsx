@@ -80,7 +80,7 @@ export function AddWorktreeDialog({
       <Modal className="ui-modal">
         <Dialog className="ui-dialog">
           <Heading slot="title" className="ui-dialog__title">
-            새 워크트리 만들기
+            새 {T.worktree} 만들기
           </Heading>
           <p className="ui-dialog__body">
             {T.branch}를 새 폴더에 함께 펼쳐요. 같은 {T.branch}는 한 폴더에서만 열 수 있어요.

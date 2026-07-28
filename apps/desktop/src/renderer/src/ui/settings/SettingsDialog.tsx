@@ -77,7 +77,7 @@ export function SettingsDialog({
               {category === 'general' ? (
                 <>
                   <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">워크트리 선택 시 동작</legend>
+                    <legend className="settings-dialog__label">{T.worktree} 선택 시 동작</legend>
                     <label className="settings-dialog__radio">
                       <input
                         type="radio"
@@ -96,7 +96,7 @@ export function SettingsDialog({
                         onChange={() => onChangeWorktreeSelectAction('switch-app')}
                         data-testid="settings-worktree-switch"
                       />
-                      앱 전체 전환 — 변경·{T.history}·{T.branch}도 그 워크트리 기준으로 바뀌어요
+                      앱 전체 전환 — 변경·{T.history}·{T.branch}도 그 {T.worktree} 기준으로 바뀌어요
                     </label>
                     <p className="settings-dialog__desc">
                       우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.

@@ -55,7 +55,7 @@ export function ManageBranchesDialog({
               {T.branch} 관리
             </Heading>
             <p className="ui-dialog__body">
-              이름을 바꾸거나 다 쓴 {T.branch}를 지워요. 지금 있는 공간은 지울 수 없어요.
+              이름을 바꾸거나 다 쓴 {T.branch}를 지워요. 지금 있는 {T.branch}는 지울 수 없어요.
             </p>
             <ul className="manage-branches__list">
               {branches.map((branch) => (
@@ -132,7 +132,7 @@ export function ManageBranchesDialog({
         }}
         onCancel={() => setRemoveTarget(null)}
       >
-        "{removeTarget}" {T.branch}를 지워요. 다른 공간에 {T.merge}된 내용은 그대로 남아요.
+        "{removeTarget}" {T.branch}를 지워요. 다른 {T.branch}에 {T.merge}된 내용은 그대로 남아요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={forceTarget !== null}

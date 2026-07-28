@@ -515,7 +515,7 @@ export function App() {
         title={
           confirmingRemoveWorktree?.force === true
             ? `${T.commit} 안 된 변경이 있어요 — 그래도 지울까요?`
-            : '워크트리를 지울까요?'
+            : `${T.worktree}를 지울까요?`
         }
         confirmLabel={confirmingRemoveWorktree?.force === true ? '그래도 지우기' : '지우기'}
         onConfirm={() => {
@@ -539,7 +539,7 @@ export function App() {
       >
         {confirmingRemoveWorktree?.force === true
           ? `그 폴더의 ${T.commit} 안 된 변경이 함께 사라져요. 되돌릴 수 없어요.`
-          : `워크트리 폴더가 디스크에서 지워져요. ${T.history}와 ${T.branch}는 그대로예요.`}
+          : `${T.worktree} 폴더가 디스크에서 지워져요. ${T.history}와 ${T.branch}는 그대로예요.`}
       </ConfirmDialog>
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
@@ -646,7 +646,7 @@ export function App() {
               onClick={() => setLeftTab('worktrees')}
               data-testid="left-tab-worktrees"
             >
-              워크트리
+              {T.worktree}
             </button>
           </div>
           {leftTab === 'changes' ? (
@@ -966,8 +966,8 @@ export function App() {
         title={`새 ${T.branch} 만들기`}
         description={
           branchPrompt?.fromHash != null
-            ? `우클릭한 ${T.commit} 시점에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.`
-            : '지금 위치에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.'
+            ? `우클릭한 ${T.commit} 시점에서 갈라져 나와요. 만들면 바로 그 ${T.branch}로 이동해요.`
+            : `지금 위치에서 갈라져 나와요. 만들면 바로 그 ${T.branch}로 이동해요.`
         }
         label="이름"
         placeholder="예: try-new-design"
@@ -985,7 +985,7 @@ export function App() {
       <ListDialog
         isOpen={mergePicker}
         title={`어느 ${T.branch}를 ${T.merge}할까요?`}
-        description={`고른 공간의 ${T.commit} 내용을 지금 공간으로 가져와 ${T.merge}해요. ${T.commit} 안 된 변경이 ${T.conflict}하면 ${T.stash}에 넣고 진행해요.`}
+        description={`고른 ${T.branch}의 ${T.commit} 내용을 지금 ${T.branch}로 가져와 ${T.merge}해요. ${T.commit} 안 된 변경이 ${T.conflict}하면 ${T.stash}에 넣고 진행해요.`}
         options={store.branches
           .filter((branch) => !branch.isCurrent)
           .map((branch) => ({ key: branch.name, label: branch.name }))}
@@ -1171,13 +1171,13 @@ export function App() {
         }}
         onCancel={() => setConfirmingRebase(null)}
       >
-        지금 공간의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩 해결하는 화면이
-        열려요. 이미 {T.push}한 공간이라면 원격과 어긋날 수 있어요.
+        지금 {T.branch}의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩 해결하는 화면이
+        열려요. 이미 {T.push}한 {T.branch}라면 원격과 어긋날 수 있어요.
       </ConfirmDialog>
       <PromptDialog
         isOpen={renamePrompt !== null}
         title={`${T.branch} 이름 바꾸기`}
-        description={`이 공간의 이름만 바뀌어요. ${T.commit} 내용은 그대로예요.`}
+        description={`이 ${T.branch}의 이름만 바뀌어요. ${T.commit} 내용은 그대로예요.`}
         label="새 이름"
         placeholder="예: feature/login"
         submitLabel="바꾸기"
@@ -1223,13 +1223,13 @@ export function App() {
         onCancel={() => setConfirmingRemove(null)}
       >
         {confirmingRemove?.force === true
-          ? `이 공간에만 있는 ${T.commit}은 함께 사라져요. 되돌릴 수 없어요.`
+          ? `이 ${T.branch}에만 있는 ${T.commit}은 함께 사라져요. 되돌릴 수 없어요.`
           : `다른 곳에 ${T.merge}된 ${T.commit}은 남아요. ${T.merge}되지 않은 ${T.commit}이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveWithWorktree !== null}
-        title={`워크트리가 이 ${T.branch}를 쓰는 중이에요 — 같이 지울까요?`}
-        confirmLabel="워크트리도 지우고 계속"
+        title={`${T.worktree}가 이 ${T.branch}를 쓰는 중이에요 — 같이 지울까요?`}
+        confirmLabel={`${T.worktree}도 지우고 계속`}
         onConfirm={() => {
           const target = confirmingRemoveWithWorktree
           setConfirmingRemoveWithWorktree(null)
@@ -1252,9 +1252,9 @@ export function App() {
         }}
         onCancel={() => setConfirmingRemoveWithWorktree(null)}
       >
-        {`"${confirmingRemoveWithWorktree?.name}"은 워크트리 "${
+        {`"${confirmingRemoveWithWorktree?.name}"은 ${T.worktree} "${
           confirmingRemoveWithWorktree?.worktreePath.split('/').pop() ?? ''
-        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. 워크트리를 지우면 그 폴더가 사라져요 — ${T.commit} 안 된 변경이 있으면 한 번 더 물어봐요.`}
+        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. ${T.worktree}를 지우면 그 폴더가 사라져요 — ${T.commit} 안 된 변경이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveRemote !== null}

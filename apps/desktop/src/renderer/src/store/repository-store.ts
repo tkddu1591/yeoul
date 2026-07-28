@@ -559,7 +559,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().shelf.save(repoPath, '직접 보관')
+      await git().shelf.save(repoPath, '직접 스태시')
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
@@ -994,8 +994,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
         notice: result.autoShelved
-          ? `원격 "${name}"을 내 공간으로 가져와 이동했어요. ${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
-          : `원격 "${name}"을 내 공간으로 가져와 이동했어요.`,
+          ? `원격 "${name}"을 내 ${T.branch}로 가져와 이동했어요. ${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : `원격 "${name}"을 내 ${T.branch}로 가져와 이동했어요.`,
       })
     })
   },
@@ -1080,7 +1080,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await git().worktrees.add(repoPath, path, branch, createBranch === true)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: `"${branch}" 워크트리를 만들었어요.`,
+        notice: `"${branch}" ${T.worktree}를 만들었어요.`,
       })
     })
   },
@@ -1095,7 +1095,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       if (result.removed) {
         set({
           ...(await fetchSnapshot(repoPath, get().historyLimit)),
-          notice: '워크트리를 지웠어요.',
+          notice: `${T.worktree}를 지웠어요.`,
         })
       }
     })
@@ -1522,7 +1522,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       }
       set({
         pullDetail: refreshed,
-        notice: `${T.pullRequest} #${number}을 승인했어요.`,
+        notice: `${T.pullRequest} #${number}을 ${T.approve}했어요.`,
       })
     })
   },
