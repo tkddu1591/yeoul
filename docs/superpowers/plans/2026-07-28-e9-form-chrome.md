@@ -480,3 +480,37 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 2. **자리표시자**: 없음. 모든 CSS·TSX 블록이 완본이고, "실독하라"고 쓴 3곳(`Button.tsx` 관용·`createRepoWithChange()` 최초 커밋 제목·README E8 문단 위치)은 **플랜이 알 수 없는 값**이라 의도적으로 지시로 남겼다.
 3. **타입 정합**: `variant="soft"`가 T3 Step 1(사용)보다 Step 3(정의)에 늦게 나온다 — 같은 태스크·같은 커밋 안이고 Step 1에 경고를 달았다. `status`/`submit`은 T3 안에서 정의·사용이 닫힌다. `--radius-*` 새 이름은 T1에서 정의되고 T2가 소비한다(순서 맞음).
 4. **알려진 위험**: T2 Step 1~4의 `sed -i ''`는 macOS 전용 형식이다(이 저장소는 darwin). 치환 후 Step 6 grep이 안전망이다.
+
+---
+
+## 최종 통합 리뷰 (`main..af83117`) — 판정 `Fix Important first` → 보완 `5676898`로 폐쇄
+
+**I-1 (핵심) — `.ui-button--primary[data-disabled]`는 폐기된 라운드의 잔재였다.** git 고고학이 결론을 냈다: 라운드 2(`bff57b3`)에서 이 규칙은 **`.ui-button--soft[data-disabled]`**로, 버튼 **한 개**가 쓰는 변형에 한정돼 있었다. 라운드 3(`80998c0`)이 soft를 폐기하면서 규칙을 **지우는 대신 셀렉터를 `primary`로 갈아끼워** 사정거리가 1 → **10개 버튼**으로 조용히 넓어졌다.
+
+| | 라이트 | 다크 |
+| --- | --- | --- |
+| 활성 primary 채움 vs surface | 5.54:1 | 5.89:1 |
+| **비활성** primary 채움 vs surface | **4.71:1** | **4.81:1** |
+| 활성 neutral 테두리 vs surface | 1.47:1 | 1.57:1 |
+
+비활성이 활성의 **82~85% 무게**를, 활성 neutral의 **약 3배**를 갖게 됐고, 활성/비활성 구분이 **색상 하나**에만 실렸다 — `tokens.css`가 스스로 "색만으로 전달하지 않는다"고 적어 둔 앱에서. **최악은 `ReviewDetailPanel.tsx:152-171`**: 승인하기(neutral)와 병합하기(primary)가 **같은 `isDisabled={busy || settled}`** 인데 하나는 유령처럼 흐려지고 하나는 **불투명 슬레이트 단색 — 패널에서 가장 시끄러운 컨트롤, 아래의 활성 버튼들보다 더 강하다.** 병합된 PR에서 사용자는 못 누르는 쪽을 누를 수 있는 것으로 읽는다.
+
+**규칙의 명분이 낡은 실측이었다** — "전역 opacity가 도형을 지운다"는 **soft의 옅은 면(1.08~1.16:1)** 기준이었고 그 변형은 이제 없다. 규칙 삭제 후 실측: 비활성 커밋 버튼 **2.00:1(라이트) / 2.27:1(다크)** — 사라지지 않으며 **활성 neutral 테두리(1.47/1.57)보다 오히려 잘 보인다.** 컨트롤러 육안 확인.
+
+**I-2 — 토큰 주석이 코드와 어긋났다.** 회수는 값 보존 리네임(`sm→control`·`lg→container`)이었는데 새 주석은 코드가 따르지 않는 용도를 6곳에서 주장했다(팝오버 4곳은 control, `.history-view-pill`은 container, `.conflict-card`는 control). 픽셀 회귀는 없지만 **`tokens.css`는 이제 다음 사람이 믿을 유일한 문서**이고, 그 문서를 믿고 "고치는" 순간 E9가 없애려던 드리프트가 되돌아온다. 조치: 팝오버·중첩 카드는 **주석을 코드에 맞췄고**(작은 부유 면이 6px인 건 의도적 선택으로 방어 가능), `.history-view-pill`만 **코드를 `--radius-pill`로 바꿨다**(이름이 알약인데 알약 토큰을 안 쓰는 쪽이 헷갈린다). 실측 부수 효과: 이 요소는 높이 15.5px라 10px 반경이 이미 half-height를 넘어 **우연히 완전한 알약이었다** — 픽셀 변화 0, 순수 의미 정정.
+
+**M-1 — 대비 테스트 신규 쌍이 동어반복이었다.** `contrast()`가 인자를 밝기순 정렬하므로 `['--color-surface','--color-text-faint',3]`은 이미 있던 `['--color-text-faint','--color-surface',4.5]`와 **수학적으로 동일**하고 기준만 약했다 — 37행이 먼저 실패하지 않는 한 절대 실패할 수 없다. 즉 이 에픽의 단위 테스트 증가분 +2가 **커버리지 0**이었다. 삭제(525 → **523**). 삭제 후 `--color-text-faint`를 저채도로 낮춰 37행이 여전히 크게 실패(1.51 < 4.5)함을 확인 — 진짜 가드는 살아 있다.
+
+**M-2 — 컴포저 버튼 포커스 링이 잘렸다.** `overflow: hidden` + foot padding 4px + `outline 2px/offset 2px` = 여유 **정확히 0.00px**, 게다가 상자의 6px 모서리 호가 안쪽을 파고들어 우하단이 잘렸다. `overflow: clip` + `overflow-clip-margin: 4px`로 해결, 6배 확대로 네 모서리 온전 확인.
+
+**M-3 — IME 가드가 테스트 없는 사본이었다.** `CommitForm`이 `key === 'Enter' && !isComposing`을 인라인 복사했는데, `ui/keyboard.ts:2`의 `isSubmitEnter()`가 `PromptDialog`가 쓰고 **`keyboard.test.ts`가 유일하게 덮는** 함수다. 런타임 검증이 불가능한 바로 그 동작이 테스트 없는 사본으로 나갈 뻔했다 → 헬퍼 재사용(meta/ctrl 요구는 컴포저 전용이라 유지).
+
+**N — `aria-keyshortcuts="Meta+Enter"` 추가**(`aria-hidden` kbd가 감춘 단축키를 스크린리더에 되돌려줌), `commit-form.css` 거짓 주석 정정(`Button`은 `className`을 받는다).
+
+**리뷰가 검증한 정상 항목:** 이중 제출 불가(textarea Enter는 폼을 제출하지 않아 ⌘↵ 경로는 하나) · `busy` 재진입 불가(`repository-store.ts:379-380`의 `guard()`가 **await 이전에 동기적으로** `busy` 검사·설정) · `busy` 전환 중 파랑 버튼은 `transition: background 0.12s`의 의도된 크로스페이드지 상태 불일치가 아니다 · 왼쪽 슬롯은 5개 분기 전부 리터럴이라 **어떤 입력으로도 빈 문자열이 안 된다** · `label[for]`↔`textarea[id]` 연결이 상자 래퍼를 넘어 살아 있고 접근명은 `커밋`/`병합 마무리` 정확 · soft 잔재 0건 · 모서리 회수 완전(`--radius-sm/md/lg` 0건, `.ts/.tsx` 내 `border-radius` 0건, 예외 2건만 생존, `--radius-pill` 7곳 정상) · 테스트 무결성(삭제·skip·약화 0, 두 단언 변경 모두 1:1 이상).
+
+**최종 게이트(컨트롤러 재실행):** typecheck 6/6 · 루트 **523** · build 성공 · e2e **99**.
+
+**리뷰의 정직한 단서 2개(기록):** ① **모서리 비율은 거의 안 변했다** — 옛 9px/30px = 30%, 새 6px/24px = **25%**. 지금 괜찮아 보이는 건 버튼이 작고 앵커돼 모서리가 더는 지배적 인상이 아니기 때문이지, 비율을 고쳐서가 아니다. ② IME 조합 중 ⌘↵는 **여전히 런타임 미검증** — 리뷰어도 네이티브 한글 조합을 주입하지 못했고, 코드 수준 동등성만 확인했다.
+
+**후속(범위 밖으로 남김):** 스펙이 약속한 "얇은 포커스 링 전역 승격" 미이행 — 현재 텍스트 입력 포커스 관용이 **3종** 공존한다(컴포저 1px 테두리+링 / `prompt-dialog`·`review-detail` 2px outline offset 1 / 나머지는 `base.css` 2px offset 2). 전역 변경이라 병합 시점에 하지 않는다.
