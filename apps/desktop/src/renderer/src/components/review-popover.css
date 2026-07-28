@@ -1,7 +1,7 @@
 .review-popover {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   box-shadow: var(--shadow-2);
   width: 380px;
 }
@@ -62,7 +62,7 @@
   padding: var(--space-2) 4px;
   text-align: left;
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: inherit;
   font-size: var(--text-sm);
 }
@@ -80,7 +80,7 @@
   font-family: var(--font-mono);
   font-size: 10px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
@@ -95,7 +95,7 @@
   margin: 0;
   padding: var(--space-2) 4px;
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--color-text-muted);
 }
 .review-popover__pull-external:hover {

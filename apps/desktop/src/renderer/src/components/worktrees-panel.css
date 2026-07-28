@@ -23,7 +23,7 @@
   gap: var(--space-2);
   padding: var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -129,7 +129,7 @@
   color: inherit;
   background: transparent;
   border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 .add-worktree__error {
   margin: 0 0 8px;

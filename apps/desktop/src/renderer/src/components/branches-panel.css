@@ -21,7 +21,7 @@
   color: inherit;
   background: transparent;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
 }
 .branches-panel__scroll {
   flex: 1;
@@ -47,7 +47,7 @@
   width: 100%;
   padding: 2px var(--space-2);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   text-align: left;

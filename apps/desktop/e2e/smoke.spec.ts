@@ -149,10 +149,9 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
       'placeholder',
       '비워 두면: app.txt 수정',
     )
-    // E8 마무리 — commit-hint는 이제 "못 누르는 사유"만 나타낸다. 제안이 쓰인다는 안내는
-    // placeholder 하나로 합쳐졌으므로(위 단언), 지금 상태(1개 스테이지·메시지 비움·제안 있음)는
-    // 누를 수 있는 상태라 힌트가 비어 있고 버튼도 눌려야 정상이다.
-    await expect(window.getByTestId('commit-hint')).toHaveText('')
+    // E9 — commit-hint(왼쪽 슬롯)는 이제 항상 무언가를 말한다. 지금 상태(1개 스테이지·메시지
+    // 비움·제안 있음)는 누를 수 있는 상태라 "몇 개 파일"을 커밋하는지를 보여준다.
+    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일')
     await expect(window.getByTestId('commit-button')).toBeEnabled()
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
@@ -2809,7 +2808,8 @@ test('E8 — 커밋 버튼은 스테이지가 비면 사유와 함께 비활성�
     await window.getByTestId('check-unstaged-app.txt').click()
     await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('commit-button')).toBeEnabled()
-    await expect(window.getByTestId('commit-button')).toHaveText(T.commit)
+    // E9 — 버튼에 ⌘↵ 단축키 힌트(kbd)가 라벨 옆에 붙는다
+    await expect(window.getByTestId('commit-button')).toHaveText(`${T.commit}⌘↵`)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -2906,6 +2906,75 @@ test('E8 — 목록 길이가 크게 다를 때 짧은 쪽 카드가 눌려 사�
     for (const h of box.panelHeights) {
       expect(h).toBeLessThanOrEqual(box.containerHeight * 0.7 + 1)
     }
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E9 — ⌘↵로 커밋된다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await window.getByTestId('commit-message').fill('e2e: 단축키 커밋')
+    await window.getByTestId('commit-message').press('ControlOrMeta+Enter')
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
+    expect(log.stdout.trim()).toBe('e2e: 단축키 커밋')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E9 — 커밋 불가 상태에서는 ⌘↵가 무시된다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 아무것도 스테이지하지 않은 채 메시지만 채운다 — 버튼도 비활성이어야 한다
+    await window.getByTestId('commit-message').fill('e2e: 눌리면 안 되는 커밋')
+    await expect(window.getByTestId('commit-button')).toBeDisabled()
+    await window.getByTestId('commit-message').press('ControlOrMeta+Enter')
+    // "아무 일도 안 일어남"을 시간 대기가 아니라 git 상태로 증명한다 —
+    // createRepoWithChange()의 최초 커밋 제목('init')이 그대로인지 확인
+    const log = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
+    expect(log.stdout.trim()).toBe('init')
+    const count = await execGitOrThrow(['log', '--oneline'], { cwd: repo })
+    expect(count.stdout.trim().split('\n')).toHaveLength(1)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E9 — 왼쪽 슬롯이 항상 상태를 말한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    // ① 아무것도 스테이지하지 않은 상태
+    await expect(window.getByTestId('commit-hint')).toContainText('올린 파일이 없어요')
+    // ② 1개 스테이지 후 — E8에서는 이 자리가 빈 문자열이라 높이 0이었다.
+    // 정확 문구 + 가시성을 함께 걸어 그 회귀를 잡는다
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일')
+    await expect(window.getByTestId('commit-hint')).toBeVisible()
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

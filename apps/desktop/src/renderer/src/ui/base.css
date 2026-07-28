@@ -38,6 +38,7 @@ select {
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
+  /* 스크롤바 썸은 폭이 8px 남짓이라 control(6px)이면 원이 된다 — 의도적 예외 */
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;

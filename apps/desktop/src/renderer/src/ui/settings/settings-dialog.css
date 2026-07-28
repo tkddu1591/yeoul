@@ -21,7 +21,7 @@
   appearance: none;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 5px 10px;
   font-size: var(--text-sm);
   color: inherit;
