@@ -69,9 +69,20 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
           <span className="commit-form__status" data-testid="commit-hint">
             {status}
           </span>
-          <Button variant="soft" size="sm" type="submit" isDisabled={disabled} testId="commit-button">
+          <Button
+            variant="soft"
+            size="sm"
+            type="submit"
+            isDisabled={disabled}
+            testId="commit-button"
+            // E9 보완 — kbd가 라벨 안에 있으면 접근명이 "커밋⌘↵"가 된다. kbd는 aria-hidden으로 빼고
+            // 접근명은 명시적으로 준다 (ShelfPopover 선례)
+            aria-label={allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
+          >
             {allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
-            <kbd className="commit-form__kbd">⌘↵</kbd>
+            <kbd className="commit-form__kbd" aria-hidden="true">
+              ⌘↵
+            </kbd>
           </Button>
         </div>
       </div>
