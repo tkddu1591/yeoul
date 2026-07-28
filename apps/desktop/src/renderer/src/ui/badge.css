@@ -8,12 +8,6 @@
   background: var(--color-surface-sunken);
   color: var(--color-text-muted);
 }
-.ui-badge--git {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  background: var(--term-badge-bg);
-  color: var(--term-badge);
-}
 .ui-badge--count {
   min-width: 22px;
   justify-content: center;

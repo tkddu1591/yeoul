@@ -147,9 +147,13 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
     // 제안이 placeholder로 보이고, 빈 채로 저장하면 그 문구로 저장된다는 안내가 뜬다
     await expect(window.getByTestId('commit-message')).toHaveAttribute(
       'placeholder',
-      'app.txt 수정',
+      '비워 두면: app.txt 수정',
     )
-    await expect(window.getByTestId('commit-hint')).toBeVisible()
+    // E8 — commit-hint는 "못 누르는 사유"와 "빈 채로 저장하면 제안이 쓰인다는 안내"를 한 줄로 합쳤다.
+    // 지금 상태(1개 스테이지·메시지 비움·제안 있음)는 후자라 정확한 안내 문구가 그대로 보여야 한다.
+    await expect(window.getByTestId('commit-hint')).toHaveText(
+      '비워 두고 커밋하면 위 제안 문구로 커밋돼요',
+    )
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
     await window.getByTestId('commit-button').click()
