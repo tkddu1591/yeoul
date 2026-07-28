@@ -149,10 +149,9 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
       'placeholder',
       '비워 두면: app.txt 수정',
     )
-    // E8 마무리 — commit-hint는 이제 "못 누르는 사유"만 나타낸다. 제안이 쓰인다는 안내는
-    // placeholder 하나로 합쳐졌으므로(위 단언), 지금 상태(1개 스테이지·메시지 비움·제안 있음)는
-    // 누를 수 있는 상태라 힌트가 비어 있고 버튼도 눌려야 정상이다.
-    await expect(window.getByTestId('commit-hint')).toHaveText('')
+    // E9 — commit-hint(왼쪽 슬롯)는 이제 항상 무언가를 말한다. 지금 상태(1개 스테이지·메시지
+    // 비움·제안 있음)는 누를 수 있는 상태라 "몇 개 파일"을 커밋하는지를 보여준다.
+    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일')
     await expect(window.getByTestId('commit-button')).toBeEnabled()
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
@@ -2809,7 +2808,8 @@ test('E8 — 커밋 버튼은 스테이지가 비면 사유와 함께 비활성�
     await window.getByTestId('check-unstaged-app.txt').click()
     await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('commit-button')).toBeEnabled()
-    await expect(window.getByTestId('commit-button')).toHaveText(T.commit)
+    // E9 — 버튼에 ⌘↵ 단축키 힌트(kbd)가 라벨 옆에 붙는다
+    await expect(window.getByTestId('commit-button')).toHaveText(`${T.commit}⌘↵`)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

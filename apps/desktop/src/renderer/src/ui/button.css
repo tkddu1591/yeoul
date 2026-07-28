@@ -28,6 +28,19 @@
 .ui-button--primary[data-pressed] {
   background: var(--color-accent-active);
 }
+/* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 옅은 배경 + 진한 글자로 무게를 낮춘다 */
+.ui-button--soft {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-soft-text);
+}
+.ui-button--soft[data-hovered] {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.ui-button--soft[data-pressed] {
+  background: var(--color-accent-active);
+  color: var(--color-accent-text);
+}
 .ui-button--neutral {
   background: var(--color-surface);
   color: var(--color-text);
