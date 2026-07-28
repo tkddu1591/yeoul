@@ -186,7 +186,10 @@ body.is-fullscreen .app__header {
 }
 /* 좌측 열 = 변경 목록(flex 1, 뷰포트 기준 확정 높이) + 저장 폼(고정 푸터) — 세로 축소는
    두 목록의 가상 스크롤이 흡수한다 (E6a). 두 목록('변경 사항'·'스테이지')은 changes-panel.css의
-   flex 0 1 auto로 내용만큼만 차지하다가, 합이 넘치면 그때 남은 세로를 나눠 갖는다 (E8) */
+   flex 0 1 auto로 내용만큼만 차지한다. 합이 넘치면 "남은 세로를 나눠 갖는" 게 아니라
+   flex-shrink가 flex-basis 비율로 깎아 짧은 쪽을 거의 다 눌러버린다 — 그래서
+   changes-panel.css가 max-height:70%로 하한을 걸고, 스테이지 카드(:last-child)만
+   flex-grow:1로 남는 공간을 흡수한다 (E8 Task 5 보완 — Blocking 리뷰 실측) */
 .app__left {
   display: flex;
   flex-direction: column;
@@ -196,18 +199,22 @@ body.is-fullscreen .app__header {
   grid-row: 1 / 3;
 }
 /* E8 — 반반 고정이라 파일 2~3개일 때 좌측에 수백 px가 비었다. 이 레벨(.changes-panel)은
-   원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다 — 가상 스크롤(react-virtual)의
-   스크롤포트가 자기 높이를 재려면 조상 중 어딘가는 반드시 "확정된" 높이여야 한다.
-   확정 높이가 아니라 이 레벨까지 내용 기준(auto)으로 바꿨더니 파일 1개+리사이즈 조합에서
-   가상 스크롤 컨테이너의 clientHeight가 0으로 굳어 행이 아예 안 그려지는 순환 참조 버그가
-   났다(실측: e2e '960px 최소 창' 케이스에서 재현, resize 이벤트 후 결정적으로 깨짐).
-   "내용만큼만 차지"는 대신 changes-panel.css의 안쪽 두 카드(.ui-panel)가 flex-grow:0으로
-   맡는다 — 바깥은 확정 높이, 안쪽은 내용 기준 축소만 허용해 순환을 끊는다 */
+   원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다. "내용만큼만 차지"는 대신
+   changes-panel.css의 안쪽 두 카드(.ui-panel)가 flex:0 1 auto로 맡는다.
+   실제 원인 정정(E8 Task 5 보완 — Important 1 리뷰 실측): 파일 1개+리사이즈 조합에서
+   가상 스크롤 컨테이너의 clientHeight가 0으로 굳어 행이 안 그려지던 버그는 이 바깥 레벨의
+   flex 값과는 무관했다 — 바깥을 flex:0 1 auto로 바꿔도(안쪽 min-height:0 유지 시) 재현되지
+   않았다. 실제 원인은 안쪽(.ui-panel)에 flex-grow:1을 주고 바깥이 확정 높이가 아닐 때다:
+   grow:1은 "남는 공간을 채운다"인데 바깥 높이가 auto라 채울 남는 공간 자체가 정의되지 않아
+   스크롤포트가 순환 참조로 0에 고정된다. 안쪽을 flex:0 1 auto(min-height:0)로 두면 바깥이
+   확정 높이든 아니든 순환이 생기지 않는다 — 그래서 바깥은 원래 flex:1 그대로 두고,
+   Important 1 이전 버전의 "바깥은 반드시 확정 높이여야 한다"는 설명은 폐기한다 */
 .app__left > .changes-panel {
   flex: 1;
   min-height: 0;
 }
-/* 좌측 탭바 (E7a) — [변경 | 브랜치]. 기본은 변경(커밋 흐름 무변), 워크트리 탭은 E7c 예약석.
+/* 좌측 탭바 (E7a) — [변경 | 브랜치 | 워크트리] 3탭, 기본은 변경(커밋 흐름 무변). 워크트리 탭은
+   E7c에서 실렸다(E8 Task 5 보완 — 이 줄이 "E7c 예약석"이라던 옛 설명은 폐기).
    position+z-index — app__top-layer(머지/재배치 바, z-index 40)가 절대 위치로 app__main 상단을 덮는데,
    좌측 열의 첫 자식인 이 탭바가 바로 그 자리다. 겹치면 탭 클릭이 막힌다(E7a rebase 충돌 흐름 실측) —
    탭바를 그 위로 올려 상태 바가 떠 있어도 항상 눌린다 */

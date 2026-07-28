@@ -282,7 +282,7 @@ export function HistoryPanel({
     if (switchTarget !== null) {
       entries.push({
         key: 'switch-here',
-        label: `"${switchTarget}" ${T.branch}로 이동 (switch)`,
+        label: `"${switchTarget}" ${T.branch}로 이동`,
         disabled: actionsDisabled,
         onSelect: () => onAction({ kind: 'switch', branch: switchTarget }),
       })
@@ -315,8 +315,8 @@ export function HistoryPanel({
       {
         key: 'reword',
         label: isHead
-          ? `${T.commitMessage} 고치기… (amend)`
-          : `${T.commitMessage} 고치기 (amend) — 가장 최근 ${T.commit}에서만`,
+          ? `${T.commitMessage} 고치기…`
+          : `${T.commitMessage} 고치기 — 가장 최근 ${T.commit}에서만`,
         disabled: actionsDisabled || !isHead,
         onSelect: () => onAction({ kind: 'reword', hash: commit.hash, subject: commit.subject }),
       },

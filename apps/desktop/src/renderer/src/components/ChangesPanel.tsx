@@ -29,7 +29,7 @@ interface ChangesPanelProps {
   onUnstage(paths: string[]): void
   /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
   onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
-  /** 우클릭 → "파일 삭제 (delete)" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
+  /** 우클릭 → "파일 삭제" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
   onRemoveFile(path: string): void
   onSelect(selected: SelectedFile): void
 }
@@ -349,12 +349,12 @@ function FileList({
                         },
                         {
                           key: 'discard-file',
-                          label: '이 파일만 되돌리기 (discard)',
+                          label: '이 파일만 되돌리기',
                           onSelect: () => setMenuDiscard(menu.change),
                         },
                         {
                           key: 'remove-file',
-                          label: '파일 삭제 (delete)',
+                          label: '파일 삭제',
                           onSelect: () => setMenuRemove(menu.change),
                         },
                       ]

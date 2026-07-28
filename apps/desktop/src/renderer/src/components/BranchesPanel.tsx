@@ -78,8 +78,8 @@ export function BranchesPanel({
       {
         key: 'switch',
         label: isCurrent
-          ? `이 공간으로 이동 (checkout) — ${T.head}예요`
-          : '이 공간으로 이동 (checkout)',
+          ? `이 공간으로 이동 — ${T.head}예요`
+          : '이 공간으로 이동',
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'switch', name: branch.name }),
       },
@@ -116,7 +116,7 @@ export function BranchesPanel({
       {
         key: 'update',
         label: isCurrent
-          ? '원격 최신으로 업데이트 (pull)'
+          ? '원격 최신으로 업데이트'
           : noUpstream
             ? '원격 최신으로 업데이트 — 원격과 연결된 적이 없어요'
             : branch.upstreamGone
@@ -150,7 +150,7 @@ export function BranchesPanel({
   const buildRemoteMenu = (name: string): ContextMenuEntry[] => [
     {
       key: 'checkout-remote',
-      label: '내 공간으로 가져오기 (checkout)',
+      label: '내 공간으로 가져오기',
       disabled: busy || actionsDisabled,
       onSelect: () => onAction({ kind: 'checkout-remote', name }),
     },
