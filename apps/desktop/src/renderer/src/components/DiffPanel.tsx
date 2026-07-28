@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { DiffView } from './DiffView'
+import { T } from '../terms'
 import './diff-panel.css'
 
 interface DiffPanelProps {
@@ -33,7 +34,7 @@ export function DiffPanel({
 
   if (!path || diff === null) {
     return (
-      <Panel title="변경 내용" testId="diff-panel">
+      <Panel title={T.diff} testId="diff-panel">
         <p className="diff-panel__empty">파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
       </Panel>
     )

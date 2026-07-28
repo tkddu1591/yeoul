@@ -287,7 +287,7 @@ test('토큰 연결 상태에서 리뷰 요청을 만들고 목록에서 본다'
     // 제목 기본값 = 현재 실험 공간의 최근 저장 제목
     await expect(window.getByTestId('prompt-input')).toHaveValue('실험 작업')
     await window.getByTestId('prompt-submit').click()
-    await expect(window.getByTestId('notice')).toContainText('리뷰 요청 #1')
+    await expect(window.getByTestId('notice')).toContainText('풀 리퀘스트 #1')
     // mock 상태에 실제 반영됐다 — upstream이 있어 push는 건너뛰었다(실행됐다면 실 push 실패로 죽는다)
     expect(mock.pulls).toHaveLength(1)
     expect(mock.pulls[0]).toMatchObject({ title: '실험 작업', head: 'feature', base: 'main' })

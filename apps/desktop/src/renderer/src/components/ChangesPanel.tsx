@@ -11,6 +11,7 @@ import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { FindBar } from './FindBar'
+import { T } from '../terms'
 import './changes-panel.css'
 import './virtual.css'
 
@@ -439,7 +440,7 @@ export function ChangesPanel({
         />
       )}
       <FileList
-        title="지금 바뀐 것"
+        title={T.unstaged}
         termBadge="unstaged"
         countTestId="unstaged-count"
         emptyText="바뀐 파일이 없어요"
@@ -455,7 +456,7 @@ export function ChangesPanel({
         onSelect={onSelect}
       />
       <FileList
-        title="저장 예정"
+        title={T.staged}
         termBadge="staged"
         countTestId="staged-count"
         emptyText="파일을 올리면 여기에 모여요"

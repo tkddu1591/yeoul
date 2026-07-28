@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Tooltip } from '../ui/Tooltip'
 import { formatRelativeTime } from './relative-time'
 import { parseShelfMessage } from './shelf-message'
+import { T } from '../terms'
 import './shelf-popover.css'
 
 interface ShelfPopoverProps {
@@ -31,16 +32,16 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
   return (
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-        <Tooltip content="보관함" summary="보관함" describedBy={false}>
-          <Button variant="ghost" size="sm" testId="shelf-open" aria-label="보관함">
-            <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">보관함</span>{' '}
+        <Tooltip content={T.stash} summary={T.stash} describedBy={false}>
+          <Button variant="ghost" size="sm" testId="shelf-open" aria-label={T.stash}>
+            <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">{T.stash}</span>{' '}
             <Badge tone="count">
               <span data-testid="shelf-count">{shelf.length}</span>
             </Badge>
           </Button>
         </Tooltip>
         <Popover className="shelf-popover">
-          <Dialog className="shelf-popover__dialog" aria-label="보관함">
+          <Dialog className="shelf-popover__dialog" aria-label={T.stash}>
             <div className="shelf-popover__head">
               <span>
                 잠시 치워 둔 변경 <Badge tone="git">stash</Badge>
@@ -51,7 +52,8 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
             </div>
             {shelf.length === 0 ? (
               <p className="shelf-popover__empty">
-                비어 있어요. 실험 공간을 옮길 때 겹치는 변경이 있으면 자동으로 담기기도 해요.
+                비어 있어요. {T.branch}을 옮길 때 {T.conflict}하는 변경이 있으면 자동으로 담기기도
+                해요.
               </p>
             ) : (
               <ul className="shelf-popover__list">
@@ -109,7 +111,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
       </DialogTrigger>
       <ConfirmDialog
         isOpen={dropTarget !== null}
-        title="보관함 항목을 버릴까요?"
+        title={`${T.stash} 항목을 버릴까요?`}
         confirmLabel="버리기"
         onConfirm={() => {
           if (dropTarget !== null) onDrop(dropTarget.ref)

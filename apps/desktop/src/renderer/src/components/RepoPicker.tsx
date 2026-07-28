@@ -1,6 +1,7 @@
 import { FolderOpen } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Pictogram } from '../ui/Pictogram'
+import { T } from '../terms'
 import './repo-picker.css'
 
 interface RepoPickerProps {
@@ -21,7 +22,7 @@ export function RepoPicker({ onOpen, error }: RepoPickerProps) {
         <p className="repo-picker__desc">
           프로젝트 폴더를 열면 바뀐 파일을 확인하고
           <br />
-          안전하게 저장할 수 있어요.
+          안전하게 {T.commit}할 수 있어요.
         </p>
         <Button variant="primary" onPress={onOpen} testId="open-repo">
           <FolderOpen size={16} aria-hidden="true" /> 저장소 열기

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { T } from '../terms'
 import './commit-form.css'
 
 interface CommitFormProps {
@@ -30,7 +31,7 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
       }}
     >
       <label className="commit-form__label" htmlFor="commit-message">
-        저장 메시지 <Badge tone="git">commit</Badge>
+        {T.commitMessage} <Badge tone="git">commit</Badge>
       </label>
       <textarea
         id="commit-message"
@@ -41,13 +42,13 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
         rows={3}
       />
       {message.trim().length === 0 && suggestion.length > 0 && (
-        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 저장 문구임을 알린다
+        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 커밋 문구임을 알린다
         <p className="commit-form__hint" data-testid="commit-hint">
-          비워 두고 저장하면 위 제안 문구로 저장돼요
+          비워 두고 {T.commit}하면 위 제안 문구로 {T.commit}돼요
         </p>
       )}
       <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
-        저장하기 — {allowEmpty && stagedCount === 0 ? '합치기 마무리' : `${stagedCount}개 파일`}
+        {T.commit} — {allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : `${stagedCount}개 파일`}
       </Button>
     </form>
   )

@@ -6,6 +6,7 @@ import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { PromptDialog } from '../ui/PromptDialog'
 import { Tooltip } from '../ui/Tooltip'
+import { T } from '../terms'
 import './manage-branches.css'
 import '../ui/confirm-dialog.css'
 
@@ -51,10 +52,10 @@ export function ManageBranchesDialog({
         <Modal className="ui-modal">
           <Dialog className="ui-dialog manage-branches">
             <Heading slot="title" className="ui-dialog__title">
-              실험 공간 관리
+              {T.branch} 관리
             </Heading>
             <p className="ui-dialog__body">
-              이름을 바꾸거나 다 쓴 실험 공간을 지워요. 지금 있는 공간은 지울 수 없어요.
+              이름을 바꾸거나 다 쓴 {T.branch}를 지워요. 지금 있는 공간은 지울 수 없어요.
             </p>
             <ul className="manage-branches__list">
               {branches.map((branch) => (
@@ -62,7 +63,7 @@ export function ManageBranchesDialog({
                   <Tooltip content={branch.name} summary={branch.name}>
                     <span className="manage-branches__name">
                       {branch.name}
-                      {branch.isCurrent && <span className="manage-branches__here">지금 여기</span>}
+                      {branch.isCurrent && <span className="manage-branches__here">{T.head}</span>}
                     </span>
                   </Tooltip>
                   <Button
@@ -100,7 +101,7 @@ export function ManageBranchesDialog({
       <PromptDialog
         isOpen={renameTarget !== null}
         title="이름 바꾸기"
-        description="이 실험 공간의 새 이름을 지어 주세요."
+        description={`이 ${T.branch}의 새 이름을 지어 주세요.`}
         label="새 이름"
         placeholder="예: better-name"
         submitLabel="바꾸기"
@@ -117,7 +118,7 @@ export function ManageBranchesDialog({
       />
       <ConfirmDialog
         isOpen={removeTarget !== null}
-        title="실험 공간을 지울까요?"
+        title={`${T.branch}를 지울까요?`}
         confirmLabel="지우기"
         onConfirm={() => {
           void (async () => {
@@ -131,11 +132,11 @@ export function ManageBranchesDialog({
         }}
         onCancel={() => setRemoveTarget(null)}
       >
-        "{removeTarget}" 실험 공간을 지워요. 다른 공간에 합쳐진 내용은 그대로 남아요.
+        "{removeTarget}" {T.branch}를 지워요. 다른 공간에 {T.merge}된 내용은 그대로 남아요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={forceTarget !== null}
-        title="아직 합쳐지지 않은 저장이 있어요"
+        title={`아직 ${T.merge}되지 않은 ${T.commit}이 있어요`}
         confirmLabel="그래도 지우기"
         onConfirm={() => {
           const name = forceTarget
@@ -144,8 +145,8 @@ export function ManageBranchesDialog({
         }}
         onCancel={() => setForceTarget(null)}
       >
-        "{forceTarget}"에는 다른 곳에 합쳐지지 않은 저장이 있어요. 지우면 그 저장들은 사라지고
-        되돌릴 수 없어요.
+        "{forceTarget}"에는 다른 곳에 {T.merge}되지 않은 {T.commit}이 있어요. 지우면 그 {T.commit}들은
+        사라지고 되돌릴 수 없어요.
       </ConfirmDialog>
     </>
   )

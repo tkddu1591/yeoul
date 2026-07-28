@@ -6,6 +6,7 @@ import '../ui/confirm-dialog.css'
 import '../ui/settings/settings-dialog.css'
 import './worktrees-panel.css'
 import { suggestWorktreePath } from './worktree-path'
+import { T } from '../terms'
 
 interface AddWorktreeDialogProps {
   isOpen: boolean
@@ -82,7 +83,7 @@ export function AddWorktreeDialog({
             새 워크트리 만들기
           </Heading>
           <p className="ui-dialog__body">
-            실험 공간을 새 폴더에 함께 펼쳐요. 같은 실험 공간은 한 폴더에서만 열 수 있어요.
+            {T.branch}을 새 폴더에 함께 펼쳐요. 같은 {T.branch}은 한 폴더에서만 열 수 있어요.
           </p>
           <fieldset className="settings-dialog__field add-worktree__mode">
             <label className="settings-dialog__radio">
@@ -93,7 +94,7 @@ export function AddWorktreeDialog({
                 onChange={() => chooseMode('existing')}
                 data-testid="add-worktree-mode-existing"
               />
-              기존 실험 공간 펼치기
+              기존 {T.branch} 펼치기
             </label>
             <label className="settings-dialog__radio">
               <input
@@ -109,11 +110,11 @@ export function AddWorktreeDialog({
           {mode === 'existing' ? (
             available.length === 0 ? (
               <p className="worktrees-panel__empty">
-                펼칠 수 있는 실험 공간이 없어요. "새로 만들면서 펼치기"를 써 보세요.
+                펼칠 수 있는 {T.branch}이 없어요. "새로 만들면서 펼치기"를 써 보세요.
               </p>
             ) : (
               <label className="add-worktree__label">
-                실험 공간
+                {T.branch}
                 <select
                   className="add-worktree__select"
                   value={branch}
@@ -130,7 +131,7 @@ export function AddWorktreeDialog({
             )
           ) : (
             <label className="add-worktree__label">
-              새 실험 공간 이름
+              새 {T.branch} 이름
               <input
                 className="add-worktree__input"
                 value={newName}

@@ -15,8 +15,8 @@ const b = (over: Partial<LocalBranchStatus>): LocalBranchStatus => ({
 })
 
 describe('trackBadgeLabel', () => {
-  it('upstream이 없으면 "연결 없음"이다', () => {
-    expect(trackBadgeLabel(b({ upstream: null, ahead: null, behind: null }))).toBe('연결 없음')
+  it('upstream이 없으면 "업스트림 없음"이다', () => {
+    expect(trackBadgeLabel(b({ upstream: null, ahead: null, behind: null }))).toBe('업스트림 없음')
   })
 
   it('[gone]이면 "연결 끊김"이다', () => {

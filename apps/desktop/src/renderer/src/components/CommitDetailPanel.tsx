@@ -12,6 +12,7 @@ import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { buildFileTree, flattenFileTree } from './file-tree'
 import { FindBar } from './FindBar'
 import { formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './commit-detail-panel.css'
 import './virtual.css'
 
@@ -144,7 +145,7 @@ export function CommitDetailPanel({
 
   return (
     <Panel
-      title={shelfPreview ? '보관 내용' : '저장 내용'}
+      title={shelfPreview ? `${T.stash} 내용` : `${T.commit} 내용`}
       accessory={
         <>
           {/* 해시 배지는 좁은 우측 열에서 잘려 겹친다(실측) — 해시는 아래 메시지 meta로 */}
@@ -186,8 +187,8 @@ export function CommitDetailPanel({
             ? ' — 누르면 가운데에 비교를 보여드려요. 새로 만든 파일은 이 목록에 안 보여요 — 꺼내면 함께 돌아와요'
             : ' — 누르면 가운데에 비교를 보여드려요'
           : shelfPreview
-            ? ' — 새로 만든 파일만 담긴 보관이에요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요'
-            : ' — 메시지만 남긴 저장이에요'}
+            ? ` — 새로 만든 파일만 담긴 ${T.stash}예요. 여기 목록에는 안 보이지만, 꺼내면 그대로 돌아와요`
+            : ` — 메시지만 남긴 ${T.commit}이에요`}
       </div>
       <div ref={scrollRef} className="virtual-scroll commit-detail__files">
         <ul
@@ -257,7 +258,7 @@ export function CommitDetailPanel({
           {detail.authorName}
           {!shelfPreview &&
             detail.parents.length >= 2 &&
-            ' · 병합된 저장 — 파일 목록은 합쳐지기 전 원래 줄기 기준이에요'}
+            ` · ${T.merge}된 ${T.commit} — 파일 목록은 ${T.merge}되기 전 원래 줄기 기준이에요`}
         </p>
       </div>
       {menu !== null && (
@@ -269,12 +270,14 @@ export function CommitDetailPanel({
               key: 'restore-file',
               // 이 저장이 "지운" 파일은 그 시점 내용이 없다 — 숨기지 않고 사유와 함께 비활성 (E5a 후속).
               // 엔진의 '그 시점에는 이 파일이 없어요' 친절 거부는 심층 방어로 유지된다
+              // E8 — checkoutFile은 삭제됨/스태시(꺼내)/일반 3변형이라 T.checkoutFile로 뭉치면
+              // "꺼내"·"지금 코드에" 구분이 사라진다 — 문장 변형은 유지하고 어휘(체크아웃)만 통일
               label:
                 menu.file.kind === 'deleted'
-                  ? '이 파일만 적용 (checkout) — 그 시점에 지워진 파일이에요'
+                  ? '이 파일만 체크아웃 — 그 시점에 지워진 파일이에요'
                   : shelfPreview
-                    ? '이 파일만 꺼내 적용 (checkout)'
-                    : '이 파일만 지금 코드에 적용 (checkout)',
+                    ? '이 파일만 꺼내 체크아웃'
+                    : '이 파일만 지금 코드에 체크아웃',
               disabled: menu.file.kind === 'deleted',
               onSelect: () => setConfirmingRestore(menu.file),
             },
@@ -289,12 +292,12 @@ export function CommitDetailPanel({
       )}
       <ConfirmDialog
         isOpen={confirmingRestore !== null}
-        title={shelfPreview ? '이 파일만 꺼내 적용할까요?' : '이 파일만 이 시점 내용으로 적용할까요?'}
-        confirmLabel="적용"
+        title={shelfPreview ? '이 파일만 꺼내 체크아웃할까요?' : '이 파일만 이 시점 내용으로 체크아웃할까요?'}
+        confirmLabel="체크아웃"
         onConfirm={runRestore}
         onCancel={() => setConfirmingRestore(null)}
       >
-        지금 파일이 이 시점 내용으로 바뀌어요. 미저장 변경은 보관함에 넣어 드려요.
+        지금 파일이 이 시점 내용으로 바뀌어요. 미저장 변경은 {T.stash}에 넣어 드려요.
       </ConfirmDialog>
     </Panel>
   )
