@@ -6,7 +6,7 @@
   padding: 0 var(--space-2);
   font-size: var(--text-xs);
   border: 1px solid var(--concept-branch);
-  border-radius: var(--radius-container);
+  border-radius: var(--radius-pill);
   background: var(--concept-branch-bg);
   color: var(--concept-branch);
   max-width: 220px;

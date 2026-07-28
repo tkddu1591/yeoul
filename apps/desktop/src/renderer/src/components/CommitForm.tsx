@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../ui/Button'
+import { isSubmitEnter } from '../ui/keyboard'
 import { T } from '../terms'
 import './commit-form.css'
 
@@ -56,9 +57,10 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={(event) => {
-            // ⌘↵ / Ctrl+↵ 제출. 한글 조합 중 Enter는 확정용이라 제출하면 안 된다 (E1a PromptDialog 선례)
-            if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
-            if (event.nativeEvent.isComposing) return
+            // ⌘↵ / Ctrl+↵ 제출. IME 조합 가드는 PromptDialog와 같은 isSubmitEnter — 한글 조합
+            // 중 Enter는 확정용이라 제출하면 안 된다 (E1a 선례). meta/ctrl 요구는 이 컴포저 전용
+            if (!(event.metaKey || event.ctrlKey)) return
+            if (!isSubmitEnter(event.key, event.nativeEvent.isComposing)) return
             event.preventDefault()
             submit()
           }}
@@ -78,6 +80,8 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
             // E9 보완 — kbd가 라벨 안에 있으면 접근명이 "커밋⌘↵"가 된다. kbd는 aria-hidden으로 빼고
             // 접근명은 명시적으로 준다 (ShelfPopover 선례)
             aria-label={allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
+            // 마무리 — aria-hidden kbd가 가리는 단축키를 스크린 리더 사용자도 알 수 있게
+            aria-keyshortcuts="Meta+Enter"
           >
             {allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
             <kbd className="commit-form__kbd" aria-hidden="true">

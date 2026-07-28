@@ -55,16 +55,6 @@
   opacity: var(--opacity-disabled);
   cursor: default;
 }
-/* E9 최종 — 톤다운(soft)은 채운 강조와 같은 양의 색을 테두리로 옮겼을 뿐 실제로는 조용해지지
-   않았다(테두리가 3:1을 단독으로 떠받침). 대신 활성은 앱의 실제 강조색을 그대로 쓰고,
-   비활성은 "흐린 강조"가 아니라 "중립"으로 갈아끼운다 — opacity 감산이 아니라 명시적 색 교체라
-   채움 자체가 사라지지 않는다(≥1.8:1 실측). 동일 특이도로 뒤에 오므로 !important 불필요 */
-.ui-button--primary[data-disabled] {
-  opacity: 1;
-  background: var(--color-text-faint);
-  color: var(--color-surface);
-  border-color: var(--color-text-faint);
-}
 /* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
 /* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다.
    hover는 옅은 빨강 틴트 — 흰 다이얼로그 표면 위에서도 구분된다 (리뷰 실측 반영) */

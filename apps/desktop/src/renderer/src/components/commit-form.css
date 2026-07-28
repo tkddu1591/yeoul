@@ -22,7 +22,10 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-control);
   background: var(--color-surface);
-  overflow: hidden;
+  /* hidden이면 커밋 버튼의 포커스 링(2px 폭 + 2px 오프셋)이 상자 모서리에서 잘린다 —
+     clip-margin으로 링이 그려질 여유만 남기고 나머지는 그대로 자른다 (마무리 실측) */
+  overflow: clip;
+  overflow-clip-margin: 4px;
 }
 /* 포커스 링을 textarea가 아니라 상자가 받는다 — "이 상자가 하나"라는 사실이 강화된다 */
 .commit-form__box:focus-within {
@@ -62,7 +65,8 @@
   font-size: var(--text-xs);
   opacity: 0.65;
 }
-/* 좁은 창에서 버튼 라벨이 줄바꿈되지 않게 (E1a 이관) — 제출 버튼은 공용 Button이라 전용 클래스가 없다 */
+/* 좁은 창에서 버튼 라벨이 줄바꿈되지 않게 (E1a 이관) — 이 폼엔 제출 버튼이 하나뿐이라
+   전용 className 없이 속성 선택자로 충분하다 */
 .commit-form button[type='submit'] {
   white-space: nowrap;
 }
