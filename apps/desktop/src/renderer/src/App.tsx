@@ -369,7 +369,7 @@ export function App() {
                 setManageOpen(true)
               }}
             />
-            <Tooltip content={T.merge} summary={T.merge} describedBy={false}>
+            <Tooltip content={`${T.merge} (merge)`} summary={T.merge} describedBy={false}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -397,7 +397,7 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
-          <Tooltip content={T.pull} summary={T.pull} describedBy={false}>
+          <Tooltip content={`${T.pull} (pull)`} summary={T.pull} describedBy={false}>
             <Button
               variant="neutral"
               size="sm"
@@ -438,7 +438,7 @@ export function App() {
             onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
           />
-          <Tooltip content={T.push} summary={T.push} describedBy={false}>
+          <Tooltip content={`${T.push} (push)`} summary={T.push} describedBy={false}>
             <Button
               variant="neutral"
               size="sm"
@@ -1034,7 +1034,7 @@ export function App() {
       <PromptDialog
         isOpen={pullPrompt}
         title={`${T.pullRequest} 만들기`}
-        description={`지금 ${T.branch}의 ${T.commit} 내용을 검토해 달라고 요청해요. 아직 ${T.push}(push) 전이면 ${T.push}부터 자동으로 해요.`}
+        description={`지금 ${T.branch}의 ${T.commit} 내용을 검토해 달라고 요청해요. 아직 ${T.push} 전이면 ${T.push}부터 자동으로 해요.`}
         label="제목"
         placeholder="예: 로그인 버튼 색 실험"
         submitLabel="요청 만들기"
@@ -1172,7 +1172,7 @@ export function App() {
         onCancel={() => setConfirmingRebase(null)}
       >
         지금 공간의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩 해결하는 화면이
-        열려요. 이미 {T.push}(push)한 공간이라면 원격과 어긋날 수 있어요.
+        열려요. 이미 {T.push}한 공간이라면 원격과 어긋날 수 있어요.
       </ConfirmDialog>
       <PromptDialog
         isOpen={renamePrompt !== null}

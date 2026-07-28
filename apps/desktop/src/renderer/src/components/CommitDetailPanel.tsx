@@ -146,18 +146,15 @@ export function CommitDetailPanel({
     <Panel
       title={shelfPreview ? `${T.stash} 내용` : `${T.commit} 내용`}
       accessory={
-        <>
-          {/* 해시 배지는 좁은 우측 열에서 잘려 겹친다(실측) — 해시는 아래 메시지 meta로 */}
-          <Button
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onPress={onBack}
-            testId="commit-detail-back"
-          >
-            <X size={13} aria-hidden="true" /> 닫기
-          </Button>
-        </>
+        <Button
+          variant="ghost"
+          size="sm"
+          isDisabled={busy}
+          onPress={onBack}
+          testId="commit-detail-back"
+        >
+          <X size={13} aria-hidden="true" /> 닫기
+        </Button>
       }
       testId="commit-detail-panel"
     >

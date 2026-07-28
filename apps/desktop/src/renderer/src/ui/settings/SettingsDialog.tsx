@@ -103,7 +103,7 @@ export function SettingsDialog({
                     </p>
                   </fieldset>
                   <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">{T.pull}(pull) 방식</legend>
+                    <legend className="settings-dialog__label">{T.pull} 방식</legend>
                     <label className="settings-dialog__radio">
                       <input
                         type="radio"

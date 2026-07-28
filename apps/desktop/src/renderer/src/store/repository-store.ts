@@ -965,7 +965,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: result.linked
           ? `"${name}"을 원격과 연결하며 ${T.push}했어요 — 이제 ↑↓로 차이가 보여요.`
-          : `"${name}"을 ${T.push}(push)했어요.`,
+          : `"${name}"을 ${T.push}했어요.`,
       })
     })
   },
@@ -1544,7 +1544,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       }
       set({
         pullDetail: refreshed,
-        notice: `${T.pullRequest} #${number}을 "${base}"에 ${T.merge}했어요. 로컬은 아직 그대로예요 — 기본 공간에서 ${T.pull}(pull)를 하면 반영돼요.`,
+        notice: `${T.pullRequest} #${number}을 "${base}"에 ${T.merge}했어요. 로컬은 아직 그대로예요 — 기본 브랜치에서 ${T.pull}를 하면 반영돼요.`,
       })
     })
   },

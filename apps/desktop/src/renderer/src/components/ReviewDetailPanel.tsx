@@ -148,7 +148,7 @@ export function ReviewDetailPanel({
         </Button>
       </div>
       <div className="review-detail__actions">
-        <Tooltip content="승인 (approve)" summary="승인" describedBy={false}>
+        <Tooltip content={`${T.approve} (approve)`} summary={T.approve} describedBy={false}>
           <Button
             variant="neutral"
             size="sm"
@@ -156,7 +156,7 @@ export function ReviewDetailPanel({
             onPress={onApprove}
             testId="review-approve"
           >
-            <Check size={13} aria-hidden="true" /> 승인하기
+            <Check size={13} aria-hidden="true" /> {T.approve}하기
           </Button>
         </Tooltip>
         <Tooltip content={`${T.merge} (merge)`} summary={T.merge} describedBy={false}>

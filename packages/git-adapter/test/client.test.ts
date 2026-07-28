@@ -1728,7 +1728,7 @@ describe('GitClient', () => {
     await client.branches.merge('rival')
     const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
 
-    await expect(client.commits.undoLast(head)).rejects.toThrow(/먼저 마무리하거나 취소/)
+    await expect(client.commits.undoLast(head)).rejects.toThrow(/먼저 마무리하거나 되돌려야/)
   })
 
   it('reword — 메시지만 바꾸고 내용(tree)·미저장 변경은 그대로다', async () => {

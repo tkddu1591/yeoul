@@ -28,6 +28,7 @@ export const T = {
   fetch: '페치',
   noUpstream: '업스트림 없음',
   pullRequest: '풀 리퀘스트',
+  approve: '승인',
   // 통합 작업
   merge: '병합',
   rebase: '리베이스',
