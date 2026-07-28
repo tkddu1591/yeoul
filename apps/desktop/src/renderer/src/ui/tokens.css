@@ -47,10 +47,12 @@
   --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
   /* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 컴포저 버튼은 옅은 배경 + 진한 글자로 */
-  --color-accent-soft: #e6ebfd;
-  --color-accent-soft-text: #1e44bd;
-  /* E9 보완 — 비활성 opacity가 배경색을 함께 죽여 도형이 안 보였다. 테두리로 도형을 지킨다 */
-  --color-accent-soft-border: #c4d0f8;
+  /* E9 보완2 — 옅은 배경이 1.19:1로 속삭임 수준이라 실측 후 진한 톤으로 재조정(≥3:1은 테두리가 담당) */
+  --color-accent-soft: #a3b7f4;
+  --color-accent-soft-text: #173485;
+  /* E9 보완 — 비활성 opacity가 배경색을 함께 죽여 도형이 안 보였다. 테두리로 도형을 지킨다
+     E9 보완2 — 테두리를 accent 원색으로 올려 3:1 경계 식별 기준을 단독으로 만족시킨다 */
+  --color-accent-soft-border: #2e5ce6;
   --color-danger: #d92d20;
   /* E7g 인라인 ↑↓ — 올릴 것(ahead)·받을 것(behind). 서피스 대비 4.5:1 이상(대비 회귀 테스트) */
   --color-ahead: #067647;
@@ -109,9 +111,10 @@
     --color-accent-hover: #93a9fc;
     --color-accent-active: #a8b9fd;
     --color-accent-text: #10131a;
-    --color-accent-soft: #2f3a52;
+    /* E9 보완2 — 라이트와 동일 재조정 (실측: 2.230:1 vs surface, 텍스트쌍 4.701:1 유지) */
+    --color-accent-soft: #475585;
     --color-accent-soft-text: #c3d0f5;
-    --color-accent-soft-border: #46567a;
+    --color-accent-soft-border: #7c97fb;
     --color-danger: #f97066;
     --color-ahead: #4ade80;
     --color-behind: #fdb022;

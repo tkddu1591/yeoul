@@ -70,6 +70,14 @@
   opacity: var(--opacity-disabled);
   cursor: default;
 }
+/* E9 보완2 — 전역 opacity가 soft 배경·테두리까지 함께 지워 도형이 사라졌다(실측 1.08~1.16:1).
+   soft 변형만 opacity를 무효화하고(동일 특이도, 뒤에 오므로 !important 불필요) 텍스트·테두리만
+   흐려서 '비활성'을 전달한다 — 배경은 활성과 동일하게 유지해 도형 자체는 계속 보인다(≥1.8:1 실측) */
+.ui-button--soft[data-disabled] {
+  opacity: 1;
+  border-color: var(--color-border-strong);
+  color: var(--color-text-faint);
+}
 /* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
 /* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다.
    hover는 옅은 빨강 틴트 — 흰 다이얼로그 표면 위에서도 구분된다 (리뷰 실측 반영) */
