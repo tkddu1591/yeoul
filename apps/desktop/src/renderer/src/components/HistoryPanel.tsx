@@ -340,6 +340,7 @@ export function HistoryPanel({
   return (
     <Panel
       title={T.history}
+      titleHint="log"
       accessory={
         <>
           {historyRef !== null && (
@@ -356,7 +357,6 @@ export function HistoryPanel({
               </button>
             </span>
           )}
-          <Badge tone="git">log</Badge>
           <Badge tone="count">
             <span data-testid="history-count">
               {truncated ? `${historyLimit}+` : history.length}

@@ -379,7 +379,7 @@ export function App() {
                 aria-label={T.merge}
               >
                 <GitMerge size={13} aria-hidden="true" />{' '}
-                <span className="app__btn-label">{T.merge}</span> <Badge tone="git">merge</Badge>
+                <span className="app__btn-label">{T.merge}</span>
               </Button>
             </Tooltip>
             {status.state !== 'normal' && (
@@ -407,7 +407,7 @@ export function App() {
               aria-label={T.pull}
             >
               <DownloadCloud size={14} aria-hidden="true" />{' '}
-              <span className="app__btn-label">{T.pull}</span> <Badge tone="git">pull</Badge>
+              <span className="app__btn-label">{T.pull}</span>
             </Button>
           </Tooltip>
           <ShelfPopover
@@ -448,7 +448,7 @@ export function App() {
               aria-label={T.push}
             >
               <CloudUpload size={14} aria-hidden="true" />{' '}
-              <span className="app__btn-label">{T.push}</span> <Badge tone="git">push</Badge>
+              <span className="app__btn-label">{T.push}</span>
             </Button>
           </Tooltip>
           <Tooltip content="새로고침" summary="새로고침" describedBy={false}>
@@ -1148,7 +1148,7 @@ export function App() {
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={mergeFollowUp !== null}
-        title="기본 공간으로 이동할까요?"
+        title="기본 브랜치로 이동할까요?"
         confirmLabel="이동하고 가져오기"
         onConfirm={() => {
           const base = mergeFollowUp
@@ -1158,7 +1158,7 @@ export function App() {
         }}
         onCancel={() => setMergeFollowUp(null)}
       >
-        병합 완료 — 기본 공간({mergeFollowUp})으로 이동해 최신을 가져올까요? 나중에 해도 돼요.
+        병합 완료 — 기본 브랜치({mergeFollowUp})로 이동해 최신을 가져올까요? 나중에 해도 돼요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRebase !== null}

@@ -1,7 +1,6 @@
 import { useState, type MouseEvent } from 'react'
 import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
 import { formatRelativeTime } from './relative-time'
-import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
@@ -108,7 +107,7 @@ export function WorktreesPanel({
         : `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`
 
   return (
-    <Panel title={T.worktree} accessory={<Badge tone="git">worktree</Badge>} testId="worktrees-panel">
+    <Panel title={T.worktree} titleHint="worktree" testId="worktrees-panel">
       <div className="worktrees-panel">
         <div className="worktrees-panel__scroll" data-testid="worktrees-list">
           {worktrees.map((worktree) => {

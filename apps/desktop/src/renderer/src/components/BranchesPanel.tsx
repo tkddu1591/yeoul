@@ -1,7 +1,6 @@
 import { useState, type MouseEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
@@ -206,11 +205,7 @@ export function BranchesPanel({
       </>
     )
     return (
-      <Panel
-        title={`지금 ↔ "${compare.name}"`}
-        accessory={<Badge tone="git">compare</Badge>}
-        testId="branches-panel"
-      >
+      <Panel title={`지금 ↔ "${compare.name}"`} testId="branches-panel">
         <div className="branches-panel">
           <div>
             {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
@@ -360,7 +355,7 @@ export function BranchesPanel({
   const remoteRows = flattenBranchTree(buildBranchTree(remotes), collapsed)
 
   return (
-    <Panel title={T.branch} accessory={<Badge tone="git">branch</Badge>} testId="branches-panel">
+    <Panel title={T.branch} titleHint="branch" testId="branches-panel">
       <div className="branches-panel">
         <div className="branches-panel__fetch">
           <Button variant="ghost" size="sm" isDisabled={busy} onPress={onFetchRemotes} testId="fetch-remotes">

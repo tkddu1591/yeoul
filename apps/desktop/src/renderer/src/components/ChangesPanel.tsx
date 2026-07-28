@@ -117,7 +117,6 @@ function FileRow({
 
 interface FileListProps {
   title: string
-  termBadge: string
   countTestId: string
   emptyText: string
   changes: FileChange[]
@@ -138,7 +137,6 @@ interface FileListProps {
 
 function FileList({
   title,
-  termBadge,
   countTestId,
   emptyText,
   changes,
@@ -221,12 +219,9 @@ function FileList({
     <Panel
       title={title}
       accessory={
-        <>
-          <Badge tone="git">{termBadge}</Badge>
-          <Badge tone="count">
-            <span data-testid={countTestId}>{changes.length}</span>
-          </Badge>
-        </>
+        <Badge tone="count">
+          <span data-testid={countTestId}>{changes.length}</span>
+        </Badge>
       }
     >
       {changes.length === 0 ? (
@@ -441,7 +436,6 @@ export function ChangesPanel({
       )}
       <FileList
         title={T.unstaged}
-        termBadge="unstaged"
         countTestId="unstaged-count"
         emptyText="바뀐 파일이 없어요"
         changes={unstagedChanges}
@@ -457,7 +451,6 @@ export function ChangesPanel({
       />
       <FileList
         title={T.staged}
-        termBadge="staged"
         countTestId="staged-count"
         emptyText="파일을 올리면 여기에 모여요"
         changes={stagedChanges}

@@ -1,7 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown, Check, CheckCheck, Download, PenLine, RotateCcw, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Panel } from '../ui/Panel'
@@ -135,11 +134,7 @@ export function ConflictPanel({
   }
 
   return (
-    <Panel
-      title={`${path} — ${T.conflict} 해결`}
-      accessory={<Badge tone="git">conflict</Badge>}
-      testId="conflict-panel"
-    >
+    <Panel title={`${path} — ${T.conflict} 해결`} testId="conflict-panel">
       {view === 'cards' ? (
         <>
           <p className="conflict-panel__hint">

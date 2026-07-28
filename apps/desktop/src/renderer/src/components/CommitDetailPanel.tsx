@@ -2,7 +2,6 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CommitDetail, CommitFileChange } from '@git-gui/domain'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
@@ -149,7 +148,6 @@ export function CommitDetailPanel({
       accessory={
         <>
           {/* 해시 배지는 좁은 우측 열에서 잘려 겹친다(실측) — 해시는 아래 메시지 meta로 */}
-          <Badge tone="git">{shelfPreview ? 'stash' : 'commit'}</Badge>
           <Button
             variant="ghost"
             size="sm"

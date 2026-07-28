@@ -32,7 +32,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
   return (
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-        <Tooltip content={T.stash} summary={T.stash} describedBy={false}>
+        <Tooltip content={`${T.stash} (stash)`} summary={T.stash} describedBy={false}>
           <Button variant="ghost" size="sm" testId="shelf-open" aria-label={T.stash}>
             <Archive size={13} aria-hidden="true" /> <span className="app__btn-label">{T.stash}</span>{' '}
             <Badge tone="count">
@@ -43,9 +43,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
         <Popover className="shelf-popover">
           <Dialog className="shelf-popover__dialog" aria-label={T.stash}>
             <div className="shelf-popover__head">
-              <span>
-                잠시 치워 둔 변경 <Badge tone="git">stash</Badge>
-              </span>
+              <span>잠시 치워 둔 변경</span>
               <Button variant="neutral" size="sm" isDisabled={busy} onPress={onSave} testId="shelf-save">
                 지금 변경 {T.stash}하기
               </Button>

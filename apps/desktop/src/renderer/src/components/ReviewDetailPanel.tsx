@@ -6,6 +6,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './review-detail-panel.css'
 
 interface ReviewDetailPanelProps {
@@ -147,24 +148,28 @@ export function ReviewDetailPanel({
         </Button>
       </div>
       <div className="review-detail__actions">
-        <Button
-          variant="neutral"
-          size="sm"
-          isDisabled={busy || settled}
-          onPress={onApprove}
-          testId="review-approve"
-        >
-          <Check size={13} aria-hidden="true" /> 승인하기 <Badge tone="git">approve</Badge>
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          isDisabled={busy || settled}
-          onPress={onMerge}
-          testId="review-merge"
-        >
-          <GitMerge size={13} aria-hidden="true" /> 병합하기 <Badge tone="git">merge</Badge>
-        </Button>
+        <Tooltip content="승인 (approve)" summary="승인" describedBy={false}>
+          <Button
+            variant="neutral"
+            size="sm"
+            isDisabled={busy || settled}
+            onPress={onApprove}
+            testId="review-approve"
+          >
+            <Check size={13} aria-hidden="true" /> 승인하기
+          </Button>
+        </Tooltip>
+        <Tooltip content={`${T.merge} (merge)`} summary={T.merge} describedBy={false}>
+          <Button
+            variant="primary"
+            size="sm"
+            isDisabled={busy || settled}
+            onPress={onMerge}
+            testId="review-merge"
+          >
+            <GitMerge size={13} aria-hidden="true" /> {T.merge}하기
+          </Button>
+        </Tooltip>
       </div>
     </Panel>
   )

@@ -1525,7 +1525,7 @@ export function createGitClient(repoPath: string): GitClient {
         // merging 등 도중의 reset은 진행 중 작업을 반쯤 무너뜨린다 — revert 관례로 먼저 마무리를 안내한다
         const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
         if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
-          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 실행취소할 수 있어요.')
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 취소할 수 있어요.')
         }
         // 화면 목록이 낡은 채 실행취소하면 엉뚱한 저장이 물린다(CLI 경합) — 실제 HEAD와 일치를 확인한다
         const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })

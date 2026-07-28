@@ -65,16 +65,16 @@ export function ReviewPopover({
         if (next) onOpen()
       }}
     >
-      <Tooltip content="리뷰" summary="리뷰" describedBy={false}>
+      <Tooltip content={`${T.pullRequest} (pull request)`} summary={T.pullRequest} describedBy={false}>
         <Button
           variant="ghost"
           size="sm"
           className="review-popover__trigger"
           testId="review-open"
-          aria-label="리뷰"
+          aria-label={T.pullRequest}
         >
-          <GitPullRequest size={13} aria-hidden="true" /> <span className="app__btn-label">리뷰</span>{' '}
-          <Badge tone="git">PR</Badge>
+          <GitPullRequest size={13} aria-hidden="true" />{' '}
+          <span className="app__btn-label">{T.pullRequest}</span>
         </Button>
       </Tooltip>
       <Popover className="review-popover">
@@ -82,7 +82,7 @@ export function ReviewPopover({
           {status === null || !status.connected ? (
             <>
               <p className="review-popover__empty">
-                GitHub와 연결하면 {T.pullRequest} (pull request)를 만들고 볼 수 있어요.
+                GitHub와 연결하면 {T.pullRequest}를 만들고 볼 수 있어요.
               </p>
               <div className="review-popover__buttons">
                 {status?.ghAvailable === true && (
@@ -123,7 +123,7 @@ export function ReviewPopover({
               </div>
               {status.repo === null ? (
                 <p className="review-popover__empty">
-                  이 저장소의 원격(origin)이 GitHub가 아니에요. GitHub 저장소를 {T.push}(push) 대상으로
+                  이 저장소의 원격(origin)이 GitHub가 아니에요. GitHub 저장소를 {T.push} 대상으로
                   연결하면 {T.pullRequest}를 만들 수 있어요.
                 </p>
               ) : (
@@ -139,7 +139,7 @@ export function ReviewPopover({
                   </Button>
                   {isDefaultBranch && (
                     <p className="review-popover__reason" data-testid="review-create-reason">
-                      "{currentBranch}"는 모두가 함께 쓰는 기본 공간이에요. {T.branch}(branch)를
+                      "{currentBranch}"는 모두가 함께 쓰는 기본 브랜치예요. {T.branch}를
                       만들어 요청해 주세요.
                     </p>
                   )}
