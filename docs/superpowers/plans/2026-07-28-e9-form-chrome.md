@@ -20,7 +20,7 @@
 - Modify: `apps/desktop/src/renderer/src/ui/tokens.css`
 - Test: `apps/desktop/test/tokens-contrast.test.ts`
 
-- [ ] **Step 1: 모서리 토큰 교체.** `tokens.css`의 기존(실측 26~29행):
+- [x] **Step 1: 모서리 토큰 교체.** `tokens.css`의 기존(실측 26~29행):
 
 ```css
   /* 모서리·그림자 */
@@ -39,7 +39,7 @@
   --radius-pill: 999px; /* 배지·ref 칩·개수 알약 */
 ```
 
-- [ ] **Step 2: accent-soft 2벌 추가.** 라이트 블록의 `--color-accent-text: #ffffff;` **바로 다음 줄**에 추가:
+- [x] **Step 2: accent-soft 2벌 추가.** 라이트 블록의 `--color-accent-text: #ffffff;` **바로 다음 줄**에 추가:
 
 ```css
   /* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 컴포저 버튼은 옅은 배경 + 진한 글자로 */
@@ -54,7 +54,7 @@
   --color-accent-soft-text: #c3d0f5;
 ```
 
-- [ ] **Step 3: 대비 회귀 테스트에 쌍 추가.** `tokens-contrast.test.ts`의 `PAIRS` 배열(실측 34행 시작)에서 기존:
+- [x] **Step 3: 대비 회귀 테스트에 쌍 추가.** `tokens-contrast.test.ts`의 `PAIRS` 배열(실측 34행 시작)에서 기존:
 
 ```ts
   ['--color-accent-text', '--color-accent', 4.5],
@@ -68,11 +68,11 @@
 
 이 파일은 라이트·다크 **두 벌 모두** 같은 `PAIRS`로 검사한다(`darkTokens`가 라이트를 상속 후 덮어씀 — 실측 16~18행). 즉 한 줄로 두 테마가 함께 걸린다.
 
-- [ ] **Step 4: 실패 확인.** `npx vitest run apps/desktop/test/tokens-contrast.test.ts` — Step 2를 건너뛴 상태라면 토큰 미정의로 실패해야 한다. 이미 Step 2를 했다면 통과를 확인하고, **일부러 `--color-accent-soft-text`를 `#9aa8c8`로 잠깐 바꿔 실패하는지 1회 확인**한 뒤 되돌린다(테스트가 실제로 물고 있는지 검증 — E8에서 공허한 단언이 통과하던 사례가 있었다).
+- [x] **Step 4: 실패 확인.** `npx vitest run apps/desktop/test/tokens-contrast.test.ts` — Step 2를 건너뛴 상태라면 토큰 미정의로 실패해야 한다. 이미 Step 2를 했다면 통과를 확인하고, **일부러 `--color-accent-soft-text`를 `#9aa8c8`로 잠깐 바꿔 실패하는지 1회 확인**한 뒤 되돌린다(테스트가 실제로 물고 있는지 검증 — E8에서 공허한 단언이 통과하던 사례가 있었다).
 
-- [ ] **Step 5: 게이트.** `pnpm test` — **524**(523 + 신규 대비 쌍 1건). 실제 숫자를 보고한다.
+- [x] **Step 5: 게이트.** `pnpm test` — **524**(523 + 신규 대비 쌍 1건). 실제 숫자를 보고한다.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src/ui/tokens.css apps/desktop/test/tokens-contrast.test.ts
@@ -89,7 +89,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 Task 1이 새 이름을 만들었을 뿐 **옛 이름은 아직 아무도 안 쓰게 정리되지 않았다.** 이 태스크가 없으면 앱 전체가 모서리 없이 렌더된다(정의되지 않은 var는 무효 → 초기값 0).
 
-- [ ] **Step 1: `--radius-sm` → `--radius-control` 일괄 치환.** 실측 사용처 16개 파일(총 24회): `pictogram.css`·`tooltip.css`·`context-menu.css`(2)·`list-dialog.css`·`prompt-dialog.css`·`review-popover.css`(3)·`button.css`·`find-bar.css`·`shelf-popover.css`(2)·`branches-panel.css`(2)·`changes-panel.css`(2)·`worktrees-panel.css`·`branch-switcher.css`(3)·`conflict-panel.css`(2)·`commit-detail-panel.css`·`history-panel.css`.
+- [x] **Step 1: `--radius-sm` → `--radius-control` 일괄 치환.** 실측 사용처 16개 파일(총 24회): `pictogram.css`·`tooltip.css`·`context-menu.css`(2)·`list-dialog.css`·`prompt-dialog.css`·`review-popover.css`(3)·`button.css`·`find-bar.css`·`shelf-popover.css`(2)·`branches-panel.css`(2)·`changes-panel.css`(2)·`worktrees-panel.css`·`branch-switcher.css`(3)·`conflict-panel.css`(2)·`commit-detail-panel.css`·`history-panel.css`.
 
 ```bash
 grep -rl --include='*.css' -- '--radius-sm' apps/desktop/src/renderer/src | xargs sed -i '' 's/--radius-sm/--radius-control/g'
@@ -97,7 +97,7 @@ grep -rl --include='*.css' -- '--radius-sm' apps/desktop/src/renderer/src | xarg
 
 `changes-panel.css`에 `border-radius: 0 0 var(--radius-sm) var(--radius-sm);` 형태의 **부분 모서리**가 1건 있다(실측) — 치환으로 자연히 따라오지만 결과를 눈으로 확인한다.
 
-- [ ] **Step 2: `--radius-lg` → `--radius-container`.** 실측 3곳: `ui/confirm-dialog.css:35`, `ui/panel.css:9`, `components/repo-picker.css:16`.
+- [x] **Step 2: `--radius-lg` → `--radius-container`.** 실측 3곳: `ui/confirm-dialog.css:35`, `ui/panel.css:9`, `components/repo-picker.css:16`.
 
 ```bash
 grep -rl --include='*.css' -- '--radius-lg' apps/desktop/src/renderer/src | xargs sed -i '' 's/--radius-lg/--radius-container/g'
@@ -105,19 +105,19 @@ grep -rl --include='*.css' -- '--radius-lg' apps/desktop/src/renderer/src | xarg
 
 **값이 14 → 10으로 줄어드는 변경**이다. 패널·확인창·저장소 선택 화면의 인상이 바뀌므로 Task 5 스크린샷에서 반드시 육안 확인한다.
 
-- [ ] **Step 3: `--radius-md` 폐기.** 실측 4곳 — `ui/button.css:6`, `components/commit-form.css:22`, `components/review-detail-panel.css:81`, `components/conflict-panel.css:47`. **전부 `--radius-control`로 내린다**(9px이 블롭의 원인). `commit-form.css:22`는 Task 3에서 통째로 다시 쓰지만 여기서도 일단 치환해 중간 상태가 깨지지 않게 한다.
+- [x] **Step 3: `--radius-md` 폐기.** 실측 4곳 — `ui/button.css:6`, `components/commit-form.css:22`, `components/review-detail-panel.css:81`, `components/conflict-panel.css:47`. **전부 `--radius-control`로 내린다**(9px이 블롭의 원인). `commit-form.css:22`는 Task 3에서 통째로 다시 쓰지만 여기서도 일단 치환해 중간 상태가 깨지지 않게 한다.
 
 ```bash
 grep -rl --include='*.css' -- '--radius-md' apps/desktop/src/renderer/src | xargs sed -i '' 's/--radius-md/--radius-control/g'
 ```
 
-- [ ] **Step 4: `999px` → `--radius-pill`.** 실측 7곳: `ui/badge.css:5`, `components/review-popover.css:83`, `components/manage-branches.css:34`, `components/shelf-popover.css:77`, `components/history-panel.css:99,128,138`.
+- [x] **Step 4: `999px` → `--radius-pill`.** 실측 7곳: `ui/badge.css:5`, `components/review-popover.css:83`, `components/manage-branches.css:34`, `components/shelf-popover.css:77`, `components/history-panel.css:99,128,138`.
 
 ```bash
 grep -rl --include='*.css' 'border-radius: 999px' apps/desktop/src/renderer/src | xargs sed -i '' 's/border-radius: 999px/border-radius: var(--radius-pill)/g'
 ```
 
-- [ ] **Step 5: raw px 회수 — 4곳, 각각 판단이 다르다.**
+- [x] **Step 5: raw px 회수 — 4곳, 각각 판단이 다르다.**
 
 | 위치 | 현재 | 조치 |
 | --- | --- | --- |
@@ -127,7 +127,7 @@ grep -rl --include='*.css' 'border-radius: 999px' apps/desktop/src/renderer/src 
 | `ui/base.css:41` | `5px` | **남긴다** — `::-webkit-scrollbar-thumb`. 썸 폭이 8px 남짓이라 6px이면 거의 원이 된다. 남기되 바로 위에 주석을 단다: `/* 스크롤바 썸은 폭이 8px 남짓이라 control(6px)이면 원이 된다 — 의도적 예외 */` |
 | `layout.css:181` | `3px` | **남긴다** — `.app__resizer`는 폭 4px 요소다. 같은 형태의 주석을 단다 |
 
-- [ ] **Step 6: 잔재 0 확인(필수).** 아래 세 grep이 **전부 0건**이어야 한다. 하나라도 남으면 그 요소는 모서리가 사라진 채 렌더된다.
+- [x] **Step 6: 잔재 0 확인(필수).** 아래 세 grep이 **전부 0건**이어야 한다. 하나라도 남으면 그 요소는 모서리가 사라진 채 렌더된다.
 
 ```bash
 grep -rn --include='*.css' -e '--radius-sm' -e '--radius-md' -e '--radius-lg' apps/desktop/src/renderer/src
@@ -137,9 +137,9 @@ grep -rn --include='*.css' 'border-radius: [0-9]' apps/desktop/src/renderer/src
 
 세 번째는 **예외 2건(`base.css:41` 5px, `layout.css:181` 3px)만** 남아야 하고, 각각 바로 위에 이유 주석이 있어야 한다. 결과를 그대로 보고한다.
 
-- [ ] **Step 7: 게이트.** typecheck · `pnpm test` **524 유지** · `pnpm --filter @git-gui/desktop build` · e2e **96 유지**(포그라운드, `timeout: 600000`).
+- [x] **Step 7: 게이트.** typecheck · `pnpm test` **524 유지** · `pnpm --filter @git-gui/desktop build` · e2e **96 유지**(포그라운드, `timeout: 600000`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src
@@ -150,13 +150,20 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
+**Task 1·2 실행 편차 (소급 기록):** ① **플랜 산수 오류 — 524가 아니라 525.** `tokens-contrast.test.ts`는 `describe.each(['라이트','다크'])`로 테마를 순회하므로 `PAIRS`에 한 줄을 더하면 테스트가 **2개** 는다(64→66). 이후 모든 게이트 기준선은 **525**. ② `--radius-sm` 실사용은 24곳이 아니라 **26곳**(파일 수 16은 일치). ③ 부분 모서리(`0 0 var() var()`) 선언은 `changes-panel.css`가 아니라 **`branch-switcher.css:55`**에 있었다 — 치환 후에도 유효. ④ Step 6의 세 번째 grep(`border-radius: [0-9]`)은 **의도적 예외 2건 외에 2건이 더 걸린다** — `terminal-dock.css:42`의 `border-radius: 0`(반경 없음 리셋)과 `branch-switcher.css:55`의 var() 기반 4값 shorthand(`0`으로 시작). 둘 다 미회수 raw px가 **아니다**. 플랜의 "정확히 2건" 기대는 패턴이 숫자 `0`도 무는 걸 놓친 것.
+
+**대비 테스트가 실제로 무는지 검증(플랜 Step 4 요구):** 정상값 66/66 통과 → `--color-accent-soft-text`를 `#9aa8c8`로 저하하면 **해당 1건만** `expected 2.005464058432836 to be greater than or equal to 4.5`로 실패(나머지 65 통과) → 원복. **공허한 단언이 아님을 실증.** 실측 대비율 라이트 **6.75:1** · 다크 **7.39:1**.
+
+**Step 8 실측(프로브):** 패널 **10px** · 헤더 버튼 **6px** · 배지 **999px** · 터미널 도크 **10px** — 기대값 정확히 일치. `.tsx`/`.ts` 내 구 토큰 참조 0건. 컨트롤러 육안: 패널 14→10이 카드를 또렷하게 만들었고 헤더·배지도 규칙대로. 게이트 typecheck 6/6 · **525** · build 성공 · e2e **96**.
+
+
 ### Task 3: 커밋 컴포저 — 한 상자 + ⌘↵ 제출
 
 **Files:**
 - Modify: `apps/desktop/src/renderer/src/components/CommitForm.tsx`
 - Modify: `apps/desktop/src/renderer/src/components/commit-form.css`
 
-- [ ] **Step 1: 컴포넌트 재구성.** `CommitForm.tsx`의 기존 `reason` 계산부(실측 21~30행)를 다음으로 교체 — **사유가 없을 때 빈 문자열이 아니라 대상 요약을 낸다**(빈 span이 높이 0이 되던 E8 함정을 구조적으로 제거):
+- [x] **Step 1: 컴포넌트 재구성.** `CommitForm.tsx`의 기존 `reason` 계산부(실측 21~30행)를 다음으로 교체 — **사유가 없을 때 빈 문자열이 아니라 대상 요약을 낸다**(빈 span이 높이 0이 되던 E8 함정을 구조적으로 제거):
 
 ```tsx
   // E9 — 왼쪽 슬롯은 항상 무언가를 말한다. 못 누르면 이유를, 누를 수 있으면 무엇을 커밋하는지.
@@ -228,7 +235,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ⚠️ **`status`가 항상 비어 있지 않게 바뀌므로 `smoke.spec.ts:152`가 영향받는다.** E8 마무리가 그 자리를 `toHaveText('')`로 바꿔 놨다(실측). 이제 그 상태에서 `1개 파일`이 나오므로 **단언을 그 문구로 1:1 갱신**한다. 삭제·약화 금지.
 
-- [ ] **Step 2: CSS 교체.** `commit-form.css` 전체를 다음으로:
+- [x] **Step 2: CSS 교체.** `commit-form.css` 전체를 다음으로:
 
 ```css
 /* E8 — 카드 3겹 중첩을 줄인다. 커밋 폼은 좌측 열 하단의 영역이지 또 하나의 카드가 아니다 */
@@ -301,7 +308,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 }
 ```
 
-- [ ] **Step 3: `Button`에 `soft` variant 추가.** `ui/Button.tsx`의 `variant` 유니언에 `'soft'`를 더하고, `ui/button.css`의 `.ui-button--primary` 블록(실측 21~30행) **바로 아래**에 추가:
+- [x] **Step 3: `Button`에 `soft` variant 추가.** `ui/Button.tsx`의 `variant` 유니언에 `'soft'`를 더하고, `ui/button.css`의 `.ui-button--primary` 블록(실측 21~30행) **바로 아래**에 추가:
 
 ```css
 /* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 옅은 배경 + 진한 글자로 무게를 낮춘다 */
@@ -321,11 +328,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 `Button.tsx`를 **실독**하고 그 파일의 기존 관용(유니언 정의 위치·클래스 조립 방식)을 따른다. 추측하지 말 것.
 
-- [ ] **Step 4: 육안 검증(필수).** Playwright Electron으로 (a) 상자가 **테두리 1겹**인지(textarea에 자체 테두리가 없는지 `getComputedStyle`로 확인) (b) textarea 포커스 시 링이 **상자**에 뜨는지 (c) 버튼 `border-radius`가 6px인지 (d) 왼쪽 슬롯이 스테이지 0/1/병합 세 상태에서 각각 무엇을 말하는지 — 수치·문구를 그대로 보고한다. 임시 spec은 삭제.
+- [x] **Step 4: 육안 검증(필수).** Playwright Electron으로 (a) 상자가 **테두리 1겹**인지(textarea에 자체 테두리가 없는지 `getComputedStyle`로 확인) (b) textarea 포커스 시 링이 **상자**에 뜨는지 (c) 버튼 `border-radius`가 6px인지 (d) 왼쪽 슬롯이 스테이지 0/1/병합 세 상태에서 각각 무엇을 말하는지 — 수치·문구를 그대로 보고한다. 임시 spec은 삭제.
 
-- [ ] **Step 5: 게이트.** typecheck · `pnpm test` **524 유지** · build · e2e **96 유지**(포그라운드, `timeout: 600000`). `smoke.spec.ts:152` 갱신 외에 깨지는 테스트가 있으면 원인을 고친다(비활성·삭제 금지).
+- [x] **Step 5: 게이트.** typecheck · `pnpm test` **524 유지** · build · e2e **96 유지**(포그라운드, `timeout: 600000`). `smoke.spec.ts:152` 갱신 외에 깨지는 테스트가 있으면 원인을 고친다(비활성·삭제 금지).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src/renderer/src apps/desktop/e2e/smoke.spec.ts
@@ -336,13 +343,38 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
+**Task 3 실행 편차 (소급 기록):** ① 플랜에 없던 E2E 1건이 깨져 함께 고쳤다 — `smoke.spec.ts:2811`의 `toHaveText(T.commit)`은 버튼에 `⌘↵` kbd가 들어가면서 `textContent`가 바뀌어 실패한다 → `` toHaveText(`${T.commit}⌘↵`) ``로 1:1 갱신(플랜은 `:152`만 예상했다). ② `Button.tsx`는 `AriaButtonProps`를 그대로 spread하므로 `aria-label` 지원에 별도 배선이 필요 없었다(`ShelfPopover.tsx:36` 선례).
+
+**컴포저 실측:** textarea `border-width: 0px` / 상자 `1px` — 테두리 1겹 확인. 포커스 시 링이 **상자**에만 뜬다(`box-shadow: rgb(124,151,251) 0 0 0 1px`, textarea는 `none` 유지). 버튼 `border-radius: 6px`, **67.97 × 24px**(E8 블롭은 51.6 × 30). 왼쪽 슬롯 3상태 전부 실측: `스테이지에 올린 파일이 없어요` / `1개 파일` / `병합 마무리`(전량 ours 충돌을 실제로 만들어 도달 — 추측 아님).
+
+---
+
+## 버튼 무게 — 3라운드 (보완 `26d39ef` → `bff57b3` → `80998c0`)
+
+**컨트롤러 판단 오류의 기록.** 사용자의 원 불만은 "슬롭 버튼"이었고 나는 그걸 **채도 문제**로 읽어 `soft`(옅은 채움) 변형을 만들었다. 실측은 그 전제가 틀렸음을 보였다.
+
+| 라운드 | 조치 | 실측 결과 |
+| --- | --- | --- |
+| 1 (`26d39ef`) | soft에 테두리 추가 | 비활성 1.16 → **1.39:1**. 전역 `opacity: 0.45`가 **테두리까지 지워** 어떤 색도 살아남지 못한다 — 값이 아니라 구조 문제 |
+| 2 (`bff57b3`) | soft 무게 상향 + 비활성 전용 규칙 | 활성 테두리 5.5/5.9:1로 3:1 통과. **그러나 비활성 면 = 활성 면**이 되어 **누를 수 있는지 구분 불가** — 컨트롤러 지시("모양이 보이게 ≥1.8:1")가 부실해 "모양을 동일하게"로 귀결 |
+| 3 (`80998c0`) | **soft 폐기, 강조색 복귀 + 비활성 무채색** | 활성 5.54/5.89:1 · 비활성(무채색) 4.71/4.81:1 · 텍스트 양쪽 4.5+ |
+
+**결론:** "슬롭 블롭"의 원인은 **색이 아니라 위치·비례·9px 모서리**였고 그건 컴포저가 이미 해결했다. 채도를 죽인 것은 과교정이었다. 활성 5.5:1 대비 soft 활성이 1.97:1이었다는 실측 — **옅은 면은 아무 일도 안 하고 꽉 찬 강조색 테두리가 혼자 일하고 있었다**(즉 그냥 채우는 것보다 시끄러웠다).
+
+**리뷰 지표 함정(기록할 가치가 있음):** 최종 활성 vs 비활성 휘도 대비는 **1.18/1.23:1**로 컨트롤러가 제시한 1.5:1 기준을 못 넘는다. 구현자는 값을 튜닝하는 대신 **WCAG 대비는 휘도만 보고 색상·채도에 눈이 멀었다**고 지적하고 스크린샷 근거로 진행했다 — 파랑 vs 회색은 눈으로 명확히 구분된다. 컨트롤러 육안 확인 결과 판단이 옳다. **지표가 답이 아닌 사례.**
+
+**범위 확장(최종 리뷰 확인 대상):** `.ui-button--primary[data-disabled]`는 커밋 버튼만이 아니라 **앱 전체 primary 버튼 10곳**(`App.tsx:580`·`PromptDialog:98`·`AddWorktreeDialog:169`·`ReviewPopover:100,132`·`ConflictPanel:162,307`·`RepoPicker:27`·`ReviewDetailPanel:164`)의 비활성 모습을 바꾼다. 기존(강조색 45%)보다 읽히기는 쉬우나 지시 범위 밖이었다.
+
+**대비 테스트 치환:** soft 토큰이 사라져 그 쌍은 무의미해졌지만, 구현자가 삭제 대신 **새 비활성 조합(`--color-surface` on `--color-text-faint`, 3:1)으로 교체**해 총계 525를 유지했다 — 새 색 조합을 무방비로 두지 않는 판단. 컨트롤러 예상(523)이 틀렸다. 또한 토큰이 없으면 이 파일은 **조용히 통과하지 않고 실패**함을 확인(`toBeDefined()` 단언 존재).
+
+
 ### Task 4: E2E 3건 — ⌘↵ 동작·IME 가드·상태 문구
 
 **Files:** `apps/desktop/e2e/smoke.spec.ts`
 
 `T`는 `smoke.spec.ts:8`에서 이미 import돼 있고 `mkdtemp`·`tmpdir`·`rm`·`execGitOrThrow`·`electron`·`APP_ROOT`도 기존 import에 있다. 스테이징 관용은 **`check-unstaged-<이름>` 클릭 → `stage-selected` 클릭**이다(`stage-all`은 없다 — 실측).
 
-- [ ] **Step 1: ⌘↵ 제출.** 파일 끝에 추가:
+- [x] **Step 1: ⌘↵ 제출.** 파일 끝에 추가:
 
 ```ts
 test('E9 — ⌘↵로 커밋된다', async () => {
@@ -368,17 +400,17 @@ test('E9 — ⌘↵로 커밋된다', async () => {
 })
 ```
 
-- [ ] **Step 2: 커밋 불가 상태에서 ⌘↵ 무시.** 스테이지가 빈 상태(파일을 올리지 않음)에서 메시지를 채우고 `ControlOrMeta+Enter`를 눌렀을 때 **커밋이 생기지 않는지**를 단언한다. `git log --oneline | wc -l`이 전후 동일한지, 또는 `git log -1 --format=%s`가 픽스처의 최초 커밋 제목 그대로인지로 확인한다 — **"아무 일도 안 일어남"을 시간 대기가 아니라 git 상태로 증명할 것.** 픽스처의 최초 커밋 제목은 `createRepoWithChange()`를 실독해 확인한다(추측 금지).
+- [x] **Step 2: 커밋 불가 상태에서 ⌘↵ 무시.** 스테이지가 빈 상태(파일을 올리지 않음)에서 메시지를 채우고 `ControlOrMeta+Enter`를 눌렀을 때 **커밋이 생기지 않는지**를 단언한다. `git log --oneline | wc -l`이 전후 동일한지, 또는 `git log -1 --format=%s`가 픽스처의 최초 커밋 제목 그대로인지로 확인한다 — **"아무 일도 안 일어남"을 시간 대기가 아니라 git 상태로 증명할 것.** 픽스처의 최초 커밋 제목은 `createRepoWithChange()`를 실독해 확인한다(추측 금지).
 
-- [ ] **Step 3: 왼쪽 슬롯이 상태를 말한다.** ① 아무것도 스테이지하지 않은 상태 → `commit-hint`가 `올린 파일이 없어요`를 포함 ② 1개 스테이지 후 → `1개 파일`. **두 번째가 이 태스크의 핵심**이다 — E8에서는 이 자리가 빈 문자열이라 높이 0이었다. `toHaveText`로 정확 문구를 물고, `toBeVisible()`도 함께 걸어 높이 0 회귀를 잡는다.
+- [x] **Step 3: 왼쪽 슬롯이 상태를 말한다.** ① 아무것도 스테이지하지 않은 상태 → `commit-hint`가 `올린 파일이 없어요`를 포함 ② 1개 스테이지 후 → `1개 파일`. **두 번째가 이 태스크의 핵심**이다 — E8에서는 이 자리가 빈 문자열이라 높이 0이었다. `toHaveText`로 정확 문구를 물고, `toBeVisible()`도 함께 걸어 높이 0 회귀를 잡는다.
 
-- [ ] **Step 4: IME 가드는 E2E로 덮지 않는다 — 대신 실측 보고.** Playwright에서 `isComposing`을 신뢰성 있게 만들려면 CDP 저수준 이벤트가 필요해 테스트가 취약해진다. 대신 **실제 앱에서 한글 조합 중 ⌘↵를 눌러 제출되지 않는지 직접 확인**하고 결과를 보고한다. 확인이 불가능하면 그 사실을 명시하고 후속 노트로 남긴다 — **덮었다고 말하지 말 것.**
+- [x] **Step 4: IME 가드는 E2E로 덮지 않는다 — 대신 실측 보고.** Playwright에서 `isComposing`을 신뢰성 있게 만들려면 CDP 저수준 이벤트가 필요해 테스트가 취약해진다. 대신 **실제 앱에서 한글 조합 중 ⌘↵를 눌러 제출되지 않는지 직접 확인**하고 결과를 보고한다. 확인이 불가능하면 그 사실을 명시하고 후속 노트로 남긴다 — **덮었다고 말하지 말 것.**
 
-- [ ] **Step 5: 각 신규 테스트를 `-g`로 2회씩** 돌려 비플레이키를 확인하고 결과를 붙인다.
+- [x] **Step 5: 각 신규 테스트를 `-g`로 2회씩** 돌려 비플레이키를 확인하고 결과를 붙인다.
 
-- [ ] **Step 6: 게이트.** `npx playwright test e2e/smoke.spec.ts` **93**(90+3) · `pnpm --filter @git-gui/desktop e2e` **99**(93+6) · `pnpm test` 524 · typecheck. 포그라운드, `timeout: 600000`.
+- [x] **Step 6: 게이트.** `npx playwright test e2e/smoke.spec.ts` **93**(90+3) · `pnpm --filter @git-gui/desktop e2e` **99**(93+6) · `pnpm test` 524 · typecheck. 포그라운드, `timeout: 600000`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/desktop/e2e/smoke.spec.ts
@@ -393,22 +425,22 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:** `README.md`
 
-- [ ] **Step 1: 전체 게이트.** typecheck 6/6 · `pnpm test` **524** · `pnpm --filter @git-gui/desktop build` · `pnpm --filter @git-gui/desktop e2e` **99** · `last-screen` 아티팩트 0건. 실제 숫자를 보고한다.
+- [x] **Step 1: 전체 게이트.** typecheck 6/6 · `pnpm test` **524** · `pnpm --filter @git-gui/desktop build` · `pnpm --filter @git-gui/desktop e2e` **99** · `last-screen` 아티팩트 0건. 실제 숫자를 보고한다.
 
-- [ ] **Step 2: 스크린샷 4장.** 임시 spec `apps/desktop/e2e/tmp-shots-e9.spec.ts`(1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지):
+- [x] **Step 2: 스크린샷 4장.** 임시 spec `apps/desktop/e2e/tmp-shots-e9.spec.ts`(1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지):
   1. `e9-composer-idle.png` — 스테이지 0, 좌측 열
   2. `e9-composer-ready.png` — 1개 스테이지 + 메시지 입력, textarea 포커스 상태(상자 링이 보여야 한다)
   3. `e9-panels.png` — 모서리 10px 적용 후 전체 화면(패널 3개가 한 화면에)
   4. `e9-dialog.png` — 확인창 하나를 열어 컨테이너 모서리 확인
   스크래치패드(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`)에 절대 경로로 보고 — 컨트롤러가 육안 검수 후 사용자에게 보낸다. **14→10 변경은 취향이 갈릴 수 있는 지점이라 3·4번이 특히 중요하다.**
 
-- [ ] **Step 3: README.** 기존 E8 문장(실독) 뒤에 추가:
+- [x] **Step 3: README.** 기존 E8 문장(실독) 뒤에 추가:
 
 ```markdown
 E9: 커밋 폼을 입력과 액션 줄이 한 테두리 안에 있는 컴포저로 바꾸고(⌘↵로 커밋), 앱 전역 모서리를 용도 기반 3단(`--radius-control` 6px · `--radius-container` 10px · `--radius-pill`)으로 통일했습니다.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md
@@ -419,16 +451,28 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
+**Task 4·5 실행 편차 (소급 기록):** ① **IME 가드는 실측 못 했다.** 이 환경에 macOS 네이티브 Electron 창에 실제 한글 조합 키 입력을 넣을 도구가 없다(Playwright Electron은 CDP 조합 이벤트 없음, 보유 자동화는 iOS 시뮬레이터·Chrome뿐). `CommitForm.tsx:61`의 `isComposing` 가드는 코드로 존재하고 E1a PromptDialog와 같은 패턴이지만 **런타임 확인은 못 했다 — 덮었다고 말하지 않는다. 후속 확인 필요.** ② Test 2의 "아무 일도 안 일어남"은 시간 대기가 아니라 git 상태로 증명했다 — `createRepoWithChange()` 실독으로 최초 커밋 제목이 `'init'`임을 확인하고, ⌘↵ 후에도 `git log -1 --format=%s`가 `'init'`이고 `git log --oneline`이 1줄인지 단언(+ 버튼 `toBeDisabled()`).
+
+**Step 3 — primary 비활성 범위 확장 확인:** `AddWorktreeDialog.tsx:169`의 "만들기"를 브랜치 이름 빈 상태로 도달시켜 실촬영. 짙은 회청색 단색 + 흰 글자로 렌더되고 옆 고스트 "그만두기"와 명확히 구분된다 — **이 인스턴스에서는 올바르다**(스크린샷 `e9-primary-disabled-addworktree.png`).
+
+**게이트 실측:** typecheck 6/6 · 루트 **525** · build 성공 · smoke **93**(90+3) · e2e **99**(93+6) · `last-screen` 아티팩트 0건. 신규 3건 각각 `-g` 2회 통과(1.4/1.0s · 826/820ms · 932/931ms).
+
+**컨트롤러 육안 검수:** 공식 스크린샷 4장 확인 — 컴포저 한 상자·상자 포커스 링·패널 10px 모서리·다이얼로그 컨테이너 모서리 전부 의도대로.
+
+**후속 노트:** ① IME 조합 중 ⌘↵ 런타임 미확인(위) ② `.ui-button--primary[data-disabled]`가 앱 전역 primary 10곳에 적용된다 — 1곳만 실촬영 확인했다.
+
+
+
 ## 게이트 표 (누적)
 
 | 시점 | 루트 테스트 | smoke | e2e 합 |
 | --- | --- | --- | --- |
 | 시작 | 523 | 90 | 96 |
-| Task 1 후 | +1 → **524** | 90 | 96 |
-| Task 2 후 | 524 유지 | 90 유지 | 96 유지 |
-| Task 3 후 | 524 유지 | 90 유지 | 96 유지 |
-| Task 4 후 | 524 유지 | +3 → **93** | **99** |
-| Task 5 후 | 524 | 93 | 99 |
+| Task 1 후 | +2 → **525** (실측 정정 — 대비 테스트가 테마 2벌을 돈다) | 90 | 96 |
+| Task 2 후 | 525 유지 | 90 유지 | 96 유지 |
+| Task 3 후 | 525 유지 | 90 유지 | 96 유지 |
+| Task 4 후 | 525 유지 | +3 → **93** | **99** |
+| Task 5 후 | 525 | 93 | 99 |
 
 ## Self-Review (플랜 자체 점검)
 
