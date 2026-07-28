@@ -19,7 +19,7 @@ export const T = {
   // 브랜치·이력
   branch: '브랜치',
   history: '커밋 히스토리',
-  head: '현재 위치(HEAD)',
+  head: '현재 위치',
   detached: '분리 HEAD',
   tag: '태그',
   // 원격
