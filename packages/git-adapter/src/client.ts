@@ -429,7 +429,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           if (result.stderr.includes('(non-fast-forward)')) {
             throw new Error(
-              '이 브랜치는 원격과 갈라져 있어요. 그 브랜치로 이동한 뒤 가져오기로 합쳐 주세요.',
+              '이 브랜치는 원격과 갈라져 있어요. 그 브랜치로 이동한 뒤 가져오기로 병합해 주세요.',
             )
           }
           // 현재 공간(다른 워크트리 포함) — refspec fetch가 체크아웃된 브랜치를 거부한다 (실측 3)
@@ -837,7 +837,7 @@ export function createGitClient(repoPath: string): GitClient {
         const result = await execGit(['merge', '--abort'], { cwd })
         if (result.exitCode !== 0) {
           if (result.stderr.includes('MERGE_HEAD')) {
-            throw new Error('지금은 병합하는 중이 아니에요.')
+            throw new Error('지금은 병합 중이 아니에요.')
           }
           throw new GitError(['merge', '--abort'], result)
         }
@@ -1535,7 +1535,7 @@ export function createGitClient(repoPath: string): GitClient {
         // 루트 커밋(부모 없음) — HEAD~1이 없다(실측 8: 조용히 exit 1). 원문 git 에러 대신 읽히는 메시지로
         const parent = await execGit(['rev-parse', '-q', '--verify', 'HEAD~1'], { cwd })
         if (parent.exitCode !== 0) {
-          throw new Error('맨 처음 커밋은 실행취소할 수 없어요.')
+          throw new Error('맨 처음 커밋은 취소할 수 없어요.')
         }
         // --mixed: 커밋만 물리고 내용은 작업 폴더에 그대로 남긴다 — 유실 없음 (스펙 §6 계열)
         await execGitOrThrow(['reset', '--mixed', 'HEAD~1'], { cwd })

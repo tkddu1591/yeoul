@@ -47,7 +47,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
                 잠시 치워 둔 변경 <Badge tone="git">stash</Badge>
               </span>
               <Button variant="neutral" size="sm" isDisabled={busy} onPress={onSave} testId="shelf-save">
-                지금 변경 보관하기
+                지금 변경 {T.stash}하기
               </Button>
             </div>
             {shelf.length === 0 ? (

@@ -733,7 +733,7 @@ describe('GitClient', () => {
   it('merge.abort — 합치는 중이 아니면 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.merge.abort()).rejects.toThrow(/병합하는 중이 아니에요/)
+    await expect(client.merge.abort()).rejects.toThrow(/병합 중이 아니에요/)
   })
 
   it('conflicts — ours/theirs 확정과 직접 수정 표시가 해소(staged)로 이어진다', async () => {
@@ -1697,7 +1697,7 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
-    await expect(client.commits.undoLast(head)).rejects.toThrow(/맨 처음 커밋은 실행취소할 수 없어요/)
+    await expect(client.commits.undoLast(head)).rejects.toThrow(/맨 처음 커밋은 취소할 수 없어요/)
   })
 
   it('undoLast — 화면 목록이 낡았으면(HEAD 불일치) 거부한다', async () => {
