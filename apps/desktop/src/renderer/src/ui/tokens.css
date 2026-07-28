@@ -23,10 +23,11 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  /* 모서리·그림자 */
-  --radius-sm: 6px;
-  --radius-md: 9px;
-  --radius-lg: 14px;
+  /* 모서리 — 크기가 아니라 용도로 부른다. 크기 이름(sm/md/lg)은 "어디에 쓰는지"를
+     말하지 않아 실사용이 7가지 값으로 흩어졌다(E9 실측). 값을 고르는 대신 종류를 고른다 */
+  --radius-control: 6px; /* 버튼·입력·행·메뉴 항목·탭·컴포저 상자 */
+  --radius-container: 10px; /* 패널·다이얼로그·팝오버·카드·터미널 도크 */
+  --radius-pill: 999px; /* 배지·ref 칩·개수 알약 */
   --shadow-1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
   --shadow-2: 0 6px 16px rgb(16 24 40 / 0.1);
 
@@ -45,6 +46,9 @@
   --color-accent-hover: #244fd0;
   --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
+  /* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 컴포저 버튼은 옅은 배경 + 진한 글자로 */
+  --color-accent-soft: #e6ebfd;
+  --color-accent-soft-text: #1e44bd;
   --color-danger: #d92d20;
   /* E7g 인라인 ↑↓ — 올릴 것(ahead)·받을 것(behind). 서피스 대비 4.5:1 이상(대비 회귀 테스트) */
   --color-ahead: #067647;
@@ -103,6 +107,8 @@
     --color-accent-hover: #93a9fc;
     --color-accent-active: #a8b9fd;
     --color-accent-text: #10131a;
+    --color-accent-soft: #2f3a52;
+    --color-accent-soft-text: #c3d0f5;
     --color-danger: #f97066;
     --color-ahead: #4ade80;
     --color-behind: #fdb022;
