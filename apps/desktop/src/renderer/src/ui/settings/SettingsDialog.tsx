@@ -3,6 +3,7 @@ import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
 import { Button } from '../Button'
 import '../confirm-dialog.css'
 import './settings-dialog.css'
+import { T } from '../../terms'
 import type { Theme } from '../theme'
 import type { WorktreeSelectAction } from './worktree-select-action'
 import type { PullMode } from './sync-settings'
@@ -76,7 +77,7 @@ export function SettingsDialog({
               {category === 'general' ? (
                 <>
                   <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">워크트리 선택 시 동작</legend>
+                    <legend className="settings-dialog__label">{T.worktree} 선택 시 동작</legend>
                     <label className="settings-dialog__radio">
                       <input
                         type="radio"
@@ -95,14 +96,14 @@ export function SettingsDialog({
                         onChange={() => onChangeWorktreeSelectAction('switch-app')}
                         data-testid="settings-worktree-switch"
                       />
-                      앱 전체 전환 — 변경·역사·실험 공간도 그 워크트리 기준으로 바뀌어요
+                      앱 전체 전환 — 변경·{T.history}·{T.branch}도 그 {T.worktree} 기준으로 바뀌어요
                     </label>
                     <p className="settings-dialog__desc">
                       우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.
                     </p>
                   </fieldset>
                   <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">받아오기(pull) 방식</legend>
+                    <legend className="settings-dialog__label">{T.pull} 방식</legend>
                     <label className="settings-dialog__radio">
                       <input
                         type="radio"
@@ -111,7 +112,7 @@ export function SettingsDialog({
                         onChange={() => onChangePullMode('merge')}
                         data-testid="settings-pull-merge"
                       />
-                      합치며 받기 — 원격과 내 저장을 합쳐요. 지금까지의 방식
+                      {T.merge}하며 받기 — 원격과 내 {T.commit}을 {T.merge}해요. 지금까지의 방식
                     </label>
                     <label className="settings-dialog__radio">
                       <input
@@ -121,11 +122,12 @@ export function SettingsDialog({
                         onChange={() => onChangePullMode('rebase')}
                         data-testid="settings-pull-rebase"
                       />
-                      재배치로 받기 — 내 저장을 원격 최신 위로 다시 쌓아 역사가 일직선이 돼요
+                      {T.rebase}로 받기 — 내 {T.commit}을 원격 최신 위로 다시 쌓아 {T.history}가 일직선이
+                      돼요
                     </label>
                   </fieldset>
                   <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">원격 새로고침</legend>
+                    <legend className="settings-dialog__label">{T.fetch}</legend>
                     <label className="settings-dialog__radio">
                       <input
                         type="checkbox"
@@ -133,10 +135,10 @@ export function SettingsDialog({
                         onChange={(event) => onChangeAutoFetch(event.target.checked)}
                         data-testid="settings-auto-fetch"
                       />
-                      주기적으로 원격 새로고침 (10분)
+                      주기적으로 {T.fetch} (10분)
                     </label>
                     <p className="settings-dialog__desc">
-                      원격의 새 실험 공간·↑↓ 차이가 저절로 최신으로 유지돼요.
+                      원격의 새 {T.branch}·↑↓ 차이가 저절로 최신으로 유지돼요.
                     </p>
                   </fieldset>
                 </>

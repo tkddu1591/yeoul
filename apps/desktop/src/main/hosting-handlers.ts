@@ -187,22 +187,22 @@ export function registerHostingHandlers(): void {
     const client = createGitClient(path)
     const branch = await client.sync.branchStatus()
     if (branch.branch === null) {
-      throw new Error('지금은 실험 공간이 아닌 시점에 있어요. 실험 공간으로 이동한 뒤 요청해 주세요.')
+      throw new Error('지금은 브랜치가 아닌 시점(분리 HEAD)에 있어요. 브랜치로 이동한 뒤 요청해 주세요.')
     }
     // 전환·받아오기와 같은 기준 — 진행 중 작업(merging·reverting) 중에는 요청을 받지 않는다 (품질 리뷰)
     const repoStatus = await client.repo.status()
     if (repoStatus.state !== 'normal') {
-      throw new Error('지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청해 주세요.')
+      throw new Error('지금 진행 중인 작업(병합·되돌리기)을 먼저 마무리한 뒤 요청해 주세요.')
     }
     const api = hosting(token)
-    // 기본 공간 판정은 GitHub의 default_branch가 정본 — UI의 main·master 추정은 빠른 안내일 뿐
+    // 기본 브랜치 판정은 GitHub의 default_branch가 정본 — UI의 main·master 추정은 빠른 안내일 뿐
     const base = await api.repo.defaultBranch(repo.owner, repo.repo)
     if (branch.branch === base) {
       throw new Error(
-        `"${base}"는 모두가 함께 쓰는 기본 공간이에요. 실험 공간(branch)을 만들어 요청해 주세요.`,
+        `"${base}"는 모두가 함께 쓰는 기본 브랜치예요. 새 브랜치를 만들어 요청해 주세요.`,
       )
     }
-    // 원격에 이 실험 공간이 없으면 리뷰 대상이 없다 — 기존 백업(push) 흐름으로 먼저 올린다.
+    // 원격에 이 브랜치가 없으면 풀 리퀘스트 대상이 없다 — 기존 푸시 흐름으로 먼저 올린다.
     // rename 뒤에는 옛 이름의 upstream이 남는다(통합 리뷰 실측) — 이름이 같을 때만 건너뛴다
     const upstreamMatches =
       branch.upstream !== null && branch.upstream.endsWith(`/${branch.branch}`)
@@ -222,7 +222,7 @@ export function registerHostingHandlers(): void {
     const url = knownPullUrls.get(pullUrlKey(path, assertPullNumber(number)))
     // main이 목록·생성에서 보관한 주소만 연다 — renderer가 만든 임의 URL은 여기 없다 (https 재확인은 심층 방어)
     if (url === undefined || !url.startsWith('https://')) {
-      throw new Error('리뷰 요청 주소를 찾지 못했어요. 리뷰 목록을 다시 열어 주세요.')
+      throw new Error('풀 리퀘스트 주소를 찾지 못했어요. 풀 리퀘스트 목록을 다시 열어 주세요.')
     }
     await shell.openExternal(url)
   })

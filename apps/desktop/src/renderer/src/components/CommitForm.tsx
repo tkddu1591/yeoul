@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { T } from '../terms'
 import './commit-form.css'
 
 interface CommitFormProps {
@@ -18,6 +18,17 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
   const effectiveMessage = message.trim().length > 0 ? message : suggestion
   const disabled = busy || (stagedCount === 0 && !allowEmpty) || effectiveMessage.trim().length === 0
 
+  // E8 마무리 — 버튼을 못 누르는 이유만 알린다. "빈 채로 저장하면 제안이 쓰인다"는 안내는
+  // placeholder가 이미 보여주고 있어(비워 두면: ...) 같은 뜻을 두 곳에 동시에 띄우던 걸 걷어냈다.
+  // 그래서 누를 수 있는 상태(제안이 있어 비워 둬도 되는 경우 포함)에는 이 줄이 빈 문자열이다.
+  const reason = busy
+    ? '작업 중이에요'
+    : stagedCount === 0 && !allowEmpty
+      ? `${T.staged}에 올린 파일이 없어요`
+      : effectiveMessage.trim().length === 0
+        ? `${T.commitMessage}를 적어 주세요`
+        : ''
+
   return (
     <form
       className="commit-form"
@@ -30,25 +41,24 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
       }}
     >
       <label className="commit-form__label" htmlFor="commit-message">
-        저장 메시지 <Badge tone="git">commit</Badge>
+        {T.commitMessage}
       </label>
       <textarea
         id="commit-message"
         data-testid="commit-message"
         value={message}
         onChange={(event) => setMessage(event.target.value)}
-        placeholder={suggestion || '무엇을 바꿨는지 적어 주세요'}
+        placeholder={suggestion ? `비워 두면: ${suggestion}` : '무엇을 바꿨는지 적어 주세요'}
         rows={3}
       />
-      {message.trim().length === 0 && suggestion.length > 0 && (
-        // 스펙 10장 "선택의 결과는 말로 설명한다" — placeholder가 힌트가 아니라 실제 저장 문구임을 알린다
-        <p className="commit-form__hint" data-testid="commit-hint">
-          비워 두고 저장하면 위 제안 문구로 저장돼요
-        </p>
-      )}
-      <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
-        저장하기 — {allowEmpty && stagedCount === 0 ? '합치기 마무리' : `${stagedCount}개 파일`}
-      </Button>
+      <div className="commit-form__foot">
+        <span className="commit-form__reason" data-testid="commit-hint">
+          {reason}
+        </span>
+        <Button variant="primary" type="submit" isDisabled={disabled} testId="commit-button">
+          {allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
+        </Button>
+      </div>
     </form>
   )
 }

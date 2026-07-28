@@ -6,6 +6,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './review-detail-panel.css'
 
 interface ReviewDetailPanelProps {
@@ -26,7 +27,7 @@ function statusOf(view: PullDetailView): { label: string; raw: string } {
   if (view.detail.merged) return { label: '병합됨', raw: 'merged' }
   if (view.detail.state === 'closed') return { label: '닫힘', raw: 'closed' }
   if (view.comments.some((comment) => comment.state === 'approved')) {
-    return { label: '승인됨', raw: 'approved' }
+    return { label: `${T.approve}됨`, raw: 'approved' }
   }
   return { label: '열림', raw: 'open' }
 }
@@ -37,7 +38,7 @@ function CommentRow({ comment }: { comment: PullComment }) {
       <p className="review-detail__comment-meta">
         <strong>@{comment.author}</strong>
         <span>{formatRelativeTime(comment.createdAt, Date.now())}</span>
-        {comment.state === 'approved' && <Badge>승인했어요</Badge>}
+        {comment.state === 'approved' && <Badge>{T.approve}했어요</Badge>}
       </p>
       {comment.body !== '' && <p className="review-detail__comment-body">{comment.body}</p>}
     </li>
@@ -147,24 +148,28 @@ export function ReviewDetailPanel({
         </Button>
       </div>
       <div className="review-detail__actions">
-        <Button
-          variant="neutral"
-          size="sm"
-          isDisabled={busy || settled}
-          onPress={onApprove}
-          testId="review-approve"
-        >
-          <Check size={13} aria-hidden="true" /> 승인하기 <Badge tone="git">approve</Badge>
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          isDisabled={busy || settled}
-          onPress={onMerge}
-          testId="review-merge"
-        >
-          <GitMerge size={13} aria-hidden="true" /> 병합하기 <Badge tone="git">merge</Badge>
-        </Button>
+        <Tooltip content={`${T.approve} (approve)`} summary={T.approve} describedBy={false}>
+          <Button
+            variant="neutral"
+            size="sm"
+            isDisabled={busy || settled}
+            onPress={onApprove}
+            testId="review-approve"
+          >
+            <Check size={13} aria-hidden="true" /> {T.approve}하기
+          </Button>
+        </Tooltip>
+        <Tooltip content={`${T.merge} (merge)`} summary={T.merge} describedBy={false}>
+          <Button
+            variant="primary"
+            size="sm"
+            isDisabled={busy || settled}
+            onPress={onMerge}
+            testId="review-merge"
+          >
+            <GitMerge size={13} aria-hidden="true" /> {T.merge}하기
+          </Button>
+        </Tooltip>
       </div>
     </Panel>
   )

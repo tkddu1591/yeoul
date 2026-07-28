@@ -18,6 +18,7 @@ import type {
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 import { findRevivableChange } from './selection-revive'
+import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
 
 const git = () => window.gitApi
@@ -508,7 +509,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
         notice: result.autoShelved
-          ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+          ? `${T.commit} 안 된 변경이 ${T.conflict}해서 ${T.stash}에 넣어뒀어요. 오른쪽 위 ${T.stash}에서 꺼낼 수 있어요.`
           : null,
       })
     })
@@ -519,8 +520,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!(await get().switchBranch(base))) return
     const shelfNotice =
       get().notice ===
-      '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
-        ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.'
+      `${T.commit} 안 된 변경이 ${T.conflict}해서 ${T.stash}에 넣어뒀어요. 오른쪽 위 ${T.stash}에서 꺼낼 수 있어요.`
+        ? ` ${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
         : ''
     await get().pullLatest()
     // 전환의 자동 보관 안내가 pull notice에 덮여 사라지지 않게 이어붙인다 — 상태를 숨기지 않는다
@@ -541,7 +542,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         const result = await git().branches.switch(repoPath, name)
         set({
           notice: result.autoShelved
-            ? '저장 안 된 변경이 겹쳐서 보관함에 넣어뒀어요. 오른쪽 위 보관함에서 꺼낼 수 있어요.'
+            ? `${T.commit} 안 된 변경이 ${T.conflict}해서 ${T.stash}에 넣어뒀어요. 오른쪽 위 ${T.stash}에서 꺼낼 수 있어요.`
             : null,
         })
       } finally {
@@ -558,7 +559,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     await guard(set, get, async () => {
-      await git().shelf.save(repoPath, '직접 보관')
+      await git().shelf.save(repoPath, '직접 스태시')
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
@@ -696,8 +697,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         const result = await git().commits.restoreFile(repoPath, hash, path)
         succeeded = true
         // "이 시점" 어투를 빼 커밋·보관함 공통으로 읽히게, staged로 올라간 것도 함께 안내한다 (품질 리뷰)
-        notice = `"${path}"에 이 내용을 적용하고 저장 예정에 올려뒀어요 — 저장하기로 확정해요.${
-          result.autoShelved ? ' 저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        notice = `"${path}"에 이 내용을 적용하고 ${T.staged}에 올려뒀어요 — ${T.commit}으로 확정해요.${
+          result.autoShelved ? ` ${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         }`
       } finally {
         set({
@@ -733,13 +734,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       try {
         const result = await git().branches.merge(repoPath, name)
         const notices: Record<typeof result.outcome, string | null> = {
-          'fast-forward': `"${name}"의 저장 내용을 모두 가져왔어요.`,
-          merged: `"${name}"와 합쳤어요 — 병합 저장이 만들어졌어요.`,
+          'fast-forward': `"${name}"의 ${T.commit} 내용을 모두 가져왔어요.`,
+          merged: `"${name}"와 ${T.merge}했어요 — ${T.merge} ${T.commit}이 만들어졌어요.`,
           // 충돌 안내는 머지 바가 상주하며 담당한다 — notice까지 겹치면 같은 문장이 2줄이 된다 (리뷰 반영)
           conflict: null,
           'up-to-date': '이미 모두 반영되어 있어요.',
         }
-        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -759,7 +760,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: '합치기를 취소하고 이전 상태로 돌아왔어요.',
+        notice: `${T.merge}을 취소하고 이전 상태로 돌아왔어요.`,
       })
     })
   },
@@ -773,14 +774,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       try {
         const result = await git().sync.pull(repoPath, get().pullMode)
         const notices: Record<typeof result.outcome, string | null> = {
-          'fast-forward': '원격의 최신 저장을 받아왔어요.',
-          merged: '원격과 합쳐 새 병합 저장을 만들었어요.',
-          rebased: '원격 최신 위로 내 저장을 다시 쌓았어요 — 역사가 일직선이에요.',
+          'fast-forward': `원격의 최신 ${T.commit}을 가져왔어요.`,
+          merged: `원격과 ${T.merge}해 새 ${T.merge} ${T.commit}을 만들었어요.`,
+          rebased: `원격 최신 위로 내 ${T.commit}을 다시 쌓았어요 — ${T.history}가 일직선이에요.`,
           // 충돌 안내는 머지 바·rebasing 바가 상주하며 담당한다 (모드별)
           conflict: null,
           'up-to-date': '이미 최신이에요.',
         }
-        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -800,10 +801,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       let notice: string | null = null
       try {
         const result = await git().commits.revert(repoPath, hash)
-        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다 (join으로 선행 공백 방지)
         notice =
-          [result.outcome === 'reverted' ? '되돌리는 새 저장을 만들었어요.' : null, shelfNotice]
+          [result.outcome === 'reverted' ? `되돌리는 새 ${T.commit}을 만들었어요.` : null, shelfNotice]
             .filter((part) => part)
             .join(' ') || null
       } finally {
@@ -838,12 +839,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       try {
         const result = await git().commits.cherryPick(repoPath, hash)
         const notices: Record<typeof result.outcome, string | null> = {
-          picked: '이 저장을 가져와 새 저장을 만들었어요.',
+          picked: `${T.cherryPick}해 새 ${T.commit}을 만들었어요.`,
           // 충돌 안내는 cherry-picking 상태 바가 담당한다 — 보관 안내만 남긴다
           conflict: null,
-          empty: '이미 지금 내용에 들어 있는 저장이에요 — 새로 만든 저장은 없어요.',
+          empty: `이미 지금 내용에 들어 있는 ${T.commit}이에요 — 새로 만든 ${T.commit}은 없어요.`,
         }
-        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         // conflict(안내 null) + 자동 보관 조합에서 선행 공백이 남지 않게 join으로 조립한다 (품질 리뷰)
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
@@ -864,7 +865,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: '가져오기를 취소하고 이전 상태로 돌아왔어요.',
+        notice: `${T.cherryPick}을 취소하고 이전 상태로 돌아왔어요.`,
       })
     })
   },
@@ -890,7 +891,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       let notice: string | null = null
       try {
         await git().commits.undoLast(repoPath, hash)
-        notice = '마지막 저장을 취소했어요. 바뀐 내용은 왼쪽 변경 목록에 그대로 남아 있어요.'
+        notice = `마지막 ${T.commit}을 취소했어요. 바뀐 내용은 왼쪽 변경 목록에 그대로 남아 있어요.`
       } finally {
         set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)), notice })
       }
@@ -906,7 +907,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: '저장 메시지를 고쳤어요.',
+        notice: `${T.commitMessage}를 고쳤어요.`,
       })
     })
   },
@@ -923,7 +924,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       if (result.removed) {
         set({
           ...(await fetchSnapshot(repoPath, get().historyLimit)),
-          notice: `"${name}" 실험 공간을 지웠어요.`,
+          notice: `"${name}" ${T.branch}를 지웠어요.`,
         })
       }
     })
@@ -963,8 +964,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         notice: result.linked
-          ? `"${name}"을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.`
-          : `"${name}"을 백업(push)했어요.`,
+          ? `"${name}"을 원격과 연결하며 ${T.push}했어요 — 이제 ↑↓로 차이가 보여요.`
+          : `"${name}"을 ${T.push}했어요.`,
       })
     })
   },
@@ -993,8 +994,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, HISTORY_LIMIT)),
         notice: result.autoShelved
-          ? `원격 "${name}"을 내 공간으로 가져와 이동했어요. 저장 안 된 변경은 보관함에 넣어뒀어요.`
-          : `원격 "${name}"을 내 공간으로 가져와 이동했어요.`,
+          ? `원격 "${name}"을 내 ${T.branch}로 가져와 이동했어요. ${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : `원격 "${name}"을 내 ${T.branch}로 가져와 이동했어요.`,
       })
     })
   },
@@ -1023,12 +1024,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       try {
         const result = await git().rebase.start(repoPath, name)
         const notices: Record<typeof result.outcome, string | null> = {
-          completed: `"${name}" 위로 재배치했어요.`,
-          'up-to-date': '이미 그 위에 있어요 — 재배치할 것이 없어요.',
+          completed: `"${name}" 위로 ${T.rebase}했어요.`,
+          'up-to-date': `이미 그 위에 있어요 — ${T.rebase}할 것이 없어요.`,
           // 충돌 안내는 rebasing 상태 바가 상주하며 담당한다
           conflict: null,
         }
-        const shelfNotice = result.autoShelved ? '저장 안 된 변경은 보관함에 넣어뒀어요.' : ''
+        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -1048,7 +1049,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       try {
         const result = await git().rebase.continue(repoPath)
         // 다음 충돌 안내는 rebasing 상태 바(진행 M/N)가 담당한다 — 완료만 notice로
-        notice = result.outcome === 'completed' ? '재배치를 마쳤어요.' : null
+        notice = result.outcome === 'completed' ? `${T.rebase}를 마쳤어요.` : null
       } finally {
         set({
           ...CLEAR_SELECTIONS,
@@ -1067,7 +1068,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: '재배치를 취소하고 이전 상태로 돌아왔어요.',
+        notice: `${T.rebase}를 취소하고 이전 상태로 돌아왔어요.`,
       })
     })
   },
@@ -1079,7 +1080,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await git().worktrees.add(repoPath, path, branch, createBranch === true)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
-        notice: `"${branch}" 워크트리를 만들었어요.`,
+        notice: `"${branch}" ${T.worktree}를 만들었어요.`,
       })
     })
   },
@@ -1094,7 +1095,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       if (result.removed) {
         set({
           ...(await fetchSnapshot(repoPath, get().historyLimit)),
-          notice: '워크트리를 지웠어요.',
+          notice: `${T.worktree}를 지웠어요.`,
         })
       }
     })
@@ -1248,7 +1249,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         // 그 블록이 더는 없다 — 최신 내용을 보여 주고 다시 고르게 안내한다
         set({
           conflictFile: { path: conflictFile.path, content: fresh },
-          notice: '파일이 밖에서 바뀌어 겹침 목록을 새로 불러왔어요. 다시 골라 주세요.',
+          notice: `파일이 밖에서 바뀌어 ${T.conflict} 목록을 새로 불러왔어요. 다시 골라 주세요.`,
         })
         return
       }
@@ -1390,7 +1391,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         // linked는 첫 연결뿐 아니라 rename 재연결·반쪽 수리에서도 참 — "만들어"를 피한 중립 문구 (Task 3 리뷰)
         notice: result.linked
-          ? '이 실험 공간을 원격과 연결하며 백업했어요 — 이제 ↑↓로 차이가 보여요.'
+          ? `이 ${T.branch}를 원격과 연결하며 ${T.push}했어요 — 이제 ↑↓로 차이가 보여요.`
           : null,
       })
     })
@@ -1458,7 +1459,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
         pulls: await hosting().pulls.list(repoPath),
-        notice: `리뷰 요청 #${pull.number}을 만들었어요. 리뷰 팝오버에서 볼 수 있어요.`,
+        notice: `${T.pullRequest} #${pull.number}을 만들었어요. 리뷰 팝오버에서 볼 수 있어요.`,
       })
     })
   },
@@ -1521,7 +1522,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       }
       set({
         pullDetail: refreshed,
-        notice: `리뷰 요청 #${number}을 승인했어요.`,
+        notice: `${T.pullRequest} #${number}을 ${T.approve}했어요.`,
       })
     })
   },
@@ -1543,7 +1544,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       }
       set({
         pullDetail: refreshed,
-        notice: `리뷰 요청 #${number}을 "${base}"에 병합했어요. 로컬은 아직 그대로예요 — 기본 공간에서 받아오기(pull)를 하면 반영돼요.`,
+        notice: `${T.pullRequest} #${number}을 "${base}"에 ${T.merge}했어요. 로컬은 아직 그대로예요 — 기본 브랜치에서 ${T.pull}를 하면 반영돼요.`,
       })
     })
   },

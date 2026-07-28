@@ -75,7 +75,7 @@ function toFriendlyMessage(status: number, body: string): string {
   if (status === 404) return 'GitHub에서 저장소를 찾을 수 없어요. 주소와 접근 권한을 확인해 주세요.'
   // GitHub는 "A pull request already exists for o:branch."를 errors[]에 담는다 — 본문 전체에서 찾는다
   if (status === 422 && body.includes('pull request already exists')) {
-    return '이 실험 공간의 리뷰 요청이 이미 있어요.'
+    return '이 브랜치의 풀 리퀘스트가 이미 있어요.'
   }
   return `GitHub 요청이 실패했어요. (HTTP ${status})`
 }
@@ -162,7 +162,7 @@ export function createGitHubHosting({
 
   // PR 단위 경로의 404는 "저장소 없음"이 아니라 "리뷰 요청 없음"이다(밖에서 닫힘·삭제)
   const pullNotFound = (status: number): string | null =>
-    status === 404 ? '리뷰 요청을 찾지 못했어요. 목록을 새로 열어 주세요.' : null
+    status === 404 ? '풀 리퀘스트를 찾지 못했어요. 목록을 새로 열어 주세요.' : null
 
   return {
     user: {
@@ -226,7 +226,7 @@ export function createGitHubHosting({
           (status, text) => {
             // 실 GitHub 422 본문의 errors[]에 이 문자열이 담긴다 — 부분 문자열로 매핑
             if (status === 422 && text.includes('Can not approve your own pull request')) {
-              return '내가 만든 리뷰 요청은 스스로 승인할 수 없어요. 다른 사람의 승인을 기다려 주세요.'
+              return '내가 만든 풀 리퀘스트는 스스로 승인할 수 없어요. 다른 사람의 승인을 기다려 주세요.'
             }
             return pullNotFound(status)
           },
@@ -240,9 +240,9 @@ export function createGitHubHosting({
           { merge_method: 'merge' },
           (status) => {
             if (status === 405) {
-              return '아직 병합할 수 없어요. 겹침(충돌)이나 진행 중인 검사가 있는지 브라우저에서 확인해 주세요.'
+              return '아직 병합할 수 없어요. 충돌이나 진행 중인 검사가 있는지 브라우저에서 확인해 주세요.'
             }
-            if (status === 409) return '리뷰 요청이 방금 바뀌었어요. 다시 열어 확인해 주세요.'
+            if (status === 409) return '풀 리퀘스트가 방금 바뀌었어요. 다시 열어 확인해 주세요.'
             return pullNotFound(status)
           },
         )

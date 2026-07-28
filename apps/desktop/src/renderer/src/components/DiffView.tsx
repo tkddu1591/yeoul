@@ -4,6 +4,7 @@ import type { DiffLine, FileDiff } from '@git-gui/domain'
 import { buildDiffRows, type DiffRow } from './diff-rows'
 import { FindBar } from './FindBar'
 import { cycleIndex, matchIndices } from './find-matches'
+import { T } from '../terms'
 import './diff-panel.css'
 import './virtual.css'
 
@@ -104,7 +105,7 @@ export function DiffView({ diff, view, findOpen, findNonce, onFindClose }: DiffV
     )
   }
   if (diff.hunks.length === 0) {
-    return <p className="diff-panel__empty">변경 내용이 없어요</p>
+    return <p className="diff-panel__empty">{T.diff}가 없어요</p>
   }
   return (
     <>

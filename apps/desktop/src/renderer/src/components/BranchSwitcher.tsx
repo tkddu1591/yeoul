@@ -8,6 +8,7 @@ import { Pictogram } from '../ui/Pictogram'
 import { Tooltip } from '../ui/Tooltip'
 import { branchDisplayName, groupBranches } from './branch-groups'
 import { formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './branch-switcher.css'
 
 interface BranchSwitcherProps {
@@ -50,7 +51,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
   return (
     <MenuTrigger isOpen={open} onOpenChange={setOpen}>
       <Button variant="ghost" size="sm" isDisabled={busy} testId="header-branch">
-        <Pictogram kind="branch" size={13} label="실험 공간 (branch)" />
+        <Pictogram kind="branch" size={13} label={T.branch} />
         <span className="branch-switcher__current">{currentName ?? '(브랜치 없음)'}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </Button>
@@ -75,22 +76,22 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
           <MenuItem
             id={NEW_KEY}
             className="branch-switcher__item branch-switcher__item--new"
-            textValue="새 실험 공간 만들기"
+            textValue={`새 ${T.branch} 만들기`}
             data-testid="branch-new"
           >
             <span className="branch-switcher__check" aria-hidden="true">
               <Plus size={12} />
             </span>
-            <span className="branch-switcher__name">새 실험 공간 만들기…</span>
+            <span className="branch-switcher__name">새 {T.branch} 만들기…</span>
           </MenuItem>
           <MenuItem
             id={MANAGE_KEY}
             className="branch-switcher__item branch-switcher__item--new"
-            textValue="실험 공간 관리"
+            textValue={`${T.branch} 관리`}
             data-testid="branch-manage"
           >
             <span className="branch-switcher__check" aria-hidden="true" />
-            <span className="branch-switcher__name">실험 공간 관리…</span>
+            <span className="branch-switcher__name">{T.branch} 관리…</span>
           </MenuItem>
         </Menu>
       </Popover>

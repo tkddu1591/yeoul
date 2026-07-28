@@ -1,10 +1,10 @@
 import { Columns2, Rows3, X } from 'lucide-react'
 import { useState } from 'react'
 import type { FileDiff } from '@git-gui/domain'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { DiffView } from './DiffView'
+import { T } from '../terms'
 import './diff-panel.css'
 
 interface DiffPanelProps {
@@ -33,7 +33,7 @@ export function DiffPanel({
 
   if (!path || diff === null) {
     return (
-      <Panel title="변경 내용" testId="diff-panel">
+      <Panel title={T.diff} testId="diff-panel">
         <p className="diff-panel__empty">파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
       </Panel>
     )
@@ -43,7 +43,6 @@ export function DiffPanel({
       title={path}
       accessory={
         <>
-          <Badge tone="git">diff</Badge>
           {/* 가시 라벨이 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
           <Button
             variant="ghost"

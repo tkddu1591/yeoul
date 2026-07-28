@@ -6,8 +6,19 @@
   /* E7h ⑥ 편차 — 두 목록 공용 FindBar(position: absolute)의 기준점 */
   position: relative;
 }
+/* E8 — grow:0으로 두 카드가 changes-panel(확정 높이)을 억지로 반반 채우지 않는다.
+   내용만큼만 차지하고(파일 1~2개면 짧게) 끝나면 되는데, shrink:1은 flex-basis 비율로
+   줄어들어서 "변경 사항" 쪽이 길고 "스테이지" 쪽이 짧으면 짧은 쪽이 자기 몫의 거의
+   전부를 빼앗겨 헤더 아래로 눌린다(E8 Task 5 보완 실측: 200/3에서 스테이지 카드가
+   14.9px까지 눌려 제목·배지·행이 전부 사라졌다 — overflow:hidden이라 잘리는 게 아니라
+   가상 스크롤이 clientHeight 0을 재서 행을 아예 안 그린다). max-height로 한쪽이
+   70%를 넘게 눌리는 걸 막는다. 남는 배경은 두 카드 아래(커밋 폼의 border-top 위)에
+   모이며 흡수되지 않는다 — 그쪽이 빈 카드를 늘려 채우는 것보다 낫다는 판단
+   (E8 마무리 — flex-grow:1 삭제, 이전 주석의 "나머지를 흡수" 주장은 실측과 달랐다) */
 .changes-panel > .ui-panel {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 70%;
 }
 .changes-panel__list {
   list-style: none;
@@ -15,11 +26,13 @@
   padding: 0;
 }
 .changes-panel__empty {
-  padding: var(--space-4);
+  /* 좌우 var(--space-4) — 실측: 제목·모두 선택·파일명은 x:37인데 space-3(12px)였던 이 패딩만
+     x:33으로 4px 왼쪽이었다. 같은 값을 써서 제목·bulk바와 같은 레일에 맞춘다 (E8 Task 5 보완) */
+  padding: var(--space-2) var(--space-4);
   margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-faint);
-  text-align: center;
+  text-align: left;
 }
 .file-row {
   display: flex;

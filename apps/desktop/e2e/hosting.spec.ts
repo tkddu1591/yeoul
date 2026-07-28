@@ -287,7 +287,7 @@ test('토큰 연결 상태에서 리뷰 요청을 만들고 목록에서 본다'
     // 제목 기본값 = 현재 실험 공간의 최근 저장 제목
     await expect(window.getByTestId('prompt-input')).toHaveValue('실험 작업')
     await window.getByTestId('prompt-submit').click()
-    await expect(window.getByTestId('notice')).toContainText('리뷰 요청 #1')
+    await expect(window.getByTestId('notice')).toContainText('풀 리퀘스트 #1')
     // mock 상태에 실제 반영됐다 — upstream이 있어 push는 건너뛰었다(실행됐다면 실 push 실패로 죽는다)
     expect(mock.pulls).toHaveLength(1)
     expect(mock.pulls[0]).toMatchObject({ title: '실험 작업', head: 'feature', base: 'main' })
@@ -320,7 +320,7 @@ test('기본 공간(main)에서는 리뷰 요청 버튼이 비활성이고 실�
     const window = await app.firstWindow()
     await window.getByTestId('review-open').click()
     await expect(window.getByTestId('review-create')).toBeDisabled()
-    await expect(window.getByTestId('review-create-reason')).toContainText('기본 공간')
+    await expect(window.getByTestId('review-create-reason')).toContainText('기본 브랜치')
     await window.keyboard.press('Escape')
     // 실험 공간을 만들어 이동하면 활성된다 (버튼 활성만 확인 — 생성은 (a)가 커버)
     await window.getByTestId('header-branch').click()
@@ -470,7 +470,7 @@ test('승인하면 승인됨 배지, 병합하면 병합됨 배지와 기본 공
     // 병합 후 기본 공간 이동 제안 — '나중에'(그만두기)를 고르면 안내 notice만 남는다.
     // 확인 경로(전환+받아오기)는 기존 smoke E2E가 커버하고, 여기서 실행하면 mock GitHub(가짜
     // 병합)와 로컬 픽스처(원격 네트워크 없음)의 정합이 깨진다 — 취소로 끝낸다(근거: 헤더)
-    await expect(window.getByRole('alertdialog')).toContainText('기본 공간(main)으로 이동해')
+    await expect(window.getByRole('alertdialog')).toContainText('기본 브랜치(main)로 이동해')
     await window.getByTestId('confirm-cancel').click()
     await expect(window.getByTestId('notice')).toContainText('병합했어요')
   } finally {

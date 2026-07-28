@@ -1,13 +1,13 @@
 import { useState, type MouseEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { buildBranchTree, flatSearch, flattenBranchTree } from './branch-tree'
 import { formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './branches-panel.css'
 
 export type BranchPanelAction =
@@ -78,29 +78,31 @@ export function BranchesPanel({
       {
         key: 'switch',
         label: isCurrent
-          ? '이 공간으로 이동 (checkout) — 지금 여기예요'
-          : '이 공간으로 이동 (checkout)',
+          ? `이 ${T.branch}로 이동 — ${T.head}예요`
+          : `이 ${T.branch}로 이동`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'switch', name: branch.name }),
       },
       {
         key: 'branch-from',
-        label: '여기서 새 실험 공간…',
+        label: `여기서 새 ${T.branch}…`,
         disabled: busy,
         onSelect: () => onAction({ kind: 'branch-from', name: branch.name, hash: branch.hash }),
       },
       { key: 'sep-1', separator: true },
       {
         key: 'merge',
-        label: isCurrent ? '지금 것과 합치기 (merge) — 자기 자신이에요' : '지금 것과 합치기 (merge)',
+        label: isCurrent
+          ? `지금 것과 ${T.merge} — 자기 자신이에요`
+          : `지금 것과 ${T.merge}`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'merge', name: branch.name }),
       },
       {
         key: 'rebase',
         label: isCurrent
-          ? '지금 것을 이 위로 재배치 (rebase) — 자기 자신이에요'
-          : '지금 것을 이 위로 재배치 (rebase)',
+          ? `지금 것을 이 위로 ${T.rebase} — 자기 자신이에요`
+          : `지금 것을 이 위로 ${T.rebase}`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'rebase', name: branch.name }),
       },
@@ -114,7 +116,7 @@ export function BranchesPanel({
       {
         key: 'update',
         label: isCurrent
-          ? '원격 최신으로 업데이트 (pull)'
+          ? '원격 최신으로 업데이트'
           : noUpstream
             ? '원격 최신으로 업데이트 — 원격과 연결된 적이 없어요'
             : branch.upstreamGone
@@ -125,7 +127,7 @@ export function BranchesPanel({
       },
       {
         key: 'backup',
-        label: '백업 (push)',
+        label: T.push,
         disabled: busy || actionsDisabled,
         onSelect: () => onAction({ kind: 'backup', name: branch.name }),
       },
@@ -138,7 +140,7 @@ export function BranchesPanel({
       },
       {
         key: 'remove',
-        label: isCurrent ? '지우기 — 지금 있는 공간이에요' : '지우기…',
+        label: isCurrent ? `지우기 — 지금 있는 ${T.branch}예요` : '지우기…',
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'remove', name: branch.name }),
       },
@@ -148,7 +150,7 @@ export function BranchesPanel({
   const buildRemoteMenu = (name: string): ContextMenuEntry[] => [
     {
       key: 'checkout-remote',
-      label: '내 공간으로 가져오기 (checkout)',
+      label: `내 ${T.branch}로 가져오기`,
       disabled: busy || actionsDisabled,
       onSelect: () => onAction({ kind: 'checkout-remote', name }),
     },
@@ -203,11 +205,7 @@ export function BranchesPanel({
       </>
     )
     return (
-      <Panel
-        title={`지금 ↔ "${compare.name}"`}
-        accessory={<Badge tone="git">compare</Badge>}
-        testId="branches-panel"
-      >
+      <Panel title={`지금 ↔ "${compare.name}"`} titleHint="compare" testId="branches-panel">
         <div className="branches-panel">
           <div>
             {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
@@ -223,16 +221,16 @@ export function BranchesPanel({
           </div>
           <div className="branches-panel__scroll" data-testid="branch-compare-view">
             {section(
-              `"${compare.name}"에만 있는 저장`,
+              `"${compare.name}"에만 있는 ${T.commit}`,
               result.onlyInSelected,
               result.selectedOverflow,
-              '없어요 — 전부 지금 공간에도 있어요.',
+              `없어요 — 전부 지금 ${T.branch}에도 있어요.`,
             )}
             {section(
-              '지금 공간에만 있는 저장',
+              `지금 ${T.branch}에만 있는 ${T.commit}`,
               result.onlyInCurrent,
               result.currentOverflow,
-              '없어요 — 전부 그 공간에도 있어요.',
+              `없어요 — 전부 그 ${T.branch}에도 있어요.`,
             )}
           </div>
         </div>
@@ -253,9 +251,10 @@ export function BranchesPanel({
 
   /** 상태 툴팁 — 칩 대신 아이콘·타이포이므로 설명은 여기서 (스펙 ③) */
   const localTitle = (branch: LocalBranchStatus): string => {
-    if (branch.name === currentBranch) return `${branch.name} — 지금 여기(현재 작업 중)`
-    if (branch.upstreamGone) return `${branch.name} — 원격에서 사라진 연결. 백업하면 다시 만들어져요`
-    if (branch.upstream === null) return `${branch.name} — 아직 원격과 연결 안 됨`
+    if (branch.name === currentBranch) return `${branch.name} — ${T.head}(현재 작업 중)`
+    if (branch.upstreamGone)
+      return `${branch.name} — 업스트림이 원격에서 사라졌어요. ${T.push}하면 다시 만들어져요`
+    if (branch.upstream === null) return `${branch.name} — 아직 ${T.noUpstream}`
     return branch.name
   }
 
@@ -356,15 +355,15 @@ export function BranchesPanel({
   const remoteRows = flattenBranchTree(buildBranchTree(remotes), collapsed)
 
   return (
-    <Panel title="실험 공간" accessory={<Badge tone="git">branch</Badge>} testId="branches-panel">
+    <Panel title={T.branch} titleHint="branch" testId="branches-panel">
       <div className="branches-panel">
         <div className="branches-panel__fetch">
           <Button variant="ghost" size="sm" isDisabled={busy} onPress={onFetchRemotes} testId="fetch-remotes">
-            <RefreshCw size={13} aria-hidden="true" /> 원격 새로고침
+            <RefreshCw size={13} aria-hidden="true" /> {T.fetch}
           </Button>
           {lastFetchAt !== null && (
             <span className="branches-panel__fetch-at" data-testid="fetch-at">
-              {formatRelativeTime(Math.floor(lastFetchAt / 1000), Date.now())} 새로고침
+              {formatRelativeTime(Math.floor(lastFetchAt / 1000), Date.now())} {T.fetch}
             </span>
           )}
         </div>
@@ -373,12 +372,12 @@ export function BranchesPanel({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="이름으로 찾기"
-          aria-label="실험 공간 검색"
+          aria-label={`${T.branch} 검색`}
           data-testid="branches-search"
         />
         <div className="branches-panel__scroll" data-testid="branches-list">
           {locals.length === 0 && remotes.length === 0 ? (
-            <p className="branches-panel__empty">보여줄 실험 공간이 없어요.</p>
+            <p className="branches-panel__empty">보여줄 {T.branch}가 없어요.</p>
           ) : searchLocals !== null ? (
             <>
               {/* 검색 중엔 평면 매치 — 전체 경로 표시 (스펙 ①) */}
@@ -390,7 +389,7 @@ export function BranchesPanel({
             </>
           ) : (
             <>
-              {locals.length > 0 && <p className="branches-panel__group">내 공간 (로컬)</p>}
+              {locals.length > 0 && <p className="branches-panel__group">로컬 {T.branch}</p>}
               {localRows.map((row) =>
                 row.node.kind === 'folder'
                   ? folderRow(row.node.path, row.node.name, row.node.count, row.depth)

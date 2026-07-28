@@ -11,6 +11,7 @@ import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { FindBar } from './FindBar'
+import { T } from '../terms'
 import './changes-panel.css'
 import './virtual.css'
 
@@ -28,7 +29,7 @@ interface ChangesPanelProps {
   onUnstage(paths: string[]): void
   /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
   onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
-  /** 우클릭 → "파일 삭제 (delete)" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
+  /** 우클릭 → "파일 삭제" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
   onRemoveFile(path: string): void
   onSelect(selected: SelectedFile): void
 }
@@ -116,7 +117,6 @@ function FileRow({
 
 interface FileListProps {
   title: string
-  termBadge: string
   countTestId: string
   emptyText: string
   changes: FileChange[]
@@ -137,7 +137,6 @@ interface FileListProps {
 
 function FileList({
   title,
-  termBadge,
   countTestId,
   emptyText,
   changes,
@@ -219,13 +218,11 @@ function FileList({
   return (
     <Panel
       title={title}
+      titleHint={side}
       accessory={
-        <>
-          <Badge tone="git">{termBadge}</Badge>
-          <Badge tone="count">
-            <span data-testid={countTestId}>{changes.length}</span>
-          </Badge>
-        </>
+        <Badge tone="count">
+          <span data-testid={countTestId}>{changes.length}</span>
+        </Badge>
       }
     >
       {changes.length === 0 ? (
@@ -255,7 +252,7 @@ function FileList({
                 onPress={() => setConfirmingDiscard(true)}
                 testId="discard-selected"
               >
-                변경 취소 ({validChecked.length})
+                변경 취소{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
               </Button>
             )}
             <Button
@@ -270,7 +267,7 @@ function FileList({
               ) : (
                 <CirclePlus size={13} aria-hidden="true" />
               )}
-              선택 {bulkLabel} ({validChecked.length})
+              선택 {bulkLabel}{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
             </Button>
           </div>
           <div ref={scrollRef} className="virtual-scroll" data-testid={`file-scroll-${side}`}>
@@ -341,24 +338,24 @@ function FileList({
                     ? [
                         {
                           key: 'unstage-file',
-                          label: '내리기 (unstage)',
+                          label: '내리기',
                           onSelect: () => onAction(actionPaths(menu.change, true)),
                         },
                       ]
                     : [
                         {
                           key: 'stage-file',
-                          label: '올리기 (stage)',
+                          label: '올리기',
                           onSelect: () => onAction(actionPaths(menu.change, false)),
                         },
                         {
                           key: 'discard-file',
-                          label: '이 파일만 되돌리기 (discard)',
+                          label: '이 파일만 되돌리기',
                           onSelect: () => setMenuDiscard(menu.change),
                         },
                         {
                           key: 'remove-file',
-                          label: '파일 삭제 (delete)',
+                          label: '파일 삭제',
                           onSelect: () => setMenuRemove(menu.change),
                         },
                       ]
@@ -439,8 +436,7 @@ export function ChangesPanel({
         />
       )}
       <FileList
-        title="지금 바뀐 것"
-        termBadge="unstaged"
+        title={T.unstaged}
         countTestId="unstaged-count"
         emptyText="바뀐 파일이 없어요"
         changes={unstagedChanges}
@@ -455,8 +451,7 @@ export function ChangesPanel({
         onSelect={onSelect}
       />
       <FileList
-        title="저장 예정"
-        termBadge="staged"
+        title={T.staged}
         countTestId="staged-count"
         emptyText="파일을 올리면 여기에 모여요"
         changes={stagedChanges}

@@ -26,7 +26,7 @@ export function resetRightWidth(): void {
 }
 
 export const LEFT_COLUMN_DEFAULT = 380
-/** 좌측(변경 목록+저장 폼) 하한 — 이 아래로는 체크박스·버튼 줄이 붕괴한다 */
+/** 좌측(변경 목록+커밋 폼) 하한 — 이 아래로는 체크박스·버튼 줄이 붕괴한다 */
 export const LEFT_COLUMN_MIN = 260
 /** 중앙(diff·충돌 뷰) 최소 보장 폭 — 960px 최소 창에서도 지킨다 (E2 후속 노트 해소) */
 export const CENTER_MIN = 380

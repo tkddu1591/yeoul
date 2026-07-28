@@ -1,11 +1,11 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown, Check, CheckCheck, Download, PenLine, RotateCcw, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Panel } from '../ui/Panel'
 import { buildConflictView, hasConflictMarkers } from './conflict-markers'
+import { T } from '../terms'
 import './conflict-panel.css'
 import './virtual.css'
 
@@ -51,7 +51,11 @@ export function ConflictPanel({
   onReset,
 }: ConflictPanelProps) {
   const takenLabel =
-    mode === 'reverting' ? '되돌린 결과물' : mode === 'rebasing' ? '재배치 중인 내 저장' : '가져온 것'
+    mode === 'reverting'
+      ? '되돌린 결과물'
+      : mode === 'rebasing'
+        ? `${T.rebase} 중인 내 ${T.commit}`
+        : '가져온 것'
   // rebase에서는 초록(ours)이 "내 것"이 아니라 새 기반이다 — 이름을 정직하게 바꾼다 (E7a)
   const mineLabel = mode === 'rebasing' ? '새 기반' : '내 것'
   const [confirmingMark, setConfirmingMark] = useState(false)
@@ -130,24 +134,20 @@ export function ConflictPanel({
   }
 
   return (
-    <Panel
-      title={`${path} — 겹침 해결`}
-      accessory={<Badge tone="git">conflict</Badge>}
-      testId="conflict-panel"
-    >
+    <Panel title={`${path} — ${T.conflict} 해결`} titleHint="conflict" testId="conflict-panel">
       {view === 'cards' ? (
         <>
           <p className="conflict-panel__hint">
-            두 버전이 같은 곳을 다르게 고쳤어요. 겹침마다 카드에서 한쪽을 골라 주세요 — 초록이{' '}
+            두 버전이 같은 곳을 다르게 고쳤어요. {T.conflict}마다 카드에서 한쪽을 골라 주세요 — 초록이{' '}
             <strong>{mineLabel}</strong>, 보라가 <strong>{takenLabel}</strong>이에요. 고르면 파일에 바로
             반영되지만, "고른 대로 확정"을 누르기 전에는 아무것도 확정되지 않아요. 선택하지 않은
-            쪽도 사라지지 않고 저장된 역사에 남아 있어요.
+            쪽도 사라지지 않고 {T.history}에 남아 있어요.
           </p>
           {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
           <div className="conflict-panel__actions">
             {blockCount > 0 ? (
               <span className="conflict-panel__progress" data-testid="conflict-progress">
-                겹침 {total}곳 중 {done + 1}번째
+                {T.conflict} {total}곳 중 {done + 1}번째
               </span>
             ) : (
               <span
@@ -204,7 +204,7 @@ export function ConflictPanel({
               onPress={jumpNext}
               testId="conflict-next"
             >
-              <ArrowDown size={13} aria-hidden="true" /> 다음 겹침 ({blockCount})
+              <ArrowDown size={13} aria-hidden="true" /> 다음 {T.conflict} ({blockCount})
             </Button>
             <Button
               variant="ghost"
@@ -247,7 +247,7 @@ export function ConflictPanel({
                     ) : (
                       <div className="conflict-card" data-testid={`conflict-card-${item.block.index}`}>
                         <p className="conflict-card__title">
-                          {done + item.block.index + 1}번째 겹침 — 어느 쪽을 쓸까요?
+                          {done + item.block.index + 1}번째 {T.conflict} — 어느 쪽을 쓸까요?
                         </p>
                         <div className="conflict-card__sides">
                           <div className="conflict-card__side conflict-card__side--mine">
@@ -298,7 +298,7 @@ export function ConflictPanel({
       ) : (
         <>
           <p className="conflict-panel__hint">
-            합쳐진 결과를 직접 고칠 수 있어요. 남은 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)도
+            병합 결과를 직접 고칠 수 있어요. 남은 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)도
             그대로 보여요 — 표시 줄까지 지우고 원하는 내용만 남긴 뒤 저장해 주세요. 저장해도 확정은
             아니에요.
           </p>
@@ -332,14 +332,14 @@ export function ConflictPanel({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             spellCheck={false}
-            aria-label="합쳐진 결과 직접 수정"
+            aria-label="병합 결과 직접 수정"
             data-testid="conflict-edit-text"
           />
         </>
       )}
       <ConfirmDialog
         isOpen={confirmingMark}
-        title="겹침 표시가 아직 남아 있어요"
+        title={`${T.conflict} 표시가 아직 남아 있어요`}
         confirmLabel="그래도 표시"
         onConfirm={() => {
           setConfirmingMark(false)
@@ -347,7 +347,7 @@ export function ConflictPanel({
         }}
         onCancel={() => setConfirmingMark(false)}
       >
-        파일에 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)가 그대로 있어요. 이대로 해결 표시하면 표시
+        파일에 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)가 그대로 있어요. 이대로 해결 표시하면 표시
         줄까지 저장돼요. 편집기에서 정리한 뒤 다시 시도하는 것을 권해요.
       </ConfirmDialog>
       <ConfirmDialog
@@ -360,8 +360,8 @@ export function ConflictPanel({
         }}
         onCancel={() => setConfirmingReset(false)}
       >
-        이 파일에서 지금까지 고른 것을 버리고 겹침 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)를 되살려요.
-        저장된 역사와 다른 파일은 그대로예요.
+        이 파일에서 지금까지 고른 것을 버리고 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)를
+        되살려요. {T.history}와 다른 파일은 그대로예요.
       </ConfirmDialog>
     </Panel>
   )

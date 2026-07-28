@@ -6,6 +6,7 @@ import type { HostingStatus, PullSummary } from '@git-gui/ipc-contract'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
+import { T } from '../terms'
 import './review-popover.css'
 
 interface ReviewPopoverProps {
@@ -64,24 +65,24 @@ export function ReviewPopover({
         if (next) onOpen()
       }}
     >
-      <Tooltip content="리뷰" summary="리뷰" describedBy={false}>
+      <Tooltip content={`${T.pullRequest} (pull request)`} summary={T.pullRequest} describedBy={false}>
         <Button
           variant="ghost"
           size="sm"
           className="review-popover__trigger"
           testId="review-open"
-          aria-label="리뷰"
+          aria-label={T.pullRequest}
         >
-          <GitPullRequest size={13} aria-hidden="true" /> <span className="app__btn-label">리뷰</span>{' '}
-          <Badge tone="git">PR</Badge>
+          <GitPullRequest size={13} aria-hidden="true" />{' '}
+          <span className="app__btn-label">{T.pullRequest}</span>
         </Button>
       </Tooltip>
       <Popover className="review-popover">
-        <Dialog className="review-popover__dialog" aria-label="리뷰 요청">
+        <Dialog className="review-popover__dialog" aria-label={T.pullRequest}>
           {status === null || !status.connected ? (
             <>
               <p className="review-popover__empty">
-                GitHub와 연결하면 리뷰 요청 (pull request)을 만들고 볼 수 있어요.
+                GitHub와 연결하면 {T.pullRequest}를 만들고 볼 수 있어요.
               </p>
               <div className="review-popover__buttons">
                 {status?.ghAvailable === true && (
@@ -122,8 +123,8 @@ export function ReviewPopover({
               </div>
               {status.repo === null ? (
                 <p className="review-popover__empty">
-                  이 저장소의 원격(origin)이 GitHub가 아니에요. GitHub 저장소를 백업(push) 대상으로
-                  연결하면 리뷰 요청을 만들 수 있어요.
+                  이 저장소의 원격(origin)이 GitHub가 아니에요. GitHub 저장소를 {T.push} 대상으로
+                  연결하면 {T.pullRequest}를 만들 수 있어요.
                 </p>
               ) : (
                 <>
@@ -134,30 +135,33 @@ export function ReviewPopover({
                     onPress={() => openDialog(onCreate)}
                     testId="review-create"
                   >
-                    <GitPullRequest size={13} aria-hidden="true" /> 이 실험 공간 리뷰 요청하기
+                    <GitPullRequest size={13} aria-hidden="true" /> 이 {T.branch}로 {T.pullRequest} 만들기
                   </Button>
                   {isDefaultBranch && (
                     <p className="review-popover__reason" data-testid="review-create-reason">
-                      "{currentBranch}"는 모두가 함께 쓰는 기본 공간이에요. 실험 공간(branch)을
+                      "{currentBranch}"는 모두가 함께 쓰는 기본 브랜치예요. {T.branch}를
                       만들어 요청해 주세요.
                     </p>
                   )}
                   {stateBlocked && (
                     <p className="review-popover__reason" data-testid="review-create-blocked">
-                      지금 진행 중인 작업(합치기·되돌리기)을 먼저 마무리한 뒤 요청할 수 있어요.
+                      지금 진행 중인 작업({T.merge}·{T.revert})을 먼저 마무리한 뒤 요청할 수 있어요.
                     </p>
                   )}
                   {pulls === null ? (
                     <p className="review-popover__empty">
-                      리뷰 요청 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.
+                      {T.pullRequest} 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.
                     </p>
                   ) : pulls.length === 0 ? (
-                    <p className="review-popover__empty">열린 리뷰 요청이 없어요.</p>
+                    <p className="review-popover__empty">열린 {T.pullRequest}가 없어요.</p>
                   ) : (
                     <ul className="review-popover__list">
                       {pulls.map((pull) => (
                         <li key={pull.number} className="review-popover__row">
-                          <Tooltip content="코멘트·승인·병합 보기" summary="코멘트·승인·병합 보기">
+                          <Tooltip
+                            content={`코멘트·${T.approve}·${T.merge} 보기`}
+                            summary={`코멘트·${T.approve}·${T.merge} 보기`}
+                          >
                             <button
                               type="button"
                               className="review-popover__pull"

@@ -43,6 +43,7 @@ import {
 import { loadAutoFetch, saveAutoFetch } from './ui/settings/sync-settings'
 import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
 import { applyTheme, initTheme, type Theme } from './ui/theme'
+import { T } from './terms'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Pictogram } from './ui/Pictogram'
@@ -63,10 +64,10 @@ const STATE_LABELS: Record<RepositoryStateKind, string> = {
 
 /** 진행 중 작업 상태 바 문구 — merging/reverting/cherry-picking/rebasing 4겸용 (E5b·E7a) */
 const OP_BAR = {
-  merging: { doing: '실험 공간 합치는 중', abort: '합치기 취소' },
-  reverting: { doing: '저장 되돌리는 중', abort: '되돌리기 취소' },
-  'cherry-picking': { doing: '저장 가져오는 중', abort: '가져오기 취소' },
-  rebasing: { doing: '저장 재배치 중', abort: '재배치 취소' },
+  merging: { doing: `${T.branch} ${T.merge}하는 중`, abort: `${T.merge} 취소` },
+  reverting: { doing: `${T.commit} 되돌리는 중`, abort: `${T.revert} 취소` },
+  'cherry-picking': { doing: `${T.cherryPick}하는 중`, abort: `${T.cherryPick} 취소` },
+  rebasing: { doing: `${T.commit} ${T.rebase} 중`, abort: `${T.rebase} 취소` },
 } as const
 
 export function App() {
@@ -330,7 +331,7 @@ export function App() {
   // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
   const suggestion =
     status?.state === 'merging' && stagedCount === 0
-      ? '실험 공간 합치기'
+      ? `${T.branch} ${T.merge}`
       : suggestCommitMessage(status?.changes ?? [])
   const repoName = store.repoPath.split('/').pop() ?? store.repoPath
   // 마지막 저장(HEAD)이 원격에 이미 백업됐는가 — 실행취소·메시지 고치기 확인창의 경고 병기 (판정 편차는 플랜 표)
@@ -368,17 +369,17 @@ export function App() {
                 setManageOpen(true)
               }}
             />
-            <Tooltip content="합치기" summary="합치기" describedBy={false}>
+            <Tooltip content={`${T.merge} (merge)`} summary={T.merge} describedBy={false}>
               <Button
                 variant="ghost"
                 size="sm"
                 isDisabled={store.busy || status.state !== 'normal'}
                 onPress={() => setMergePicker(true)}
                 testId="merge-open"
-                aria-label="합치기"
+                aria-label={T.merge}
               >
-                <GitMerge size={13} aria-hidden="true" /> <span className="app__btn-label">합치기</span>{' '}
-                <Badge tone="git">merge</Badge>
+                <GitMerge size={13} aria-hidden="true" />{' '}
+                <span className="app__btn-label">{T.merge}</span>
               </Button>
             </Tooltip>
             {status.state !== 'normal' && (
@@ -396,17 +397,17 @@ export function App() {
           </div>
         )}
         <div className="app__actions">
-          <Tooltip content="받아오기" summary="받아오기" describedBy={false}>
+          <Tooltip content={`${T.pull} (pull)`} summary={T.pull} describedBy={false}>
             <Button
-              variant="neutral"
+              variant="ghost"
               size="sm"
               isDisabled={store.busy || status?.state !== 'normal'}
               onPress={() => void store.pullLatest()}
               testId="pull"
-              aria-label="받아오기"
+              aria-label={T.pull}
             >
               <DownloadCloud size={14} aria-hidden="true" />{' '}
-              <span className="app__btn-label">받아오기</span> <Badge tone="git">pull</Badge>
+              <span className="app__btn-label">{T.pull}</span>
             </Button>
           </Tooltip>
           <ShelfPopover
@@ -437,17 +438,17 @@ export function App() {
             onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
           />
-          <Tooltip content="백업" summary="백업" describedBy={false}>
+          <Tooltip content={`${T.push} (push)`} summary={T.push} describedBy={false}>
             <Button
-              variant="neutral"
+              variant="ghost"
               size="sm"
               isDisabled={store.busy}
               onPress={() => void store.backup()}
               testId="backup"
-              aria-label="백업"
+              aria-label={T.push}
             >
-              <CloudUpload size={14} aria-hidden="true" /> <span className="app__btn-label">백업</span>{' '}
-              <Badge tone="git">push</Badge>
+              <CloudUpload size={14} aria-hidden="true" />{' '}
+              <span className="app__btn-label">{T.push}</span>
             </Button>
           </Tooltip>
           <Tooltip content="새로고침" summary="새로고침" describedBy={false}>
@@ -513,8 +514,8 @@ export function App() {
         isOpen={confirmingRemoveWorktree !== null}
         title={
           confirmingRemoveWorktree?.force === true
-            ? '미저장 변경이 있어요 — 그래도 지울까요?'
-            : '워크트리를 지울까요?'
+            ? `${T.commit} 안 된 변경이 있어요 — 그래도 지울까요?`
+            : `${T.worktree}를 지울까요?`
         }
         confirmLabel={confirmingRemoveWorktree?.force === true ? '그래도 지우기' : '지우기'}
         onConfirm={() => {
@@ -537,8 +538,8 @@ export function App() {
         onCancel={() => setConfirmingRemoveWorktree(null)}
       >
         {confirmingRemoveWorktree?.force === true
-          ? '그 폴더의 미저장 변경이 함께 사라져요. 되돌릴 수 없어요.'
-          : '워크트리 폴더가 디스크에서 지워져요. 저장된 역사와 실험 공간은 그대로예요.'}
+          ? `그 폴더의 ${T.commit} 안 된 변경이 함께 사라져요. 되돌릴 수 없어요.`
+          : `${T.worktree} 폴더가 디스크에서 지워져요. ${T.history}와 ${T.branch}는 그대로예요.`}
       </ConfirmDialog>
       {(status?.state === 'merging' ||
         status?.state === 'reverting' ||
@@ -562,16 +563,16 @@ export function App() {
                       : ''
                   } — ${
                     conflictCount > 0
-                      ? `겹침 ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 ${
+                      ? `${T.conflict} ${conflictCount}개 남음. 붉은 ! 파일에서 한쪽을 고르고, 다 정리되면 ${
                           status.state === 'rebasing'
-                            ? '계속하기로 다음 저장으로 넘어가요'
-                            : '저장하기로 마무리해요'
+                            ? `계속하기로 다음 ${T.commit}으로 넘어가요`
+                            : `${T.commit}으로 마무리해요`
                         }.`
                       : status.state === 'rebasing'
-                        ? '겹침 0개 남음. 계속하기를 눌러 다음 저장으로 넘어가요.'
+                        ? `${T.conflict} 0개 남음. 계속하기를 눌러 다음 ${T.commit}으로 넘어가요.`
                         : status.state !== 'merging' && stagedCount === 0
-                          ? `겹침 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — ${OP_BAR[status.state].abort}를 눌러 마무리해요.`
-                          : '겹침 0개 남음. 이제 저장하기로 마무리해요.'
+                          ? `${T.conflict} 0개 남음. 전부 내 것을 유지해서 바뀌는 내용이 없어요 — ${OP_BAR[status.state].abort}를 눌러 마무리해요.`
+                          : `${T.conflict} 0개 남음. 이제 ${T.commit}으로 마무리해요.`
                   }`}
                 </span>
                 {status.state === 'rebasing' && conflictCount === 0 && (
@@ -635,7 +636,7 @@ export function App() {
               onClick={() => setLeftTab('branches')}
               data-testid="left-tab-branches"
             >
-              실험 공간
+              {T.branch}
             </button>
             <button
               type="button"
@@ -645,7 +646,7 @@ export function App() {
               onClick={() => setLeftTab('worktrees')}
               data-testid="left-tab-worktrees"
             >
-              워크트리
+              {T.worktree}
             </button>
           </div>
           {leftTab === 'changes' ? (
@@ -793,7 +794,7 @@ export function App() {
               path={store.conflictFile.path}
               content={store.conflictFile.content}
               busy={store.busy}
-              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 "이 저장만 가져오기" 어휘와 일치한다 (E5b 설계 판단).
+              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 체리픽(cherry-pick) 어휘와 일치한다 (E5b 설계 판단).
               // rebasing은 git의 ours/theirs가 뒤집힌다(내 것=새 기반) — 전용 mode로 라벨을 정직하게 (E7a)
               mode={
                 status?.state === 'reverting'
@@ -816,7 +817,7 @@ export function App() {
               path={
                 store.diffLabel ??
                 (store.commitFile !== null && store.commitDetail !== null
-                  ? `${store.commitFile.path} — 저장 ${store.commitDetail.shortHash}`
+                  ? `${store.commitFile.path} — ${T.commit} ${store.commitDetail.shortHash}`
                   : store.selected?.change.path ?? null)
               }
               diff={store.diff}
@@ -962,11 +963,11 @@ export function App() {
       </main>
       <PromptDialog
         isOpen={branchPrompt !== null}
-        title="새 실험 공간 만들기"
+        title={`새 ${T.branch} 만들기`}
         description={
           branchPrompt?.fromHash != null
-            ? '우클릭한 저장 시점에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.'
-            : '지금 위치에서 갈라져 나와요. 만들면 바로 그 공간으로 이동해요.'
+            ? `우클릭한 ${T.commit} 시점에서 갈라져 나와요. 만들면 바로 그 ${T.branch}로 이동해요.`
+            : `지금 위치에서 갈라져 나와요. 만들면 바로 그 ${T.branch}로 이동해요.`
         }
         label="이름"
         placeholder="예: try-new-design"
@@ -983,12 +984,12 @@ export function App() {
       />
       <ListDialog
         isOpen={mergePicker}
-        title="어느 실험 공간을 합칠까요?"
-        description="고른 공간의 저장 내용을 지금 공간으로 가져와 합쳐요. 저장 안 된 변경이 겹치면 보관함에 넣고 진행해요."
+        title={`어느 ${T.branch}를 ${T.merge}할까요?`}
+        description={`고른 ${T.branch}의 ${T.commit} 내용을 지금 ${T.branch}로 가져와 ${T.merge}해요. ${T.commit} 안 된 변경이 ${T.conflict}하면 ${T.stash}에 넣고 진행해요.`}
         options={store.branches
           .filter((branch) => !branch.isCurrent)
           .map((branch) => ({ key: branch.name, label: branch.name }))}
-        emptyText="합칠 다른 실험 공간이 없어요."
+        emptyText={`${T.merge}할 다른 ${T.branch}가 없어요.`}
         onSelect={(name) => {
           setMergePicker(false)
           void store.mergeBranch(name)
@@ -1032,8 +1033,8 @@ export function App() {
       />
       <PromptDialog
         isOpen={pullPrompt}
-        title="리뷰 요청 만들기"
-        description="지금 실험 공간의 저장 내용을 검토해 달라고 요청해요. 아직 백업(push) 전이면 백업부터 자동으로 해요."
+        title={`${T.pullRequest} 만들기`}
+        description={`지금 ${T.branch}의 ${T.commit} 내용을 검토해 달라고 요청해요. 아직 ${T.push} 전이면 ${T.push}부터 자동으로 해요.`}
         label="제목"
         placeholder="예: 로그인 버튼 색 실험"
         submitLabel="요청 만들기"
@@ -1050,21 +1051,21 @@ export function App() {
         isOpen={confirmingAbort}
         title={
           status?.state === 'reverting'
-            ? '되돌리기를 취소할까요?'
+            ? `${T.revert}를 취소할까요?`
             : status?.state === 'cherry-picking'
-              ? '가져오기를 취소할까요?'
+              ? `${T.cherryPick}을 취소할까요?`
               : status?.state === 'rebasing'
-                ? '재배치를 취소할까요?'
-                : '합치기를 취소할까요?'
+                ? `${T.rebase}를 취소할까요?`
+                : `${T.merge}을 취소할까요?`
         }
         confirmLabel={
           status?.state === 'reverting'
-            ? '되돌리기 취소'
+            ? `${T.revert} 취소`
             : status?.state === 'cherry-picking'
-              ? '가져오기 취소'
+              ? `${T.cherryPick} 취소`
               : status?.state === 'rebasing'
-                ? '재배치 취소'
-                : '합치기 취소'
+                ? `${T.rebase} 취소`
+                : `${T.merge} 취소`
         }
         onConfirm={() => {
           setConfirmingAbort(false)
@@ -1079,8 +1080,8 @@ export function App() {
       </ConfirmDialog>
       <PromptDialog
         isOpen={tagPrompt !== null}
-        title="태그 만들기"
-        description="이 저장 시점에 이름표(태그)를 붙여요. 역사 목록에 배지로 함께 보여요."
+        title={`${T.tag} 만들기`}
+        description={`이 ${T.commit} 시점에 이름표(${T.tag})를 붙여요. ${T.history} 목록에 배지로 함께 보여요.`}
         label="태그 이름"
         placeholder="예: v1.0"
         submitLabel="만들기"
@@ -1097,8 +1098,8 @@ export function App() {
       />
       <ConfirmDialog
         isOpen={confirmingUndo !== null}
-        title="마지막 저장을 실행취소할까요?"
-        confirmLabel="실행취소"
+        title={`${T.undoCommit}할까요?`}
+        confirmLabel={T.undoCommit}
         onConfirm={() => {
           const hash = confirmingUndo?.hash ?? null
           setConfirmingUndo(null)
@@ -1106,14 +1107,14 @@ export function App() {
         }}
         onCancel={() => setConfirmingUndo(null)}
       >
-        저장만 취소하고 바뀐 내용은 그대로 남아요 — 왼쪽 변경 목록에서 다시 저장할 수 있어요.
-        {headBackedUp && ' 이미 백업된 저장이에요 — 취소하면 원격과 어긋나요.'}
+        {T.commit}만 취소하고 바뀐 내용은 그대로 남아요 — 왼쪽 변경 목록에서 다시 {T.commit}할 수 있어요.
+        {headBackedUp && ` 이미 ${T.push}된 ${T.commit}이에요 — 취소하면 원격과 어긋나요.`}
       </ConfirmDialog>
       <PromptDialog
         isOpen={rewordPrompt !== null}
-        title="저장 메시지 고치기"
-        description={`가장 최근 저장의 메시지를 새 한 줄로 바꿔요. 본문이 있었다면 함께 이 한 줄로 바뀌어요.${
-          headBackedUp ? ' 이미 백업된 저장이에요 — 고치면 원격과 어긋나요.' : ''
+        title={`${T.commitMessage} 고치기`}
+        description={`가장 최근 ${T.commit}의 메시지를 새 한 줄로 바꿔요. 본문이 있었다면 함께 이 한 줄로 바뀌어요.${
+          headBackedUp ? ` 이미 ${T.push}된 ${T.commit}이에요 — 고치면 원격과 어긋나요.` : ''
         }`}
         label="메시지"
         placeholder="예: 로그인 버튼 색 수정"
@@ -1131,7 +1132,7 @@ export function App() {
       />
       <ConfirmDialog
         isOpen={confirmingMerge}
-        title="리뷰 요청을 병합할까요?"
+        title={`${T.pullRequest}를 ${T.merge}할까요?`}
         confirmLabel="병합하기"
         onConfirm={() => {
           setConfirmingMerge(false)
@@ -1143,12 +1144,12 @@ export function App() {
         }}
         onCancel={() => setConfirmingMerge(false)}
       >
-        "{store.pullDetail?.detail.baseBranch}"에 합쳐져요. 이 동작은 GitHub에서 일어나요.
+        "{store.pullDetail?.detail.baseBranch}"에 {T.merge}돼요. 이 동작은 GitHub에서 일어나요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={mergeFollowUp !== null}
-        title="기본 공간으로 이동할까요?"
-        confirmLabel="이동하고 받아오기"
+        title="기본 브랜치로 이동할까요?"
+        confirmLabel="이동하고 가져오기"
         onConfirm={() => {
           const base = mergeFollowUp
           setMergeFollowUp(null)
@@ -1157,12 +1158,12 @@ export function App() {
         }}
         onCancel={() => setMergeFollowUp(null)}
       >
-        병합 완료 — 기본 공간({mergeFollowUp})으로 이동해 최신을 받아올까요? 나중에 해도 돼요.
+        병합 완료 — 기본 브랜치({mergeFollowUp})로 이동해 최신을 가져올까요? 나중에 해도 돼요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRebase !== null}
-        title={`"${confirmingRebase?.name}" 위로 재배치할까요?`}
-        confirmLabel="재배치 (rebase)"
+        title={`"${confirmingRebase?.name}" 위로 ${T.rebase}할까요?`}
+        confirmLabel={T.rebase}
         onConfirm={() => {
           const name = confirmingRebase?.name ?? null
           setConfirmingRebase(null)
@@ -1170,13 +1171,13 @@ export function App() {
         }}
         onCancel={() => setConfirmingRebase(null)}
       >
-        지금 공간의 저장들을 그 위로 다시 쌓아요. 내용이 겹치면 하나씩 해결하는 화면이 열려요. 이미
-        백업(push)한 공간이라면 원격과 어긋날 수 있어요.
+        지금 {T.branch}의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩 해결하는 화면이
+        열려요. 이미 {T.push}한 {T.branch}라면 원격과 어긋날 수 있어요.
       </ConfirmDialog>
       <PromptDialog
         isOpen={renamePrompt !== null}
-        title="실험 공간 이름 바꾸기"
-        description="이 공간의 이름만 바뀌어요. 저장 내용은 그대로예요."
+        title={`${T.branch} 이름 바꾸기`}
+        description={`이 ${T.branch}의 이름만 바뀌어요. ${T.commit} 내용은 그대로예요.`}
         label="새 이름"
         placeholder="예: feature/login"
         submitLabel="바꾸기"
@@ -1196,8 +1197,8 @@ export function App() {
         isOpen={confirmingRemove !== null}
         title={
           confirmingRemove?.force === true
-            ? '합쳐지지 않은 저장이 있어요 — 그래도 지울까요?'
-            : `"${confirmingRemove?.name}" 실험 공간을 지울까요?`
+            ? `${T.merge}되지 않은 ${T.commit}이 있어요 — 그래도 지울까요?`
+            : `"${confirmingRemove?.name}" ${T.branch}를 지울까요?`
         }
         confirmLabel={confirmingRemove?.force === true ? '그래도 지우기' : '지우기'}
         onConfirm={() => {
@@ -1222,13 +1223,13 @@ export function App() {
         onCancel={() => setConfirmingRemove(null)}
       >
         {confirmingRemove?.force === true
-          ? '이 공간에만 있는 저장은 함께 사라져요. 되돌릴 수 없어요.'
-          : '다른 곳에 합쳐진 저장은 남아요. 합쳐지지 않은 저장이 있으면 한 번 더 물어봐요.'}
+          ? `이 ${T.branch}에만 있는 ${T.commit}은 함께 사라져요. 되돌릴 수 없어요.`
+          : `다른 곳에 ${T.merge}된 ${T.commit}은 남아요. ${T.merge}되지 않은 ${T.commit}이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveWithWorktree !== null}
-        title={`워크트리가 이 실험 공간을 쓰는 중이에요 — 같이 지울까요?`}
-        confirmLabel="워크트리도 지우고 계속"
+        title={`${T.worktree}가 이 ${T.branch}를 쓰는 중이에요 — 같이 지울까요?`}
+        confirmLabel={`${T.worktree}도 지우고 계속`}
         onConfirm={() => {
           const target = confirmingRemoveWithWorktree
           setConfirmingRemoveWithWorktree(null)
@@ -1251,9 +1252,9 @@ export function App() {
         }}
         onCancel={() => setConfirmingRemoveWithWorktree(null)}
       >
-        {`"${confirmingRemoveWithWorktree?.name}"은 워크트리 "${
+        {`"${confirmingRemoveWithWorktree?.name}"은 ${T.worktree} "${
           confirmingRemoveWithWorktree?.worktreePath.split('/').pop() ?? ''
-        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. 워크트리를 지우면 그 폴더가 사라져요 — 미저장 변경이 있으면 한 번 더 물어봐요.`}
+        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. ${T.worktree}를 지우면 그 폴더가 사라져요 — ${T.commit} 안 된 변경이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveRemote !== null}

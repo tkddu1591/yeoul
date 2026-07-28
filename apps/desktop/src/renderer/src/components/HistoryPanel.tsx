@@ -12,6 +12,7 @@ import { cycleIndex } from './find-matches'
 import { buildGraph, type GraphRow } from './history-graph'
 import { arrangeRefs, isRemoteRef, refBadgeLabel } from './history-refs'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
+import { T } from '../terms'
 import './history-panel.css'
 import './virtual.css'
 
@@ -281,7 +282,7 @@ export function HistoryPanel({
     if (switchTarget !== null) {
       entries.push({
         key: 'switch-here',
-        label: `"${switchTarget}" 실험 공간으로 이동 (switch)`,
+        label: `"${switchTarget}" ${T.branch}로 이동`,
         disabled: actionsDisabled,
         onSelect: () => onAction({ kind: 'switch', branch: switchTarget }),
       })
@@ -289,39 +290,39 @@ export function HistoryPanel({
     entries.push(
       {
         key: 'branch-here',
-        label: '여기서 실험 공간 만들기…',
+        label: `여기서 ${T.branch} 만들기…`,
         onSelect: () => onAction({ kind: 'branch-here', hash: commit.hash }),
       },
       { key: 'sep-1', separator: true },
       {
         key: 'cherry-pick',
-        label: '이 저장만 가져오기 (cherry-pick)',
+        label: `${T.cherryPick} (cherry-pick)`,
         disabled: actionsDisabled,
         onSelect: () => onAction({ kind: 'cherry-pick', hash: commit.hash }),
       },
       {
         key: 'revert',
-        label: '이 저장 되돌리기 (revert)',
+        label: `이 ${T.commit} ${T.revert}`,
         disabled: actionsDisabled,
         onSelect: () => onAction({ kind: 'revert', hash: commit.hash }),
       },
       {
         key: 'undo-last',
-        label: isHead ? '저장 실행취소 (undo)' : '저장 실행취소 (undo) — 가장 최근 저장에서만',
+        label: isHead ? T.undoCommit : `${T.undoCommit} — 가장 최근 ${T.commit}에서만`,
         disabled: actionsDisabled || !isHead,
         onSelect: () => onAction({ kind: 'undo', hash: commit.hash }),
       },
       {
         key: 'reword',
         label: isHead
-          ? '저장 메시지 고치기… (amend)'
-          : '저장 메시지 고치기 (amend) — 가장 최근 저장에서만',
+          ? `${T.commitMessage} 고치기…`
+          : `${T.commitMessage} 고치기 — 가장 최근 ${T.commit}에서만`,
         disabled: actionsDisabled || !isHead,
         onSelect: () => onAction({ kind: 'reword', hash: commit.hash, subject: commit.subject }),
       },
       {
         key: 'tag-here',
-        label: '태그 만들기… (tag)',
+        label: '태그 만들기…',
         onSelect: () => onAction({ kind: 'tag', hash: commit.hash }),
       },
       { key: 'sep-2', separator: true },
@@ -338,7 +339,8 @@ export function HistoryPanel({
 
   return (
     <Panel
-      title="저장된 역사"
+      title={T.history}
+      titleHint="log"
       accessory={
         <>
           {historyRef !== null && (
@@ -355,7 +357,6 @@ export function HistoryPanel({
               </button>
             </span>
           )}
-          <Badge tone="git">log</Badge>
           <Badge tone="count">
             <span data-testid="history-count">
               {truncated ? `${historyLimit}+` : history.length}
@@ -363,7 +364,7 @@ export function HistoryPanel({
           </Badge>
           {headHash !== null && headIndex < 0 && historyRef === null && (
             <Button variant="ghost" size="sm" isDisabled={busy} onPress={onLocateHead} testId="history-locate-head">
-              지금 여기로
+              {T.head}로
             </Button>
           )}
         </>
@@ -395,11 +396,11 @@ export function HistoryPanel({
       )}
       {history.length === 0 ? (
         <div className="history-panel__empty">
-          <Pictogram kind="commit" size={20} label="저장 시점" />
+          <Pictogram kind="commit" size={20} label={`${T.commit} 시점`} />
           <p>
-            아직 저장된 시점이 없어요.
+            아직 {T.commit}이 없어요.
             <br />
-            저장할 때마다 여기에 쌓여요.
+            {T.commit}할 때마다 여기에 쌓여요.
           </p>
         </div>
       ) : (
@@ -452,7 +453,7 @@ export function HistoryPanel({
                       <GraphCell row={graph[item.index]!} isHead={isHead} />
                       <div className="history-item__body">
                         <span className="history-item__title">
-                          {isHead && <span className="history-item__here">지금 여기</span>}
+                          {isHead && <span className="history-item__here">{T.head}</span>}
                           {(() => {
                             // 배지 폭 경쟁으로 전부 말줄임되는 것을 막는다 — 상위 2개 + "+N" 접기 (피드백)
                             const arranged = arrangeRefs(commit.refs, currentBranch, commit.tags)

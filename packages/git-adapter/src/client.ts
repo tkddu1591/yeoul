@@ -257,28 +257,28 @@ function assertFullHash(hash: string): void {
 }
 
 /** CLI에서 rebase/gc로 사라진 커밋을 오래된 목록에서 클릭하는 흐름 — 원시 git 에러 대신 이 문구로 */
-const MISSING_COMMIT_MESSAGE = '그 저장 시점을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.'
+const MISSING_COMMIT_MESSAGE = '그 커밋을 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.'
 
 /** 전환이 막혀 자동 보관할 때의 보관함 메시지 — UI·테스트가 이 문구로 항목을 식별한다 */
-const AUTO_SHELF_MESSAGE = '실험 공간 전환 자동 보관'
+const AUTO_SHELF_MESSAGE = '브랜치 전환 자동 스태시'
 
 /** 합치기가 막혀 자동 보관할 때의 보관함 메시지 */
-const MERGE_SHELF_MESSAGE = '실험 공간 합치기 자동 보관'
+const MERGE_SHELF_MESSAGE = '브랜치 병합 자동 스태시'
 
 /** 받아오기가 막혀 자동 보관할 때의 보관함 메시지 */
-const PULL_SHELF_MESSAGE = '받아오기 자동 보관'
+const PULL_SHELF_MESSAGE = '가져오기 자동 스태시'
 
 /** 되돌리기가 막혀 자동 보관할 때의 보관함 메시지 */
-const REVERT_SHELF_MESSAGE = '저장 되돌리기 자동 보관'
+const REVERT_SHELF_MESSAGE = '커밋 되돌리기 자동 스태시'
 
 /** 파일 단위 적용이 미저장 변경을 덮기 전 자동 보관할 때의 보관함 메시지 */
-const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 보관'
+const RESTORE_FILE_SHELF_MESSAGE = '파일 적용 자동 스태시'
 
 /** 가져오기(cherry-pick)가 막혀 자동 보관할 때의 보관함 메시지 */
-const CHERRY_PICK_SHELF_MESSAGE = '저장 가져오기 자동 보관'
+const CHERRY_PICK_SHELF_MESSAGE = '커밋 체리픽 자동 스태시'
 
 /** 재배치가 막혀 자동 보관할 때의 보관함 메시지 (E7a) */
-const REBASE_SHELF_MESSAGE = '저장 재배치 자동 보관'
+const REBASE_SHELF_MESSAGE = '커밋 리베이스 자동 스태시'
 
 /** "지금과 비교" 한 방향 상한 — 초과분은 overflow 플래그로만 알린다 (E7a) */
 const COMPARE_LIMIT = 100
@@ -297,14 +297,14 @@ function rejectIfRemoteAhead(result: GitResult): void {
     result.stderr.includes('(fetch first)') ||
     result.stderr.includes('(non-fast-forward)')
   ) {
-    throw new Error('원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.')
+    throw new Error('원격에 새 커밋이 있어요. 먼저 가져오기로 병합한 뒤 푸시해 주세요.')
   }
 }
 
 /** stash ref 형식만 통과 — 임의 revision 표현식이 stash 명령으로 흘러가는 것을 차단 */
 function assertShelfRef(ref: string): void {
   if (!/^stash@\{\d{1,6}\}$/.test(ref)) {
-    throw new Error(`올바른 보관함 항목이 아니에요: ${ref}`)
+    throw new Error(`올바른 스태시 항목이 아니에요: ${ref}`)
   }
 }
 
@@ -419,7 +419,7 @@ export function createGitClient(repoPath: string): GitClient {
         const remote = await execGit(['config', '--get', `branch.${name}.remote`], { cwd })
         const mergeRef = await execGit(['config', '--get', `branch.${name}.merge`], { cwd })
         if (remote.exitCode !== 0 || mergeRef.exitCode !== 0) {
-          throw new Error('원격과 연결된 적이 없는 공간이에요. 그 공간으로 이동해 백업(push)하면 연결돼요.')
+          throw new Error('원격과 연결된 적이 없는 브랜치예요. 그 브랜치로 이동해 푸시하면 연결돼요.')
         }
         const remoteName = remote.stdout.trim()
         const srcBranch = mergeRef.stdout.trim().replace(/^refs\/heads\//, '')
@@ -429,15 +429,15 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           if (result.stderr.includes('(non-fast-forward)')) {
             throw new Error(
-              '이 공간은 원격과 갈라져 있어요. 그 공간으로 이동한 뒤 받아오기(pull)로 합쳐 주세요.',
+              '이 브랜치는 원격과 갈라져 있어요. 그 브랜치로 이동한 뒤 가져오기로 병합해 주세요.',
             )
           }
           // 현재 공간(다른 워크트리 포함) — refspec fetch가 체크아웃된 브랜치를 거부한다 (실측 3)
           if (result.stderr.includes('refusing to fetch into branch')) {
-            throw new Error('지금 체크아웃되어 있는 공간이에요. 받아오기(pull)로 업데이트해 주세요.')
+            throw new Error('지금 체크아웃되어 있는 브랜치예요. 가져오기로 업데이트해 주세요.')
           }
           if (result.stderr.includes("couldn't find remote ref")) {
-            throw new Error('원격에 이 공간이 더 이상 없어요. 새로고침해 주세요.')
+            throw new Error('원격에 이 브랜치가 더 이상 없어요. 새로고침해 주세요.')
           }
           throw new GitError(args, result)
         }
@@ -455,7 +455,7 @@ export function createGitClient(repoPath: string): GitClient {
             .split('\n')
             .filter((n) => n !== '')
           if (remoteNames.length === 0) {
-            throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+            throw new Error('푸시할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
           }
           const target = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
           const args = ['push', '-u', '--end-of-options', target, name]
@@ -479,7 +479,7 @@ export function createGitClient(repoPath: string): GitClient {
       async checkoutRemote(name) {
         const cwd = await topLevel()
         const slash = name.indexOf('/')
-        if (slash <= 0) throw new Error(`"${name}"는 원격 공간 이름이 아니에요.`)
+        if (slash <= 0) throw new Error(`"${name}"는 원격 브랜치 이름이 아니에요.`)
         const local = name.slice(slash + 1)
         // 동명 로컬 선검사 — switch -c의 원어 fatal(실측 4) 대신 행동 안내를 준다
         const existing = await execGit(['rev-parse', '-q', '--verify', `refs/heads/${local}`], {
@@ -487,7 +487,7 @@ export function createGitClient(repoPath: string): GitClient {
         })
         if (existing.exitCode === 0) {
           throw new Error(
-            `이미 "${local}" 공간이 있어요. 그 공간으로 이동해 "원격 최신으로 업데이트"해 주세요.`,
+            `이미 "${local}" 브랜치가 있어요. 그 브랜치로 이동해 "원격 최신으로 업데이트"해 주세요.`,
           )
         }
         const args = ['switch', '-c', local, '--track', '--end-of-options', name]
@@ -502,14 +502,14 @@ export function createGitClient(repoPath: string): GitClient {
       async removeRemote(name) {
         const cwd = await topLevel()
         const slash = name.indexOf('/')
-        if (slash <= 0) throw new Error(`"${name}"는 원격 공간 이름이 아니에요.`)
+        if (slash <= 0) throw new Error(`"${name}"는 원격 브랜치 이름이 아니에요.`)
         const remoteName = name.slice(0, slash)
         const branch = name.slice(slash + 1)
         const args = ['push', '--delete', '--end-of-options', remoteName, branch]
         const result = await execGit(args, { cwd })
         if (result.exitCode !== 0) {
           if (result.stderr.includes('remote ref does not exist')) {
-            throw new Error('원격에 이 공간이 이미 없어요. 새로고침해 주세요.')
+            throw new Error('원격에 이 브랜치가 이미 없어요. 새로고침해 주세요.')
           }
           throw new GitError(args, result)
         }
@@ -522,7 +522,7 @@ export function createGitClient(repoPath: string): GitClient {
         const ref = asLocal.exitCode === 0 ? `refs/heads/${name}` : name
         const valid = await execGit(['rev-parse', '-q', '--verify', `${ref}^{commit}`], { cwd })
         if (valid.exitCode !== 0) {
-          throw new Error(`"${name}"라는 공간을 찾을 수 없어요. 새로고침해 주세요.`)
+          throw new Error(`"${name}"라는 브랜치를 찾을 수 없어요. 새로고침해 주세요.`)
         }
         // history.list와 같은 레코드 포맷 — parseLog를 그대로 재사용한다
         const listSide = async (range: string) => {
@@ -577,13 +577,13 @@ export function createGitClient(repoPath: string): GitClient {
         const first = await execGit(['switch', '--end-of-options', name], { cwd })
         if (first.exitCode === 0) return { autoShelved: false }
         if (first.stderr.includes('invalid reference')) {
-          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+          throw new Error(`"${name}"라는 브랜치가 없어요.`)
         }
         if (
           first.stderr.includes('resolve your current index') ||
           first.stderr.includes('cannot switch branch while')
         ) {
-          throw new Error('충돌 정리(!)를 먼저 끝내야 다른 실험 공간으로 이동할 수 있어요.')
+          throw new Error('충돌 정리(!)를 먼저 끝내야 다른 브랜치로 이동할 수 있어요.')
         }
         if (!first.stderr.includes('would be overwritten')) {
           throw new GitError(['switch', '--end-of-options', name], first)
@@ -605,7 +605,7 @@ export function createGitClient(repoPath: string): GitClient {
         const firstOut = first.stdout + first.stderr
         if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
         if (firstOut.includes('not something we can merge')) {
-          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+          throw new Error(`"${name}"라는 브랜치가 없어요.`)
         }
         if (firstOut.includes('CONFLICT') || firstOut.includes('Automatic merge failed')) {
           return { outcome: 'conflict', autoShelved: false }
@@ -645,10 +645,10 @@ export function createGitClient(repoPath: string): GitClient {
               return { removed: false, needsForce: false, usedByWorktree: worktreePath }
             }
           }
-          throw new Error('지금 있는 실험 공간은 지울 수 없어요. 다른 공간으로 이동한 뒤 지워 주세요.')
+          throw new Error('지금 있는 브랜치는 지울 수 없어요. 다른 브랜치로 이동한 뒤 지워 주세요.')
         }
         if (result.stderr.includes('not found')) {
-          throw new Error(`"${name}"라는 실험 공간이 없어요.`)
+          throw new Error(`"${name}"라는 브랜치가 없어요.`)
         }
         throw new GitError(args, result)
       },
@@ -687,7 +687,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (firstOutcome !== null) return { outcome: firstOutcome, autoShelved: false }
         const firstOut = first.stdout + first.stderr
         if (firstOut.includes('invalid upstream')) {
-          throw new Error(`"${onto}"라는 실험 공간이 없어요.`)
+          throw new Error(`"${onto}"라는 브랜치가 없어요.`)
         }
         if (
           !firstOut.includes('You have unstaged changes') &&
@@ -713,10 +713,10 @@ export function createGitClient(repoPath: string): GitClient {
           return { outcome: 'conflict' as const }
         }
         if (output.includes('needs merge') || output.includes('You must edit all merge conflicts')) {
-          throw new Error('아직 겹침이 남아 있어요. 붉은 ! 파일을 모두 해결한 뒤 계속해 주세요.')
+          throw new Error('아직 충돌이 남아 있어요. 붉은 ! 파일을 모두 해결한 뒤 계속해 주세요.')
         }
         if (output.includes('no rebase in progress')) {
-          throw new Error('지금은 재배치 중이 아니에요.')
+          throw new Error('지금은 리베이스 중이 아니에요.')
         }
         throw new GitError(args, result)
       },
@@ -725,7 +725,7 @@ export function createGitClient(repoPath: string): GitClient {
         const result = await execGit(['rebase', '--abort'], { cwd })
         if (result.exitCode !== 0) {
           if (result.stderr.includes('no rebase in progress')) {
-            throw new Error('지금은 재배치 중이 아니에요.')
+            throw new Error('지금은 리베이스 중이 아니에요.')
           }
           throw new GitError(['rebase', '--abort'], result)
         }
@@ -768,14 +768,14 @@ export function createGitClient(repoPath: string): GitClient {
           // E7d 실측 1 — 구체 문구를 먼저: "a branch named ... already exists"가
           // 아래 기존-경로 매핑(already exists)에 잘못 걸리는 함정
           if (result.stderr.includes('is not a valid branch name')) {
-            throw new Error(`"${branch}"는 실험 공간 이름으로 쓸 수 없어요. 다른 이름을 입력해 주세요.`)
+            throw new Error(`"${branch}"는 브랜치 이름으로 쓸 수 없어요. 다른 이름을 입력해 주세요.`)
           }
           if (result.stderr.includes('a branch named')) {
-            throw new Error(`"${branch}"는 이미 있는 실험 공간 이름이에요. 기존 실험 공간 펼치기에서 골라 주세요.`)
+            throw new Error(`"${branch}"는 이미 있는 브랜치 이름이에요. 기존 브랜치 펼치기에서 골라 주세요.`)
           }
           // 실측 C: 같은 브랜치는 두 워크트리가 체크아웃할 수 없다 (UI 비활성의 심층 방어)
           if (result.stderr.includes('already used by worktree')) {
-            throw new Error(`"${branch}"는 이미 다른 워크트리가 쓰고 있어요. 다른 실험 공간을 골라 주세요.`)
+            throw new Error(`"${branch}"는 이미 다른 워크트리가 쓰고 있어요. 다른 브랜치를 골라 주세요.`)
           }
           // 실측 D: 비어있지 않은 기존 경로
           if (result.stderr.includes('already exists')) {
@@ -837,7 +837,7 @@ export function createGitClient(repoPath: string): GitClient {
         const result = await execGit(['merge', '--abort'], { cwd })
         if (result.exitCode !== 0) {
           if (result.stderr.includes('MERGE_HEAD')) {
-            throw new Error('지금은 합치는 중이 아니에요.')
+            throw new Error('지금은 병합 중이 아니에요.')
           }
           throw new GitError(['merge', '--abort'], result)
         }
@@ -851,7 +851,7 @@ export function createGitClient(repoPath: string): GitClient {
         // 워크트리의 미저장 편집을 index 버전으로 덮어쓴다 — 충돌(unmerged) 파일만 통과시킨다
         const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
         if (unmerged.stdout.trim() === '') {
-          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+          throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
         const side = choice === 'ours' ? '--ours' : '--theirs'
         await execGitOrThrow(['checkout', side, '--', `:(literal)${path}`], { cwd })
@@ -868,7 +868,7 @@ export function createGitClient(repoPath: string): GitClient {
         // resolve와 동일 가드·동일 문구 — 비충돌 파일 쓰기는 미저장 편집의 조용한 유실 경로다
         const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
         if (unmerged.stdout.trim() === '') {
-          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+          throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
         // readText와 대칭 상한 — 이보다 큰 파일은 애초에 뷰로 열리지 않는다 (심층 방어)
         if (Buffer.byteLength(content, 'utf8') > 1_000_000) {
@@ -888,7 +888,7 @@ export function createGitClient(repoPath: string): GitClient {
         assertRepoRelative(path)
         const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
         if (unmerged.stdout.trim() === '') {
-          throw new Error('지금은 겹침(충돌) 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
+          throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
         // 실측: 부분 해소(일부 블록만 고쳐 쓴) 상태에서도 exit 0으로 전체 마커를 재생성한다.
         // 라벨은 브랜치명 대신 ours/theirs로 바뀌지만 파서는 접두사 기반이라 무관. index는 UU 유지
@@ -922,12 +922,12 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           // 충돌(unmerged) 중에는 stash가 index를 쓸 수 없다 — 원어 대신 다음 행동을 안내한다 (통합 리뷰 실측)
           if (result.stderr.includes('could not write index')) {
-            throw new Error('겹침(!)을 먼저 정리해야 보관할 수 있어요.')
+            throw new Error('충돌(!)을 먼저 정리해야 스태시할 수 있어요.')
           }
           throw new GitError(['stash', 'push', '-u', '-m', message], result)
         }
         if (result.stdout.includes('No local changes to save')) {
-          throw new Error('보관할 변경이 없어요.')
+          throw new Error('스태시할 변경이 없어요.')
         }
       },
       async list() {
@@ -943,7 +943,7 @@ export function createGitClient(repoPath: string): GitClient {
           // 겹침 — git이 충돌 표시로 적용하고 항목을 보관함에 남긴다 (유실 없음)
           if ((result.stdout + result.stderr).includes('kept in case you need it again')) {
             throw new Error(
-              '겹치는 부분이 있어 충돌 표시(!)로 남겨뒀어요. 항목은 보관함에도 그대로 있어요.',
+              '겹치는 부분이 있어 충돌 표시(!)로 남겨뒀어요. 항목은 스태시에도 그대로 있어요.',
             )
           }
           throw new GitError(['stash', 'pop', ref], result)
@@ -1143,7 +1143,7 @@ export function createGitClient(repoPath: string): GitClient {
           .split('\n')
           .filter((name) => name !== '')
         if (remoteNames.length === 0) {
-          throw new Error('백업할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+          throw new Error('푸시할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
         }
         // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
         const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
@@ -1171,11 +1171,11 @@ export function createGitClient(repoPath: string): GitClient {
         // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
         const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
         if (head.exitCode !== 0) {
-          throw new Error('아직 저장된 시점이 없어요. 먼저 저장(commit)한 뒤 백업해 주세요.')
+          throw new Error('아직 커밋이 없어요. 먼저 커밋한 뒤 푸시해 주세요.')
         }
         // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
         if (branch.exitCode !== 0) {
-          throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 백업해 주세요.')
+          throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 푸시해 주세요.')
         }
         // 첫 백업(또는 이름이 어긋난 upstream 재연결) — 현재 브랜치를 remote에 연결하며 올린다.
         // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
@@ -1192,7 +1192,7 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         const remotes = await execGitOrThrow(['remote'], { cwd })
         if (remotes.stdout.trim() === '') {
-          throw new Error('받아올 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+          throw new Error('가져올 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
         }
         // rebase 모드는 사용자 전역 rebase.autostash가 앱의 보관함 흐름을 가로채지 않게 고정한다 (E7a 관례)
         const args =
@@ -1219,10 +1219,10 @@ export function createGitClient(repoPath: string): GitClient {
         const firstOut = first.stdout + first.stderr
         if (first.exitCode === 0) return { outcome: classify(firstOut), autoShelved: false }
         if (firstOut.includes('you have unmerged files')) {
-          throw new Error('겹침(!)을 모두 정리해야 받아올 수 있어요.')
+          throw new Error('충돌(!)을 모두 정리해야 가져올 수 있어요.')
         }
         if (firstOut.includes('no tracking information')) {
-          throw new Error('이 실험 공간은 아직 원격과 연결되지 않았어요. 먼저 백업(push)으로 연결해 주세요.')
+          throw new Error('이 브랜치는 아직 원격과 연결되지 않았어요. 먼저 푸시로 연결해 주세요.')
         }
         if (isConflict(firstOut)) {
           return { outcome: 'conflict', autoShelved: false }
@@ -1286,7 +1286,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           // 겹침이 남은 채 저장(병합 마무리) 시도 — 원어 에러 대신 다음 행동을 안내한다 (리뷰 실측)
           if (result.stderr.includes('unmerged files')) {
-            throw new Error('겹침(!)을 모두 정리해야 저장할 수 있어요.')
+            throw new Error('충돌(!)을 모두 정리해야 커밋할 수 있어요.')
           }
           throw new GitError(['commit', '-F', '-'], result)
         }
@@ -1447,7 +1447,7 @@ export function createGitClient(repoPath: string): GitClient {
         // merging·reverting 도중의 cherry-pick은 진행 중 상태를 오염시킨다 — revert와 동일 관례로 먼저 마무리를 안내한다
         const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
         if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
-          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 가져올 수 있어요.')
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 체리픽할 수 있어요.')
         }
         const runOnce = () => execGit(['cherry-pick', '--no-edit', '--end-of-options', hash], { cwd })
         const classify = async (
@@ -1459,7 +1459,7 @@ export function createGitClient(repoPath: string): GitClient {
           // merge commit은 -m 없이 거부된다(실측 5-ⓐ) — revert와 달리 재시도하지 않는다:
           // "이 저장만"과 병합 전체 가져오기는 의미가 다르다 (추측 금지 원칙)
           if (output.includes('is a merge but no -m option')) {
-            throw new Error('합쳐진 저장은 통째로 가져올 수 없어요. 안에 있는 저장을 하나씩 가져와 주세요.')
+            throw new Error('병합된 커밋은 통째로 체리픽할 수 없어요. 안에 있는 커밋을 하나씩 체리픽해 주세요.')
           }
           if (output.includes('bad object')) {
             throw new Error(MISSING_COMMIT_MESSAGE)
@@ -1493,7 +1493,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (result.exitCode !== 0) {
           // 실측 5-ⓔ stderr: "error: no cherry-pick or revert in progress"
           if (result.stderr.includes('cherry-pick or revert in progress')) {
-            throw new Error('지금은 가져오는 중이 아니에요.')
+            throw new Error('지금은 체리픽 중이 아니에요.')
           }
           throw new GitError(['cherry-pick', '--abort'], result)
         }
@@ -1525,17 +1525,17 @@ export function createGitClient(repoPath: string): GitClient {
         // merging 등 도중의 reset은 진행 중 작업을 반쯤 무너뜨린다 — revert 관례로 먼저 마무리를 안내한다
         const gitDir = (await execGitOrThrow(['rev-parse', '--absolute-git-dir'], { cwd })).stdout.trim()
         if (detectState(await readGitDirMarkers(gitDir)) !== 'normal') {
-          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 취소해야 실행취소할 수 있어요.')
+          throw new Error('지금 진행 중인 작업을 먼저 마무리하거나 되돌려야 마지막 커밋을 취소할 수 있어요.')
         }
-        // 화면 목록이 낡은 채 실행취소하면 엉뚱한 저장이 물린다(CLI 경합) — 실제 HEAD와 일치를 확인한다
+        // 화면 목록이 낡은 채 취소하면 엉뚱한 저장이 물린다(CLI 경합) — 실제 HEAD와 일치를 확인한다
         const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
         if (head.exitCode !== 0 || head.stdout.trim() !== hash) {
-          throw new Error('가장 최근 저장이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+          throw new Error('가장 최근 커밋이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
         }
         // 루트 커밋(부모 없음) — HEAD~1이 없다(실측 8: 조용히 exit 1). 원문 git 에러 대신 읽히는 메시지로
         const parent = await execGit(['rev-parse', '-q', '--verify', 'HEAD~1'], { cwd })
         if (parent.exitCode !== 0) {
-          throw new Error('맨 처음 저장은 실행취소할 수 없어요.')
+          throw new Error('맨 처음 커밋은 취소할 수 없어요.')
         }
         // --mixed: 커밋만 물리고 내용은 작업 폴더에 그대로 남긴다 — 유실 없음 (스펙 §6 계열)
         await execGitOrThrow(['reset', '--mixed', 'HEAD~1'], { cwd })
@@ -1549,12 +1549,12 @@ export function createGitClient(repoPath: string): GitClient {
         }
         const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
         if (head.exitCode !== 0 || head.stdout.trim() !== hash) {
-          throw new Error('가장 최근 저장이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+          throw new Error('가장 최근 커밋이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
         }
         // amend는 staged를 조용히 흡수한다 — 메시지만 바꾸는 의도와 어긋나므로 거부한다 (실측 7: --cached --quiet)
         const staged = await execGit(['diff', '--cached', '--quiet'], { cwd })
         if (staged.exitCode !== 0) {
-          throw new Error('저장 예정에 올린 파일이 있어요 — 함께 들어가지 않게 먼저 비워 주세요.')
+          throw new Error('스테이지에 올린 파일이 있어요 — 함께 들어가지 않게 먼저 비워 주세요.')
         }
         // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전.
         // --allow-empty: 빈 커밋의 메시지 고치기가 "would make it empty" 원어로 죽지 않게 (품질 리뷰)
@@ -1587,7 +1587,7 @@ export function createGitClient(repoPath: string): GitClient {
           }
           if (output.includes('nothing to commit')) {
             throw new Error(
-              '되돌려도 바뀌는 내용이 없어요 — 이미 지금 내용에 반영되어 있는 저장이에요.',
+              '되돌려도 바뀌는 내용이 없어요 — 이미 지금 내용에 반영되어 있는 커밋이에요.',
             )
           }
           if (output.includes('bad object')) {

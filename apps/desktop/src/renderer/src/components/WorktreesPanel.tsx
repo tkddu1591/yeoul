@@ -1,11 +1,11 @@
 import { useState, type MouseEvent } from 'react'
 import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
 import { formatRelativeTime } from './relative-time'
-import { Badge } from '../ui/Badge'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { shortenAbove, shortenBranch, sourceChip, uniqueNames } from './worktree-label'
+import { T } from '../terms'
 import './worktrees-panel.css'
 
 export type WorktreeAction =
@@ -64,7 +64,7 @@ export function WorktreesPanel({
       },
       {
         key: 'open',
-        label: isCurrent ? '앱에서 열기 — 지금 여기예요' : '앱에서 열기 (전체 전환)',
+        label: isCurrent ? `앱에서 열기 — ${T.head}예요` : '앱에서 열기 (전체 전환)',
         disabled: busy || isCurrent || worktree.prunable,
         onSelect: () => onAction({ kind: 'open', path: worktree.path }),
       },
@@ -80,7 +80,7 @@ export function WorktreesPanel({
         label: worktree.isMain
           ? '지우기 — 본체는 지울 수 없어요'
           : isCurrent
-            ? '지우기 — 지금 열고 있는 워크트리예요'
+            ? `지우기 — 지금 열고 있는 ${T.worktree}예요`
             : '지우기… (worktree remove)',
         disabled: busy || worktree.isMain || isCurrent,
         onSelect: () => onAction({ kind: 'remove', path: worktree.path }),
@@ -101,13 +101,13 @@ export function WorktreesPanel({
 
   const branchLabel = (worktree: WorktreeInfo) =>
     worktree.prunable
-      ? '없어진 폴더'
+      ? T.prunable
       : worktree.branch !== null
         ? shortenBranch(worktree.branch, 28)
-        : `분리됨 (${worktree.headHash?.slice(0, 7) ?? '?'})`
+        : `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`
 
   return (
-    <Panel title="워크트리" accessory={<Badge tone="git">worktree</Badge>} testId="worktrees-panel">
+    <Panel title={T.worktree} titleHint="worktree" testId="worktrees-panel">
       <div className="worktrees-panel">
         <div className="worktrees-panel__scroll" data-testid="worktrees-list">
           {worktrees.map((worktree) => {
@@ -122,7 +122,7 @@ export function WorktreesPanel({
                 content={
                   <>
                     <div className="ui-tooltip__title">
-                      {worktree.branch ?? `분리됨 (${worktree.headHash?.slice(0, 7) ?? '?'})`}
+                      {worktree.branch ?? `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`}
                     </div>
                     <div className="ui-tooltip__path">{worktree.path}</div>
                     <div className="ui-tooltip__meta">
@@ -130,7 +130,7 @@ export function WorktreesPanel({
                       {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
                       {head !== null && ` · ${head.subject}`}
                       {head !== null && ` · ${formatRelativeTime(head.committedAt, Date.now())}`}
-                      {worktree.path === currentPath && ' · 지금 여기'}
+                      {worktree.path === currentPath && ` · ${T.head}`}
                       {worktree.locked && ' · 잠김'}
                     </div>
                     {worktree.prunable && (
@@ -146,7 +146,7 @@ export function WorktreesPanel({
                     {worktree.branch === null && head !== null && head.containedIn.length > 0 && (
                       <div className="ui-tooltip__meta">
                         {head.containedIn.join('·')}
-                        {head.containedTruncated && ' 외 여러 곳'}에 포함된 저장
+                        {head.containedTruncated && ' 외 여러 곳'}에 포함된 {T.commit}
                       </div>
                     )}
                   </>
@@ -214,7 +214,7 @@ export function WorktreesPanel({
             onClick={() => onAction({ kind: 'add' })}
             data-testid="worktree-add"
           >
-            ＋ 새 워크트리…
+            ＋ 새 {T.worktree}…
           </button>
         </div>
       </div>
