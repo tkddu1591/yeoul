@@ -257,8 +257,9 @@ export function BranchesPanel({
   /** 상태 툴팁 — 칩 대신 아이콘·타이포이므로 설명은 여기서 (스펙 ③) */
   const localTitle = (branch: LocalBranchStatus): string => {
     if (branch.name === currentBranch) return `${branch.name} — ${T.head}(현재 작업 중)`
-    if (branch.upstreamGone) return `${branch.name} — 원격에서 사라진 연결. ${T.push}하면 다시 만들어져요`
-    if (branch.upstream === null) return `${branch.name} — 아직 원격과 연결 안 됨`
+    if (branch.upstreamGone)
+      return `${branch.name} — 업스트림이 원격에서 사라졌어요. ${T.push}하면 다시 만들어져요`
+    if (branch.upstream === null) return `${branch.name} — 아직 ${T.noUpstream}`
     return branch.name
   }
 
@@ -381,7 +382,7 @@ export function BranchesPanel({
         />
         <div className="branches-panel__scroll" data-testid="branches-list">
           {locals.length === 0 && remotes.length === 0 ? (
-            <p className="branches-panel__empty">보여줄 {T.branch}이 없어요.</p>
+            <p className="branches-panel__empty">보여줄 {T.branch}가 없어요.</p>
           ) : searchLocals !== null ? (
             <>
               {/* 검색 중엔 평면 매치 — 전체 경로 표시 (스펙 ①) */}

@@ -52,7 +52,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
             </div>
             {shelf.length === 0 ? (
               <p className="shelf-popover__empty">
-                비어 있어요. {T.branch}을 옮길 때 {T.conflict}하는 변경이 있으면 자동으로 담기기도
+                비어 있어요. {T.branch}를 옮길 때 {T.conflict}하는 변경이 있으면 자동으로 담기기도
                 해요.
               </p>
             ) : (

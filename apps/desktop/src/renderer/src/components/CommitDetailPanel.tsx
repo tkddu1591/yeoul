@@ -270,8 +270,9 @@ export function CommitDetailPanel({
               key: 'restore-file',
               // 이 저장이 "지운" 파일은 그 시점 내용이 없다 — 숨기지 않고 사유와 함께 비활성 (E5a 후속).
               // 엔진의 '그 시점에는 이 파일이 없어요' 친절 거부는 심층 방어로 유지된다
-              // E8 — checkoutFile은 삭제됨/스태시(꺼내)/일반 3변형이라 T.checkoutFile로 뭉치면
+              // E8 — 이 파일만 체크아웃은 삭제됨/스태시(꺼내)/일반 3변형이라 사전 키 하나로 뭉치면
               // "꺼내"·"지금 코드에" 구분이 사라진다 — 문장 변형은 유지하고 어휘(체크아웃)만 통일
+              // (사전에 checkoutFile 키를 두지 않기로 함 — 품질 리뷰 Minor, 재사용 불가한 3변형이라 편차 보고)
               label:
                 menu.file.kind === 'deleted'
                   ? '이 파일만 체크아웃 — 그 시점에 지워진 파일이에요'
@@ -297,7 +298,7 @@ export function CommitDetailPanel({
         onConfirm={runRestore}
         onCancel={() => setConfirmingRestore(null)}
       >
-        지금 파일이 이 시점 내용으로 바뀌어요. 미저장 변경은 {T.stash}에 넣어 드려요.
+        지금 파일이 이 시점 내용으로 바뀌어요. {T.commit} 안 된 변경은 {T.stash}에 넣어 드려요.
       </ConfirmDialog>
     </Panel>
   )

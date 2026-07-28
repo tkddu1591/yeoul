@@ -514,7 +514,7 @@ export function App() {
         isOpen={confirmingRemoveWorktree !== null}
         title={
           confirmingRemoveWorktree?.force === true
-            ? '미저장 변경이 있어요 — 그래도 지울까요?'
+            ? `${T.commit} 안 된 변경이 있어요 — 그래도 지울까요?`
             : '워크트리를 지울까요?'
         }
         confirmLabel={confirmingRemoveWorktree?.force === true ? '그래도 지우기' : '지우기'}
@@ -538,7 +538,7 @@ export function App() {
         onCancel={() => setConfirmingRemoveWorktree(null)}
       >
         {confirmingRemoveWorktree?.force === true
-          ? '그 폴더의 미저장 변경이 함께 사라져요. 되돌릴 수 없어요.'
+          ? `그 폴더의 ${T.commit} 안 된 변경이 함께 사라져요. 되돌릴 수 없어요.`
           : `워크트리 폴더가 디스크에서 지워져요. ${T.history}와 ${T.branch}는 그대로예요.`}
       </ConfirmDialog>
       {(status?.state === 'merging' ||
@@ -794,7 +794,7 @@ export function App() {
               path={store.conflictFile.path}
               content={store.conflictFile.content}
               busy={store.busy}
-              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 "이 저장만 가져오기" 어휘와 일치한다 (E5b 설계 판단).
+              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 체리픽(cherry-pick) 어휘와 일치한다 (E5b 설계 판단).
               // rebasing은 git의 ours/theirs가 뒤집힌다(내 것=새 기반) — 전용 mode로 라벨을 정직하게 (E7a)
               mode={
                 status?.state === 'reverting'
@@ -1254,7 +1254,7 @@ export function App() {
       >
         {`"${confirmingRemoveWithWorktree?.name}"은 워크트리 "${
           confirmingRemoveWithWorktree?.worktreePath.split('/').pop() ?? ''
-        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. 워크트리를 지우면 그 폴더가 사라져요 — 미저장 변경이 있으면 한 번 더 물어봐요.`}
+        }"(${confirmingRemoveWithWorktree?.worktreePath})가 펼쳐 쓰는 중이에요. 워크트리를 지우면 그 폴더가 사라져요 — ${T.commit} 안 된 변경이 있으면 한 번 더 물어봐요.`}
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingRemoveRemote !== null}

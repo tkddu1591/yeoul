@@ -39,7 +39,6 @@ export const T = {
   stash: '스태시',
   worktree: '워크트리',
   prunable: '정리 대상',
-  checkoutFile: '이 파일만 체크아웃',
 } as const
 
 /** 사전 키 — 잘못된 키 참조를 컴파일 타임에 막는다 */

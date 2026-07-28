@@ -266,7 +266,7 @@ test('커밋을 누르면 트리 아래에 상세가 열리고 파일 diff는 �
     // 파일 클릭 → 좌측 흐름과 동일하게 중앙 diff에 뜬다 (v1 → v2 수정)
     await window.getByTestId('commit-file-app.txt').click()
     await expect(window.getByTestId('diff-view-unified')).toContainText('v2')
-    await expect(window.getByTestId('diff-panel')).toContainText('커밋')
+    await expect(window.getByTestId('diff-panel')).toContainText(T.commit)
     // 닫기 → 하단 상세가 닫히고 트리가 전체 높이로 복귀한다
     await window.getByTestId('commit-detail-back').click()
     await expect(window.getByTestId('commit-detail-panel')).toHaveCount(0)
@@ -469,7 +469,7 @@ test('전환이 막히면 변경을 보관함에 자동 보관하고 이동한�
     await window.getByTestId('header-branch').click()
     await window.getByTestId('branch-item-other').click()
     await expect(window.getByTestId('header-branch')).toContainText('other')
-    await expect(window.getByTestId('notice')).toContainText('스태시')
+    await expect(window.getByTestId('notice')).toContainText(T.stash)
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
   } finally {
@@ -501,7 +501,7 @@ test('우클릭한 저장 시점에서 실험 공간을 만든다', async () => 
     const rootHash = (
       await execGitOrThrow(['rev-list', '--max-parents=0', 'HEAD'], { cwd: repo })
     ).stdout.trim()
-    await expect(window.getByTestId(`history-item-${rootHash}`)).toContainText('현재 위치')
+    await expect(window.getByTestId(`history-item-${rootHash}`)).toContainText(T.head)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -571,7 +571,7 @@ test('보관함 항목을 클릭하면 담긴 내용을 미리 보여준다', as
     await window.getByTestId('shelf-preview-stash@{0}').click()
     // 팝오버가 닫히고 우측이 커밋 상세로 전환된다 — 담긴 파일이 보인다
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
-    await expect(window.getByTestId('commit-detail-panel')).toContainText('스태시 내용')
+    await expect(window.getByTestId('commit-detail-panel')).toContainText(`${T.stash} 내용`)
     await expect(window.getByTestId('commit-detail-panel')).toContainText(
       '새로 만든 파일은 이 목록에 안 보여요',
     )
@@ -631,12 +631,12 @@ test('겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무�
     await window.getByTestId('merge-open').click()
     await window.getByTestId('list-option-rival').click()
     // 충돌 상태 — 머지 바와 ! 파일
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 1개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-view')).toContainText('rival')
     await window.getByTestId('conflict-theirs').click()
     // 해소 — 머지 바 0개, staged로 이동
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 0개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await expect(window.getByTestId('staged-count')).toHaveText('1')
     // 저장하기 = 병합 마무리
     await window.getByTestId('commit-message').fill('합치기 마무리')
@@ -668,12 +668,12 @@ test('겹침을 전부 내 것으로 정리해도 저장하기로 합치기를 �
     const window = await app.firstWindow()
     await window.getByTestId('merge-open').click()
     await window.getByTestId('list-option-rival').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 1개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-ours').click()
     // 전량 내 것 — 변경 0개지만 병합 커밋으로 마무리할 수 있어야 한다 (데드엔드 방지)
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 0개 남음')
-    await expect(window.getByTestId('commit-button')).toContainText('병합 마무리')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
+    await expect(window.getByTestId('commit-button')).toContainText(`${T.merge} 마무리`)
     await expect(window.getByTestId('commit-button')).toBeEnabled()
     await window.getByTestId('commit-button').click()
     await expect(window.getByTestId('merge-bar')).toHaveCount(0)
@@ -733,7 +733,7 @@ test('저장 안 된 변경이 겹치면 보관함에 넣고 합친다 (스마�
     await expect(window.getByTestId('unstaged-count')).toHaveText('1')
     await window.getByTestId('merge-open').click()
     await window.getByTestId('list-option-exp').click()
-    await expect(window.getByTestId('notice')).toContainText('스태시')
+    await expect(window.getByTestId('notice')).toContainText(T.stash)
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
   } finally {
@@ -786,7 +786,7 @@ test('저장을 되돌리는 새 저장을 만든다 (revert)', async () => {
     await expect(window.getByTestId('history-count')).toHaveText('2')
     await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
     await window.getByTestId('context-revert').click()
-    await expect(window.getByTestId('notice')).toContainText('되돌리는 새 커밋')
+    await expect(window.getByTestId('notice')).toContainText(`되돌리는 새 ${T.commit}`)
     await expect(window.getByTestId('history-count')).toHaveText('3')
   } finally {
     await app.close()
@@ -810,11 +810,11 @@ test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async ()
     // v2(가운데 저장)를 되돌리면 v3와 겹친다
     await window.locator('[data-testid^="history-item-"]').nth(1).click({ button: 'right' })
     await window.getByTestId('context-revert').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('커밋 되돌리는 중')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.commit} 되돌리는 중`)
     // 전부 내 것을 유지하면 바뀌는 내용이 없다 — 저장하기 대신 취소로 마무리하도록 안내한다
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-ours').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('되돌리기 취소를 눌러 마무리해요')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.revert} 취소를 눌러 마무리해요`)
     // 되돌리는 중에는 우클릭 되돌리기가 비활성 — 이중 실행을 막는다 (통합 리뷰)
     await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
     await expect(window.getByTestId('context-revert')).toBeDisabled()
@@ -822,7 +822,7 @@ test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async ()
     await window.getByTestId('merge-abort').click()
     await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('merge-bar')).toHaveCount(0)
-    await expect(window.getByTestId('notice')).toContainText('되돌리기를 취소')
+    await expect(window.getByTestId('notice')).toContainText(`${T.revert}를 취소`)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -869,10 +869,10 @@ test('합쳐지지 않은 실험 공간은 두 번 확인 후에만 지워진다
     await window.getByTestId('manage-remove-doomed').click()
     await window.getByTestId('confirm-accept').click()
     // 합쳐지지 않은 저장 — 1차와 구분되는 강제 확인창(제목)이 이어진다
-    await expect(window.getByText('아직 병합되지 않은 커밋이 있어요')).toBeVisible()
+    await expect(window.getByText(`아직 ${T.merge}되지 않은 ${T.commit}이 있어요`)).toBeVisible()
     // 강제 확인창으로 이름 스코프해 클릭 — 퇴장 즉시화(E3b) 이후에도 견고하다
     await window
-      .getByRole('alertdialog', { name: '아직 병합되지 않은 커밋이 있어요' })
+      .getByRole('alertdialog', { name: `아직 ${T.merge}되지 않은 ${T.commit}이 있어요` })
       .getByTestId('confirm-accept')
       .click()
     await expect(window.getByTestId('manage-remove-doomed')).toHaveCount(0)
@@ -892,18 +892,18 @@ test('겹침 두 곳을 카드에서 하나씩 골라 확정하고 저장하기�
     const window = await app.firstWindow()
     await window.getByTestId('merge-open').click()
     await window.getByTestId('list-option-rival').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 1개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 1번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 1번째`)
     // 1번째 겹침은 내 것 — 반영되면 남은 블록이 파일 기준 다시 0번이 된다
     await window.getByTestId('conflict-block-ours-0').click()
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 2번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 2번째`)
     await window.getByTestId('conflict-block-theirs-0').click()
     await expect(window.getByTestId('conflict-progress')).toHaveText('모두 골랐어요')
     // 확정 전에는 여전히 겹침(unmerged) 파일이다 — add는 확정 버튼에서만
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 1개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('conflict-confirm').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 0개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await expect(window.getByTestId('staged-count')).toHaveText('1')
     // 저장하기 = 병합 마무리 (부모 2)
     await window.getByTestId('commit-message').fill('겹침 정리해서 합치기')
@@ -932,7 +932,7 @@ test('선택형 일부 선택 → 자세히 보기 직접 수정 → 선택 유�
     await window.getByTestId('list-option-rival').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-block-ours-0').click()
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 2번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 2번째`)
     await window.getByTestId('conflict-detail-toggle').click()
     // 선택형에서 고른 것이 결과에 유지된 채로 열린다 — 남은 겹침 표시도 그대로 (E-004)
     await expect(window.getByTestId('conflict-edit-text')).toHaveValue(/mine-top/)
@@ -965,7 +965,7 @@ test('일부만 고르고 재시작해도 고른 결과와 남은 겹침이 복�
     await window.getByTestId('list-option-rival').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-block-ours-0').click()
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 2번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 2번째`)
   } finally {
     await app.close()
   }
@@ -973,10 +973,10 @@ test('일부만 고르고 재시작해도 고른 결과와 남은 겹침이 복�
   const second = await electron.launch({ args: [APP_ROOT], env })
   try {
     const window = await second.firstWindow()
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 1개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
     // 남은 블록 1개부터 이어서 — 앞서 고른 mine-top은 일반 줄로 남아 있다
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 1곳 중 1번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 1곳 중 1번째`)
     await expect(window.getByTestId('conflict-view')).toContainText('mine-top')
     await expect(window.getByTestId('conflict-card-1')).toHaveCount(0)
   } finally {
@@ -997,11 +997,11 @@ test('처음부터 다시를 누르면 겹침 표시가 되살아난다', async 
     await window.getByTestId('list-option-rival').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-block-ours-0').click()
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 2번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 2번째`)
     await window.getByTestId('conflict-reset').click()
     await window.getByTestId('confirm-accept').click()
     // 마커 재생성(실측: 라벨은 ours/theirs) — 카드 2개와 진행 표시가 처음으로 돌아온다
-    await expect(window.getByTestId('conflict-progress')).toHaveText('충돌 2곳 중 1번째')
+    await expect(window.getByTestId('conflict-progress')).toHaveText(`${T.conflict} 2곳 중 1번째`)
     await expect(window.getByTestId('conflict-card-1')).toBeVisible()
     expect(await readFile(join(repo, 'app.txt'), 'utf8')).toContain('<<<<<<<')
   } finally {
@@ -1024,10 +1024,10 @@ test('커밋 상세에서 파일 우클릭 — 이 파일만 그 시점 내용�
     await window.getByTestId('commit-file-app.txt').click({ button: 'right' })
     await window.getByTestId('context-restore-file').click()
     // 확인창 — 자동 보관 안내를 담는다
-    await expect(window.getByRole('alertdialog')).toContainText('스태시에 넣어 드려요')
+    await expect(window.getByRole('alertdialog')).toContainText(`${T.stash}에 넣어 드려요`)
     await window.getByTestId('confirm-accept').click()
-    await expect(window.getByTestId('notice')).toContainText('스테이지에 올려뒀어요')
-    await expect(window.getByTestId('notice')).toContainText('스태시')
+    await expect(window.getByTestId('notice')).toContainText(`${T.staged}에 올려뒀어요`)
+    await expect(window.getByTestId('notice')).toContainText(T.stash)
     // dirty였던 v2는 보관함으로 +1, 디스크는 그 시점(v1) 내용 — 실측
     await expect(window.getByTestId('shelf-count')).toHaveText('1')
     expect(await readFile(join(repo, 'app.txt'), 'utf8')).toBe('v1\n')
@@ -1119,15 +1119,15 @@ test('히스토리 전체 그래프 — 다른 실험 공간·원격(☁)이 함
     // 원격 배지 — origin/은 ☁ 접두로 로컬과 구분된다 (피드백 3)
     await expect(window.getByTestId('history-list')).toContainText('☁ origin/main')
     // "지금 여기"는 index 0(최신 행 = other)이 아니라 HEAD(main) 행에 붙는다 (피드백 4)
-    await expect(window.getByTestId(`history-item-${mainHash}`)).toContainText('현재 위치')
-    await expect(window.getByTestId(`history-item-${otherHash}`)).not.toContainText('현재 위치')
+    await expect(window.getByTestId(`history-item-${mainHash}`)).toContainText(T.head)
+    await expect(window.getByTestId(`history-item-${otherHash}`)).not.toContainText(T.head)
     // 전환하면 마커가 따라온다 — 목록은 그대로 전체
     await window.getByTestId('header-branch').click()
     await window.getByTestId('branch-item-other').click()
     await expect(window.getByTestId('header-branch')).toContainText('other')
     await expect(window.getByTestId('history-count')).toHaveText('2')
-    await expect(window.getByTestId(`history-item-${otherHash}`)).toContainText('현재 위치')
-    await expect(window.getByTestId(`history-item-${mainHash}`)).not.toContainText('현재 위치')
+    await expect(window.getByTestId(`history-item-${otherHash}`)).toContainText(T.head)
+    await expect(window.getByTestId(`history-item-${mainHash}`)).not.toContainText(T.head)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -1163,18 +1163,18 @@ test('이 저장만 가져오기 (cherry-pick) — 성공과 충돌·취소', as
     // (1) 깔끔한 가져오기 — 새 저장이 생기고 파일이 도착한다
     await window.getByTestId(`history-item-${featureHash}`).click({ button: 'right' })
     await window.getByTestId('context-cherry-pick').click()
-    await expect(window.getByTestId('notice')).toContainText('체리픽해 새 커밋을 만들었어요')
+    await expect(window.getByTestId('notice')).toContainText(`${T.cherryPick}해 새 ${T.commit}을 만들었어요`)
     await expect(window.getByTestId('history-count')).toHaveText('5')
     expect(await readFile(join(repo, 'feature.txt'), 'utf8')).toBe('f\n')
     // (2) 겹치는 가져오기 — cherry-picking 상태 바가 뜨고 취소로 돌아온다
     await window.getByTestId(`history-item-${rivalHash}`).click({ button: 'right' })
     await window.getByTestId('context-cherry-pick').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('체리픽하는 중')
-    await expect(window.getByTestId('merge-abort')).toHaveText('체리픽 취소')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.cherryPick}하는 중`)
+    await expect(window.getByTestId('merge-abort')).toHaveText(`${T.cherryPick} 취소`)
     await window.getByTestId('merge-abort').click()
     await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('merge-bar')).toHaveCount(0)
-    await expect(window.getByTestId('notice')).toContainText('체리픽을 취소')
+    await expect(window.getByTestId('notice')).toContainText(`${T.cherryPick}을 취소`)
     await expect(window.getByTestId('history-count')).toHaveText('5')
   } finally {
     await app.close()
@@ -1195,7 +1195,7 @@ test('태그 만들기 (tag) — 배지로 나타난다', async () => {
     await window.getByTestId('context-tag-here').click()
     await window.getByTestId('prompt-input').fill('v1.0')
     await window.getByTestId('prompt-submit').click()
-    await expect(window.getByTestId('notice')).toContainText('태그를 만들었어요')
+    await expect(window.getByTestId('notice')).toContainText(`${T.tag}를 만들었어요`)
     // 태그는 --all 그래프의 decorate 배지로 자동 반영된다 (실측 9) — 🏷 접두로 로컬·원격과 구분 (E6b)
     await expect(window.getByTestId('history-list')).toContainText('🏷 v1.0')
     const tags = await execGitOrThrow(['tag', '--list'], { cwd: repo })
@@ -1222,7 +1222,7 @@ test('notice 안내는 10초 뒤 자동으로 사라진다 (에러·머지 바�
     await window.getByTestId('context-tag-here').click()
     await window.getByTestId('prompt-input').fill('v-auto')
     await window.getByTestId('prompt-submit').click()
-    await expect(window.getByTestId('notice')).toContainText('태그를 만들었어요')
+    await expect(window.getByTestId('notice')).toContainText(`${T.tag}를 만들었어요`)
     await window.clock.fastForward(10_500)
     await expect(window.getByTestId('notice')).toHaveCount(0)
   } finally {
@@ -1314,13 +1314,13 @@ test('실험 공간 탭 — 목록·상태 배지·검색 (E7a)', async () => {
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branches-panel')).toBeVisible()
     // E7g: 상태는 칩 텍스트 대신 아이콘(➤)·Tooltip(data-tooltip)·인라인 ↑↓로 표시된다 (E7j 전환)
-    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('data-tooltip', /현재 위치/)
+    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('data-tooltip', new RegExp(T.head))
     await expect(
       window.getByTestId('branch-row-main').locator('.branch-row__ahead, .branch-row__behind'),
     ).toHaveCount(0)
     await expect(window.getByTestId('branch-row-feature/login')).toHaveAttribute(
       'data-tooltip',
-      /아직 원격과 연결 안 됨/,
+      new RegExp(`아직 ${T.noUpstream}`),
     )
     await expect(window.getByTestId('branch-row-origin/main')).toBeVisible()
     // 검색 — login만 남는다
@@ -1351,7 +1351,7 @@ test('실험 공간 탭 — 우클릭 이동(checkout)에 현재 표시가 따�
     await window.getByTestId('branch-row-sidework').click({ button: 'right' })
     await window.getByTestId('context-switch').click()
     // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
-    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('data-tooltip', /현재 위치/)
+    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('data-tooltip', new RegExp(T.head))
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('sidework')
   } finally {
@@ -1414,18 +1414,18 @@ test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속�
     await window.getByTestId('left-tab-branches').click()
     await window.getByTestId('branch-row-main').click({ button: 'right' })
     await window.getByTestId('context-rebase').click()
-    await window.getByRole('button', { name: '리베이스 (rebase)' }).click()
+    await window.getByRole('button', { name: `${T.rebase} (rebase)` }).click()
     // 충돌 — 4겸용 상태 바 + 진행 표시(실측 2: msgnum/end)
-    await expect(window.getByTestId('merge-bar')).toContainText('커밋 리베이스 중 (1개 중 1번째)')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.commit} ${T.rebase} 중 (1개 중 1번째)`)
     // 변경 탭의 ! 파일에서 해결 — rebase 라벨 반전(초록=새 기반, 보라=재배치 중인 내 저장)
     await window.getByTestId('left-tab-changes').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-panel')).toBeVisible()
     await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 유지')
     await window.getByTestId('conflict-theirs').click()
-    await expect(window.getByTestId('merge-bar')).toContainText('충돌 0개 남음')
+    await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await window.getByTestId('rebase-continue').click()
-    await expect(window.getByTestId('notice')).toContainText('리베이스를 마쳤어요')
+    await expect(window.getByTestId('notice')).toContainText(`${T.rebase}를 마쳤어요`)
     await expect(window.getByTestId('merge-bar')).toHaveCount(0)
     // 재배치 성립 — topic의 부모가 main이고 내 저장 내용이 남았다
     const parent = await execGitOrThrow(['rev-parse', 'topic^'], { cwd: repo })
@@ -1498,7 +1498,7 @@ test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추�
     await window.getByTestId('context-checkout-remote').click()
     await expect(window.getByTestId('notice')).toContainText('가져와 이동했어요')
     // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
-    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('data-tooltip', /현재 위치/)
+    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('data-tooltip', new RegExp(T.head))
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('incoming')
   } finally {
@@ -1772,7 +1772,7 @@ test('워크트리 탭 — 미저장 변경이 있으면 지우기가 2단 확�
     await window.getByTestId('context-remove').click()
     // 1차 확인 → 엔진이 needsForce → 2차(강제) 확인
     await window.getByTestId('confirm-accept').click()
-    await expect(window.getByRole('alertdialog')).toContainText('미저장 변경이 있어요')
+    await expect(window.getByRole('alertdialog')).toContainText(`${T.commit} 안 된 변경이 있어요`)
     await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId(`worktree-row-${repoName}-feature-login`)).toHaveCount(0)
     const wtList = await execGitOrThrow(['worktree', 'list'], { cwd: repo })
@@ -2064,7 +2064,7 @@ test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E
   try {
     const window = await app.firstWindow()
     await window.getByTestId('backup').click()
-    await expect(window.getByTestId('notice')).toContainText('연결하며 푸시했어요', { timeout: 10_000 })
+    await expect(window.getByTestId('notice')).toContainText(`연결하며 ${T.push}했어요`, { timeout: 10_000 })
     await window.getByTestId('left-tab-branches').click()
     // E7g: "동기화됨" 칩 대신 침묵(인라인 ↑↓ 배지가 없음)이 신호
     await expect(
@@ -2224,7 +2224,7 @@ test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 �
     await window.getByTestId('prompt-input').fill('e7h-notice')
     await window.getByTestId('prompt-submit').click()
     const notice = window.getByTestId('notice')
-    await expect(notice).toContainText('태그를 만들었어요')
+    await expect(notice).toContainText(`${T.tag}를 만들었어요`)
     // 배너 박스가 좌측 탭 구역(변경/실험 공간/워크트리)과 겹치지 않는다 — 탭 3개 모두 온전히 클릭 가능
     const noticeBox = (await notice.boundingBox())!
     const tabBox = (await window.getByTestId('left-tab-worktrees').boundingBox())!
@@ -2406,7 +2406,7 @@ test('E7h — 워크트리가 쓰는 실험 공간은 동반 삭제로 지운다
     await window.getByTestId('confirm-accept').click() // 1단: 지울까요?
     // 동반 삭제 확인 — 두 확인창이 겹치지 않게 순차로 뜨는 기존 관례(E3b) 전제, title 스코프로 좁혀 클릭
     const withWorktreeDialog = window.getByRole('alertdialog', {
-      name: '워크트리가 이 브랜치를 쓰는 중이에요 — 같이 지울까요?',
+      name: `${T.worktree}가 이 ${T.branch}를 쓰는 중이에요 — 같이 지울까요?`,
     })
     await expect(withWorktreeDialog).toBeVisible()
     await withWorktreeDialog.getByTestId('confirm-accept').click()
@@ -2761,7 +2761,7 @@ test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치�
     await expect(tip).toBeVisible()
     // 제목(첫 저장 메시지)·포함 브랜치가 카드에 있다
     await expect(tip).toContainText('holder')
-    await expect(tip).toContainText('에 포함된 커밋')
+    await expect(tip).toContainText(`에 포함된 ${T.commit}`)
     // E7k 보완 — 분리 HEAD 자신이 (no branch) 유령으로 섞이지 않는다(회귀 방지)
     await expect(tip).not.toContainText('(no branch)')
   } finally {

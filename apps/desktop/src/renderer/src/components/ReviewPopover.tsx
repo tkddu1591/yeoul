@@ -82,7 +82,7 @@ export function ReviewPopover({
           {status === null || !status.connected ? (
             <>
               <p className="review-popover__empty">
-                GitHub와 연결하면 {T.pullRequest} (pull request)을 만들고 볼 수 있어요.
+                GitHub와 연결하면 {T.pullRequest} (pull request)를 만들고 볼 수 있어요.
               </p>
               <div className="review-popover__buttons">
                 {status?.ghAvailable === true && (
@@ -124,7 +124,7 @@ export function ReviewPopover({
               {status.repo === null ? (
                 <p className="review-popover__empty">
                   이 저장소의 원격(origin)이 GitHub가 아니에요. GitHub 저장소를 {T.push}(push) 대상으로
-                  연결하면 {T.pullRequest}을 만들 수 있어요.
+                  연결하면 {T.pullRequest}를 만들 수 있어요.
                 </p>
               ) : (
                 <>
@@ -135,11 +135,11 @@ export function ReviewPopover({
                     onPress={() => openDialog(onCreate)}
                     testId="review-create"
                   >
-                    <GitPullRequest size={13} aria-hidden="true" /> 이 {T.branch} {T.pullRequest}하기
+                    <GitPullRequest size={13} aria-hidden="true" /> 이 {T.branch}로 {T.pullRequest} 만들기
                   </Button>
                   {isDefaultBranch && (
                     <p className="review-popover__reason" data-testid="review-create-reason">
-                      "{currentBranch}"는 모두가 함께 쓰는 기본 공간이에요. {T.branch}(branch)을
+                      "{currentBranch}"는 모두가 함께 쓰는 기본 공간이에요. {T.branch}(branch)를
                       만들어 요청해 주세요.
                     </p>
                   )}
@@ -153,7 +153,7 @@ export function ReviewPopover({
                       {T.pullRequest} 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.
                     </p>
                   ) : pulls.length === 0 ? (
-                    <p className="review-popover__empty">열린 {T.pullRequest}이 없어요.</p>
+                    <p className="review-popover__empty">열린 {T.pullRequest}가 없어요.</p>
                   ) : (
                     <ul className="review-popover__list">
                       {pulls.map((pull) => (

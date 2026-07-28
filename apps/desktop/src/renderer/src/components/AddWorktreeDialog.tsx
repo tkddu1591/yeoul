@@ -83,7 +83,7 @@ export function AddWorktreeDialog({
             새 워크트리 만들기
           </Heading>
           <p className="ui-dialog__body">
-            {T.branch}을 새 폴더에 함께 펼쳐요. 같은 {T.branch}은 한 폴더에서만 열 수 있어요.
+            {T.branch}를 새 폴더에 함께 펼쳐요. 같은 {T.branch}는 한 폴더에서만 열 수 있어요.
           </p>
           <fieldset className="settings-dialog__field add-worktree__mode">
             <label className="settings-dialog__radio">
@@ -110,7 +110,7 @@ export function AddWorktreeDialog({
           {mode === 'existing' ? (
             available.length === 0 ? (
               <p className="worktrees-panel__empty">
-                펼칠 수 있는 {T.branch}이 없어요. "새로 만들면서 펼치기"를 써 보세요.
+                펼칠 수 있는 {T.branch}가 없어요. "새로 만들면서 펼치기"를 써 보세요.
               </p>
             ) : (
               <label className="add-worktree__label">

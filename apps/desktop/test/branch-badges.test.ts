@@ -19,8 +19,8 @@ describe('trackBadgeLabel', () => {
     expect(trackBadgeLabel(b({ upstream: null, ahead: null, behind: null }))).toBe('업스트림 없음')
   })
 
-  it('[gone]이면 "연결 끊김"이다', () => {
-    expect(trackBadgeLabel(b({ upstreamGone: true, ahead: null, behind: null }))).toBe('연결 끊김')
+  it('[gone]이면 "업스트림 삭제됨"이다', () => {
+    expect(trackBadgeLabel(b({ upstreamGone: true, ahead: null, behind: null }))).toBe('업스트림 삭제됨')
   })
 
   it('앞서고 뒤처진 수를 ↑·↓로 보여주고, 0인 쪽은 생략한다', () => {

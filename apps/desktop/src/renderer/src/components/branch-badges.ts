@@ -7,7 +7,7 @@ import { T } from '../terms'
  */
 export function trackBadgeLabel(branch: LocalBranchStatus): string {
   if (branch.upstream === null) return T.noUpstream
-  if (branch.upstreamGone) return '연결 끊김'
+  if (branch.upstreamGone) return '업스트림 삭제됨'
   const parts: string[] = []
   if (branch.ahead !== null && branch.ahead > 0) parts.push(`↑${branch.ahead}`)
   if (branch.behind !== null && branch.behind > 0) parts.push(`↓${branch.behind}`)
