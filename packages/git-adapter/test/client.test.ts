@@ -122,7 +122,7 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await expect(
       client.commits.diffFile('deadbeef'.repeat(5), 'README.md', null),
-    ).rejects.toThrow(/저장 시점을 찾을 수 없어요/)
+    ).rejects.toThrow(/커밋을 찾을 수 없어요/)
   })
 
   it('diff — 사용자 전역 diff.renames=false여도 staged rename은 rename으로 표시된다 (-M 고정)', async () => {
@@ -360,7 +360,7 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await expect(client.commits.show('deadbeef'.repeat(5))).rejects.toThrow(
-      /저장 시점을 찾을 수 없어요/,
+      /커밋을 찾을 수 없어요/,
     )
   })
 
@@ -553,13 +553,13 @@ describe('GitClient', () => {
     expect(status.changes).toEqual([])
     const shelf = await client.shelf.list()
     expect(shelf).toHaveLength(1)
-    expect(shelf[0]!.message).toContain('실험 공간 전환 자동 보관')
+    expect(shelf[0]!.message).toContain('브랜치 전환 자동 스태시')
   })
 
-  it('switch — 없는 실험 공간은 읽히는 메시지로 거부한다', async () => {
+  it('switch — 없는 브랜치는 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.branches.switch('no-such')).rejects.toThrow(/실험 공간이 없어요/)
+    await expect(client.branches.switch('no-such')).rejects.toThrow(/브랜치가 없어요/)
   })
 
   it('shelf — 항목 해시로 커밋 상세(미리보기)를 열 수 있다', async () => {
@@ -603,11 +603,11 @@ describe('GitClient', () => {
   it('shelf — 깨끗한 트리 보관과 잘못된 ref를 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.shelf.save('없는 변경')).rejects.toThrow(/보관할 변경이 없어요/)
+    await expect(client.shelf.save('없는 변경')).rejects.toThrow(/스태시할 변경이 없어요/)
     // 패턴 필수 — 무패턴 toThrow는 가드를 제거해도 git 원시 에러로 통과해 버린다(변이 실증).
     // 가드가 없으면 '--quiet' 같은 입력이 플래그로 해석돼 엉뚱한 최신 항목이 pop된다.
-    await expect(client.shelf.restore('HEAD')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
-    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 보관함 항목이 아니에요/)
+    await expect(client.shelf.restore('HEAD')).rejects.toThrow(/올바른 스태시 항목이 아니에요/)
+    await expect(client.shelf.drop('stash@{x}')).rejects.toThrow(/올바른 스태시 항목이 아니에요/)
   })
 
   it('switch — 충돌 정리 중에는 읽히는 메시지로 거부한다', async () => {
@@ -699,15 +699,15 @@ describe('GitClient', () => {
     expect(result).toEqual({ outcome: 'fast-forward', autoShelved: true })
     const shelf = await client.shelf.list()
     expect(shelf).toHaveLength(1)
-    expect(shelf[0]!.message).toContain('실험 공간 합치기 자동 보관')
+    expect(shelf[0]!.message).toContain('브랜치 병합 자동 스태시')
     const status = await client.repo.status()
     expect(status.changes).toEqual([])
   })
 
-  it('merge — 없는 실험 공간은 읽히는 메시지로 거부한다', async () => {
+  it('merge — 없는 브랜치는 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.branches.merge('no-such')).rejects.toThrow(/실험 공간이 없어요/)
+    await expect(client.branches.merge('no-such')).rejects.toThrow(/브랜치가 없어요/)
   })
 
   it('merge.abort — 충돌 상태를 버리고 합치기 전으로 돌아간다', async () => {
@@ -733,7 +733,7 @@ describe('GitClient', () => {
   it('merge.abort — 합치는 중이 아니면 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.merge.abort()).rejects.toThrow(/합치는 중이 아니에요/)
+    await expect(client.merge.abort()).rejects.toThrow(/병합하는 중이 아니에요/)
   })
 
   it('conflicts — ours/theirs 확정과 직접 수정 표시가 해소(staged)로 이어진다', async () => {
@@ -805,7 +805,7 @@ describe('GitClient', () => {
     expect(await readFile(join(repo, 'README.md'), 'utf8')).toBe('# fixture\n')
     const shelf = await client.shelf.list()
     expect(shelf).toHaveLength(1)
-    expect(shelf[0]!.message).toContain('파일 적용 자동 보관')
+    expect(shelf[0]!.message).toContain('파일 적용 자동 스태시')
     // 사라질 뻔한 내용이 보관 항목에 실제로 담겨 있다 (커밋 상세 재사용으로 검증)
     const detail = await client.commits.show(shelf[0]!.hash)
     expect(detail.files.map((f) => f.path)).toContain('README.md')
@@ -856,7 +856,7 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await expect(
       client.commits.restoreFile('0123456789012345678901234567890123456789', 'README.md'),
-    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    ).rejects.toThrow(/그 커밋을 찾을 수 없어요/)
     // 패턴 필수 — 가드가 없으면 'HEAD~' 같은 ref 표현식이 checkout 인자로 흘러간다
     await expect(client.commits.restoreFile('HEAD', 'README.md')).rejects.toThrow(
       /올바른 커밋 해시가 아니에요/,
@@ -960,7 +960,7 @@ describe('GitClient', () => {
         'README.md',
         null,
       ),
-    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    ).rejects.toThrow(/그 커밋을 찾을 수 없어요/)
     await expect(client.commits.diffAgainstWorktree('HEAD', 'README.md', null)).rejects.toThrow(
       /올바른 커밋 해시가 아니에요/,
     )
@@ -1051,7 +1051,7 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
-    await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌\) 상태가 아닌/)
+    await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌 상태가 아닌/)
     // 미저장 편집이 살아 있어야 한다
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
@@ -1082,7 +1082,7 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
     await expect(client.conflicts.saveText('README.md', '덮어쓰기')).rejects.toThrow(
-      /충돌\) 상태가 아닌/,
+      /충돌 상태가 아닌/,
     )
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
@@ -1138,7 +1138,7 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
-    await expect(client.conflicts.reset('README.md')).rejects.toThrow(/충돌\) 상태가 아닌/)
+    await expect(client.conflicts.reset('README.md')).rejects.toThrow(/충돌 상태가 아닌/)
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
 
@@ -1188,7 +1188,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await expect(client.commits.create('아직 안 끝났는데')).rejects.toThrow(/정리해야 저장/)
+    await expect(client.commits.create('아직 안 끝났는데')).rejects.toThrow(/정리해야 커밋/)
   })
 
   it('switch — 합치는 중(merging)에도 읽히는 메시지로 거부한다', async () => {
@@ -1206,7 +1206,7 @@ describe('GitClient', () => {
     await client.branches.merge('rival')
 
     await expect(client.branches.switch('rival')).rejects.toThrow(/충돌 정리/)
-    await expect(client.shelf.save('합치는 중 보관')).rejects.toThrow(/정리해야 보관/)
+    await expect(client.shelf.save('합치는 중 보관')).rejects.toThrow(/정리해야 스태시/)
   })
 
   it('shelf — 꺼내기가 겹치면 충돌 표시로 남기고 항목을 보관함에 보존한다', async () => {
@@ -1278,7 +1278,7 @@ describe('GitClient', () => {
     await client.changes.stage(['c.txt'])
     await client.commits.create('로컬 저장')
     await expect(client.sync.push()).rejects.toThrow(
-      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+      '원격에 새 커밋이 있어요. 먼저 가져오기로 병합한 뒤 푸시해 주세요.',
     )
   })
 
@@ -1292,7 +1292,7 @@ describe('GitClient', () => {
     const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
     await client.commits.undoLast(head)
     await expect(client.sync.push()).rejects.toThrow(
-      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+      '원격에 새 커밋이 있어요. 먼저 가져오기로 병합한 뒤 푸시해 주세요.',
     )
   })
 
@@ -1307,7 +1307,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'other first'], { cwd: other })
     await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: other })
     await expect(client.sync.push()).rejects.toThrow(
-      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+      '원격에 새 커밋이 있어요. 먼저 가져오기로 병합한 뒤 푸시해 주세요.',
     )
   })
 
@@ -1365,7 +1365,7 @@ describe('GitClient', () => {
     const result = await client.sync.pull()
     expect(result).toEqual({ outcome: 'fast-forward', autoShelved: true })
     const shelf = await client.shelf.list()
-    expect(shelf[0]!.message).toContain('받아오기 자동 보관')
+    expect(shelf[0]!.message).toContain('가져오기 자동 스태시')
   })
 
   it('pull — 원격/upstream이 없으면 읽히는 메시지로 거부한다', async () => {
@@ -1376,7 +1376,7 @@ describe('GitClient', () => {
     const withRemote = await createFixtureRepoWithRemote()
     const client2 = createGitClient(withRemote.repo)
     // push(업스트림 연결) 없이 pull — tracking 정보 없음
-    await expect(client2.sync.pull()).rejects.toThrow(/백업.*연결/)
+    await expect(client2.sync.pull()).rejects.toThrow(/푸시.*연결/)
   })
 
   it('revert — 저장을 반대로 적용하는 새 저장을 만들고, merge commit은 첫 부모 기준으로 되돌린다', async () => {
@@ -1477,7 +1477,7 @@ describe('GitClient', () => {
     const result = await client.commits.revert(head.hash)
     expect(result).toEqual({ outcome: 'reverted', autoShelved: true })
     const shelf = await client.shelf.list()
-    expect(shelf[0]?.message).toContain('저장 되돌리기 자동 보관')
+    expect(shelf[0]?.message).toContain('커밋 되돌리기 자동 스태시')
     // 되돌린 결과가 워킹 트리에 반영됐다
     expect(await client.files.readText('README.md')).toBe('# fixture\n')
   })
@@ -1588,7 +1588,7 @@ describe('GitClient', () => {
     await client.branches.create('from-root', root)
     await client.branches.switch('from-root')
 
-    await expect(client.commits.cherryPick(mergeHash)).rejects.toThrow(/통째로 가져올 수 없어요/)
+    await expect(client.commits.cherryPick(mergeHash)).rejects.toThrow(/통째로 체리픽할 수 없어요/)
     // 진행 흔적 없음 — 상태는 정상 그대로다
     expect((await client.repo.status()).state).toBe('normal')
   })
@@ -1612,7 +1612,7 @@ describe('GitClient', () => {
     expect(await client.files.readText('README.md')).toBe('# side\n')
     const shelf = await client.shelf.list()
     expect(shelf).toHaveLength(1)
-    expect(shelf[0]!.message).toContain('저장 가져오기 자동 보관')
+    expect(shelf[0]!.message).toContain('커밋 체리픽 자동 스태시')
   })
 
   it('cherryPick — 합치는 중(merging)에는 읽히는 메시지로 거부한다', async () => {
@@ -1638,14 +1638,14 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await expect(
       client.commits.cherryPick('0123456789012345678901234567890123456789'),
-    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    ).rejects.toThrow(/그 커밋을 찾을 수 없어요/)
     await expect(client.commits.cherryPick('HEAD')).rejects.toThrow(/올바른 커밋 해시가 아니에요/)
   })
 
   it('cherryPickAbort — 가져오는 중이 아니면 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     await expect(createGitClient(repo).commits.cherryPickAbort()).rejects.toThrow(
-      /지금은 가져오는 중이 아니에요/,
+      /지금은 체리픽 중이 아니에요/,
     )
   })
 
@@ -1673,7 +1673,7 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await expect(
       client.commits.createTag('v9', '0123456789012345678901234567890123456789'),
-    ).rejects.toThrow(/그 저장 시점을 찾을 수 없어요/)
+    ).rejects.toThrow(/그 커밋을 찾을 수 없어요/)
     await expect(client.commits.createTag('v9', 'HEAD')).rejects.toThrow(/올바른 커밋 해시가 아니에요/)
   })
 
@@ -1697,7 +1697,7 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
-    await expect(client.commits.undoLast(head)).rejects.toThrow(/맨 처음 저장은 실행취소할 수 없어요/)
+    await expect(client.commits.undoLast(head)).rejects.toThrow(/맨 처음 커밋은 실행취소할 수 없어요/)
   })
 
   it('undoLast — 화면 목록이 낡았으면(HEAD 불일치) 거부한다', async () => {
@@ -1709,7 +1709,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
 
     // CLI 경합으로 HEAD가 이미 바뀐 상황 — 엉뚱한 저장이 물리면 안 된다
-    await expect(client.commits.undoLast(stale)).rejects.toThrow(/가장 최근 저장이 바뀌었어요/)
+    await expect(client.commits.undoLast(stale)).rejects.toThrow(/가장 최근 커밋이 바뀌었어요/)
     expect((await client.history.list(10))).toHaveLength(2)
   })
 
@@ -1756,7 +1756,7 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# staged\n')
     await client.changes.stage(['README.md'])
 
-    await expect(client.commits.reword(head, '고친 제목')).rejects.toThrow(/저장 예정에 올린 파일이 있어요/)
+    await expect(client.commits.reword(head, '고친 제목')).rejects.toThrow(/스테이지에 올린 파일이 있어요/)
     // 메시지도 staged도 그대로다
     expect(
       (await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })).stdout.trim(),
@@ -1774,7 +1774,7 @@ describe('GitClient', () => {
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'v2'], { cwd: repo })
 
-    await expect(client.commits.reword(stale, '고친 제목')).rejects.toThrow(/가장 최근 저장이 바뀌었어요/)
+    await expect(client.commits.reword(stale, '고친 제목')).rejects.toThrow(/가장 최근 커밋이 바뀌었어요/)
   })
 
   it('reword — 합치는 중(merging)에는 읽히는 메시지로 거부한다', async () => {
@@ -1819,7 +1819,7 @@ describe('GitClient', () => {
     await client.commits.revert(target.hash)
 
     await expect(client.branches.switch('elsewhere')).rejects.toThrow(/충돌 정리/)
-    await expect(client.sync.pull()).rejects.toThrow(/정리해야 받아올/)
+    await expect(client.sync.pull()).rejects.toThrow(/정리해야 가져올/)
     await client.commits.revertAbort()
   })
 
@@ -1855,7 +1855,7 @@ describe('GitClient', () => {
   it('branches.remove — 지금 있는 공간은 읽히는 메시지로 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.branches.remove('main', false)).rejects.toThrow(/다른 공간으로 이동/)
+    await expect(client.branches.remove('main', false)).rejects.toThrow(/다른 브랜치로 이동/)
   })
 
   it('branches.remove — 워크트리가 펼쳐 쓰는 실험 공간 지우기는 usedByWorktree로 알린다 (E7h ⑤)', async () => {
@@ -1874,7 +1874,7 @@ describe('GitClient', () => {
   it('branches.remove — 본체가 쓰는(현재) 실험 공간 지우기는 기존 친절 에러를 던진다 (E7h ⑤)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.branches.remove('main', false)).rejects.toThrow('지금 있는 실험 공간')
+    await expect(client.branches.remove('main', false)).rejects.toThrow('지금 있는 브랜치')
   })
 
   it('branches.rename — 이름을 바꾸고, 중복·잘못된 이름은 읽히는 메시지로 거부한다', async () => {
@@ -1962,7 +1962,7 @@ describe('GitClient', () => {
     const { repo } = await createFixtureRepoWithRemote()
     const client = createGitClient(repo)
     await client.sync.push()
-    await expect(client.branches.update('main')).rejects.toThrow(/받아오기\(pull\)로 업데이트/)
+    await expect(client.branches.update('main')).rejects.toThrow(/가져오기로 업데이트/)
   })
 
   it('branches.backup — 비현재 공간을 checkout 없이 push한다 (upstream 없으면 -u 연결)', async () => {
@@ -2014,7 +2014,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'local side'], { cwd: repo })
     await client.branches.switch('main')
     await expect(client.branches.backup('side')).rejects.toThrow(
-      '원격에 새 저장이 있어요. 먼저 받아오기(pull)로 합친 뒤 백업해 주세요.',
+      '원격에 새 커밋이 있어요. 먼저 가져오기로 병합한 뒤 푸시해 주세요.',
     )
   })
 
@@ -2048,7 +2048,7 @@ describe('GitClient', () => {
     await client.sync.push()
     await execGitOrThrow(['fetch', 'origin'], { cwd: repo })
     await expect(client.branches.checkoutRemote('origin/main')).rejects.toThrow(
-      /이미 "main" 공간이 있어요/,
+      /이미 "main" 브랜치가 있어요/,
     )
   })
 
@@ -2229,13 +2229,13 @@ describe('GitClient', () => {
     await execGitOrThrow(['add', '-A'], { cwd: repo })
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'topic 1'], { cwd: repo })
     await client.rebase.start('main')
-    await expect(client.rebase.continue()).rejects.toThrow(/겹침이 남아 있어요/)
+    await expect(client.rebase.continue()).rejects.toThrow(/충돌이 남아 있어요/)
   })
 
   it('rebase.abort — 시작 전 상태로 복원하고, 재배치 중이 아니면 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.rebase.abort()).rejects.toThrow(/재배치 중이 아니에요/)
+    await expect(client.rebase.abort()).rejects.toThrow(/리베이스 중이 아니에요/)
     await client.branches.create('topic', null)
     await writeFixtureFile(repo, 'README.md', '# main version\n')
     await execGitOrThrow(['add', '-A'], { cwd: repo })
@@ -2354,11 +2354,11 @@ describe('GitClient', () => {
     await client.branches.create('taken', null)
     // 함정: "a branch named ... already exists"가 기존 경로 매핑(already exists)에 먼저 걸리면 안 된다
     await expect(client.worktrees.add(`${repo}-dup`, 'taken', { createBranch: true })).rejects.toThrow(
-      /이미 있는 실험 공간 이름이에요/,
+      /이미 있는 브랜치 이름이에요/,
     )
     await expect(
       client.worktrees.add(`${repo}-bad`, 'bad..name', { createBranch: true }),
-    ).rejects.toThrow(/실험 공간 이름으로 쓸 수 없어요/)
+    ).rejects.toThrow(/브랜치 이름으로 쓸 수 없어요/)
   })
 
   // E7j 편차: 플랜의 commitFile 헬퍼가 파일에 없다 — 기존 write+add+commit 3줄 관례(FIXTURE_IDENT)를
@@ -2834,6 +2834,6 @@ describe('GitClient', () => {
     const bare = await mkdtemp(join(tmpdir(), 'git-gui-unborn-remote-'))
     await execGitOrThrow(['init', '--bare'], { cwd: bare })
     await execGitOrThrow(['remote', 'add', 'origin', bare], { cwd: dir })
-    await expect(createGitClient(dir).sync.push()).rejects.toThrow('아직 저장된 시점이 없어요')
+    await expect(createGitClient(dir).sync.push()).rejects.toThrow('아직 커밋이 없어요')
   })
 })

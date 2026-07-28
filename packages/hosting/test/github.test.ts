@@ -161,7 +161,7 @@ describe('createGitHubHosting', () => {
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(
       hosting.pulls.create('octo', 'hello', { title: 't', head: 'feature', base: 'main', body: '' }),
-    ).rejects.toThrow('이 실험 공간의 리뷰 요청이 이미 있어요.')
+    ).rejects.toThrow('이 브랜치의 풀 리퀘스트가 이미 있어요.')
   })
 
   it('네트워크 실패(연결 거부) — 인터넷 확인 문구로 매핑한다', async () => {
@@ -206,7 +206,7 @@ describe('createGitHubHosting', () => {
     const mock = await startMock(404, { message: 'Not Found' })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(hosting.pulls.get('octo', 'hello', 7)).rejects.toThrow(
-      '리뷰 요청을 찾지 못했어요. 목록을 새로 열어 주세요.',
+      '풀 리퀘스트를 찾지 못했어요. 목록을 새로 열어 주세요.',
     )
   })
 
@@ -252,7 +252,7 @@ describe('createGitHubHosting', () => {
     const mock = await startMock(404, { message: 'Not Found' })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(hosting.pulls.comments('octo', 'hello', 7)).rejects.toThrow(
-      '리뷰 요청을 찾지 못했어요. 목록을 새로 열어 주세요.',
+      '풀 리퀘스트를 찾지 못했어요. 목록을 새로 열어 주세요.',
     )
   })
 
@@ -284,7 +284,7 @@ describe('createGitHubHosting', () => {
     })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(hosting.pulls.approve('octo', 'hello', 7)).rejects.toThrow(
-      '내가 만든 리뷰 요청은 스스로 승인할 수 없어요. 다른 사람의 승인을 기다려 주세요.',
+      '내가 만든 풀 리퀘스트는 스스로 승인할 수 없어요. 다른 사람의 승인을 기다려 주세요.',
     )
   })
 
@@ -302,7 +302,7 @@ describe('createGitHubHosting', () => {
     const mock = await startMock(405, { message: 'Pull Request is not mergeable' })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(hosting.pulls.merge('octo', 'hello', 7)).rejects.toThrow(
-      '아직 병합할 수 없어요. 겹침(충돌)이나 진행 중인 검사가 있는지 브라우저에서 확인해 주세요.',
+      '아직 병합할 수 없어요. 충돌이나 진행 중인 검사가 있는지 브라우저에서 확인해 주세요.',
     )
   })
 
@@ -310,7 +310,7 @@ describe('createGitHubHosting', () => {
     const mock = await startMock(409, { message: 'Head branch was modified' })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(hosting.pulls.merge('octo', 'hello', 7)).rejects.toThrow(
-      '리뷰 요청이 방금 바뀌었어요. 다시 열어 확인해 주세요.',
+      '풀 리퀘스트가 방금 바뀌었어요. 다시 열어 확인해 주세요.',
     )
   })
 })
