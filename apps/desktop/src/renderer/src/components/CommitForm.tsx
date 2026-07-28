@@ -70,7 +70,7 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
             {status}
           </span>
           <Button
-            variant="soft"
+            variant="primary"
             size="sm"
             type="submit"
             isDisabled={disabled}

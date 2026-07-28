@@ -36,8 +36,9 @@ const PAIRS: Array<[string, string, number]> = [
   ['--color-text-muted', '--color-surface', 4.5],
   ['--color-text-faint', '--color-surface', 4.5],
   ['--color-accent-text', '--color-accent', 4.5],
-  ['--color-accent-soft-text', '--color-accent-soft', 4.5],
   ['--color-accent-text', '--color-accent-active', 4.5],
+  // E9 최종 — 비활성 커밋 버튼(중립 채움). 라벨이 도형 위에서 읽혀야 한다(≥3:1)
+  ['--color-surface', '--color-text-faint', 3],
   ['--color-danger', '--color-surface', 4.5],
   // E7g 인라인 ↑↓ — 평상시·선택 행 양쪽에서 텍스트 대비 (라이트·다크 공통 순회)
   ['--color-ahead', '--color-surface', 4.5],

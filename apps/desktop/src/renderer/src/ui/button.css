@@ -28,21 +28,6 @@
 .ui-button--primary[data-pressed] {
   background: var(--color-accent-active);
 }
-/* E9 — 채운 강조가 좌측 열에서 유일한 큰 색 면적이라 튀었다. 옅은 배경 + 진한 글자로 무게를 낮춘다 */
-.ui-button--soft {
-  background: var(--color-accent-soft);
-  color: var(--color-accent-soft-text);
-  /* E9 보완 — 비활성 상태(opacity 감소)에서도 도형이 살아남도록 테두리를 준다 */
-  border-color: var(--color-accent-soft-border);
-}
-.ui-button--soft[data-hovered] {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-.ui-button--soft[data-pressed] {
-  background: var(--color-accent-active);
-  color: var(--color-accent-text);
-}
 .ui-button--neutral {
   background: var(--color-surface);
   color: var(--color-text);
@@ -70,13 +55,15 @@
   opacity: var(--opacity-disabled);
   cursor: default;
 }
-/* E9 보완2 — 전역 opacity가 soft 배경·테두리까지 함께 지워 도형이 사라졌다(실측 1.08~1.16:1).
-   soft 변형만 opacity를 무효화하고(동일 특이도, 뒤에 오므로 !important 불필요) 텍스트·테두리만
-   흐려서 '비활성'을 전달한다 — 배경은 활성과 동일하게 유지해 도형 자체는 계속 보인다(≥1.8:1 실측) */
-.ui-button--soft[data-disabled] {
+/* E9 최종 — 톤다운(soft)은 채운 강조와 같은 양의 색을 테두리로 옮겼을 뿐 실제로는 조용해지지
+   않았다(테두리가 3:1을 단독으로 떠받침). 대신 활성은 앱의 실제 강조색을 그대로 쓰고,
+   비활성은 "흐린 강조"가 아니라 "중립"으로 갈아끼운다 — opacity 감산이 아니라 명시적 색 교체라
+   채움 자체가 사라지지 않는다(≥1.8:1 실측). 동일 특이도로 뒤에 오므로 !important 불필요 */
+.ui-button--primary[data-disabled] {
   opacity: 1;
-  border-color: var(--color-border-strong);
-  color: var(--color-text-faint);
+  background: var(--color-text-faint);
+  color: var(--color-surface);
+  border-color: var(--color-text-faint);
 }
 /* 포커스 링은 base.css의 전역 :focus-visible이 단일 진실 — 여기서 중복 정의하지 않는다 */
 /* 되돌릴 수 없는 동작 전용 — 색만으로 전달하지 않도록 라벨에 항상 동작명을 쓴다.
