@@ -8,7 +8,7 @@
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-container);
   /* 프레임은 앱 테마를 따른다 — 터미널 내부 색은 xterm 팔레트(terminal-theme.ts) 소유 (E7d ③ 보완:
      다크 하드코딩이면 라이트 모드에서 xterm 둘레 패딩이 어두운 심으로 노출된다) */
   background: var(--color-surface);

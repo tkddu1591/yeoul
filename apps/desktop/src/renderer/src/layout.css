@@ -178,6 +178,7 @@ body.is-fullscreen .app__header {
 }
 .app__resizer {
   cursor: col-resize;
+  /* 리사이저는 폭이 4px이라 control(6px)이면 원이 된다 — 의도적 예외 */
   border-radius: 3px;
   background: transparent;
 }
@@ -231,7 +232,7 @@ body.is-fullscreen .app__header {
   background: transparent;
   color: var(--color-text-faint);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 4px 12px;
   font-size: var(--text-sm);
   cursor: pointer;

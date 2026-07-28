@@ -37,7 +37,7 @@
 .file-row {
   display: flex;
   align-items: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   padding: 0 var(--space-3) 0 0;
   width: 100%;
 }
@@ -55,7 +55,7 @@
   background: none;
   cursor: pointer;
   text-align: left;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--color-text);
 }
 .file-row__main:hover:not(:disabled) {

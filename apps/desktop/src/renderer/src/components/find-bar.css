@@ -10,7 +10,7 @@
   padding: 3px 6px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   box-shadow: var(--shadow-2);
 }
 .find-bar__input {

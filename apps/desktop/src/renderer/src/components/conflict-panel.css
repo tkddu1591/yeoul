@@ -44,7 +44,7 @@
 .conflict-card {
   margin: var(--space-2) var(--space-4);
   border: 1px solid var(--concept-conflict);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-control);
   background: var(--color-surface);
   padding: var(--space-2) var(--space-3) var(--space-3);
   /* 라벨·제목은 산세리프 — 조상(.conflict-panel__code)의 mono 상속을 끊는다. 코드는 __code가 mono (품질 리뷰) */
@@ -73,7 +73,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   padding: var(--space-2);
 }
 /* 초록 = 내 것(mine), 보라 = 가져온 것(branch) — 앱 전체의 개념 색과 일치 (스펙 10장) */
@@ -129,7 +129,7 @@
   color: var(--color-text);
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   resize: none;
   white-space: pre;
   overflow: auto;

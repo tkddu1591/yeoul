@@ -20,7 +20,7 @@
   color: var(--color-text);
   text-align: left;
   padding: 7px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   cursor: pointer;
 }
 .ui-list-dialog__option:hover {
