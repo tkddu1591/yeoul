@@ -31,6 +31,10 @@
   min-height: 120px;
   overflow-y: auto;
   padding: var(--space-2) var(--space-4);
+  /* E11 — 내용 교체 페이드. ReviewDetailPanel 전체가 이미 key=PR 번호로 재마운트한다(E3b) —
+     코멘트 100개 상한이라 가상화가 없어(주석 참고) 이 key 재마운트에 스크롤 손실 우려가 없다.
+     최신 코멘트로 스크롤하는 effect가 마운트 때마다 이미 실행되므로 동작도 그대로다 */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .review-detail__empty {
   margin: 0;

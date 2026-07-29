@@ -53,6 +53,9 @@
   text-align: left;
   cursor: pointer;
   font-size: var(--text-sm);
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .branch-row:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));

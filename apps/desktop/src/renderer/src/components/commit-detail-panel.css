@@ -13,6 +13,10 @@
   padding: var(--space-3) var(--space-4);
   max-height: 40%;
   overflow-y: auto;
+  /* E11 — 내용 교체 페이드. React key=hash로 커밋 전환 때 재생된다. 가상화 없는 자체 스크롤
+     영역이라(파일 목록과 달리) key 재마운트로 스크롤이 맨 위로 가도 무해하다 — 다른 커밋의
+     메시지이니 맨 위가 맞다. 파일 목록(virtual-scroll)에는 걸지 않는다(아래 Step 2 근거) */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .commit-detail__subject {
   margin: 0;
@@ -64,6 +68,9 @@
   border-radius: var(--radius-control);
   cursor: pointer;
   text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .commit-file-folder:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));

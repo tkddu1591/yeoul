@@ -42,6 +42,9 @@ select {
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
+  /* E11 마무리(N6) — 색이 바뀌는 다른 13개 hover는 전부 transition이 있는데 이것만 즉시 전환이었다
+     (단순 누락). .app__resizer:hover는 드래그 핸들이라 즉시 반응이 맞아 의도적으로 그대로 둔다 */
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-faint);
@@ -50,4 +53,41 @@ select {
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* E11 — 같은 자리에서 내용만 바뀌는 순간에 건다. 3px은 의도적으로 작다:
+   크게 움직이면 "미끄러진다"는 인상이 되어 오히려 느려 보인다 */
+@keyframes ui-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* E11 마무리 — 전체 화면 오버레이(모달 배경막) 전용 페이드. ui-enter는 translateY(3px)가 붙어
+   있어 화면 전체를 덮는 고정 배경막에는 어색하다(작은 요소가 미끄러 들어오는 느낌이 없다) —
+   그래서 opacity만 움직이는 별도 키프레임을 둔다. 공용 키프레임이라 ui-enter 옆에 정의 */
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* E11 — 테마 토글 순간, 호버·눌림에 걸어둔 배경색 transition이 토큰 값 변경에도 동시 발화해
+   화면 전체가 물결친다(실측 — Step 4). ui/theme.ts가 전환 전후 한 프레임만 이 클래스를 건다 */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
+}
+
+/* OS에서 모션 줄이기를 켠 사용자에게는 전부 끈다 (E11).
+   0이 아니라 0.01ms인 이유: transitionend·animationend에 의존하는 코드가 생겨도 이벤트는 계속 발화한다 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

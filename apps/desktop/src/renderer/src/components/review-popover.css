@@ -65,6 +65,9 @@
   border-radius: var(--radius-control);
   color: inherit;
   font-size: var(--text-sm);
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .review-popover__pull:hover {
   background: var(--color-surface-sunken);
@@ -97,6 +100,9 @@
   cursor: pointer;
   border-radius: var(--radius-control);
   color: var(--color-text-muted);
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .review-popover__pull-external:hover {
   background: var(--color-surface-sunken);

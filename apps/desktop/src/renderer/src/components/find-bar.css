@@ -12,6 +12,8 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-2);
+  /* E11 — 등장 페이드. 퇴장은 만들지 않는다(의도된 비대칭) */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .find-bar__input {
   width: 150px;
@@ -37,6 +39,9 @@
   cursor: pointer;
   font-size: var(--text-sm);
   padding: 0 2px;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .find-bar__nav:hover {
   color: inherit;

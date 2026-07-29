@@ -3181,18 +3181,28 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
       }).observe(button, { attributes: true })
     })
 
-    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스만 준다
-    await app.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows()[0]!
-      win.blur()
-      win.focus()
-    })
-
-    await expect
-      .poll(() => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles), {
-        timeout: 5_000,
+    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스만 준다.
+    //
+    // E11 Task 5 — 이 테스트는 2-워커 병렬 실행에서 간헐적으로 5초 타임아웃에 걸린다(단독
+    // 실행은 3/3 통과, E11 수정 전 베이스라인에서도 동일 재현 — 새로 생긴 회귀가 아니라
+    // E9a/E10에서 이 테스트를 넣을 때부터 있던 문제다). 원인은 로직이 아니라 경합: 이 테스트만
+    // GIT_GUI_E2E_SHOW=1로 실제(비가상) 창을 띄우는데, 다른 워커가 동시에 띄운 실제 창과
+    // OS 포커스를 놓고 다툰다 — blur()/focus() 한 번이 상대 창에 밀려 씹히면 focus 리스너가
+    // 아예 발화하지 않고 5초를 그대로 흘려보낸다. 그래서 "한 번 쐈는데 놓쳤다"를 흡수하도록
+    // blur()/focus()를 재시도 가능한 블록으로 감싼다 — 실패할 때마다 전이를 다시 쏘고, 검증
+    // 대상(재조회가 실제로 도는지, disabled 뮤테이션으로 증명)은 원래 그대로 유지한다.
+    // 지우거나 skip으로 "고치지" 말 것 — 포커스 채널이 실제로 동작한다는 유일한 증거다.
+    await expect(async () => {
+      await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0]!
+        win.blur()
+        win.focus()
       })
-      .toBeGreaterThan(0)
+      const cycles = await window.evaluate(
+        () => (window as unknown as { __refreshCycles: number }).__refreshCycles,
+      )
+      expect(cycles).toBeGreaterThan(0)
+    }).toPass({ timeout: 20_000, intervals: [500, 1_000, 2_000, 3_000] })
 
     // 재조회는 돌았지만 바뀐 파일은 없다 — 화면도 그대로다
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
@@ -3235,6 +3245,117 @@ test('E10 — 외부 파일 저장이 화면의 알림을 지우지 않는다 (I
     // 워킹트리 감시(E10)가 반영해 화면은 갱신되지만, 방금 작업의 알림은 그대로 남아 있어야 한다
     await expect(window.getByTestId('file-unstaged-external.txt')).toBeVisible({ timeout: 5_000 })
     await expect(notice).toContainText(`${T.tag}를 만들었어요`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E11 Task 5 Step 1a — reduced-motion을 강제해도 앱이 그대로 동작하는지 증명한다.
+ *
+ * 메커니즘 선정(우선순위대로 실측):
+ * 1. Playwright의 `reducedMotion` BrowserContext 옵션 — 이 저장소는 `electron.launch`를 쓴다.
+ *    playwright-core의 타입 정의(`Electron.launch` 옵션)를 실독하면 `colorScheme`은 있지만
+ *    `reducedMotion`은 없다 — Electron 창에는 애초에 컨텍스트 옵션으로 줄 방법이 없다.
+ * 2. 그래서 `app.firstWindow()`가 돌려주는 Page에 직접 `emulateMedia({ reducedMotion: 'reduce' })`를
+ *    건다 — CDP로 이 창의 media feature 자체를 덮어써 `prefers-reduced-motion: reduce`가 실제로
+ *    발화한다. 숨김 창에서도 동작해(OS 가시성과 무관) GIT_GUI_E2E_SHOW 없이 쓸 수 있다.
+ *
+ * "그냥 잘 동작한다"만으로는 reduced-motion이 실제로 켜졌다는 증거가 안 된다 — 두 가지를
+ * 직접 확인한다: (a) matchMedia 자체가 true로 뒤집혔는지, (b) 안전망(base.css)이 미디어 쿼리로
+ * 강제하는 transition-duration이 실제로 0.01ms대로 떨어졌는지(평소 100ms 버튼 전환과 자릿수가
+ * 셋이나 달라 우연히 통과할 여지가 없다). 그 위에서 이 에픽의 최대 위험 지점(Task 4의
+ * grid-template-rows 상세 슬롯 + 가상 스크롤)을 열고 닫아 실제 흐름이 안 깨지는지 확인한다.
+ */
+test('E11 — reduced-motion을 강제해도 상세 슬롯 열기/닫기 흐름이 그대로 동작한다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+
+    await window.emulateMedia({ reducedMotion: 'reduce' })
+
+    // 증거 1 — 미디어 쿼리 자체가 뒤집혔다
+    expect(
+      await window.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    ).toBe(true)
+
+    // 증거 2 — 안전망(base.css)이 실제 CSS 전환 시간을 0.01ms대로 끌어내렸다. 대상은 항상
+    // 존재하는 .ui-button 기본 규칙(호버·눌림과 무관하게 상시 걸려 있는 transition, button.css)
+    const forcedDuration = await window.evaluate(() => {
+      const button = document.querySelector('[data-testid="commit-button"]') as HTMLElement
+      return getComputedStyle(button).transitionDuration
+    })
+    const forcedSeconds = Number.parseFloat(forcedDuration)
+    // 0.01ms = 0.00001s ≪ 평소 --motion-fast(0.1s) — 자릿수가 셋 차이 나 우연히 통과할 수 없다
+    expect(forcedSeconds).toBeLessThan(0.001)
+
+    // 흐름 자체 — 상세 슬롯 열기(grid-template-rows 전환 + 가상 스크롤)가 reduced-motion 아래서도
+    // 그대로 동작해야 한다
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+    await expect(window.getByTestId('commit-detail-subject')).toHaveText('두 번째 저장')
+
+    // 닫기도 정상 — 전환이 사실상 즉시 끝나도 DOM 정리(언마운트)는 그대로 일어난다
+    await window.getByTestId('commit-detail-back').click()
+    await expect(window.getByTestId('commit-detail-panel')).toHaveCount(0)
+    await expect(window.getByTestId('history-panel')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E11 Task 5 Step 1b — Task 4가 실측으로 고정한 상세 슬롯 배치 무회귀를 E2E로 못박는다
+ * (1280×800에서 닫힘 history-panel 높이 694 → 열림 366/312 → 닫으면 694로 복귀, Task 4 플랜
+ * 실측 앵커). 값을 그대로 하드코딩하지 않는다 — 이 환경에서 실측한 닫힘 높이를 기준선으로
+ * 잡아두고, 열었다 닫은 뒤 "기준선으로 정확히 돌아오는가"라는 불변식을 검증한다. 폰트
+ * 렌더링·OS 차이로 리터럴이 어긋나도 이 불변식은 흔들리지 않는다.
+ */
+test('E11 — 상세 슬롯을 열었다 닫으면 우측 열 배치가 닫힘 기준선으로 정확히 돌아온다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['add', '-A'], { cwd: repo })
+  await execGitOrThrow(['commit', '-m', '두 번째 저장'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.setViewportSize({ width: 1280, height: 800 })
+    await expect(window.getByTestId('history-count')).toHaveText('2')
+
+    const historyPanel = window.getByTestId('history-panel')
+    await expect(historyPanel).toBeVisible()
+    // 전환 트리거 전 — 닫힘 기준선(Task 4 실측 앵커: 694)
+    const closedBaseline = (await historyPanel.boundingBox())!.height
+
+    // 상세를 연다 — grid-template-rows가 --motion-slow(240ms)로 움직이니 다 끝날 때까지 기다린다
+    await window.locator('[data-testid^="history-item-"]').first().click()
+    const detailPanel = window.getByTestId('commit-detail-panel')
+    await expect(detailPanel).toBeVisible()
+    await window.waitForTimeout(320)
+    const openHistoryHeight = (await historyPanel.boundingBox())!.height
+    const openDetailHeight = (await detailPanel.boundingBox())!.height
+    // 열림 트리(11fr)는 닫힘보다 확연히 작아지고(45%가 상세로 넘어간다), 상세는 실제 높이를 가진다
+    expect(openHistoryHeight).toBeLessThan(closedBaseline)
+    expect(openDetailHeight).toBeGreaterThan(100)
+
+    // 닫는다 — 다시 전환이 끝날 때까지 기다린 뒤 기준선과 정확히 같아야 한다(불변식)
+    await window.getByTestId('commit-detail-back').click()
+    await expect(detailPanel).toHaveCount(0)
+    await window.waitForTimeout(320)
+    const closedAgain = (await historyPanel.boundingBox())!.height
+    expect(closedAgain).toBe(closedBaseline)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

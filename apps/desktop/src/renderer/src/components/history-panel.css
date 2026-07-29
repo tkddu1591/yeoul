@@ -54,6 +54,9 @@
   text-align: left;
   font: inherit;
   color: inherit;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .history-item:hover:not(:disabled) {
   background: var(--color-surface-sunken);

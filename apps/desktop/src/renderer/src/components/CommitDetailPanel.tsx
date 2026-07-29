@@ -240,7 +240,10 @@ export function CommitDetailPanel({
           })}
         </ul>
       </div>
-      <div className="commit-detail__message">
+      {/* key=hash — 커밋 전환 시 교체 페이드가 재생된다(E11). 위 파일 목록은 가상 스크롤이라
+          key로 재마운트하면 스크롤 위치가 초기화돼 여기엔 걸지 않는다(스크롤 리셋이 맞는 diff와
+          달리, 파일 목록은 이 패널 안에서 계속 훑어보는 화면이라 근거가 다르다) */}
+      <div className="commit-detail__message" key={detail.hash}>
         <p className="commit-detail__subject" data-testid="commit-detail-subject">
           {detail.subject}
         </p>
