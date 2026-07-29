@@ -412,6 +412,9 @@ export const TERMINAL_CHANNELS = {
 export interface WindowApi {
   /** 전체화면 전환 push 구독 — 해제 함수를 반환한다 */
   onFullScreen(listener: (isFullScreen: boolean) => void): () => void
+  /** 창 포커스 복귀 push 구독 — 해제 함수를 반환한다. 감시 사각지대(watch 조용히 죽음·놓친 이벤트)를
+   *  메운다 (E10) */
+  onFocused(listener: () => void): () => void
 }
 
 export const WINDOW_API_KEY = 'windowApi' as const
@@ -419,4 +422,6 @@ export const WINDOW_API_KEY = 'windowApi' as const
 export const WINDOW_CHANNELS = {
   /** push(main→renderer) — enter/leave-full-screen (E7f) */
   fullScreen: 'window:full-screen',
+  /** push(main→renderer) — 창이 포커스를 받을 때 (E10) */
+  focused: 'window:focused',
 } as const

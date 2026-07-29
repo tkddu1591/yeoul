@@ -197,6 +197,11 @@ const windowApi: WindowApi = {
     ipcRenderer.on(WINDOW_CHANNELS.fullScreen, wrapped)
     return () => ipcRenderer.removeListener(WINDOW_CHANNELS.fullScreen, wrapped)
   },
+  onFocused: (listener) => {
+    const wrapped = () => listener()
+    ipcRenderer.on(WINDOW_CHANNELS.focused, wrapped)
+    return () => ipcRenderer.removeListener(WINDOW_CHANNELS.focused, wrapped)
+  },
 }
 
 contextBridge.exposeInMainWorld(WINDOW_API_KEY, windowApi)
