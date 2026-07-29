@@ -30,20 +30,46 @@ export interface TrailingDebounce {
   dispose(): void
 }
 
-/** 마지막 hit 후 delayMs가 지나면 fire를 1회 부른다 — git 한 명령의 이벤트 폭주를 묶는다 */
-export function createTrailingDebounce(delayMs: number, fire: () => void): TrailingDebounce {
+/**
+ * 마지막 hit 후 delayMs가 지나면 fire를 1회 부른다 — git 한 명령의 이벤트 폭주를 묶는다.
+ * maxWaitMs를 주면 **첫 hit로부터** 그만큼 지났을 때 조용해지길 기다리지 않고 발화한다:
+ * 트레일링만 있으면 개발 서버처럼 계속 쓰는 프로세스 앞에서 영원히 굶는다(E10).
+ */
+export function createTrailingDebounce(
+  delayMs: number,
+  fire: () => void,
+  maxWaitMs?: number,
+): TrailingDebounce {
   let timer: ReturnType<typeof setTimeout> | null = null
+  let cycleStartedAt: number | null = null
+  const clear = (): void => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    cycleStartedAt = null
+  }
   return {
     hit() {
+      if (cycleStartedAt === null) cycleStartedAt = Date.now()
+      const remaining =
+        maxWaitMs === undefined ? delayMs : Math.min(delayMs, cycleStartedAt + maxWaitMs - Date.now())
       if (timer !== null) clearTimeout(timer)
-      timer = setTimeout(() => {
-        timer = null
-        fire()
-      }, delayMs)
+      timer = setTimeout(
+        () => {
+          clear()
+          fire()
+        },
+        Math.max(0, remaining),
+      )
     },
-    dispose() {
-      if (timer !== null) clearTimeout(timer)
-      timer = null
-    },
+    dispose: clear,
   }
+}
+
+/**
+ * 워킹트리 감시 필터 (E10) — `.git` 아래는 전용 감시(isRelevantGitEvent)가 이미 본다.
+ * **무시 목록을 두지 않는다**: 실측상 빌드 1회가 209 이벤트지만 디바운스가 재조회 1회로
+ * 합치고 git status는 20~100ms다. .gitignore 의미론을 반쯤 흉내 내다 틀리는 쪽이 더 위험하다
+ */
+export function isWorkingTreeEvent(relativePath: string): boolean {
+  return relativePath !== '.git' && !relativePath.startsWith('.git/')
 }
