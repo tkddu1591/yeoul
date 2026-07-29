@@ -3145,10 +3145,32 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
 })
 
 /**
- * E10 Task 3(창 복귀 재조회)의 검증 공백을 메운다 — E2E는 숨김 창이라 OS 포커스 이벤트가
- * 나지 않는다. Playwright Electron은 메인 프로세스를 직접 조작할 수 있어(app.evaluate),
- * GIT_GUI_E2E_SHOW=1(기존 로컬 디버깅 opt-out)로 실제 창을 띄우면 BrowserWindow#focus()가
- * 진짜 'focus' 리스너(main/index.ts)를 발화시킬 수 있다(실측).
+ * E10 Task 3(창 복귀 재조회)의 검증 공백을 메운다.
+ *
+ * E12 이전에는 GIT_GUI_E2E_SHOW=1로 실제(비가상) 창을 띄우고 blur()/focus()로 진짜 OS 포커스
+ * 전이를 만들어 main/index.ts의 'focus' 리스너를 발화시켰다. 그런데 이 방식은 이 테스트가
+ * 검증해야 할 계약(우리 코드: "창이 focus 이벤트를 받으면 렌더러가 재조회한다")과 무관한
+ * 전제 — "OS가 실제로 우리 창에 포커스를 준다" — 에 기대고 있었다. 그 전제는 머신에 다른
+ * Electron 창(이 저장소의 다른 워커, 또는 사용자의 개발 앱)이 있으면 깨진다: OS 포커스는
+ * 창들끼리 경합하는 유한 자원이라, 우리 blur()/focus() 호출이 상대 창에 밀려 씹히면 'focus'
+ * 리스너가 아예 발화하지 않는다. E11 병합 직후 실제로 한 번 이렇게 실패했다(2-워커 병렬
+ * 실행에서 5초 타임아웃) — E11의 toPass 재시도는 그 증상을 흡수하는 완화였을 뿐, "다른 창이
+ * 있으면 흔들린다"는 근본 원인은 그대로 남아 있었다.
+ *
+ * E12: 자극(stimulus)을 바꿔 이 결함을 근본에서 없앤다. Electron의 BrowserWindow는 표준
+ * EventEmitter이고, main/index.ts:66의 `window.on('focus', …)`는 그 EventEmitter에 등록된
+ * 보통의 JS 리스너다(OS가 네이티브 포커스를 감지했을 때 Electron 바인딩이 내부적으로 같은
+ * `emit('focus')`를 호출해 도달하는 지점과 동일한 지점). app.evaluate로 메인 프로세스에서
+ * 그 창 인스턴스에 직접 `emit('focus')`를 불러 이 리스너를 발화시키면 — 실제 OS 포커스
+ * 전이 없이도, 다른 창과의 경합 없이도 — "focus 이벤트를 받으면 재조회한다"는 우리 계약만
+ * 결정적으로 검증한다. 창은 이제 실제로 보일 필요가 없으므로 GIT_GUI_E2E_SHOW를 뺀다.
+ * (검증: 이 접근을 쓰기 전 emit이 정말 이 리스너에 닿는지 직접 실행해 확인했다 — 아래 함수 보고 참고)
+ *
+ * 이 방식이 못 잡는 것 — "OS가 실제로 네이티브 포커스 이벤트를 Electron에 전달하고,
+ * Electron이 그걸 JS 'focus' 이벤트로 통역하는" 파이프라인 자체의 회귀. 하지만 그건 우리
+ * 코드가 아니라 Electron의 책임이다(플랜 근거). 이 앱에는 창이 하나뿐이라 "리스너가 엉뚱한
+ * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BrowserWindow.getAllWindows()[0]
+ * 이 바로 그 창이므로).
  *
  * 재조회 호출 자체는 window.gitApi로 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze해
  * (실측: Object.isFrozen(gitApi.repo) === true) 재할당이 조용히 무시된다. 대신 "새로고침"
@@ -3156,16 +3178,15 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * MutationObserver로 지켜본다 — guard()의 busy 전이는 refresh()가 실제로 실행됐다는
  * 직접 증거다. 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 전이를 만들 수 없다.
  *
- * 전이 자체도 실측이 필요했다: 이미 포커스된 창에 focus()를 다시 불러도 'focus'는
- * 재발화하지 않는다(전이가 없으면 이벤트도 없다) — blur()로 포커스 없음을 먼저 확정한
- * 뒤에 focus()를 불러야 매번 확실한 전이가 만들어진다(실측 4회 연속 재현).
+ * ⚠️ 다음 사람에게: "진짜 포커스가 아니니 불완전하다"며 blur()/focus() + GIT_GUI_E2E_SHOW로
+ * 되돌리지 말 것 — 그 버전이 바로 위에서 설명한 경합 플레이크의 원인이었다.
  */
 test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가 돈다 (포커스 채널 검증)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_E2E_SHOW: '1' },
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
   })
   try {
     const window = await app.firstWindow()
@@ -3186,28 +3207,18 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
       }).observe(button, { attributes: true })
     })
 
-    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스만 준다.
-    //
-    // E11 Task 5 — 이 테스트는 2-워커 병렬 실행에서 간헐적으로 5초 타임아웃에 걸린다(단독
-    // 실행은 3/3 통과, E11 수정 전 베이스라인에서도 동일 재현 — 새로 생긴 회귀가 아니라
-    // E9a/E10에서 이 테스트를 넣을 때부터 있던 문제다). 원인은 로직이 아니라 경합: 이 테스트만
-    // GIT_GUI_E2E_SHOW=1로 실제(비가상) 창을 띄우는데, 다른 워커가 동시에 띄운 실제 창과
-    // OS 포커스를 놓고 다툰다 — blur()/focus() 한 번이 상대 창에 밀려 씹히면 focus 리스너가
-    // 아예 발화하지 않고 5초를 그대로 흘려보낸다. 그래서 "한 번 쐈는데 놓쳤다"를 흡수하도록
-    // blur()/focus()를 재시도 가능한 블록으로 감싼다 — 실패할 때마다 전이를 다시 쏘고, 검증
-    // 대상(재조회가 실제로 도는지, disabled 뮤테이션으로 증명)은 원래 그대로 유지한다.
-    // 지우거나 skip으로 "고치지" 말 것 — 포커스 채널이 실제로 동작한다는 유일한 증거다.
-    await expect(async () => {
-      await app.evaluate(({ BrowserWindow }) => {
-        const win = BrowserWindow.getAllWindows()[0]!
-        win.blur()
-        win.focus()
-      })
-      const cycles = await window.evaluate(
-        () => (window as unknown as { __refreshCycles: number }).__refreshCycles,
+    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
+    // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
+    // toPass 재시도도 더 이상 필요 없다(남겨둔 5초는 IPC 왕복 지연만 흡수하는 여유다).
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]!.emit('focus')
+    })
+    await expect
+      .poll(
+        () => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles),
+        { timeout: 5_000 },
       )
-      expect(cycles).toBeGreaterThan(0)
-    }).toPass({ timeout: 20_000, intervals: [500, 1_000, 2_000, 3_000] })
+      .toBeGreaterThan(0)
 
     // 재조회는 돌았지만 바뀐 파일은 없다 — 화면도 그대로다
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
