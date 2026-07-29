@@ -3,6 +3,7 @@ import {
   clampRightWidth,
   computeColumns,
   isCompactHeader,
+  LEFT_COLUMN_DEFAULT,
   parseStoredWidth,
   RIGHT_COLUMN_DEFAULT,
 } from '../src/renderer/src/ui/column-resize'
@@ -48,6 +49,35 @@ describe('computeColumns (E6a 반응형)', () => {
 
   it('과대 저장값은 기존 45% 클램프가 먼저 자르고, 남으면 좌측이 줄어든다', () => {
     expect(computeColumns(1440, 2000)).toEqual({ left: 318, right: 648 })
+  })
+})
+
+describe('computeColumns — 사이드 접기 (E12)', () => {
+  it('좌측을 접으면 좌측 폭이 0이고 그만큼 중앙이 넓어진다', () => {
+    const open = computeColumns(1400, 360)
+    const collapsed = computeColumns(1400, 360, { left: true })
+    expect(collapsed.left).toBe(0)
+    expect(collapsed.right).toBe(open.right)
+  })
+
+  it('우측을 접으면 우측 폭이 0이고 좌측은 기본 폭을 되찾는다', () => {
+    const collapsed = computeColumns(1400, 360, { right: true })
+    expect(collapsed.right).toBe(0)
+    expect(collapsed.left).toBe(LEFT_COLUMN_DEFAULT)
+  })
+
+  it('양쪽을 접으면 둘 다 0 — 중앙 전폭은 정당한 상태다', () => {
+    expect(computeColumns(1400, 360, { left: true, right: true })).toEqual({ left: 0, right: 0 })
+  })
+
+  it('최소 창(960)에서 좌측을 접어도 우측이 클램프 하한 아래로 찌그러지지 않는다', () => {
+    const { left, right } = computeColumns(960, 360, { left: true })
+    expect(left).toBe(0)
+    expect(right).toBeGreaterThanOrEqual(260)
+  })
+
+  it('접힘 인자를 주지 않으면 기존 동작 그대로다', () => {
+    expect(computeColumns(1400, 360)).toEqual(computeColumns(1400, 360, {}))
   })
 })
 
