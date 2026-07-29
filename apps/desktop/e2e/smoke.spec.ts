@@ -3035,3 +3035,208 @@ test('E9 — 한글 조합 중 ⌘↵는 커밋하지 않는다 (IME 가드)', a
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E10 — 억제 창 안에서 연속된 외부 변경 두 건이 모두 반영된다 (Task 2-보완)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+
+    // 첫 외부 변경 — 읽기 전용 재조회(externalRefresh)가 반영한다
+    await execGitOrThrow(['commit', '--allow-empty', '-m', 'E10 외부 변경 1'], { cwd: repo })
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 5_000 })
+
+    // 첫 재조회가 화면에 반영된 직후 — 억제 창(WATCH_SUPPRESS_MS=800, E7b) 안에 두 번째 외부
+    // 변경을 밀어넣는 의도된 타이밍이다. 읽기 전용 재조회가 억제를 걸면(버그) 이 변경은 조용히
+    // 삼켜져 화면이 영영 갱신되지 않는다 — 사용자가 에디터로 연달아 저장하는 실제 패턴 (E10 Task 2-보완)
+    await execGitOrThrow(['commit', '--allow-empty', '-m', 'E10 외부 변경 2'], { cwd: repo })
+    await expect(window.getByTestId('history-count')).toHaveText('3', { timeout: 5_000 })
+    await expect(window.getByTestId('history-list')).toContainText('E10 외부 변경 2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E10 — 앱 밖에서 만든 파일이 새로고침 없이 나타난다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 목록이 정착할 때까지 — 이 시점엔 되돌린 app.txt뿐이라 바뀐 파일이 없다
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+
+    // 앱 API를 거치지 않고 저장소 밖에서 새 파일을 만든다 — 에디터·다른 프로그램이 만드는 상황
+    await writeFile(join(repo, 'external.txt'), '앱 밖에서 생성\n')
+
+    // 새로고침 버튼을 누르지 않는다 — 워킹트리 감시(E10)가 스스로 반영해야 한다
+    await expect(window.getByTestId('file-unstaged-external.txt')).toBeVisible({ timeout: 5_000 })
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E10 — 앱 밖에서 지운 파일이 새로고침 없이 사라진다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // 앱이 뜨기 전에 만든 미추적 파일 — 초기 조회가 이미 잡은 상태에서 시작한다
+  await writeFile(join(repo, 'external.txt'), '앱 밖에서 생성\n')
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('file-unstaged-external.txt')).toBeVisible()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+
+    // 앱 API를 거치지 않고 저장소 밖에서 지운다 — 한 번도 추적된 적 없어 git엔 흔적이 안 남는다
+    await rm(join(repo, 'external.txt'))
+
+    await expect(window.getByTestId('file-unstaged-external.txt')).toHaveCount(0, {
+      timeout: 5_000,
+    })
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다', async () => {
+  // createRepoWithChange가 app.txt를 v1 → v2로 고쳐 두어, 시작부터 추적 파일의 unstaged 수정이 있다
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('1')
+
+    // 앱 API를 거치지 않고 에디터의 '실행 취소'처럼 파일 내용만 원래대로 되돌린다.
+    // git checkout --는 .git/index도 함께 갱신해 .git 감시자가 대신 잡아버리므로(실측) 이
+    // 테스트의 검출력이 사라진다 — 순수 워킹트리 쓰기(createRepoWithChange의 v1)로 재현한다
+    await writeFile(join(repo, 'app.txt'), 'v1\n')
+
+    await expect(window.getByTestId('file-unstaged-app.txt')).toHaveCount(0, { timeout: 5_000 })
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E10 Task 3(창 복귀 재조회)의 검증 공백을 메운다 — E2E는 숨김 창이라 OS 포커스 이벤트가
+ * 나지 않는다. Playwright Electron은 메인 프로세스를 직접 조작할 수 있어(app.evaluate),
+ * GIT_GUI_E2E_SHOW=1(기존 로컬 디버깅 opt-out)로 실제 창을 띄우면 BrowserWindow#focus()가
+ * 진짜 'focus' 리스너(main/index.ts)를 발화시킬 수 있다(실측).
+ *
+ * 재조회 호출 자체는 window.gitApi로 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze해
+ * (실측: Object.isFrozen(gitApi.repo) === true) 재할당이 조용히 무시된다. 대신 "새로고침"
+ * 버튼(store.busy로 disabled가 묶여 있다)의 disabled 속성이 true→false로 도는 것을
+ * MutationObserver로 지켜본다 — guard()의 busy 전이는 refresh()가 실제로 실행됐다는
+ * 직접 증거다. 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 전이를 만들 수 없다.
+ *
+ * 전이 자체도 실측이 필요했다: 이미 포커스된 창에 focus()를 다시 불러도 'focus'는
+ * 재발화하지 않는다(전이가 없으면 이벤트도 없다) — blur()로 포커스 없음을 먼저 확정한
+ * 뒤에 focus()를 불러야 매번 확실한 전이가 만들어진다(실측 4회 연속 재현).
+ */
+test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가 돈다 (포커스 채널 검증)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_E2E_SHOW: '1' },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+
+    // "새로고침" 버튼의 disabled 전이 횟수를 센다 — refresh()의 guard()가 busy를
+    // true로 돌릴 때마다 하나씩 늘어난다
+    await window.evaluate(() => {
+      const button = document.querySelector('[data-testid="refresh"]')!
+      const win = window as unknown as { __refreshCycles: number }
+      win.__refreshCycles = 0
+      new MutationObserver((records) => {
+        for (const record of records) {
+          if (record.attributeName === 'disabled' && button.hasAttribute('disabled')) {
+            win.__refreshCycles += 1
+          }
+        }
+      }).observe(button, { attributes: true })
+    })
+
+    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스만 준다
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]!
+      win.blur()
+      win.focus()
+    })
+
+    await expect
+      .poll(() => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles), {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(0)
+
+    // 재조회는 돌았지만 바뀐 파일은 없다 — 화면도 그대로다
+    await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E10 Important 3 회귀 — 외부 저장 한 번마다 워킹트리 감시(E10)가 externalRefresh를 돌리고,
+ * guard()가 무조건 notice/error를 지워 왔다. 그 결과 에디터가 자동 저장할 때마다, 또는 빌드가
+ * 파일을 건드릴 때마다(2s 주기) 화면의 안내 배너가 사라졌다 — E6b 스펙상 10초는 살아 있어야 한다.
+ * 알림 유발은 E7h 관례(태그 만들기)를 재사용한다 — 이 스위트에서 가장 값싼 notice 경로다.
+ */
+test('E10 — 외부 파일 저장이 화면의 알림을 지우지 않는다 (Important 3 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await window.getByTestId('prompt-input').fill('e10-notice')
+    await window.getByTestId('prompt-submit').click()
+    const notice = window.getByTestId('notice')
+    await expect(notice).toContainText(`${T.tag}를 만들었어요`)
+
+    // 태그 작업(쓰기) 자신의 억제 창(WATCH_SUPPRESS_MS=800, E7b)이 다 지나가길 기다린다 —
+    // 그래야 다음 쓰기가 확실히 "그다음 외부 변경"으로 감시에 잡힌다
+    await window.waitForTimeout(900)
+    await expect(notice).toBeVisible()
+
+    // 앱 API를 거치지 않고 파일을 저장한다 — 에디터 자동 저장·포맷온세이브와 같은 순수 워킹트리 쓰기
+    await writeFile(join(repo, 'external.txt'), '외부 저장\n')
+
+    // 워킹트리 감시(E10)가 반영해 화면은 갱신되지만, 방금 작업의 알림은 그대로 남아 있어야 한다
+    await expect(window.getByTestId('file-unstaged-external.txt')).toBeVisible({ timeout: 5_000 })
+    await expect(notice).toContainText(`${T.tag}를 만들었어요`)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})

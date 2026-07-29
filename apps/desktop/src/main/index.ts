@@ -62,6 +62,11 @@ function createWindow(): void {
     window.webContents.send(WINDOW_CHANNELS.fullScreen, false)
   })
 
+  // 창으로 돌아오면 재조회 — 감시가 못 잡은 잔여와 감시가 죽은 경우(watch error로 조용히 닫힘)를 메운다 (E10)
+  window.on('focus', () => {
+    window.webContents.send(WINDOW_CHANNELS.focused)
+  })
+
   // 이 창은 preload로 git 조작 API를 갖는 특권 창이다 — 외부 네비게이션과 새 창을 차단한다
   // (파일 드래그&드롭의 file:// 네비게이션 같은 기본 동작도 여기서 막힌다)
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

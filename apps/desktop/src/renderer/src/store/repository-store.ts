@@ -23,6 +23,7 @@ import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-s
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
+const windowApi = () => window.windowApi
 
 /** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
@@ -375,10 +376,27 @@ let lastGuardEndAt = 0
 /** 작업 종료 후 이 시간 안의 감시 이벤트는 자기 작업의 꼬리로 보고 무시한다 (디바운스 300ms + 여유) */
 export const WATCH_SUPPRESS_MS = 800
 
-/** busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다 */
-async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Promise<boolean> {
+/**
+ * busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다.
+ * armSuppression(기본 true) — 억제 창은 "이 작업이 만든 감시 이벤트"를 삼키기 위한 것이라,
+ * 워크트리를 쓰지 않는 읽기 전용 작업(refresh, externalRefresh, selectFile 등 조회성 호출)은
+ * false로 넘겨 억제를 걸지 않는다 — 그렇지 않으면 읽기 전용 재조회가 그다음 진짜 외부 변경까지
+ * 삼켜버린다 (E10)
+ *
+ * error/notice 초기화도 같은 구분을 따른다 — 읽기 전용 재조회는 "사용자가 뭔가 새로 시작했다"는
+ * 신호가 아니라 화면을 최신화할 뿐이라, 이전 작업이 남긴 배너를 지울 이유가 없다. 지우면 diff를
+ * 훑어보거나(selectFile) 창에 포커스만 줘도(focus 재조회) 안내가 사라진다 — 특히 워킹트리
+ * 감시(E10)가 붙은 뒤로는 에디터 자동 저장마다 externalRefresh가 돌며 이 문제가 상시화된다.
+ * 실제로 무언가를 실행하는(armSuppression=true) 작업만 "새로 시작"이므로 여기서 지운다 (E10 보완 — Important 3)
+ */
+async function guard(
+  set: StoreSet,
+  get: StoreGet,
+  run: () => Promise<void>,
+  armSuppression = true,
+): Promise<boolean> {
   if (get().busy) return false
-  set({ busy: true, error: null, notice: null })
+  set(armSuppression ? { busy: true, error: null, notice: null } : { busy: true })
   try {
     await run()
     return true
@@ -386,7 +404,7 @@ async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Pr
     set({ error: toErrorMessage(cause) })
     return false
   } finally {
-    lastGuardEndAt = Date.now()
+    if (armSuppression) lastGuardEndAt = Date.now()
     set({ busy: false })
   }
 }
@@ -438,6 +456,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     git().repo.onChanged((changedPath) => {
       if (get().repoPath === changedPath) void get().externalRefresh()
     })
+    // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
+    windowApi().onFocused(() => {
+      if (get().repoPath !== null) void get().refresh()
+    })
   },
 
   async openRepository() {
@@ -466,36 +488,61 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async refresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
-      // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      set({
-        ...CLEAR_SELECTIONS,
-        conflictFile: get().conflictFile,
-        ...(await reviveSelections(repoPath, get(), snapshot.status)),
-        hostingStatus: await hosting().status(repoPath),
-        ...snapshot,
-      })
-    })
+    // 읽기 전용이라 억제를 걸지 않는다 — 워크트리를 쓰지 않으니 자기 꼬리 이벤트가 없고,
+    // 걸면 그사이 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10)
+    await guard(
+      set,
+      get,
+      async () => {
+        // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
+        // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
+        // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
+        // 대상이 아니지만, 그렇다고 CLEAR_SELECTIONS로 매번 닫아 버리면 저장할 때마다 열어 둔
+        // 리뷰 패널이 사라진다 (E10 보완 — Important 3). diffLabel만 남고 diff는 못 살아난 경우도
+        // DiffPanel이 diff===null이면 빈 상태를 그려 안전하다(실측 — apps/desktop/.../DiffPanel.tsx)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        set({
+          ...CLEAR_SELECTIONS,
+          conflictFile: get().conflictFile,
+          pullDetail: get().pullDetail,
+          diffLabel: get().diffLabel,
+          ...(await reviveSelections(repoPath, get(), snapshot.status)),
+          hostingStatus: await hosting().status(repoPath),
+          ...snapshot,
+        })
+      },
+      false,
+    )
   },
 
   async externalRefresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    // 자기 작업 꼬리 이벤트 억제 — 작업 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다
+    // 자기 작업 꼬리 이벤트 억제 — 작업(쓰기) 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다.
+    // 이 억제는 마지막 "쓰기" 작업 기준으로만 걸린다(guard의 armSuppression) — 읽기 전용 재조회는
+    // 여기 걸리지 않으므로, 연속된 외부 변경이 서로를 삼키지 않는다 (E10)
     if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
-    await guard(set, get, async () => {
-      // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
-      // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰)
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      set({
-        ...CLEAR_SELECTIONS,
-        conflictFile: get().conflictFile,
-        ...(await reviveSelections(repoPath, get(), snapshot.status)),
-        ...snapshot,
-      })
-    })
+    await guard(
+      set,
+      get,
+      async () => {
+        // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
+        // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
+        // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
+        // 지우면 에디터 자동 저장 한 번에 열어 둔 리뷰 패널이 닫힌다 (E10 보완 — Important 3)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        set({
+          ...CLEAR_SELECTIONS,
+          conflictFile: get().conflictFile,
+          pullDetail: get().pullDetail,
+          diffLabel: get().diffLabel,
+          ...(await reviveSelections(repoPath, get(), snapshot.status)),
+          ...snapshot,
+        })
+      },
+      // 읽기 전용이라 억제를 걸지 않는다 — 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
+      false,
+    )
   },
 
   async switchBranch(name) {
@@ -641,17 +688,25 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await get().selectConflict(selected.change.path)
       return
     }
-    await guard(set, get, async () => {
-      const untracked = selected.change.unstaged === 'untracked'
-      const diff = await git().changes.diff(repoPath, selected.change.path, {
-        staged: selected.staged,
-        untracked,
-        // staged rename은 원래 경로를 동봉해야 rename으로 표시된다 (unstage와 대칭)
-        origPath: selected.staged ? selected.change.origPath : null,
-      })
-      // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
-      set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
-    })
+    // 읽기 전용 재조회(diff만 읽는다) — 억제를 걸지 않는다. 이 앱에서 가장 잦은 조작이라,
+    // 걸어두면 사용자가 diff를 훑어보는 내내 억제 창이 거의 상시로 걸려 그사이 도착한 외부
+    // 변경이 조용히 삼켜진다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const untracked = selected.change.unstaged === 'untracked'
+        const diff = await git().changes.diff(repoPath, selected.change.path, {
+          staged: selected.staged,
+          untracked,
+          // staged rename은 원래 경로를 동봉해야 rename으로 표시된다 (unstage와 대칭)
+          origPath: selected.staged ? selected.change.origPath : null,
+        })
+        // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
+        set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
+      },
+      false,
+    )
   },
 
   clearSelection() {
@@ -661,28 +716,40 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async selectCommit(hash) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      const commitDetail = await git().commits.show(repoPath, hash)
-      // 우측 열은 하나 — 리뷰 상세가 열려 있었다면 닫고 커밋 상세로 전환한다 (상호 배타)
-      set({
-        commitDetail,
-        commitFile: null,
-        conflictFile: null,
-        selected: null,
-        diff: null,
-        diffLabel: null,
-        pullDetail: null,
-      })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const commitDetail = await git().commits.show(repoPath, hash)
+        // 우측 열은 하나 — 리뷰 상세가 열려 있었다면 닫고 커밋 상세로 전환한다 (상호 배타)
+        set({
+          commitDetail,
+          commitFile: null,
+          conflictFile: null,
+          selected: null,
+          diff: null,
+          diffLabel: null,
+          pullDetail: null,
+        })
+      },
+      false,
+    )
   },
 
   async selectCommitFile(file) {
     const { repoPath, commitDetail } = get()
     if (!repoPath || !commitDetail) return
-    await guard(set, get, async () => {
-      const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
-      set({ diff, commitFile: file, diffLabel: null })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
+        set({ diff, commitFile: file, diffLabel: null })
+      },
+      false,
+    )
   },
 
   async restoreFileFromCommit(hash, path) {
@@ -713,12 +780,18 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async compareFileWithWorktree(hash, path, origPath) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
-      // 같은 diff 슬롯 재사용 — 부모 대비 diff(commitFile 제목)와 오인하지 않게 제목만 diffLabel로 덮는다.
-      // commitFile은 비워 부모 대비 제목 규칙이 끼어들지 않게 한다 (상세 파일 목록은 열린 채 유지)
-      set({ diff, diffLabel: `${path} — 지금 코드와 비교`, commitFile: null })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
+        // 같은 diff 슬롯 재사용 — 부모 대비 diff(commitFile 제목)와 오인하지 않게 제목만 diffLabel로 덮는다.
+        // commitFile은 비워 부모 대비 제목 규칙이 끼어들지 않게 한다 (상세 파일 목록은 열린 채 유지)
+        set({ diff, diffLabel: `${path} — 지금 코드와 비교`, commitFile: null })
+      },
+      false,
+    )
   },
 
   clearCommit() {
@@ -973,10 +1046,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async compareBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      const result = await git().branches.compare(repoPath, name)
-      set({ branchCompare: { name, result } })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const result = await git().branches.compare(repoPath, name)
+        set({ branchCompare: { name, result } })
+      },
+      false,
+    )
   },
 
   clearBranchCompare() {
@@ -1175,35 +1254,53 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async viewHistory(ref) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      set({ historyRef: ref })
-      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        set({ historyRef: ref })
+        set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      },
+      false,
+    )
   },
 
   async clearHistoryView() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      set({ historyRef: null })
-      set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        set({ historyRef: null })
+        set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+      },
+      false,
+    )
   },
 
   async selectConflict(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      const content = await git().files.readText(repoPath, path)
-      set({
-        conflictFile: { path, content },
-        selected: null,
-        diff: null,
-        diffLabel: null,
-        commitDetail: null,
-        commitFile: null,
-      })
-    })
+    // 읽기 전용 재조회(충돌 파일 내용만 읽는다) — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const content = await git().files.readText(repoPath, path)
+        set({
+          conflictFile: { path, content },
+          selected: null,
+          diff: null,
+          diffLabel: null,
+          commitDetail: null,
+          commitFile: null,
+        })
+      },
+      false,
+    )
   },
 
   async reloadConflict(path) {
@@ -1303,17 +1400,23 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, history, historyLimit } = get()
     // 끝까지 다 봤거나(뒤가 없음) 상한에 닿았으면 더 부르지 않는다
     if (!repoPath || history.length < historyLimit || historyLimit >= HISTORY_MAX) return
-    await guard(set, get, async () => {
-      const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
-      const ref = get().historyRef ?? undefined
-      try {
-        set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
-      } catch (error) {
-        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
-        if (ref === undefined) throw error
-        set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
-      }
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
+        const ref = get().historyRef ?? undefined
+        try {
+          set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
+        } catch (error) {
+          // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
+          if (ref === undefined) throw error
+          set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
+        }
+      },
+      false,
+    )
   },
 
   async searchHistory(query) {
@@ -1345,31 +1448,43 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || index < history.length) return
     const next = Math.min(Math.max(index + 1, historyLimit + HISTORY_PAGE), SEARCH_JUMP_MAX)
     if (next <= historyLimit) return
-    await guard(set, get, async () => {
-      const ref = get().historyRef ?? undefined
-      try {
-        set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
-      } catch (error) {
-        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀 (loadMoreHistory와 같은 원칙)
-        if (ref === undefined) throw error
-        set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
-      }
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const ref = get().historyRef ?? undefined
+        try {
+          set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
+        } catch (error) {
+          // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀 (loadMoreHistory와 같은 원칙)
+          if (ref === undefined) throw error
+          set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
+        }
+      },
+      false,
+    )
   },
 
   async revealHead() {
     const { repoPath, status } = get()
     const headHash = status?.headHash ?? null
     if (!repoPath || headHash === null) return
-    await guard(set, get, async () => {
-      // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
-      let limit = get().historyLimit
-      for (let round = 0; round < 10; round += 1) {
-        if (get().history.some((commit) => commit.hash === headHash)) return
-        limit += 2000
-        set({ historyLimit: limit, history: await git().history.list(repoPath, limit) })
-      }
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
+        let limit = get().historyLimit
+        for (let round = 0; round < 10; round += 1) {
+          if (get().history.some((commit) => commit.hash === headHash)) return
+          limit += 2000
+          set({ historyLimit: limit, history: await git().history.list(repoPath, limit) })
+        }
+      },
+      false,
+    )
   },
 
   async commit(message) {
@@ -1402,15 +1517,21 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || hostingStatus === null || !hostingStatus.connected || hostingStatus.repo === null) {
       return
     }
-    await guard(set, get, async () => {
-      try {
-        set({ pulls: await hosting().pulls.list(repoPath) })
-      } catch (cause) {
-        // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰)
-        set({ pulls: null })
-        throw cause
-      }
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        try {
+          set({ pulls: await hosting().pulls.list(repoPath) })
+        } catch (cause) {
+          // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰)
+          set({ pulls: null })
+          throw cause
+        }
+      },
+      false,
+    )
   },
 
   async connectGh() {
@@ -1480,11 +1601,17 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     for (let waited = 0; get().busy && waited < 5000; waited += 50) {
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    await guard(set, get, async () => {
-      const pullDetail = await hosting().pulls.detail(repoPath, number)
-      // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
-      set({ ...CLEAR_SELECTIONS, pullDetail })
-    })
+    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
+    await guard(
+      set,
+      get,
+      async () => {
+        const pullDetail = await hosting().pulls.detail(repoPath, number)
+        // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
+        set({ ...CLEAR_SELECTIONS, pullDetail })
+      },
+      false,
+    )
   },
 
   closePullDetail() {
