@@ -51,3 +51,15 @@ select {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* OS에서 모션 줄이기를 켠 사용자에게는 전부 끈다 (E11).
+   0이 아니라 0.01ms인 이유: transitionend·animationend에 의존하는 코드가 생겨도 이벤트는 계속 발화한다 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
