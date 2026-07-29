@@ -319,6 +319,10 @@ export interface AppSettings {
   pullMode?: 'merge' | 'rebase'
   /** 주기적 원격 새로고침(10분) — 기본 켬 (E7e) */
   autoFetch?: boolean
+  /** 좌측 사이드(변경·브랜치·워크트리 탭) 접힘 (E12) */
+  leftCollapsed?: boolean
+  /** 우측 사이드(히스토리·상세) 접힘 (E12) */
+  rightCollapsed?: boolean
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -341,6 +345,10 @@ export function sanitizeSettings(value: unknown): AppSettings {
     settings.pullMode = candidate.pullMode
   }
   if (typeof candidate.autoFetch === 'boolean') settings.autoFetch = candidate.autoFetch
+  if (typeof candidate.leftCollapsed === 'boolean') settings.leftCollapsed = candidate.leftCollapsed
+  if (typeof candidate.rightCollapsed === 'boolean') {
+    settings.rightCollapsed = candidate.rightCollapsed
+  }
   return settings
 }
 

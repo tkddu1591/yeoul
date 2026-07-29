@@ -95,6 +95,24 @@ export function computeColumns(
   return { left, right }
 }
 
+/** 좌측 사이드 접힘 — 저장값 없으면 펼침(false)이 기본 (E12, terminalOpen 관례) */
+export function loadLeftCollapsed(): boolean {
+  return window.settingsApi.initial.leftCollapsed === true
+}
+
+export function saveLeftCollapsed(collapsed: boolean): void {
+  void window.settingsApi.set({ leftCollapsed: collapsed })
+}
+
+/** 우측 사이드 접힘 — 저장값 없으면 펼침(false)이 기본 (E12, terminalOpen 관례) */
+export function loadRightCollapsed(): boolean {
+  return window.settingsApi.initial.rightCollapsed === true
+}
+
+export function saveRightCollapsed(collapsed: boolean): void {
+  void window.settingsApi.set({ rightCollapsed: collapsed })
+}
+
 /**
  * 헤더 접힘 임계 폭 (E7k) — 이 아래에서는 액션 버튼이 아이콘만 남는다.
  * 실측: 1200px 창에서 상태 394 + 액션 683 + gap 40 + padding 100 = 1217이라
