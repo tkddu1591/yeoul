@@ -52,6 +52,22 @@ select {
   background: transparent;
 }
 
+/* E11 — 같은 자리에서 내용만 바뀌는 순간에 건다. 3px은 의도적으로 작다:
+   크게 움직이면 "미끄러진다"는 인상이 되어 오히려 느려 보인다 */
+@keyframes ui-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* E11 — 테마 토글 순간, 호버·눌림에 걸어둔 배경색 transition이 토큰 값 변경에도 동시 발화해
+   화면 전체가 물결친다(실측 — Step 4). ui/theme.ts가 전환 전후 한 프레임만 이 클래스를 건다 */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
+}
+
 /* OS에서 모션 줄이기를 켠 사용자에게는 전부 끈다 (E11).
    0이 아니라 0.01ms인 이유: transitionend·animationend에 의존하는 코드가 생겨도 이벤트는 계속 발화한다 */
 @media (prefers-reduced-motion: reduce) {

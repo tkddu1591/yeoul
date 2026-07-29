@@ -124,6 +124,8 @@ body.is-fullscreen .app__header {
   color: var(--term-badge);
   font-size: var(--text-sm);
   flex: none;
+  /* E11 — 등장 페이드. 퇴장은 만들지 않는다(의도된 비대칭) */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 /* 상단 바(머지 바·알림)는 전부 흐름 밖 오버레이 스택 — 무엇이 떠도 본문이 밀리지 않는다 (피드백).
    스택 안에서는 머지 바가 위, 알림이 아래로 쌓여 서로 가리지 않는다(E1c 가림 문제의 구조적 해소) */

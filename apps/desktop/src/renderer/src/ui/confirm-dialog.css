@@ -7,27 +7,13 @@
   justify-content: center;
   z-index: 100;
 }
-/* 앱 전반의 0.12s 모션 톤에 맞춘 진입 페이드 — alertdialog라 퇴장은 즉시 */
-.ui-modal-overlay[data-entering] {
-  animation: ui-fade-in 120ms ease;
-}
-/* 진입 중에 닫혀도 즉시 사라진다 — 진입 애니메이션이 돌고 있으면 react-aria가
-   animationend까지 unmount를 미뤄, 연속 다이얼로그(병합 확인→이동 제안)에서
-   alertdialog 2개가 잠깐 겹친다(E3b 실측: data-entering·data-exiting 동시 존재) */
-.ui-modal-overlay[data-exiting] {
-  animation: none;
-}
-@keyframes ui-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 .ui-modal {
   outline: none;
 }
+/* E11 — 등장 페이드는 배경막이 아니라 상자에만 건다(ui-fade-in 120ms 흡수, 중복 정의 제거).
+   Dialog는 react-aria가 진입/퇴장을 추적하는 대상이 아니라서(ModalOverlay·Modal만 추적) 퇴장을
+   기다리게 만들 위험이 없다 — 그래서 이전처럼 [data-exiting] 예외가 필요 없다(연속 다이얼로그
+   겹침 문제였던 E3b도 함께 해소). 퇴장은 만들지 않는다(의도된 비대칭) */
 .ui-dialog {
   width: 340px;
   background: var(--color-surface);
@@ -36,6 +22,7 @@
   box-shadow: var(--shadow-2);
   padding: var(--space-4);
   outline: none;
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .ui-dialog__title {
   margin: 0 0 var(--space-2);

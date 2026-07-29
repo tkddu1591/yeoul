@@ -4,12 +4,17 @@
   font-size: var(--text-sm);
   color: var(--color-text-faint);
   text-align: center;
+  /* E11 — 내용 교체 페이드(DiffView가 key=path로 재마운트할 때 재생). 성공 결과에만 걸린다 —
+     diff는 조회가 끝나야 selected·diff가 함께 갱신되므로(로딩 중엔 이 트리 자체가 없다) */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .diff-panel__code {
   padding: 0;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.7;
+  /* E11 — 내용 교체 페이드, 위와 동일 근거 */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .diff-line {
   display: flex;
