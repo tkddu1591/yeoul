@@ -236,6 +236,9 @@ body.is-fullscreen .app__header {
   padding: 4px 12px;
   font-size: var(--text-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .app__left-tab[aria-selected='true'] {
   color: inherit;

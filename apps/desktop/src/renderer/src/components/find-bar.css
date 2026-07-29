@@ -37,6 +37,9 @@
   cursor: pointer;
   font-size: var(--text-sm);
   padding: 0 2px;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .find-bar__nav:hover {
   color: inherit;

@@ -30,6 +30,9 @@
   cursor: pointer;
   /* E7j 보완 M-2 — 소실되어 워크트리 탭만 14px이던 것을 좌측 패널 공통 크기로 복구 */
   font-size: var(--text-sm);
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .worktree-row:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));

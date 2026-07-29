@@ -22,6 +22,9 @@
   padding: 7px 10px;
   border-radius: var(--radius-control);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .ui-list-dialog__option:hover {
   background: var(--color-surface-sunken);

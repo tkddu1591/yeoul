@@ -64,6 +64,9 @@
   border-radius: var(--radius-control);
   cursor: pointer;
   text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .commit-file-folder:hover {
   background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));
