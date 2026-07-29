@@ -10,10 +10,23 @@
 .ui-modal {
   outline: none;
 }
-/* E11 — 등장 페이드는 배경막이 아니라 상자에만 건다(ui-fade-in 120ms 흡수, 중복 정의 제거).
-   Dialog는 react-aria가 진입/퇴장을 추적하는 대상이 아니라서(ModalOverlay·Modal만 추적) 퇴장을
-   기다리게 만들 위험이 없다 — 그래서 이전처럼 [data-exiting] 예외가 필요 없다(연속 다이얼로그
-   겹침 문제였던 E3b도 함께 해소). 퇴장은 만들지 않는다(의도된 비대칭) */
+/* E11 마무리 — Task 3이 "중복 정의 제거"라며 이 배경막의 진입 페이드를 지우고 상자(.ui-dialog)에만
+   건 것은 실측하면 회귀였다: 배경막이 즉시 100% 불투명으로 나타난 뒤(35% 검정) 그 위에서 상자만
+   페이드인해, 20ms 시점에 화면 전체가 한 프레임 만에 어두워지는 게 보였다(Confirm·Prompt·List·
+   Settings·AddWorktree·ManageBranches 6종 공용) — 딱딱함을 걷어내는 게 목적인 에픽이 오히려
+   가장 눈에 띄는 전환을 더 딱딱하게 만든 셈이라 되돌린다. ui-enter는 translateY(3px)가 있어
+   전체 화면 배경막에는 안 맞으므로 opacity 전용 ui-fade(base.css)를 새로 쓴다.
+   [data-exiting] { animation: none } 가드는 E3b에서 실측으로 필요해진 것 — 진입 애니메이션이
+   끝나기 전에 닫히면 react-aria(ModalOverlay)가 animationend까지 unmount를 미뤄, 연속
+   확인창(예: 병합 확인 → 이동 제안)에서 alertdialog 2개가 잠깐 겹친다(당시 실측: data-entering·
+   data-exiting 동시 존재). 배경막에 진입 페이드를 다시 걸면 이 경합도 다시 열리므로 가드도
+   함께 되살린다 */
+.ui-modal-overlay[data-entering] {
+  animation: ui-fade var(--motion-fast) var(--ease-out);
+}
+.ui-modal-overlay[data-exiting] {
+  animation: none;
+}
 .ui-dialog {
   width: 340px;
   background: var(--color-surface);

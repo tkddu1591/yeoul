@@ -116,6 +116,10 @@ body.is-fullscreen .app__header {
   color: var(--concept-conflict);
   font-size: var(--text-sm);
   flex: none;
+  /* E11 마무리(M3) — 형제 .app__notice(아래)는 등장 페이드가 있는데 이쪽만 없었다. 같은
+     app__top-layer 안에 나란히 쌓이는 배너라(App.tsx:601/:606) 실패 알림이 함께 뜨면 한쪽만
+     밀려 들어오고 한쪽은 하드컷으로 보였다 — 플랜·스펙에 기록된 의도적 제외가 아니라 누락이었다 */
+  animation: ui-enter var(--motion-base) var(--ease-out);
 }
 .app__notice {
   margin: 0;

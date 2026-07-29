@@ -42,6 +42,9 @@ select {
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
+  /* E11 마무리(N6) — 색이 바뀌는 다른 13개 hover는 전부 transition이 있는데 이것만 즉시 전환이었다
+     (단순 누락). .app__resizer:hover는 드래그 핸들이라 즉시 반응이 맞아 의도적으로 그대로 둔다 */
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-faint);
@@ -58,6 +61,15 @@ select {
   from {
     opacity: 0;
     transform: translateY(3px);
+  }
+}
+
+/* E11 마무리 — 전체 화면 오버레이(모달 배경막) 전용 페이드. ui-enter는 translateY(3px)가 붙어
+   있어 화면 전체를 덮는 고정 배경막에는 어색하다(작은 요소가 미끄러 들어오는 느낌이 없다) —
+   그래서 opacity만 움직이는 별도 키프레임을 둔다. 공용 키프레임이라 ui-enter 옆에 정의 */
+@keyframes ui-fade {
+  from {
+    opacity: 0;
   }
 }
 
