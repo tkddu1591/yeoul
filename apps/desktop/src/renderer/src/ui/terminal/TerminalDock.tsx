@@ -39,6 +39,8 @@ export function TerminalDock({
   const sessions = useTerminalSessions(repoPath, theme)
   // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
   const groupKey = activeWorktree?.cwd ?? repoPath
+  // 빈 상태 오버레이는 지금 보이는 탭 기준 (E12)
+  const activeTab = sessions.tabs.find((tab) => tab.sessionId === sessions.activeId) ?? null
 
   // 도크가 열려 있는 상태에서 열리거나(open) 그룹이 바뀌면(groupKey) 그 그룹을 활성화한다 —
   // 기억된 탭 복원, 없으면 자동 1개 생성. 그룹에 활성 탭이 이미 있으면(재열림, 그룹 불변) refit만 한다.
@@ -68,6 +70,16 @@ export function TerminalDock({
     sessions.refitActive()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height, sessions.activeId])
+
+  // 창 폭이 바뀌면 도크 폭(중앙+우측 flex 트랙)도 따라 바뀐다 — 높이와 별개 축이라
+  // 위 effect가 못 잡는다. 폰트·줄간격을 명시하기 시작해 FitAddon 셀 계산이 더 정밀해진
+  // 만큼(E12), 폭이 바뀌었는데 refit을 안 하면 글자가 잘리거나 오른쪽에 빈 공간이 남는다(실측)
+  useEffect(() => {
+    const onResize = () => sessions.refitActive()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="terminal-dock" style={{ height }} data-testid="terminal-dock">
@@ -146,6 +158,14 @@ export function TerminalDock({
             ref={(element) => sessions.attach(tab.sessionId, element)}
           />
         ))}
+        {/* E12 — 새 탭의 빈 화면 안내. 셸에 문자를 넣지 않는 순수 오버레이(pointer-events: none)라
+            터미널 포커스·입력을 절대 가로채지 않는다. 첫 입력·첫 출력 중 먼저 오는 것에 꺼진다
+            (useTerminalSessions.dismissHint) */}
+        {activeTab?.hintVisible === true && (
+          <p className="terminal-dock__hint-overlay" data-testid="terminal-empty-hint">
+            {activeWorktree?.label ?? repoPath?.split('/').pop() ?? ''} · {activeTab.groupKey}
+          </p>
+        )}
       </div>
     </div>
   )
