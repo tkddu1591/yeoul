@@ -2325,21 +2325,26 @@ test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다
   const repoName = repo.split('/').filter(Boolean).pop()!
   try {
     const window = await app.firstWindow()
-    // 본체 그룹: 도크 열면 자동 1탭, ＋로 2탭
+    // 본체 그룹: 도크 열면 자동 1탭, ＋로 2탭 — E12: 탭 번호는 그룹 안에서만 매기고
+    // 워크트리 이름은 탭이 아니라 헤더 힌트(.terminal-dock__hint)로 옮겨갔다
     await window.getByTestId('terminal-toggle').click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
     await window.getByTestId('terminal-new-tab').click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
-    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다 — 번호는
+    // 이 그룹 안에서 다시 1부터(전역 카운터였다면 3이 됐을 자리)
     await window.getByTestId('left-tab-worktrees').click()
     await window.getByTestId(`worktree-row-${sideName}`).click()
-    await expect(window.getByTestId('terminal-dock')).toContainText(`3: ${sideName}`)
-    await expect(window.getByTestId('terminal-dock')).not.toContainText('1: 쉘')
-    // 본체로 복귀 → 본체 탭 2개 복원
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await expect(window.locator('.terminal-dock__hint')).toContainText(sideName)
+    // 본체로 복귀 → 본체 탭 2개 복원, 번호도 그대로
     await window.getByTestId(`worktree-row-${repoName}`).click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
-    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
-    await expect(window.getByTestId('terminal-dock')).not.toContainText(`3: ${sideName}`)
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

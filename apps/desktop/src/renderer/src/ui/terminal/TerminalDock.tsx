@@ -1,6 +1,7 @@
 import { Plus, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { Button } from '../Button'
+import { Tooltip } from '../Tooltip'
 import { useTerminalSessions } from './use-terminal-sessions'
 import type { Theme } from '../theme'
 import './terminal-dock.css'
@@ -9,7 +10,8 @@ interface TerminalDockProps {
   repoPath: string | null
   /** 앱 테마 — xterm 팔레트가 따라간다 (E7d ③) */
   theme: Theme
-  /** 활성 워크트리(터미널 대상) — 새 세션이 이 폴더에서 열리고 탭 라벨에 이름이 병기된다 (E7c) */
+  /** 활성 워크트리(터미널 대상) — 새 세션이 이 폴더에서 열린다. 이름은 도크 헤더에 표시된다
+     (E7c, 탭 라벨 병기는 E12에서 폐지) */
   activeWorktree: { cwd: string; label: string } | null
   /** 도크가 보이는가 — 접힘은 숨김일 뿐 언마운트가 아니다(세션 유지 — 스펙) */
   open: boolean
@@ -82,29 +84,33 @@ export function TerminalDock({
           {sessions.tabs
             .filter((tab) => tab.groupKey === groupKey)
             .map((tab) => (
-              <span
-                key={tab.sessionId}
-                className={`terminal-dock__tab${
-                  tab.sessionId === sessions.activeId ? ' terminal-dock__tab--on' : ''
-                }`}
-              >
-                <button
-                  type="button"
-                  className="terminal-dock__tab-name"
-                  onClick={() => sessions.select(tab.sessionId)}
+              // E12 — 탭은 번호만 보여준다. 이 워크트리에서 어느 폴더가 열렸는지는 이제
+              // 탭마다 반복하는 라벨이 아니라 호버 툴팁(cwd)으로 옮겼다 — 정보는 그대로,
+              // 반복은 없앤다(도크 헤더가 이미 지금 보는 워크트리를 보여준다)
+              <Tooltip key={tab.sessionId} content={tab.groupKey} summary={tab.groupKey}>
+                <span
+                  className={`terminal-dock__tab${
+                    tab.sessionId === sessions.activeId ? ' terminal-dock__tab--on' : ''
+                  }`}
                 >
-                  {tab.title}
-                  {tab.exited ? ' (종료)' : ''}
-                </button>
-                <button
-                  type="button"
-                  className="terminal-dock__tab-close"
-                  aria-label={`${tab.title} 닫기`}
-                  onClick={() => sessions.close(tab.sessionId)}
-                >
-                  <X size={11} aria-hidden="true" />
-                </button>
-              </span>
+                  <button
+                    type="button"
+                    className="terminal-dock__tab-name"
+                    onClick={() => sessions.select(tab.sessionId)}
+                  >
+                    {tab.title}
+                    {tab.exited ? ' (종료)' : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="terminal-dock__tab-close"
+                    aria-label={`${tab.title} 닫기`}
+                    onClick={() => sessions.close(tab.sessionId)}
+                  >
+                    <X size={11} aria-hidden="true" />
+                  </button>
+                </span>
+              </Tooltip>
             ))}
           <Button
             variant="ghost"
@@ -115,7 +121,11 @@ export function TerminalDock({
             <Plus size={13} aria-hidden="true" />
           </Button>
         </div>
-        <span className="terminal-dock__hint">{repoPath?.split('/').pop() ?? ''}</span>
+        {/* E12 — 탭에서 뺀 워크트리 이름이 여기로 옮겨왔다. 지금 보고 있는 워크트리가 곧 이
+            탭들의 대상이라 헤더에 한 번만 있으면 충분하다(activeWorktree가 없으면 본체 저장소) */}
+        <span className="terminal-dock__hint">
+          {activeWorktree?.label ?? repoPath?.split('/').pop() ?? ''}
+        </span>
         <div onPointerDown={(event) => event.stopPropagation()}>
           <Button variant="ghost" size="sm" onPress={onClose} testId="terminal-close">
             <X size={13} aria-hidden="true" /> 접기

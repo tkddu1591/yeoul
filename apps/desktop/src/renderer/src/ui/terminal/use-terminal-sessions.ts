@@ -3,12 +3,16 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { silentExitNotice } from './silent-exit'
+import { nextTabNumber } from './tab-number'
 import { terminalPalette } from './terminal-theme'
 import type { Theme } from '../theme'
 
 export interface TerminalTab {
   sessionId: string
-  /** 탭 라벨 — "1: 쉘" 형태 */
+  /** 이 그룹(워크트리) 안에서의 탭 번호 — 닫은 자리는 재사용한다 (E12 nextTabNumber) */
+  number: number
+  /** 탭 라벨 — 이제 번호뿐이다. 워크트리 이름은 도크 헤더로 옮겼다(E12 — "남의 것이 어딘가 있다"는
+     암시를 없앤다) */
   title: string
   exited: boolean
   /** 이 터미널이 열린 워크트리 경로(본체는 repoPath) — 도크가 그룹별로 필터한다 (E7h ④) */
@@ -42,7 +46,6 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   const receivedRef = useRef(new Set<string>())
   /** 사용자가 닫아서(kill) 죽는 세션 — 프롬프트 도착 전 닫기가 깨진 쉘 오경보가 되는 것 방지 (E7d ② 보완) */
   const closingRef = useRef(new Set<string>())
-  const counterRef = useRef(0)
   /** 그룹별 마지막 활성 탭 — 그룹 전환 시 복원한다 (E7h ④) */
   const lastActiveRef = useRef(new Map<string, string>())
 
@@ -88,12 +91,16 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
     void window.terminalApi.resize(sessionId, view.terminal.cols, view.terminal.rows)
   }
 
-  /** 세션 생성 — cwd·label이 오면 그 워크트리 폴더에서 열고 탭 라벨에 병기한다 (E7c) */
+  /**
+   * 세션 생성 — cwd가 오면 그 워크트리 폴더에서 연다 (E7c). 탭 번호는 이 그룹(groupKey) 안에서만
+   * 매긴다 — nextTabNumber(E12)가 닫힌 자리를 재사용한다. label(워크트리 이름)은 더 이상 탭
+   * 제목에 붙지 않는다 — 도크 헤더가 "지금 보고 있는 워크트리"를 이미 보여주므로 탭마다 반복할
+   * 필요가 없다(오히려 "다른 그룹의 번호가 여기 붙어온다"는 착시를 만들었다)
+   */
   const create = async (options?: { cwd?: string; label?: string }) => {
     if (repoPath === null) return
     try {
       const { sessionId } = await window.terminalApi.create(repoPath, options?.cwd)
-      counterRef.current += 1
       const terminal = new Terminal({ fontSize: 12, theme: terminalPalette(theme), scrollback: 1000 })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
@@ -106,15 +113,13 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
         for (const chunk of pending) terminal.write(chunk)
       }
       const groupKey = options?.cwd ?? repoPath
-      setTabs((prev) => [
-        ...prev,
-        {
-          sessionId,
-          title: `${counterRef.current}: ${options?.label ?? '쉘'}`,
-          exited: false,
-          groupKey,
-        },
-      ])
+      // 함수형 업데이터 필수 — 바깥 tabs 클로저를 읽으면 같은 렌더 안에서 연속 생성될 때
+      // 번호가 중복된다(:133-137의 close/closeGroup 트랩과 같은 이유)
+      setTabs((prev) => {
+        const usedNumbers = prev.filter((tab) => tab.groupKey === groupKey).map((tab) => tab.number)
+        const number = nextTabNumber(usedNumbers)
+        return [...prev, { sessionId, number, title: String(number), exited: false, groupKey }]
+      })
       setActiveId(sessionId)
       lastActiveRef.current.set(groupKey, sessionId)
       setError(null)
