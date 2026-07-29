@@ -3126,8 +3126,10 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
     await expect(window.getByTestId('unstaged-count')).toHaveText('1')
 
-    // 앱 API를 거치지 않고 에디터의 '실행 취소'처럼 파일을 인덱스 상태로 되돌린다
-    await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+    // 앱 API를 거치지 않고 에디터의 '실행 취소'처럼 파일 내용만 원래대로 되돌린다.
+    // git checkout --는 .git/index도 함께 갱신해 .git 감시자가 대신 잡아버리므로(실측) 이
+    // 테스트의 검출력이 사라진다 — 순수 워킹트리 쓰기(createRepoWithChange의 v1)로 재현한다
+    await writeFile(join(repo, 'app.txt'), 'v1\n')
 
     await expect(window.getByTestId('file-unstaged-app.txt')).toHaveCount(0, { timeout: 5_000 })
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
@@ -3194,6 +3196,45 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
 
     // 재조회는 돌았지만 바뀐 파일은 없다 — 화면도 그대로다
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E10 Important 3 회귀 — 외부 저장 한 번마다 워킹트리 감시(E10)가 externalRefresh를 돌리고,
+ * guard()가 무조건 notice/error를 지워 왔다. 그 결과 에디터가 자동 저장할 때마다, 또는 빌드가
+ * 파일을 건드릴 때마다(2s 주기) 화면의 안내 배너가 사라졌다 — E6b 스펙상 10초는 살아 있어야 한다.
+ * 알림 유발은 E7h 관례(태그 만들기)를 재사용한다 — 이 스위트에서 가장 값싼 notice 경로다.
+ */
+test('E10 — 외부 파일 저장이 화면의 알림을 지우지 않는다 (Important 3 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
+    await window.getByTestId('context-tag-here').click()
+    await window.getByTestId('prompt-input').fill('e10-notice')
+    await window.getByTestId('prompt-submit').click()
+    const notice = window.getByTestId('notice')
+    await expect(notice).toContainText(`${T.tag}를 만들었어요`)
+
+    // 태그 작업(쓰기) 자신의 억제 창(WATCH_SUPPRESS_MS=800, E7b)이 다 지나가길 기다린다 —
+    // 그래야 다음 쓰기가 확실히 "그다음 외부 변경"으로 감시에 잡힌다
+    await window.waitForTimeout(900)
+    await expect(notice).toBeVisible()
+
+    // 앱 API를 거치지 않고 파일을 저장한다 — 에디터 자동 저장·포맷온세이브와 같은 순수 워킹트리 쓰기
+    await writeFile(join(repo, 'external.txt'), '외부 저장\n')
+
+    // 워킹트리 감시(E10)가 반영해 화면은 갱신되지만, 방금 작업의 알림은 그대로 남아 있어야 한다
+    await expect(window.getByTestId('file-unstaged-external.txt')).toBeVisible({ timeout: 5_000 })
+    await expect(notice).toContainText(`${T.tag}를 만들었어요`)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })

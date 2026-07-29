@@ -67,8 +67,9 @@ export function createTrailingDebounce(
 
 /**
  * 워킹트리 감시 필터 (E10) — `.git` 아래는 전용 감시(isRelevantGitEvent)가 이미 본다.
- * **무시 목록을 두지 않는다**: 실측상 빌드 1회가 209 이벤트지만 디바운스가 재조회 1회로
- * 합치고 git status는 20~100ms다. .gitignore 의미론을 반쯤 흉내 내다 틀리는 쪽이 더 위험하다
+ * **무시 목록을 두지 않는다**: 실측상 빌드 1회(2.48초)가 207 이벤트지만 디바운스가 재조회
+ * 2회로 합친다(2초 max-wait이 빌드가 아직 도는 중에 한 번 발화하고, 조용해진 뒤 트레일링이
+ * 한 번 더 발화) — git status는 20~100ms다. .gitignore 의미론을 반쯤 흉내 내다 틀리는 쪽이 더 위험하다
  */
 export function isWorkingTreeEvent(relativePath: string): boolean {
   return relativePath !== '.git' && !relativePath.startsWith('.git/')
