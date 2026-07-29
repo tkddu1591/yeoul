@@ -3377,3 +3377,178 @@ test('E11 — 상세 슬롯을 열었다 닫으면 우측 열 배치가 닫힘 �
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+/**
+ * E12 Task 6 ① — 좌측 접기 버튼으로 좌측 열이 사라지고(폭 0), 펼치면 되돌아온다.
+ * 접힘은 별도 CSS 분기가 아니라 트랙 자체를 렌더에서 빼는 방식(App.tsx)이라, 접힌 동안은
+ * `.app__left`가 아예 언마운트된다 — "폭 0"은 count 0으로 확인하고, 펼친 뒤 실제 폭이 양수인지로
+ * "복귀"를 확인한다.
+ */
+test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복귀한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+    const before = (await window.locator('.app__left').boundingBox())!.width
+    expect(before).toBeGreaterThan(0)
+
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toBeVisible()
+    await expect
+      .poll(async () => (await window.locator('.app__left').boundingBox())!.width)
+      .toBeGreaterThan(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ② — ⌘⌥1이 좌측 접기 버튼과 같은 토글을 한다. macOS는 Option을 누른 채면
+ * event.key가 '1'이 아닌 특수문자로 바뀌므로(App.tsx 실측 주석), 구현은 event.code(물리 키)를
+ * 본다 — Playwright의 'Digit1' 키 이름은 정확히 그 물리 코드를 만든다.
+ */
+test('E12 — ⌘⌥1 단축키로도 좌측 접기·펼치기가 동작한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+
+    await window.keyboard.press('Meta+Alt+Digit1')
+    await expect(window.locator('.app__left')).toHaveCount(0)
+
+    await window.keyboard.press('Meta+Alt+Digit1')
+    await expect(window.locator('.app__left')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ③ — 접힘은 settingsApi로 영속화된다(loadLeftCollapsed/saveLeftCollapsed,
+ * dockOpen과 같은 자리). 같은 GIT_GUI_USER_DATA로 재시작하면 접힘이 복원돼야 한다.
+ */
+test('E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+  } finally {
+    await app.close()
+  }
+  // 재시작 — 같은 userData면 접힘 상태가 복원되어야 한다 (파일 영속화)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ④ — 탭 번호는 그룹(워크트리) 안에서만 매긴다(nextTabNumber). 본체(워크트리 A)에서
+ * 탭 2개를 만든 뒤 워크트리 B로 전환하면, B는 아직 세션이 없던 새 그룹이라 첫 탭이 다시 1이어야
+ * 한다 — 전역 카운터였다면 3이 됐을 자리다.
+ */
+test('E12 — 워크트리 A에 탭 2개, B로 전환하면 B의 첫 탭은 1이다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'e12-tabnum-side'], { cwd: repo })
+  const wtPath = `${repo}-e12tabnum`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'e12-tabnum-side'], {
+    cwd: repo,
+  })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    // 워크트리 A(본체) — 탭 2개
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+
+    // 워크트리 B로 전환 — 새 그룹이라 자동 1개 생성, 번호는 이 그룹 안에서 다시 1부터
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click()
+    await expect(window.locator('.terminal-dock__hint')).toContainText(sideName)
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ⑤ — 탭을 닫아 빈 번호가 생기면, 다음에 만드는 탭이 그 빈 자리를 재사용한다(끝에
+ * 이어붙는 새 번호가 아니라). 1번을 닫아 [2]만 남기고 새로 만들면 nextTabNumber가 1을 돌려줘야
+ * 한다 — 3이 아니라.
+ *
+ * GIT_GUI_USER_DATA 격리 필수 — dockOpen은 settings.json에 영속되는데(rightWidth 선례),
+ * 격리가 없으면 이전 터미널 테스트가 남긴 열림 상태를 물려받아 이번 terminal-toggle 클릭이
+ * 반대로 닫아버릴 수 있다(:1537 기존 주석과 같은 함정 — 실측: dockOpen이 이미 true인 채로
+ * 시작하면 클릭이 도크를 닫고, 이미 존재하던 탭 텍스트('1')는 disabled와 달리 숨겨져도
+ * DOM에 남아 toHaveText 단언은 그대로 통과해버려 그다음 '+' 클릭에서만 30초 타임아웃으로
+ * 드러난다 — 격리 없이 반복 실행해 실제로 재현했다).
+ */
+test('E12 — 탭을 닫고 새로 만들면 빈 번호를 재사용한다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+
+    // 1번 탭을 닫는다 — 빈 자리(1)가 생긴다
+    await window.locator('.terminal-dock__tab-close').first().click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('2')
+
+    // 새 탭 — 끝에 3을 붙이는 대신 빈 1을 재사용해야 한다
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
