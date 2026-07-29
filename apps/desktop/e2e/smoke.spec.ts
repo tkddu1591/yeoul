@@ -58,10 +58,38 @@ async function createTwoBlockConflictRepo(): Promise<string> {
   return dir
 }
 
-/** 대상 요소 중심에 마우스를 올리고 ⌘F를 눌러 그 스코프의 FindBar를 연다 (E7h ⑥ — hover 라우팅) */
+/**
+ * 대상 요소 중심에 마우스를 올리고 ⌘F를 눌러 그 스코프의 FindBar를 연다 (E7h ⑥ — hover 라우팅).
+ *
+ * E12 ⌘F 12% 플레이크 실측(root-cause): 앱의 스코프 판정은 hover 상태를 어딘가에 미리 저장해 두는
+ * 게 아니라, keydown 시점에 pointerRef(마지막 pointermove 좌표)로 document.elementFromPoint를
+ * 불러 그 자리에서 계산한다(App.tsx의 ⌘F 핸들러) — 그래서 "hover가 아직 등록 안 됐다"는 레이스는
+ * 애초에 존재하지 않는다. 진짜 문제는 대상이 막 열리는 애니메이션 도중(app__right-detail의
+ * grid-template-rows 240ms 전환, E11)일 때다 — boundingBox()가 프레임마다 다른 값을 주므로, 계산한
+ * 좌표로 마우스를 옮기고 곧장 키를 누르면 그 지점이 아직 대상 밖(레이아웃이 덜 자란 자리)일 수
+ * 있다. 그러면 App.tsx의 elementFromPoint가 data-find-scope를 못 찾아 'diff'로 폴백하는데, 이
+ * testId('commit-detail-panel') 테스트는 diff에 선택된 파일이 없어 FindBar가 어디에도 안 뜬다
+ * (실측: 40회 중 3회, 실패마다 scope=diff/scopeElClass=null로 재현 — 통과한 회차들도 y좌표가
+ * 730~769 사이를 계속 오갔다(애니메이션 진행 중 샘플링됐다는 증거). 애니메이션이 안 걸리는 나머지
+ * hoverAndCmdF 호출부(history/diff/changes 패널)는 이 레이스가 안 걸려 플레이크가 이 테스트에만
+ * 몰렸던 것과도 일치한다).
+ *
+ * 고정 sleep은 레이스를 드물게만 만들 뿐이라(플랜 지시) 쓰지 않는다 — 대신 "그 좌표의 실제 요소가
+ * 대상 selector 안에 들어와 있다"는 조건 자체를 만족할 때까지 기다린 뒤에만 키를 누른다.
+ */
 async function hoverAndCmdF(window: Page, selector: string): Promise<void> {
-  const box = (await window.locator(selector).boundingBox())!
-  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  const locator = window.locator(selector)
+  let point = { x: 0, y: 0 }
+  await expect(async () => {
+    const box = (await locator.boundingBox())!
+    point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    await window.mouse.move(point.x, point.y)
+    const landedInside = await window.evaluate(
+      ({ x, y, sel }) => document.elementFromPoint(x, y)?.closest(sel) != null,
+      { x: point.x, y: point.y, sel: selector },
+    )
+    expect(landedInside).toBe(true)
+  }).toPass({ timeout: 2000 })
   await window.keyboard.press('Meta+f')
 }
 
@@ -2325,21 +2353,26 @@ test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다
   const repoName = repo.split('/').filter(Boolean).pop()!
   try {
     const window = await app.firstWindow()
-    // 본체 그룹: 도크 열면 자동 1탭, ＋로 2탭
+    // 본체 그룹: 도크 열면 자동 1탭, ＋로 2탭 — E12: 탭 번호는 그룹 안에서만 매기고
+    // 워크트리 이름은 탭이 아니라 헤더 힌트(.terminal-dock__hint)로 옮겨갔다
     await window.getByTestId('terminal-toggle').click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
     await window.getByTestId('terminal-new-tab').click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
-    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다 — 번호는
+    // 이 그룹 안에서 다시 1부터(전역 카운터였다면 3이 됐을 자리)
     await window.getByTestId('left-tab-worktrees').click()
     await window.getByTestId(`worktree-row-${sideName}`).click()
-    await expect(window.getByTestId('terminal-dock')).toContainText(`3: ${sideName}`)
-    await expect(window.getByTestId('terminal-dock')).not.toContainText('1: 쉘')
-    // 본체로 복귀 → 본체 탭 2개 복원
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await expect(window.locator('.terminal-dock__hint')).toContainText(sideName)
+    // 본체로 복귀 → 본체 탭 2개 복원, 번호도 그대로
     await window.getByTestId(`worktree-row-${repoName}`).click()
-    await expect(window.getByTestId('terminal-dock')).toContainText('1: 쉘')
-    await expect(window.getByTestId('terminal-dock')).toContainText('2: 쉘')
-    await expect(window.getByTestId('terminal-dock')).not.toContainText(`3: ${sideName}`)
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -3140,10 +3173,32 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
 })
 
 /**
- * E10 Task 3(창 복귀 재조회)의 검증 공백을 메운다 — E2E는 숨김 창이라 OS 포커스 이벤트가
- * 나지 않는다. Playwright Electron은 메인 프로세스를 직접 조작할 수 있어(app.evaluate),
- * GIT_GUI_E2E_SHOW=1(기존 로컬 디버깅 opt-out)로 실제 창을 띄우면 BrowserWindow#focus()가
- * 진짜 'focus' 리스너(main/index.ts)를 발화시킬 수 있다(실측).
+ * E10 Task 3(창 복귀 재조회)의 검증 공백을 메운다.
+ *
+ * E12 이전에는 GIT_GUI_E2E_SHOW=1로 실제(비가상) 창을 띄우고 blur()/focus()로 진짜 OS 포커스
+ * 전이를 만들어 main/index.ts의 'focus' 리스너를 발화시켰다. 그런데 이 방식은 이 테스트가
+ * 검증해야 할 계약(우리 코드: "창이 focus 이벤트를 받으면 렌더러가 재조회한다")과 무관한
+ * 전제 — "OS가 실제로 우리 창에 포커스를 준다" — 에 기대고 있었다. 그 전제는 머신에 다른
+ * Electron 창(이 저장소의 다른 워커, 또는 사용자의 개발 앱)이 있으면 깨진다: OS 포커스는
+ * 창들끼리 경합하는 유한 자원이라, 우리 blur()/focus() 호출이 상대 창에 밀려 씹히면 'focus'
+ * 리스너가 아예 발화하지 않는다. E11 병합 직후 실제로 한 번 이렇게 실패했다(2-워커 병렬
+ * 실행에서 5초 타임아웃) — E11의 toPass 재시도는 그 증상을 흡수하는 완화였을 뿐, "다른 창이
+ * 있으면 흔들린다"는 근본 원인은 그대로 남아 있었다.
+ *
+ * E12: 자극(stimulus)을 바꿔 이 결함을 근본에서 없앤다. Electron의 BrowserWindow는 표준
+ * EventEmitter이고, main/index.ts:66의 `window.on('focus', …)`는 그 EventEmitter에 등록된
+ * 보통의 JS 리스너다(OS가 네이티브 포커스를 감지했을 때 Electron 바인딩이 내부적으로 같은
+ * `emit('focus')`를 호출해 도달하는 지점과 동일한 지점). app.evaluate로 메인 프로세스에서
+ * 그 창 인스턴스에 직접 `emit('focus')`를 불러 이 리스너를 발화시키면 — 실제 OS 포커스
+ * 전이 없이도, 다른 창과의 경합 없이도 — "focus 이벤트를 받으면 재조회한다"는 우리 계약만
+ * 결정적으로 검증한다. 창은 이제 실제로 보일 필요가 없으므로 GIT_GUI_E2E_SHOW를 뺀다.
+ * (검증: 이 접근을 쓰기 전 emit이 정말 이 리스너에 닿는지 직접 실행해 확인했다 — 아래 함수 보고 참고)
+ *
+ * 이 방식이 못 잡는 것 — "OS가 실제로 네이티브 포커스 이벤트를 Electron에 전달하고,
+ * Electron이 그걸 JS 'focus' 이벤트로 통역하는" 파이프라인 자체의 회귀. 하지만 그건 우리
+ * 코드가 아니라 Electron의 책임이다(플랜 근거). 이 앱에는 창이 하나뿐이라 "리스너가 엉뚱한
+ * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BrowserWindow.getAllWindows()[0]
+ * 이 바로 그 창이므로).
  *
  * 재조회 호출 자체는 window.gitApi로 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze해
  * (실측: Object.isFrozen(gitApi.repo) === true) 재할당이 조용히 무시된다. 대신 "새로고침"
@@ -3151,16 +3206,15 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * MutationObserver로 지켜본다 — guard()의 busy 전이는 refresh()가 실제로 실행됐다는
  * 직접 증거다. 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 전이를 만들 수 없다.
  *
- * 전이 자체도 실측이 필요했다: 이미 포커스된 창에 focus()를 다시 불러도 'focus'는
- * 재발화하지 않는다(전이가 없으면 이벤트도 없다) — blur()로 포커스 없음을 먼저 확정한
- * 뒤에 focus()를 불러야 매번 확실한 전이가 만들어진다(실측 4회 연속 재현).
+ * ⚠️ 다음 사람에게: "진짜 포커스가 아니니 불완전하다"며 blur()/focus() + GIT_GUI_E2E_SHOW로
+ * 되돌리지 말 것 — 그 버전이 바로 위에서 설명한 경합 플레이크의 원인이었다.
  */
 test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가 돈다 (포커스 채널 검증)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_E2E_SHOW: '1' },
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
   })
   try {
     const window = await app.firstWindow()
@@ -3181,28 +3235,18 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
       }).observe(button, { attributes: true })
     })
 
-    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스만 준다.
-    //
-    // E11 Task 5 — 이 테스트는 2-워커 병렬 실행에서 간헐적으로 5초 타임아웃에 걸린다(단독
-    // 실행은 3/3 통과, E11 수정 전 베이스라인에서도 동일 재현 — 새로 생긴 회귀가 아니라
-    // E9a/E10에서 이 테스트를 넣을 때부터 있던 문제다). 원인은 로직이 아니라 경합: 이 테스트만
-    // GIT_GUI_E2E_SHOW=1로 실제(비가상) 창을 띄우는데, 다른 워커가 동시에 띄운 실제 창과
-    // OS 포커스를 놓고 다툰다 — blur()/focus() 한 번이 상대 창에 밀려 씹히면 focus 리스너가
-    // 아예 발화하지 않고 5초를 그대로 흘려보낸다. 그래서 "한 번 쐈는데 놓쳤다"를 흡수하도록
-    // blur()/focus()를 재시도 가능한 블록으로 감싼다 — 실패할 때마다 전이를 다시 쏘고, 검증
-    // 대상(재조회가 실제로 도는지, disabled 뮤테이션으로 증명)은 원래 그대로 유지한다.
-    // 지우거나 skip으로 "고치지" 말 것 — 포커스 채널이 실제로 동작한다는 유일한 증거다.
-    await expect(async () => {
-      await app.evaluate(({ BrowserWindow }) => {
-        const win = BrowserWindow.getAllWindows()[0]!
-        win.blur()
-        win.focus()
-      })
-      const cycles = await window.evaluate(
-        () => (window as unknown as { __refreshCycles: number }).__refreshCycles,
+    // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
+    // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
+    // toPass 재시도도 더 이상 필요 없다(남겨둔 5초는 IPC 왕복 지연만 흡수하는 여유다).
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]!.emit('focus')
+    })
+    await expect
+      .poll(
+        () => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles),
+        { timeout: 5_000 },
       )
-      expect(cycles).toBeGreaterThan(0)
-    }).toPass({ timeout: 20_000, intervals: [500, 1_000, 2_000, 3_000] })
+      .toBeGreaterThan(0)
 
     // 재조회는 돌았지만 바뀐 파일은 없다 — 화면도 그대로다
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
@@ -3359,5 +3403,180 @@ test('E11 — 상세 슬롯을 열었다 닫으면 우측 열 배치가 닫힘 �
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ① — 좌측 접기 버튼으로 좌측 열이 사라지고(폭 0), 펼치면 되돌아온다.
+ * 접힘은 별도 CSS 분기가 아니라 트랙 자체를 렌더에서 빼는 방식(App.tsx)이라, 접힌 동안은
+ * `.app__left`가 아예 언마운트된다 — "폭 0"은 count 0으로 확인하고, 펼친 뒤 실제 폭이 양수인지로
+ * "복귀"를 확인한다.
+ */
+test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복귀한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+    const before = (await window.locator('.app__left').boundingBox())!.width
+    expect(before).toBeGreaterThan(0)
+
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toBeVisible()
+    await expect
+      .poll(async () => (await window.locator('.app__left').boundingBox())!.width)
+      .toBeGreaterThan(0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ② — ⌘⌥1이 좌측 접기 버튼과 같은 토글을 한다. macOS는 Option을 누른 채면
+ * event.key가 '1'이 아닌 특수문자로 바뀌므로(App.tsx 실측 주석), 구현은 event.code(물리 키)를
+ * 본다 — Playwright의 'Digit1' 키 이름은 정확히 그 물리 코드를 만든다.
+ */
+test('E12 — ⌘⌥1 단축키로도 좌측 접기·펼치기가 동작한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+
+    await window.keyboard.press('Meta+Alt+Digit1')
+    await expect(window.locator('.app__left')).toHaveCount(0)
+
+    await window.keyboard.press('Meta+Alt+Digit1')
+    await expect(window.locator('.app__left')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ③ — 접힘은 settingsApi로 영속화된다(loadLeftCollapsed/saveLeftCollapsed,
+ * dockOpen과 같은 자리). 같은 GIT_GUI_USER_DATA로 재시작하면 접힘이 복원돼야 한다.
+ */
+test('E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+  } finally {
+    await app.close()
+  }
+  // 재시작 — 같은 userData면 접힘 상태가 복원되어야 한다 (파일 영속화)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await expect(window.locator('.app__left')).toHaveCount(0)
+  } finally {
+    await second.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ④ — 탭 번호는 그룹(워크트리) 안에서만 매긴다(nextTabNumber). 본체(워크트리 A)에서
+ * 탭 2개를 만든 뒤 워크트리 B로 전환하면, B는 아직 세션이 없던 새 그룹이라 첫 탭이 다시 1이어야
+ * 한다 — 전역 카운터였다면 3이 됐을 자리다.
+ */
+test('E12 — 워크트리 A에 탭 2개, B로 전환하면 B의 첫 탭은 1이다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'e12-tabnum-side'], { cwd: repo })
+  const wtPath = `${repo}-e12tabnum`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'e12-tabnum-side'], {
+    cwd: repo,
+  })
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  try {
+    const window = await app.firstWindow()
+    // 워크트리 A(본체) — 탭 2개
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+
+    // 워크트리 B로 전환 — 새 그룹이라 자동 1개 생성, 번호는 이 그룹 안에서 다시 1부터
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click()
+    await expect(window.locator('.terminal-dock__hint')).toContainText(sideName)
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E12 Task 6 ⑤ — 탭을 닫아 빈 번호가 생기면, 다음에 만드는 탭이 그 빈 자리를 재사용한다(끝에
+ * 이어붙는 새 번호가 아니라). 1번을 닫아 [2]만 남기고 새로 만들면 nextTabNumber가 1을 돌려줘야
+ * 한다 — 3이 아니라.
+ *
+ * GIT_GUI_USER_DATA 격리 필수 — dockOpen은 settings.json에 영속되는데(rightWidth 선례),
+ * 격리가 없으면 이전 터미널 테스트가 남긴 열림 상태를 물려받아 이번 terminal-toggle 클릭이
+ * 반대로 닫아버릴 수 있다(:1537 기존 주석과 같은 함정 — 실측: dockOpen이 이미 true인 채로
+ * 시작하면 클릭이 도크를 닫고, 이미 존재하던 탭 텍스트('1')는 disabled와 달리 숨겨져도
+ * DOM에 남아 toHaveText 단언은 그대로 통과해버려 그다음 '+' 클릭에서만 30초 타임아웃으로
+ * 드러난다 — 격리 없이 반복 실행해 실제로 재현했다).
+ */
+test('E12 — 탭을 닫고 새로 만들면 빈 번호를 재사용한다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('1')
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
+
+    // 1번 탭을 닫는다 — 빈 자리(1)가 생긴다
+    await window.locator('.terminal-dock__tab-close').first().click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.terminal-dock__tab-name').first()).toHaveText('2')
+
+    // 새 탭 — 끝에 3을 붙이는 대신 빈 1을 재사용해야 한다
+    await window.getByTestId('terminal-new-tab').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
+    await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('1')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
   }
 })

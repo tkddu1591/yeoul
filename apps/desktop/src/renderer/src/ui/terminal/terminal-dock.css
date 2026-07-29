@@ -7,7 +7,9 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--color-border-strong);
+  /* E12 — 패널들과 같은 위계로: border-strong은 도크만 유독 진해 보여 다른 층처럼 읽혔다.
+     panel.css의 .ui-panel과 같은 --color-border로 내려 시각적으로 같은 층에 앉힌다 */
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-container);
   /* 프레임은 앱 테마를 따른다 — 터미널 내부 색은 xterm 팔레트(terminal-theme.ts) 소유 (E7d ③ 보완:
      다크 하드코딩이면 라이트 모드에서 xterm 둘레 패딩이 어두운 심으로 노출된다) */
@@ -20,7 +22,7 @@
   gap: var(--space-2);
   padding: 2px var(--space-2);
   cursor: row-resize;
-  border-bottom: 1px solid var(--color-border-strong);
+  border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
 }
 .terminal-dock__label {
@@ -33,21 +35,26 @@
   gap: var(--space-1);
   cursor: default;
 }
+/* E12 — 밑줄형(2px border-bottom)에서 알약형으로. 활성은 가라앉은 서피스로 채우고,
+   비활성은 투명 — 탭이 버튼처럼 눌러야 할 대상이라는 게 형태로 드러난다 */
 .terminal-dock__tab {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  padding: 0 var(--space-1) 2px;
+  border-radius: var(--radius-control);
+  padding: 2px var(--space-1) 2px var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+  background: transparent;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 .terminal-dock__tab--on {
-  border-bottom-color: var(--concept-branch);
   color: inherit;
   font-weight: 600;
+  background: var(--color-surface-sunken);
 }
 .terminal-dock__tab-name {
   appearance: none;
@@ -55,9 +62,11 @@
   border: none;
   color: inherit;
   font-size: var(--text-sm);
-  padding: 2px 6px;
+  padding: 2px 2px;
   cursor: pointer;
 }
+/* 닫기 X는 호버·활성일 때만 — 탭마다 항상 떠 있으면 시끄럽다(사용자 피드백).
+   포커스(키보드 탐색)에서도 드러나야 접근성이 죽지 않는다 */
 .terminal-dock__tab-close {
   appearance: none;
   background: transparent;
@@ -66,6 +75,14 @@
   cursor: pointer;
   padding: 2px;
   display: inline-flex;
+  border-radius: var(--radius-control);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+.terminal-dock__tab:hover .terminal-dock__tab-close,
+.terminal-dock__tab:focus-within .terminal-dock__tab-close,
+.terminal-dock__tab--on .terminal-dock__tab-close {
+  opacity: 1;
 }
 .terminal-dock__hint {
   margin-left: auto;
@@ -81,10 +98,36 @@
 .terminal-dock__body {
   flex: 1;
   min-height: 0;
-  padding: var(--space-1);
+  position: relative;
+  /* E12 — 4px(space-1)는 글자가 프레임에 거의 붙어 있었다. 상하 8px·좌우 12px로 여유를 준다 */
+  padding: var(--space-2) var(--space-3);
 }
 .terminal-dock__view {
   height: 100%;
+}
+/* E12 — 빈 새 탭 안내. 셸 프롬프트 위에 뜨는 순수 오버레이라 클릭·타이핑을 가로채면 안 된다
+   (pointer-events: none) — 첫 입력·출력에 사라지므로 아주 잠깐만 보인다.
+   배경만으로는 안 보인다 — xterm 팔레트 배경과 --color-surface-sunken이 거의 같은 톤이라
+   (라이트 #f7f7fa vs #f8f9fb) 채움만으론 경계가 안 읽힌다(실측 스크린샷). border+shadow로
+   테두리를 분명히 그어 채움 색이 뭐든 알약이 뜬 게 보이게 한다 */
+.terminal-dock__hint-overlay {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  left: var(--space-3);
+  margin: 0;
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-1);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: fit-content;
 }
 .terminal-dock__view .xterm {
   height: 100%;

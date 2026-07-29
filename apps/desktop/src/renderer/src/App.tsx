@@ -1,4 +1,15 @@
-import { CloudUpload, DownloadCloud, GitMerge, RefreshCw, Settings, Terminal } from 'lucide-react'
+import {
+  CloudUpload,
+  DownloadCloud,
+  GitMerge,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  RefreshCw,
+  Settings,
+  Terminal,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
 import { isHeadBackedUp } from './components/backup-state'
@@ -21,9 +32,13 @@ import {
   clampRightWidth,
   computeColumns,
   isCompactHeader,
+  loadLeftCollapsed,
+  loadRightCollapsed,
   loadRightWidth,
   resetRightWidth,
   RIGHT_COLUMN_DEFAULT,
+  saveLeftCollapsed,
+  saveRightCollapsed,
   saveRightWidth,
 } from './ui/column-resize'
 import {
@@ -206,11 +221,62 @@ export function App() {
     resetRightWidth()
     setRightWidth(RIGHT_COLUMN_DEFAULT)
   }
+
+  // 좌·우 사이드 접기 (E12) — 저장·복원은 dockOpen 선례와 같은 자리(settingsApi). 접힘은
+  // computeColumns의 입력일 뿐 별도 CSS 분기가 아니다 — 최소 창·양쪽 접기 조합이 저절로 정합한다
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => loadLeftCollapsed())
+  const [rightCollapsed, setRightCollapsed] = useState<boolean>(() => loadRightCollapsed())
+  const toggleLeftCollapsed = () => {
+    setLeftCollapsed((prev) => {
+      saveLeftCollapsed(!prev)
+      return !prev
+    })
+  }
+  const toggleRightCollapsed = () => {
+    setRightCollapsed((prev) => {
+      saveRightCollapsed(!prev)
+      return !prev
+    })
+  }
+  // 우측이 접힌 채 죽은 클릭(결과를 볼 수 없는 곳으로 보내는 것)을 만들 상황이면 편다 (E12 스펙 에러표).
+  // 이미 펼쳐져 있으면 그대로 둔다 — 매번 저장을 부르지 않는다
+  const expandRightIfCollapsed = () => {
+    setRightCollapsed((prev) => {
+      if (!prev) return prev
+      saveRightCollapsed(false)
+      return false
+    })
+  }
+  const expandLeftIfCollapsed = () => {
+    setLeftCollapsed((prev) => {
+      if (!prev) return prev
+      saveLeftCollapsed(false)
+      return false
+    })
+  }
+
   // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
   // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
-  const columns = computeColumns(viewportWidth, rightWidth)
+  const columns = computeColumns(viewportWidth, rightWidth, {
+    left: leftCollapsed,
+    right: rightCollapsed,
+  })
   // E7k — 창이 좁으면 헤더 액션이 아이콘만 남는다(이름은 Tooltip이 담당). 판정만 여기서, 숨김은 CSS
   const compactHeader = isCompactHeader(viewportWidth)
+  // 접힌 열은 그 트랙 자체를 뺀다 — gap도 함께 없어져야 computeColumns의 예산(chrome) 산식과
+  // 실제 DOM이 맞는다(트랙이 있는데 0px만 주면 grid gap이 남아 폭이 어긋난다). 사이드 접기는
+  // E11 모션을 타지 않는다 — 인라인 style이라 transition을 넣지 않는다(사람이 지키는 안전망)
+  const gridTemplateColumns = [
+    leftCollapsed ? null : `${columns.left}px`,
+    'minmax(0, 1fr)',
+    rightCollapsed ? null : `6px ${columns.right}px`,
+  ]
+    .filter((track): track is string => track !== null)
+    .join(' ')
+  // 도크(터미널)는 좌측 관리 존을 제외한 나머지 트랙 전부를 덮는다 — 좌측이 있으면 2번째 줄부터,
+  // 없으면 1번째 줄부터. 끝 줄은 "지금 보이는 트랙 수 + 1"
+  const visibleTrackCount = (leftCollapsed ? 0 : 1) + 1 + (rightCollapsed ? 0 : 2)
+  const dockGridColumn = `${leftCollapsed ? 1 : 2} / ${visibleTrackCount + 1}`
 
   useEffect(() => {
     void store.init()
@@ -255,6 +321,9 @@ export function App() {
   // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다.
   // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
   // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
+  // ⌘⌥1/⌘⌥2 — 좌·우 사이드 접기 토글 (E12). event.altKey를 반드시 같이 봐야 한다 — macOS는
+  // Option을 누른 채면 event.key가 '1'이 아니라 특수문자(예: '¡')로 바뀐다(실측) — event.key만
+  // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === '`') {
@@ -263,6 +332,23 @@ export function App() {
           saveDockOpen(!prev)
           return !prev
         })
+      } else if (
+        (event.metaKey || event.ctrlKey) &&
+        event.altKey &&
+        (event.code === 'Digit1' || event.code === 'Digit2')
+      ) {
+        event.preventDefault()
+        if (event.code === 'Digit1') {
+          setLeftCollapsed((prev) => {
+            saveLeftCollapsed(!prev)
+            return !prev
+          })
+        } else {
+          setRightCollapsed((prev) => {
+            saveRightCollapsed(!prev)
+            return !prev
+          })
+        }
       } else if ((event.metaKey || event.ctrlKey) && (event.key === 'f' || event.key === 'F')) {
         // 터미널(xterm) 포커스면 쉘의 자체 검색을 존중 — 가로채지 않는다. closest는 매치가
         // 없으면 null을 돌려주므로, activeElement가 .terminal-dock 안에 있을 때만(= 매치 있음
@@ -273,6 +359,10 @@ export function App() {
         const scopeEl = document.elementFromPoint(x, y)?.closest('[data-find-scope]')
         const scope = (scopeEl?.getAttribute('data-find-scope') ??
           'diff') as NonNullable<typeof findScope>
+        // 접힌 패널을 대상으로 하면 먼저 편다 — 안 그러면 찾기 오버레이가 안 보이는 곳에 뜬다
+        // (E12 죽은 클릭 방지, 커밋 클릭과 같은 이유)
+        if (scope === 'history' || scope === 'commit-files') expandRightIfCollapsed()
+        else if (scope === 'changes') expandLeftIfCollapsed()
         setFindScope(scope)
         setFindNonce((n) => n + 1)
       }
@@ -293,6 +383,17 @@ export function App() {
     if (conflictCount > 0 && prevConflictsRef.current === 0) setLeftTab('changes')
     prevConflictsRef.current = conflictCount
   }, [conflictCount])
+
+  // E12 — 우측이 접힌 채 커밋 상세가 뜨면 죽은 클릭이다. 히스토리 목록을 직접 클릭하는 경로는
+  // 우측 자체가 접혀 있어 애초에 불가능하지만, 헤더 보관함(ShelfPopover) "미리보기"처럼 우측
+  // 밖에서 store.selectCommit을 부르는 경로가 있다(ShelfPopover onPreview) — commitDetail이
+  // 채워지는 순간을 공통으로 잡아 우측을 편다
+  useEffect(() => {
+    if (store.commitDetail === null) return
+    expandRightIfCollapsed()
+    // commitDetail 값 자체(어느 커밋인지)에 반응할 필요는 없다 — null→값 전이만 신호
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.commitDetail])
 
   // E7e ① 자동 원격 새로고침 — 시작 직후 1회 + 10분 주기. fetch만 던지고 갱신은 감시가 담당.
   // 훅 순서 불변 — 이른 반환보다 앞 (E7d ① 교훈)
@@ -344,6 +445,28 @@ export function App() {
   return (
     <div className="app">
       <header className={`app__header${compactHeader ? ' app__header--compact' : ''}`}>
+        {/* E12 — 좌측 사이드 접기. 헤더 툴바에 두면 열이 접혀 트랙이 사라져도(app__left
+            언마운트) 진입점이 화면에서 사라지지 않는다 — 헤더는 접힘과 무관하게 항상 그대로다.
+            ⌘⌥1과 같은 동작(toggleLeftCollapsed) */}
+        <Tooltip
+          content={leftCollapsed ? '왼쪽 패널 펼치기 (⌘⌥1)' : '왼쪽 패널 접기 (⌘⌥1)'}
+          summary={leftCollapsed ? '왼쪽 패널 펼치기' : '왼쪽 패널 접기'}
+          describedBy={false}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={toggleLeftCollapsed}
+            testId="left-collapse-toggle"
+            aria-label={leftCollapsed ? '왼쪽 패널 펼치기' : '왼쪽 패널 접기'}
+          >
+            {leftCollapsed ? (
+              <PanelLeftOpen size={14} aria-hidden="true" />
+            ) : (
+              <PanelLeftClose size={14} aria-hidden="true" />
+            )}
+          </Button>
+        </Tooltip>
         <div className="app__repo">
           <strong>{repoName}</strong>
           {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
@@ -472,6 +595,26 @@ export function App() {
               aria-label="터미널"
             >
               <Terminal size={13} aria-hidden="true" /> <span className="app__btn-label">터미널</span>
+            </Button>
+          </Tooltip>
+          {/* E12 — 우측 사이드 접기. 좌측 토글과 대칭 위치(헤더 오른쪽 끝 쪽) */}
+          <Tooltip
+            content={rightCollapsed ? '오른쪽 패널 펼치기 (⌘⌥2)' : '오른쪽 패널 접기 (⌘⌥2)'}
+            summary={rightCollapsed ? '오른쪽 패널 펼치기' : '오른쪽 패널 접기'}
+            describedBy={false}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={toggleRightCollapsed}
+              testId="right-collapse-toggle"
+              aria-label={rightCollapsed ? '오른쪽 패널 펼치기' : '오른쪽 패널 접기'}
+            >
+              {rightCollapsed ? (
+                <PanelRightOpen size={14} aria-hidden="true" />
+              ) : (
+                <PanelRightClose size={14} aria-hidden="true" />
+              )}
             </Button>
           </Tooltip>
           <Button variant="ghost" size="sm" onPress={() => setSettingsOpen(true)} testId="settings-open">
@@ -610,12 +753,11 @@ export function App() {
           </div>
         </div>
       )}
-      <main
-        className="app__main"
-        style={{ gridTemplateColumns: `${columns.left}px minmax(0, 1fr) 6px ${columns.right}px` }}
-      >
+      <main className="app__main" style={{ gridTemplateColumns }}>
         {/* 좌측 열 = [변경 | 실험 공간] 탭 (E7a) — 변경 탭은 기존 그대로(목록+저장 폼, E6a), 커밋 흐름 무변.
-            빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화) */}
+            빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화).
+            E12 — 접히면 트랙째로 렌더에서 뺀다(gridTemplateColumns와 짝) */}
+        {!leftCollapsed && (
         <div className="app__left">
           <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
             <button
@@ -787,6 +929,7 @@ export function App() {
             />
           ) : null}
         </div>
+        )}
         <div className="app__center" data-find-scope="diff">
           {store.conflictFile !== null ? (
             <ConflictPanel
@@ -831,6 +974,9 @@ export function App() {
             />
           )}
         </div>
+        {/* E12 — 우측이 접히면 리사이저·우측 열 둘 다 트랙에서 빠진다(gridTemplateColumns와 짝) */}
+        {!rightCollapsed && (
+        <>
         {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값 */}
         <div
           className="app__resizer"
@@ -953,9 +1099,15 @@ export function App() {
             </>
           )}
         </div>
-        {/* E7b 터미널 도크 — 접힘은 display:none(세션 유지). 행(auto)은 숨김 시 0으로 접힌다 */}
+        </>
+        )}
+        {/* E7b 터미널 도크 — 접힘은 display:none(세션 유지). 행(auto)은 숨김 시 0으로 접힌다.
+            E12 — 좌·우 접힘에 따라 도크가 덮는 열 범위도 함께 바뀐다(dockGridColumn) */}
         {store.repoPath !== null && (
-          <div className="app__dock" style={{ display: dockOpen ? 'block' : 'none' }}>
+          <div
+            className="app__dock"
+            style={{ display: dockOpen ? 'block' : 'none', gridColumn: dockGridColumn }}
+          >
             <TerminalDock
               repoPath={store.repoPath}
               theme={theme}
