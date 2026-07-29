@@ -265,24 +265,43 @@ body.is-fullscreen .app__header {
 .app__center > .ui-panel {
   flex: 1;
 }
-/* 우측 열 — 트리(flex 1)가 기본 전체, 커밋 클릭 시에만 하단 상세 슬롯이 45%를 차지한다 (E6a).
-   리뷰 상세(단독 자식)도 같은 flex 1 규칙으로 전체 높이를 쓴다 */
+/* 우측 열 — 트리(11fr)가 기본 전체, 커밋 클릭 시에만 하단 상세 슬롯이 9fr(=45%)을 차지한다 (E6a).
+   리뷰 상세(단독 자식)는 상세 행이 0인 상태 그대로라 전체 높이를 쓴다.
+   E11 — 이 슬롯의 등장/퇴장만 실제 높이가 움직인다(에픽에서 유일한 레이아웃 애니메이션,
+   안전망의 명시적 예외). grid-template-rows는 Chromium이 보간하는 몇 안 되는 레이아웃 속성이라
+   flex 대신 grid로 옮겼다 — 행 트랙을 minmax(0, 11fr)/minmax(<최소>, <fr>)로 둬 두 상태에서
+   같은 함수 모양(minmax)을 유지해야 각 성분(길이·fr)이 따로 보간된다(실측: 함수 모양이 다르면
+   Chromium이 중간에 스냅한다). 닫힘의 minmax(0px, 0fr)와 열림의 minmax(240px, 9fr)는 옛
+   height:45%+min-height:240px 이중 제약과 같은 값이 되도록 실측으로 고른 조합(11:9 = 55:45,
+   240px 그대로).
+   gap은 안 쓴다 — grid gap은 상세 행이 0이어도(닫힘) 무조건 16px를 먹어 트리가 16px 짧아지는
+   회귀가 실측에서 나왔다(옛 flex는 자식이 하나뿐이면 gap이 안 붙는다). 대신 트리 쪽
+   ui-panel에 margin-bottom을 열렸을 때만 건다 — 옛 flex:1이 gap까지 포함해 "남는 공간"을
+   흡수하던 것과 동치라 두 뷰포트(1280×800·960×600) 모두 픽셀 단위로 일치했다(Step 2 실측).
+   margin은 transition을 걸지 않는다 — 안전망이 막는 레이아웃 속성이라 즉시 전환(계단식)이고,
+   grid-template-rows만 부드럽게 움직인다(의도된 절충, 보고 참조) */
 .app__right {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 11fr) minmax(0px, 0fr);
   min-height: 0;
+  transition: grid-template-rows var(--motion-slow) var(--ease-in-out);
+}
+.app__right--detail-open {
+  grid-template-rows: minmax(0, 11fr) minmax(240px, 9fr);
 }
 .app__right > .ui-panel {
-  flex: 1;
   min-height: 0;
 }
+.app__right--detail-open > .ui-panel {
+  margin-bottom: var(--space-4);
+}
 .app__right-detail {
-  flex: none;
-  height: 45%;
-  min-height: 240px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  /* 0fr로 접힐 때 안에 든 상세 패널이 밖으로 삐져나오지 않게 자른다 */
+  overflow: hidden;
 }
 .app__right-detail > .ui-panel {
   flex: 1;

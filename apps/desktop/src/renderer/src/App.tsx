@@ -845,7 +845,7 @@ export function App() {
             리뷰(PR) 상세만 대화형 화면이라 기존의 우측 전체 전환을 유지한다 (사용자 동의).
             store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다 */}
         <div
-          className="app__right"
+          className={`app__right${store.commitDetail !== null ? ' app__right--detail-open' : ''}`}
           // E7h ⑥ — 리뷰 상세가 열린 동안은 히스토리 스코프가 아니다(그 아래 commit-files
           // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다)
           data-find-scope={store.pullDetail === null ? 'history' : undefined}
@@ -911,8 +911,17 @@ export function App() {
                 }}
                 onClearView={() => void store.clearHistoryView()}
               />
-              {store.commitDetail !== null && (
-                <div className="app__right-detail" data-find-scope="commit-files">
+              {/* E11 — grid-template-rows가 0fr↔9fr로 열고 닫히려면 이 래퍼가 닫힌 동안에도
+                  DOM에 남아 있어야 한다(그래야 처음 여는 순간도 애니메이션이 붙는다).
+                  안은 그대로 조건부 마운트 — 가상 스크롤을 품은 CommitDetailPanel을 미리
+                  올려두면(즉 항상 마운트) 얻는 이득이 없고(닫힌 동안 0fr·overflow:hidden이라
+                  안 보이는데 유지비만 진다) 기존 E2E(commit-detail-panel 소멸 단언)도 깨진다 —
+                  그래서 CommitDetailPanel은 계속 지연 마운트한다 */}
+              <div
+                className="app__right-detail"
+                data-find-scope={store.commitDetail !== null ? 'commit-files' : undefined}
+              >
+                {store.commitDetail !== null && (
                   <CommitDetailPanel
                     detail={store.commitDetail}
                     shelfPreview={shelfPreview}
@@ -939,8 +948,8 @@ export function App() {
                     }}
                     onBack={() => store.clearCommit()}
                   />
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
         </div>
