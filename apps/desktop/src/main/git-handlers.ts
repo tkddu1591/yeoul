@@ -3,7 +3,7 @@ import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
 import { execGit, execGitOrThrow } from '@git-gui/git-process'
 import { CHANNELS } from '@git-gui/ipc-contract'
-import { watchRepository } from './repo-watcher'
+import { watchRepository, watchWorkingTree } from './repo-watcher'
 import { assertOpenableWorktree } from './worktree-open-guard'
 
 /** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
@@ -152,9 +152,16 @@ export function registerGitHandlers(): void {
     ).stdout.trim()
     stopWatching?.()
     const sender = event.sender
-    stopWatching = watchRepository(gitDir, () => {
+    const notify = (): void => {
       if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
-    })
+    }
+    // .git 감시는 HEAD·refs·상태 마커를, 워킹트리 감시는 파일 내용을 본다 — 목적이 달라 둘 다 필요하다 (E10)
+    const stopGit = watchRepository(gitDir, notify)
+    const stopTree = watchWorkingTree(path, notify)
+    stopWatching = () => {
+      stopGit()
+      stopTree()
+    }
     if (!watchCleanupHooked.has(sender)) {
       watchCleanupHooked.add(sender)
       sender.once('destroyed', () => {
