@@ -23,6 +23,7 @@ import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-s
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
+const windowApi = () => window.windowApi
 
 /** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
@@ -375,8 +376,18 @@ let lastGuardEndAt = 0
 /** 작업 종료 후 이 시간 안의 감시 이벤트는 자기 작업의 꼬리로 보고 무시한다 (디바운스 300ms + 여유) */
 export const WATCH_SUPPRESS_MS = 800
 
-/** busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다 */
-async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Promise<boolean> {
+/**
+ * busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다.
+ * armSuppression(기본 true) — 억제 창은 "이 작업이 만든 감시 이벤트"를 삼키기 위한 것이라,
+ * 워크트리를 쓰지 않는 읽기 전용 작업(refresh, externalRefresh)은 false로 넘겨 억제를 걸지
+ * 않는다 — 그렇지 않으면 읽기 전용 재조회가 그다음 진짜 외부 변경까지 삼켜버린다 (E10)
+ */
+async function guard(
+  set: StoreSet,
+  get: StoreGet,
+  run: () => Promise<void>,
+  armSuppression = true,
+): Promise<boolean> {
   if (get().busy) return false
   set({ busy: true, error: null, notice: null })
   try {
@@ -386,7 +397,7 @@ async function guard(set: StoreSet, get: StoreGet, run: () => Promise<void>): Pr
     set({ error: toErrorMessage(cause) })
     return false
   } finally {
-    lastGuardEndAt = Date.now()
+    if (armSuppression) lastGuardEndAt = Date.now()
     set({ busy: false })
   }
 }
@@ -438,6 +449,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     git().repo.onChanged((changedPath) => {
       if (get().repoPath === changedPath) void get().externalRefresh()
     })
+    // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
+    windowApi().onFocused(() => {
+      if (get().repoPath !== null) void get().refresh()
+    })
   },
 
   async openRepository() {
@@ -466,36 +481,51 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async refresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
-      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
-      // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      set({
-        ...CLEAR_SELECTIONS,
-        conflictFile: get().conflictFile,
-        ...(await reviveSelections(repoPath, get(), snapshot.status)),
-        hostingStatus: await hosting().status(repoPath),
-        ...snapshot,
-      })
-    })
+    // 읽기 전용이라 억제를 걸지 않는다 — 워크트리를 쓰지 않으니 자기 꼬리 이벤트가 없고,
+    // 걸면 그사이 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10)
+    await guard(
+      set,
+      get,
+      async () => {
+        // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
+        // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        set({
+          ...CLEAR_SELECTIONS,
+          conflictFile: get().conflictFile,
+          ...(await reviveSelections(repoPath, get(), snapshot.status)),
+          hostingStatus: await hosting().status(repoPath),
+          ...snapshot,
+        })
+      },
+      false,
+    )
   },
 
   async externalRefresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    // 자기 작업 꼬리 이벤트 억제 — 작업 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다
+    // 자기 작업 꼬리 이벤트 억제 — 작업(쓰기) 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다.
+    // 이 억제는 마지막 "쓰기" 작업 기준으로만 걸린다(guard의 armSuppression) — 읽기 전용 재조회는
+    // 여기 걸리지 않으므로, 연속된 외부 변경이 서로를 삼키지 않는다 (E10)
     if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
-    await guard(set, get, async () => {
-      // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
-      // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰)
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      set({
-        ...CLEAR_SELECTIONS,
-        conflictFile: get().conflictFile,
-        ...(await reviveSelections(repoPath, get(), snapshot.status)),
-        ...snapshot,
-      })
-    })
+    await guard(
+      set,
+      get,
+      async () => {
+        // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
+        // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        set({
+          ...CLEAR_SELECTIONS,
+          conflictFile: get().conflictFile,
+          ...(await reviveSelections(repoPath, get(), snapshot.status)),
+          ...snapshot,
+        })
+      },
+      // 읽기 전용이라 억제를 걸지 않는다 — 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
+      false,
+    )
   },
 
   async switchBranch(name) {

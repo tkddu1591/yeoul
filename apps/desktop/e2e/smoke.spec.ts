@@ -3035,3 +3035,30 @@ test('E9 — 한글 조합 중 ⌘↵는 커밋하지 않는다 (IME 가드)', a
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E10 — 억제 창 안에서 연속된 외부 변경 두 건이 모두 반영된다 (Task 2-보완)', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('history-count')).toHaveText('1')
+
+    // 첫 외부 변경 — 읽기 전용 재조회(externalRefresh)가 반영한다
+    await execGitOrThrow(['commit', '--allow-empty', '-m', 'E10 외부 변경 1'], { cwd: repo })
+    await expect(window.getByTestId('history-count')).toHaveText('2', { timeout: 5_000 })
+
+    // 첫 재조회가 화면에 반영된 직후 — 억제 창(WATCH_SUPPRESS_MS=800, E7b) 안에 두 번째 외부
+    // 변경을 밀어넣는 의도된 타이밍이다. 읽기 전용 재조회가 억제를 걸면(버그) 이 변경은 조용히
+    // 삼켜져 화면이 영영 갱신되지 않는다 — 사용자가 에디터로 연달아 저장하는 실제 패턴 (E10 Task 2-보완)
+    await execGitOrThrow(['commit', '--allow-empty', '-m', 'E10 외부 변경 2'], { cwd: repo })
+    await expect(window.getByTestId('history-count')).toHaveText('3', { timeout: 5_000 })
+    await expect(window.getByTestId('history-list')).toContainText('E10 외부 변경 2')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
