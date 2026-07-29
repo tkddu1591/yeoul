@@ -58,10 +58,38 @@ async function createTwoBlockConflictRepo(): Promise<string> {
   return dir
 }
 
-/** 대상 요소 중심에 마우스를 올리고 ⌘F를 눌러 그 스코프의 FindBar를 연다 (E7h ⑥ — hover 라우팅) */
+/**
+ * 대상 요소 중심에 마우스를 올리고 ⌘F를 눌러 그 스코프의 FindBar를 연다 (E7h ⑥ — hover 라우팅).
+ *
+ * E12 ⌘F 12% 플레이크 실측(root-cause): 앱의 스코프 판정은 hover 상태를 어딘가에 미리 저장해 두는
+ * 게 아니라, keydown 시점에 pointerRef(마지막 pointermove 좌표)로 document.elementFromPoint를
+ * 불러 그 자리에서 계산한다(App.tsx의 ⌘F 핸들러) — 그래서 "hover가 아직 등록 안 됐다"는 레이스는
+ * 애초에 존재하지 않는다. 진짜 문제는 대상이 막 열리는 애니메이션 도중(app__right-detail의
+ * grid-template-rows 240ms 전환, E11)일 때다 — boundingBox()가 프레임마다 다른 값을 주므로, 계산한
+ * 좌표로 마우스를 옮기고 곧장 키를 누르면 그 지점이 아직 대상 밖(레이아웃이 덜 자란 자리)일 수
+ * 있다. 그러면 App.tsx의 elementFromPoint가 data-find-scope를 못 찾아 'diff'로 폴백하는데, 이
+ * testId('commit-detail-panel') 테스트는 diff에 선택된 파일이 없어 FindBar가 어디에도 안 뜬다
+ * (실측: 40회 중 3회, 실패마다 scope=diff/scopeElClass=null로 재현 — 통과한 회차들도 y좌표가
+ * 730~769 사이를 계속 오갔다(애니메이션 진행 중 샘플링됐다는 증거). 애니메이션이 안 걸리는 나머지
+ * hoverAndCmdF 호출부(history/diff/changes 패널)는 이 레이스가 안 걸려 플레이크가 이 테스트에만
+ * 몰렸던 것과도 일치한다).
+ *
+ * 고정 sleep은 레이스를 드물게만 만들 뿐이라(플랜 지시) 쓰지 않는다 — 대신 "그 좌표의 실제 요소가
+ * 대상 selector 안에 들어와 있다"는 조건 자체를 만족할 때까지 기다린 뒤에만 키를 누른다.
+ */
 async function hoverAndCmdF(window: Page, selector: string): Promise<void> {
-  const box = (await window.locator(selector).boundingBox())!
-  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  const locator = window.locator(selector)
+  let point = { x: 0, y: 0 }
+  await expect(async () => {
+    const box = (await locator.boundingBox())!
+    point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    await window.mouse.move(point.x, point.y)
+    const landedInside = await window.evaluate(
+      ({ x, y, sel }) => document.elementFromPoint(x, y)?.closest(sel) != null,
+      { x: point.x, y: point.y, sel: selector },
+    )
+    expect(landedInside).toBe(true)
+  }).toPass({ timeout: 2000 })
   await window.keyboard.press('Meta+f')
 }
 
