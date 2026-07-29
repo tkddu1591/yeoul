@@ -2980,3 +2980,58 @@ test('E9 — 왼쪽 슬롯이 항상 상태를 말한다', async () => {
     await rm(repo, { recursive: true, force: true })
   }
 })
+
+test('E9 — 한글 조합 중 ⌘↵는 커밋하지 않는다 (IME 가드)', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('check-unstaged-app.txt').click()
+    await window.getByTestId('stage-selected').click()
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+
+    // CDP Input.imeSetComposition으로 진짜 조합 상태를 만든다 — 이러면 keydown의
+    // event.isComposing이 실제 한글 입력과 똑같이 true가 된다(컨트롤러 실측으로 확인).
+    // 이 경로가 없다고 판단해 E9는 이 가드를 런타임 미검증으로 남겼었다
+    const cdp = await window.context().newCDPSession(window)
+    await window.getByTestId('commit-message').click()
+    await cdp.send('Input.imeSetComposition', { text: '한', selectionStart: 1, selectionEnd: 1 })
+
+    // 키가 정말 도달했는지까지 확인한다 — 이게 없으면 "커밋이 안 됐다"가 가드 덕분인지
+    // 키가 안 온 탓인지 구분할 수 없어 단언이 공허해진다 (실측으로 겪은 함정)
+    const seen: Array<{ key: string; isComposing: boolean }> = []
+    await window.exposeFunction('__recordKey', (entry: { key: string; isComposing: boolean }) => {
+      seen.push(entry)
+    })
+    await window.evaluate(() => {
+      const el = document.querySelector<HTMLTextAreaElement>('[data-testid="commit-message"]')
+      el?.addEventListener('keydown', (event) => {
+        void (window as unknown as { __recordKey(e: unknown): void }).__recordKey({
+          key: event.key,
+          isComposing: event.isComposing,
+        })
+      })
+    })
+
+    await window.getByTestId('commit-message').press('ControlOrMeta+Enter')
+    await expect(window.getByTestId('staged-count')).toHaveText('1')
+    expect(seen).toContainEqual({ key: 'Enter', isComposing: true })
+
+    // 조합 중 커밋이 새면 미완성 자모("한")가 커밋 메시지로 박힌다 — 개수로 확인
+    const log = await execGitOrThrow(['log', '--oneline'], { cwd: repo })
+    expect(log.stdout.trim().split('\n')).toHaveLength(1)
+
+    // 확정 후에는 정상 커밋된다
+    await window.getByTestId('commit-message').fill('조합 확정 후 커밋')
+    await window.getByTestId('commit-message').press('ControlOrMeta+Enter')
+    await expect(window.getByTestId('staged-count')).toHaveText('0')
+    const after = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: repo })
+    expect(after.stdout.trim()).toBe('조합 확정 후 커밋')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
