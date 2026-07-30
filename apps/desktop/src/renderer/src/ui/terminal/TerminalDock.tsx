@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button } from '../Button'
 import { Tooltip } from '../Tooltip'
 import { useTerminalSessions } from './use-terminal-sessions'
@@ -37,6 +37,8 @@ export function TerminalDock({
   onClose,
 }: TerminalDockProps) {
   const sessions = useTerminalSessions(repoPath, theme)
+  // 도크 행 전환(open/close, E13 Task 3) 중 ResizeObserver가 관찰할 이 요소 자신의 DOM 참조
+  const dockRef = useRef<HTMLDivElement | null>(null)
   // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
   const groupKey = activeWorktree?.cwd ?? repoPath
   // 빈 상태 오버레이는 지금 보이는 탭 기준 (E12)
@@ -81,8 +83,23 @@ export function TerminalDock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // E13 Task 3 — 도크 행이 grid-template-rows 전환(App.tsx)으로 열고 닫히는 240ms 내내 이
+  // 요소 자신의 실제 박스 크기가 매 프레임 바뀐다(.terminal-dock이 height:100%로 부모 행
+  // 트랙을 그대로 따라간다, terminal-dock.css). 위 'resize'(창 폭) 리스너는 창 크기 자체가
+  // 그대로인 이 전환을 못 잡는다 — ResizeObserver로 이 요소의 실제 크기 변화를 프레임마다
+  // 관찰해 refit한다. 전환이 끝나 크기가 dockHeight에 정확히 도달하는 마지막 콜백이 최종
+  // 정착 크기도 함께 잡아준다(별도 transitionend 처리가 필요 없다)
+  useEffect(() => {
+    const el = dockRef.current
+    if (el === null) return
+    const observer = new ResizeObserver(() => sessions.refitActive())
+    observer.observe(el)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
-    <div className="terminal-dock" style={{ height }} data-testid="terminal-dock">
+    <div className="terminal-dock" ref={dockRef} data-testid="terminal-dock">
       <div
         className="terminal-dock__bar"
         onPointerDown={onResizeStart}

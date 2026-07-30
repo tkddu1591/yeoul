@@ -41,7 +41,12 @@ import {
   saveRightCollapsed,
   saveRightWidth,
 } from './ui/column-resize'
-import { buildMainColumns, MAIN_DOCK_GRID_COLUMN } from './ui/grid-tracks'
+import {
+  buildMainColumns,
+  buildMainRows,
+  MAIN_DOCK_GRID_COLUMN,
+  MAIN_DOCK_GRID_ROW,
+} from './ui/grid-tracks'
 import {
   clampDockHeight,
   loadDockHeight,
@@ -159,6 +164,9 @@ export function App() {
   }
   const startDockResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
+    // E13 Task 3 — 열 리사이즈(startResize)와 같은 이유: 행 전환(240ms)이 걸린 채 드래그하면
+    // 커서를 뒤쫓아 오는 모양으로 보인다. 손 떼는 순간까지 억제한다 (아래 noColumnTransition)
+    setDockDragSuppress(true)
     const onMove = (move: PointerEvent) => {
       setDockHeight(clampDockHeight(window.innerHeight - move.clientY - 20, window.innerHeight))
     }
@@ -167,6 +175,7 @@ export function App() {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       saveDockHeight(clampDockHeight(window.innerHeight - up.clientY - 20, window.innerHeight))
+      setDockDragSuppress(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -193,14 +202,16 @@ export function App() {
   )
   // 창 폭 — 좌·우 열이 창 폭에 따라 줄어드는 반응형 계산(computeColumns)의 입력 (E6a)
   const [viewportWidth, setViewportWidth] = useState<number>(() => window.innerWidth)
-  // E13 — .app__main의 grid-template-columns 전환(240ms)을 꺼야 하는 세 순간을 각자 독립된
-  // 플래그로 추적하고 OR로 합친다(부팅·드래그·창 크기 변경은 서로 다른 생명주기라 하나로
-  // 뭉치면 한쪽이 끝나며 다른 쪽 억제까지 같이 풀린다). 부팅은 E11 theme-switching과 같은
-  // idiom(rAF 두 번 — 첫 rAF는 새 스타일이 커밋된 뒤, 그 안의 두 번째 rAF에서 억제 해제)
+  // E13 — .app__main의 grid-template-columns(열) · grid-template-rows(행, Task 3) 전환(240ms)을
+  // 꺼야 하는 네 순간을 각자 독립된 플래그로 추적하고 OR로 합친다(부팅·열 드래그·창 크기 변경·
+  // 도크 높이 드래그는 서로 다른 생명주기라 하나로 뭉치면 한쪽이 끝나며 다른 쪽 억제까지 같이
+  // 풀린다). 부팅은 E11 theme-switching과 같은 idiom(rAF 두 번 — 첫 rAF는 새 스타일이 커밋된
+  // 뒤, 그 안의 두 번째 rAF에서 억제 해제)
   const [bootSuppress, setBootSuppress] = useState(true)
   const [dragSuppress, setDragSuppress] = useState(false)
   const [resizeSuppress, setResizeSuppress] = useState(false)
-  const noColumnTransition = bootSuppress || dragSuppress || resizeSuppress
+  const [dockDragSuppress, setDockDragSuppress] = useState(false)
+  const noColumnTransition = bootSuppress || dragSuppress || resizeSuppress || dockDragSuppress
   useEffect(() => {
     const raf1 = requestAnimationFrame(() => {
       requestAnimationFrame(() => setBootSuppress(false))
@@ -308,6 +319,12 @@ export function App() {
   // 도크(터미널)는 좌측 관리 존(좌 트랙+그 간격)만 제외한 나머지 트랙 전부를 덮는다 — 트랙 수가
   // 이제 접힘과 무관하게 항상 고정이라(grid-tracks.ts) 시작선도 항상 3번째로 고정이다
   const dockGridColumn = MAIN_DOCK_GRID_COLUMN
+  // E13 Task 3 — 닫힌 도크도 행 트랙을 유지하고 0px로 둔다(grid-tracks.ts) — 간격도 트랙으로
+  // 옮겨져 콘텐츠·간격·도크가 이 한 값 안에서 함께 보간된다. .app__main의 transition이 이 값의
+  // 변화도 탄다(부팅·열 드래그·창 크기 변경·도크 드래그 중엔 noColumnTransition으로 억제)
+  const gridTemplateRows = buildMainRows(dockOpen, dockHeight)
+  // 도크는 항상 3번째(마지막) 행 — 암시적 배치에 맡기면 2번째 간격 행에 잘못 올라갈 수 있다
+  const dockGridRow = MAIN_DOCK_GRID_ROW
 
   useEffect(() => {
     void store.init()
@@ -798,7 +815,7 @@ export function App() {
       )}
       <main
         className={`app__main${noColumnTransition ? ' app__main--no-column-transition' : ''}`}
-        style={{ gridTemplateColumns }}
+        style={{ gridTemplateColumns, gridTemplateRows }}
       >
         {/* 좌측 열 = [변경 | 실험 공간] 탭 (E7a) — 변경 탭은 기존 그대로(목록+저장 폼, E6a), 커밋 흐름 무변.
             빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화).
@@ -1148,13 +1165,12 @@ export function App() {
             </>
           )}
         </div>
-        {/* E7b 터미널 도크 — 접힘은 display:none(세션 유지). 행(auto)은 숨김 시 0으로 접힌다.
-            E13 — 도크가 덮는 열 범위(dockGridColumn)는 이제 트랙 수가 고정이라 상수다 */}
+        {/* E7b 터미널 도크 — 세션 유지를 위해 항상 마운트한다(언마운트 금지).
+            E13 Task 3 — display:none 대신 행 트랙 자체가 0px↔dockHeight로 전환된다(gridTemplateRows,
+            좌·우 열이 트랙을 유지하는 것과 같은 이유). 열 범위(dockGridColumn)·행 범위(dockGridRow)
+            모두 트랙 수가 고정이라 상수다 */}
         {store.repoPath !== null && (
-          <div
-            className="app__dock"
-            style={{ display: dockOpen ? 'block' : 'none', gridColumn: dockGridColumn }}
-          >
+          <div className="app__dock" style={{ gridColumn: dockGridColumn, gridRow: dockGridRow }}>
             <TerminalDock
               repoPath={store.repoPath}
               theme={theme}

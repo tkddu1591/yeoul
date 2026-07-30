@@ -1,15 +1,33 @@
-/* E7b 터미널 도크 — 중앙+우측 하단(grid-column 2/5). 좌측 관리 존은 전체 높이 유지 (스펙 v2 목업) */
+/* E7b 터미널 도크 — 중앙+우측 하단. 좌측 관리 존은 전체 높이 유지 (스펙 v2 목업).
+   grid-column·grid-row는 App.tsx가 grid-tracks.ts 상수로 inline style 지정한다(E13) —
+   여기 값은 지우지 않고 App이 항상 덮어쓴다는 사실만 유지 */
 .app__dock {
-  grid-column: 2 / 5;
   min-height: 0;
+  /* E13 Task 3 — display:none 폐기, 행 트랙이 0px↔dockHeight로 전환된다(App.tsx). 이 그리드
+     아이템 자신의 박스가 곧 행 트랙 크기라 별도 처리가 필요 없지만, stretch로 생긴 박스보다
+     안의 내용(.terminal-dock)이 커지는 순간(전환 도중)이 있을 수 있어 방어적으로 자른다 */
+  overflow: hidden;
 }
 .terminal-dock {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* E13 Task 3 — 고정 px 대신 부모(.app__dock, 곧 행 트랙 크기)를 그대로 채운다. 열림/닫힘
+     전환 내내 이 값이 실제로 바뀌어야 (a) FitAddon이 매 프레임 올바른 크기를 재기 위한
+     ResizeObserver(TerminalDock.tsx)가 뭔가 관찰할 대상이 생기고 (b) 닫힘일 때 이 요소 자신의
+     박스가 진짜 0이 되어 Playwright의 not.toBeVisible()이 성립한다(고정 높이였다면 부모가
+     overflow:hidden으로 가려도 이 요소 자신의 bounding box는 0이 아니라 여전히 "보임"으로
+     잡힌다 — app__left 등 다른 접힘 트랙이 전부 "그리드 아이템 자신이 곧 트랙"인 것과 같은 이유) */
+  height: 100%;
   /* E12 — 패널들과 같은 위계로: border-strong은 도크만 유독 진해 보여 다른 층처럼 읽혔다.
-     panel.css의 .ui-panel과 같은 --color-border로 내려 시각적으로 같은 층에 앉힌다 */
-  border: 1px solid var(--color-border);
+     panel.css의 .ui-panel과 같은 --color-border로 내려 시각적으로 같은 층에 앉힌다.
+     E13 Task 3 — border가 아니라 inset box-shadow로 그린다: border는 box-sizing:border-box라도
+     height가 0으로 수렴할 때 내용 높이만 음수로 clamp되고 테두리 두께(위+아래 2px)는 그대로
+     남아 실제 렌더 높이가 2px가 된다(실측: 도크를 닫아도 이 2px 때문에 이 요소 자신의
+     bounding box가 0이 아니게 되어 Playwright의 not.toBeVisible()이 깨졌다 — E7b 회귀).
+     box-shadow는 레이아웃 박스 크기에 전혀 관여하지 않는 순수 페인트라 0px 박스에서는
+     아무것도 그려지지 않는다 — 그 외에는 border-radius를 그대로 따라가 시각적으로 동일하다 */
+  box-shadow: inset 0 0 0 1px var(--color-border);
   border-radius: var(--radius-container);
   /* 프레임은 앱 테마를 따른다 — 터미널 내부 색은 xterm 팔레트(terminal-theme.ts) 소유 (E7d ③ 보완:
      다크 하드코딩이면 라이트 모드에서 xterm 둘레 패딩이 어두운 심으로 노출된다) */
