@@ -2,9 +2,51 @@ import { describe, expect, it } from 'vitest'
 import {
   buildMainColumns,
   buildMainRows,
+  MAIN_DOCK_GRID_COLUMN,
+  MAIN_DOCK_GRID_ROW,
   MAIN_GAP,
+  MAIN_ROW_COUNT,
+  MAIN_TRACK_COUNT,
   RESIZER_WIDTH,
 } from '../src/renderer/src/ui/grid-tracks'
+import { computeColumns } from '../src/renderer/src/ui/column-resize'
+
+/**
+ * E13 후속(리뷰 NOTE 5) — 아래 트랙 문자열 테스트들은 기대값을 상수 자신으로 쓴다(`${MAIN_GAP}px`).
+ * 그래서 상수를 바꾸면 기대값도 같이 바뀌어 **항진명제**가 된다 — 실측: MAIN_GAP만 16→24로
+ * 바꿨더니 이 파일 10건은 물론 루트 555건 전부가 그대로 통과했다. 값 자체를 여기서 리터럴로
+ * 못박아야 조용한 변경이 잡힌다. 리터럴은 CSS 쪽 정본과 짝이다:
+ *   - MAIN_GAP 16 ↔ layout.css `.app__main`의 폴백 트랙 문자열·`--space-4`
+ *   - RESIZER_WIDTH 6 ↔ layout.css `.app__resizer`가 올라앉는 5번 트랙 폭
+ *   - MAIN_ROW_COUNT 3 ↔ layout.css `.app__left`의 `grid-row: 1 / 4`
+ * (e2e는 간격이 커지는 쪽만 잡는다 — 작아지면 아무도 못 잡았다)
+ */
+describe('레이아웃 상수 (CSS와 짝 — 리터럴로 못박는다)', () => {
+  it('MAIN_GAP은 16 — layout.css의 --space-4·폴백 트랙과 같은 값', () => {
+    expect(MAIN_GAP).toBe(16)
+  })
+
+  it('RESIZER_WIDTH는 6 — layout.css .app__resizer가 사는 트랙 폭', () => {
+    expect(RESIZER_WIDTH).toBe(6)
+  })
+
+  it('MAIN_TRACK_COUNT는 7 · MAIN_ROW_COUNT는 3 — CSS의 grid-column/grid-row 리터럴과 짝', () => {
+    expect(MAIN_TRACK_COUNT).toBe(7)
+    expect(MAIN_ROW_COUNT).toBe(3)
+    expect(MAIN_DOCK_GRID_COLUMN).toBe('3 / 8')
+    expect(MAIN_DOCK_GRID_ROW).toBe('3')
+  })
+
+  it('column-resize가 쓰는 간격도 같은 정본이다 — 반응형 계산이 MAIN_GAP을 따라 움직인다', () => {
+    // 1200px 창·양쪽 펼침: chrome = 패딩 40 + 간격 3칸 + 리사이저 6.
+    // 좌 = min(380, 1200 - chrome - 380(중앙 최소) - 우측). MAIN_GAP이 정본이 아니면
+    // 여기 유도식이 실제 계산과 어긋나 이 단언이 깨진다
+    const chrome = 40 + 3 * MAIN_GAP + RESIZER_WIDTH
+    const { left, right } = computeColumns(1200, 360, {})
+    expect(right).toBe(360)
+    expect(left).toBe(Math.min(380, 1200 - chrome - 380 - right))
+  })
+})
 
 /** 트랙 문자열의 px 합 — 간격을 트랙으로 옮겼으므로 합이 곧 콘텐츠 폭이어야 한다 */
 function sum(template: string): number {

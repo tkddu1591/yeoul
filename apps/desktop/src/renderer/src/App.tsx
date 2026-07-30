@@ -839,8 +839,9 @@ export function App() {
             시작점을 유지해야 grid-template-columns가 보간된다(E12 시절의 조건부 마운트 폐기).
             E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — .app__left는 이제 순수
             클리퍼(트랙 폭 그대로)이고, 실제 탭바·패널은 안의 .app__left-inner가 펼친 폭
-            (leftExpandedWidth)을 고정으로 유지한 채 담는다(layout.css 주석 참조) */}
-        <div className="app__left">
+            (leftExpandedWidth)을 고정으로 유지한 채 담는다(layout.css 주석 참조).
+            inert — 아래 app__dock 주석 참조(세 클리퍼 공통) */}
+        <div className="app__left" inert={leftCollapsed} aria-hidden={leftCollapsed || undefined}>
           <div className="app__left-inner" style={{ width: leftExpandedWidth }}>
           <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
             <button
@@ -1076,9 +1077,12 @@ export function App() {
             클리퍼(트랙 폭 그대로)이고, 실제 트리·상세는 안의 .app__right-inner가 펼친 폭
             (rightExpandedWidth)을 고정으로 유지한 채 담는다. 오른쪽 끝에 고정(justify-content:
             flex-end, layout.css)해 왼쪽(중앙쪽)부터 잘려 나가 오른쪽으로 슬라이드 아웃하는
-            모양을 낸다 */}
+            모양을 낸다.
+            inert — 아래 app__dock 주석 참조(세 클리퍼 공통) */}
         <div
           className="app__right"
+          inert={rightCollapsed}
+          aria-hidden={rightCollapsed || undefined}
           // E7h ⑥ — 리뷰 상세가 열린 동안은 히스토리 스코프가 아니다(그 아래 commit-files
           // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다).
           // E13 — 접힌 동안도 스코프를 비운다(⌘F 핸들러가 leftCollapsedRef/rightCollapsedRef로
@@ -1204,11 +1208,28 @@ export function App() {
             그대로)라 data-testid="terminal-dock"을 여기로 옮겼다(TerminalDock.tsx의 안쪽
             .terminal-dock에서 이전 — 그쪽은 이제 고정 높이라 자기 박스가 안 줄어든다, 아래
             TerminalDock 주석·terminal-dock.css 참조). Playwright의 toBeHidden()/toBeVisible()이
-            이 요소를 봐야 실제로 접혔는지 정확히 잡는다 */}
+            이 요소를 봐야 실제로 접혔는지 정확히 잡는다.
+
+            E13 후속(적대적 리뷰 BLOCKING) — 세 클리퍼(.app__dock/.app__left/.app__right) 공통으로
+            접힌 동안 inert를 건다. E13이 "전환의 시작점을 남기려고" 조건부 마운트·display:none을
+            폐기하면서, 박스만 0px일 뿐 **포커스는 그대로 들어가는** 상태를 만들었다. 마우스는
+            overflow:hidden이 히트 테스트까지 잘라 안전하지만 키보드는 아니다 — 리뷰 실측: 도크를
+            닫은 채 body에서 Tab 15번이면 숨은 .xterm-helper-textarea에 포커스가 앉고 거기 친 글자가
+            **살아 있는 pty에서 실제로 실행됐다**(다시 열면 스크롤백에 남아 있다). 접힌 사이드도
+            각각 21개가 포커스 가능했다.
+            inert를 고른 이유: ① 레이아웃 효과가 0이라 240ms 전환을 전혀 건드리지 않는다
+            ② 언마운트가 아니라 E7b의 "접어도 터미널 세션이 산다"가 그대로다 ③ 박스 크기를 바꾸지
+            않아 Playwright의 toBeHidden()/toBeVisible()도 그대로 동작한다.
+            aria-hidden을 함께 거는 이유: inert는 포커스·클릭·텍스트 선택을 막지만 스크린리더
+            노출까지 규격상 보장하지는 않는다(브라우저별 편차) — 둘을 같이 건다. false 대신
+            undefined로 지우는 것은 aria-hidden="false"가 "명시적으로 노출"이라는 별개 의미를
+            갖기 때문이다. React 19라 inert는 boolean prop 그대로 쓴다(false면 속성이 안 붙는다) */}
         {store.repoPath !== null && (
           <div
             className="app__dock"
             data-testid="terminal-dock"
+            inert={!dockOpen}
+            aria-hidden={!dockOpen || undefined}
             style={{ gridColumn: dockGridColumn, gridRow: dockGridRow }}
           >
             <TerminalDock

@@ -37,7 +37,8 @@ export function TerminalDock({
   onClose,
 }: TerminalDockProps) {
   const sessions = useTerminalSessions(repoPath, theme)
-  // 도크 행 전환(open/close, E13 Task 3) 중 ResizeObserver가 관찰할 이 요소 자신의 DOM 참조
+  // 아래 ResizeObserver가 관찰할 이 요소 자신의 DOM 참조 — 창 크기와 무관한 폭 변화(사이드
+  // 접기)를 잡는 용도다(그 effect 주석 참조, E13 후속에서 세로→가로로 역할 정정)
   const dockRef = useRef<HTMLDivElement | null>(null)
   // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
   const groupKey = activeWorktree?.cwd ?? repoPath
@@ -83,12 +84,16 @@ export function TerminalDock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // E13 Task 3 — 도크 행이 grid-template-rows 전환(App.tsx)으로 열고 닫히는 240ms 내내 이
-  // 요소 자신의 실제 박스 크기가 매 프레임 바뀐다(.terminal-dock이 height:100%로 부모 행
-  // 트랙을 그대로 따라간다, terminal-dock.css). 위 'resize'(창 폭) 리스너는 창 크기 자체가
-  // 그대로인 이 전환을 못 잡는다 — ResizeObserver로 이 요소의 실제 크기 변화를 프레임마다
-  // 관찰해 refit한다. 전환이 끝나 크기가 dockHeight에 정확히 도달하는 마지막 콜백이 최종
-  // 정착 크기도 함께 잡아준다(별도 transitionend 처리가 필요 없다)
+  // 도크 폭이 **창 크기 변화 없이** 바뀌는 경우를 잡는다 — 좌·우 사이드 접기(⌘⌥1/⌘⌥2)다.
+  // 도크는 좌측 관리 존을 뺀 나머지 열 전부를 덮으므로(MAIN_DOCK_GRID_COLUMN) 좌측이 접히면
+  // 도크가 그만큼 넓어지는데, 창 크기는 그대로라 위 'resize' 리스너가 못 잡는다.
+  //
+  // E13 후속 정정 — 이 자리에 원래 "도크 행 전환(open/close) 240ms 동안 이 요소의 높이가 매
+  // 프레임 바뀌므로 그것을 추적한다"고 적혀 있었다. f523ed0 이후로는 **사실이 아니다**:
+  // 이 요소(.terminal-dock)는 인라인 고정 높이(dockHeight)를 유지하고, 줄어드는 쪽은 부모
+  // 클리퍼(.app__dock)다(실측: 행 트랙이 240↔0으로 오가는 내내 innerH는 240 고정). 즉 이
+  // 옵저버가 실제로 잡는 것은 이제 **세로가 아니라 가로**뿐이다. 세로는 위의 height prop
+  // effect가 담당한다(도크 높이 드래그·창 세로 축소 모두 그쪽 경로다)
   useEffect(() => {
     const el = dockRef.current
     if (el === null) return

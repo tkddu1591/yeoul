@@ -1,3 +1,10 @@
+// E13 후속(리뷰 NOTE 5) — 간격·리사이저 폭은 grid-tracks.ts가 정본이다. 예전엔 여기에
+// GRID_GAP=16·RESIZER_WIDTH=6을 따로 적어 두 곳이 조용히 어긋날 수 있었다(실측: grid-tracks의
+// MAIN_GAP만 24로 바꿔도 루트 555건이 전부 통과했다 — 아무도 안 잡는다). 이제 하나만 남긴다.
+// grid-tracks.ts가 여기서 가져가는 ColumnCollapse는 `import type`이라 런타임에 지워진다 —
+// 순환 import가 아니다(런타임 그래프는 column-resize → grid-tracks 한 방향)
+import { MAIN_GAP, RESIZER_WIDTH } from './grid-tracks'
+
 export const RIGHT_COLUMN_DEFAULT = 360
 
 /** 우측 열 폭 제한 — 최소 260px(내용 붕괴 방지), 최대 뷰포트 45%(중앙 diff 생존) */
@@ -30,16 +37,14 @@ export const LEFT_COLUMN_DEFAULT = 380
 export const LEFT_COLUMN_MIN = 260
 /** 중앙(diff·충돌 뷰) 최소 보장 폭 — 960px 최소 창에서도 지킨다 (E2 후속 노트 해소) */
 export const CENTER_MIN = 380
-/** 그리드 고정 소모 폭 — main 좌우 패딩 20×2 + 열 간 gap 16×3 + 리사이저 6 (layout.css와 짝) */
-const MAIN_CHROME = 94
 /** 중앙 보장이 우측 클램프 하한(260)과 충돌할 때 우측이 내려가는 마지막 바닥 */
 const RIGHT_COLUMN_FLOOR = 200
 /** main 좌우 패딩 20×2 — 열이 몇 개 접히든 항상 남는다 (MAIN_CHROME 분해 성분) */
 const MAIN_PADDING = 40
-/** 열 간 gap — 접힌 열은 이 gap도 함께 사라진다(트랙 자체가 빠지므로) */
-const GRID_GAP = 16
-/** 리사이저 — 우측 폭 조절 전용이라 우측이 접히면 존재 이유가 없어져 함께 사라진다 */
-const RESIZER_WIDTH = 6
+/** 그리드 고정 소모 폭 — main 좌우 패딩 20×2 + 열 간 gap 16×3 + 리사이저 6 (layout.css와 짝).
+ * E13 후속 — 하드코딩 94를 성분식으로 바꿨다. 아래 computeColumns의 검산 주석이 이 값을
+ * 기준으로 쓰는데, 간격이 바뀌면 그 검산도 같이 따라와야 맞다 */
+const MAIN_CHROME = MAIN_PADDING + 3 * MAIN_GAP + RESIZER_WIDTH
 
 /** 접힌 열 상태 — 없으면(undefined) 둘 다 펼쳐진 것으로 본다 */
 export interface ColumnCollapse {
@@ -74,7 +79,7 @@ export function computeColumns(
   if (leftCollapsed && rightCollapsed) return { left: 0, right: 0 }
 
   const trackCount = (leftCollapsed ? 0 : 1) + 1 + (rightCollapsed ? 0 : 2)
-  const chrome = MAIN_PADDING + (trackCount - 1) * GRID_GAP + (rightCollapsed ? 0 : RESIZER_WIDTH)
+  const chrome = MAIN_PADDING + (trackCount - 1) * MAIN_GAP + (rightCollapsed ? 0 : RESIZER_WIDTH)
   const budget = viewportWidth - chrome - CENTER_MIN
 
   if (leftCollapsed) {

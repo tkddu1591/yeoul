@@ -290,8 +290,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Task 3 실측:** 열기 `0→2.8→13→…→240`, 닫기 `240→…→0` 단조 · xterm 정상(본문 210px·화면 176px, 마지막 출력 행이 안쪽) · 닫은 뒤 중앙 710px = 열기 전 710px 완전 동일.
 
-- **`.terminal-dock`의 `border`가 0높이에서 2px을 남겨 E7b `toBeHidden()`을 깼다** — `box-shadow: inset`으로 바꾸고 `height: 100%`로 부모 트랙을 따라가게 했다(처음엔 고정 px 높이로 두려다 자기 박스가 0이 안 돼 실패).
-- 도크 행 애니메이션을 매 프레임 추적하도록 `ResizeObserver`를 새로 달았다(E12가 창 폭용으로 단 `resize` 리스너와는 별개).
+- **`.terminal-dock`의 `border`가 0높이에서 2px을 남겨 E7b `toBeHidden()`을 깼다** — `box-shadow: inset`으로 바꾸고 `height: 100%`로 부모 트랙을 따라가게 했다(처음엔 고정 px 높이로 두려다 자기 박스가 0이 안 돼 실패). **⚠️ 정정(아래 「후속 ①」) — 이 `height: 100%`는 `f523ed0`이 바로 그 크러시의 원인으로 지목해 폐기했다. 지금은 다시 인라인 고정 높이이고, 0이 되는 쪽은 부모 클리퍼 `.app__dock`이며 `data-testid="terminal-dock"`도 그리로 옮겨 `toBeHidden()`을 지킨다.**
+- 도크 행 애니메이션을 매 프레임 추적하도록 `ResizeObserver`를 새로 달았다(E12가 창 폭용으로 단 `resize` 리스너와는 별개). **⚠️ 정정(아래 「후속 ①」) — `f523ed0` 이후 `.terminal-dock`의 높이는 행 전환 중 **변하지 않는다**(실측: 행 트랙이 240↔0을 오가는 내내 `innerH: 240` 고정). 이 옵저버가 실제로 잡는 것은 세로가 아니라 **가로**뿐이다 — 창 크기 변화 없이 도크 폭이 바뀌는 유일한 경로인 사이드 접기다. 코드 주석도 같은 내용으로 고쳤다(`TerminalDock.tsx`).**
 
 **Task 4 — 플랜의 전제 두 개가 틀렸다.**
 
@@ -308,3 +308,62 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Task 5.** 신규 3건 중 reduced-motion 테스트가 1회 실패 — `firstWindow()`가 React 마운트 전에 반환될 수 있다는 **기존 E7d 주석(`:426`)이 기록해 둔 레이스**였다. `.app__left` 가시성 대기를 `emulateMedia` 앞으로 옮겨 해결. **타임아웃을 올리지 않았다 — 순수 로직 버그였다.** 이후 3건 × 2회 = 6/6 통과.
 
 **최종 게이트(컨트롤러 재실행):** typecheck 6/6 · 루트 **555** · build 성공 · smoke **110** · e2e **116** · `last-screen` 0건.
+
+---
+
+## 후속 ① — `f523ed0` 뭉개짐 수정 (플랜 커밋 이후, 사용자 실측 피드백)
+
+플랜 커밋(`4ac81c8`)은 이 변경을 모른다. **브랜치에서 가장 큰 구조 변경**이라 여기에 소급 기록한다.
+
+**증상(사용자):** "접힐 때 텍스트가 뭉개진다." 원인은 유지 마운트 설계의 필연적 부작용이었다 — 트랙이 380→0으로 줄어드는 240ms 동안 그 안의 탭바·파일 행·터미널 바가 **매 프레임 좁아진 폭으로 다시 흐른다(reflow)**. `overflow: hidden`은 넘치는 걸 자르기만 할 뿐 내용이 좁아지는 것 자체를 막지 못한다.
+
+**해법 — 클리퍼 / 안쪽 상자 2단 분리.** 세 곳 모두 같은 모양으로 바꿨다.
+
+| 클리퍼(트랙 크기 그대로) | 안쪽 상자(펼친 크기 고정) | 고정 값의 출처 |
+| --- | --- | --- |
+| `.app__left` (`overflow: hidden`) | `.app__left-inner` | `leftExpandedWidth` (인라인 `width`) |
+| `.app__right` (`overflow: hidden` + `display: flex`) | `.app__right-inner` (`flex-shrink: 0`) | `rightExpandedWidth` (인라인 `width`) |
+| `.app__dock` (`overflow: hidden` + `display: flex`) | `.terminal-dock` (`flex-shrink: 0`) | `dockHeight` (인라인 `height`) |
+
+- **`leftExpandedWidth`/`rightExpandedWidth`** — "지금 펼치면 몇 px일지"를 `computeColumns`를 **반대쪽 접힘만 반영해 다시 호출**해 구한다. 접기 직전 값을 상태로 기억하는 대안을 버린 이유: 접은 채 창을 줄이면 나중에 펼칠 폭도 좁아져야 맞는데, 기억해 둔 값은 낡는다. 정본은 계속 `computeColumns` 하나다.
+- **정렬 반전.** 그리드에서 마지막 트랙의 **끝 선**은 컨테이너 끝과 같아 움직이지 않는다. 그래서 `.app__right`는 `justify-content: flex-end`, `.app__dock`은 `align-items: flex-end`로 고정변(오른쪽·아래)에 붙였다. 기본 정렬로 두면 고정폭 상자가 **움직이는 변**에 붙어 "반대쪽 끝이 잘려 사라지는" 어색한 모양이 된다. `.app__left`는 고정변이 왼쪽이라 기본 정렬 그대로면 맞는다.
+- **`data-testid="terminal-dock"`이 `.terminal-dock` → `.app__dock`으로 이사.** 안쪽 상자는 이제 고정 높이라 자기 박스가 안 줄어든다 — 거기 testid가 남아 있으면 닫혀도 `toBeHidden()`이 거짓을 준다. 실제로 0이 되는 박스(행 트랙 = `.app__dock`)를 봐야 맞다.
+- **`.app__right--detail-open` → `.app__right-inner--detail-open`.** E11의 상세 슬롯 중첩 grid(11fr/9fr)가 안쪽 상자로 통째로 내려갔다. 세로 축(상세 열림)과 가로 축(폭 고정)은 별개라 서로 간섭하지 않는다.
+
+**실측(후속 ②에서 자동화):** 좌측 트랙 `366→346→312→254→186→…→0`이 흐르는 내내 `.app__left-inner`는 366 고정 · 도크 행 트랙 `240→…→0` 내내 `.terminal-dock`은 240 고정.
+
+---
+
+## 후속 ② — 적대적 리뷰 7건 해소
+
+**BLOCKING 1 — 닫힌 도크·접힌 사이드가 tab order에 남아 있었다 (E13이 만든 회귀).**
+E12까지는 `display: none`이거나 언마운트라 저절로 빠졌는데, "전환의 시작점을 남긴다"로 바꾸며 **박스만 0px이고 포커스는 그대로 들어가는** 상태가 됐다. 마우스는 `overflow: hidden`이 히트 테스트까지 잘라 안전 — **키보드 전용 결함**이었다. 리뷰어 실측: 도크를 닫은 채 `document.body`에서 Tab 15번이면 숨은 `.xterm-helper-textarea`에 포커스가 앉고, 거기 친 `echo GHOSTKEY_PROOF`가 **살아 있는 pty에서 실제로 실행돼** 다시 열었을 때 스크롤백에 남아 있었다. 접힌 사이드도 각각 21개가 포커스 가능(`left-tab-changes`가 x=20에, 커밋 메시지 입력까지).
+→ 세 클리퍼에 `inert`(+`aria-hidden`). React 19라 boolean prop 그대로 쓴다(typecheck 6/6이 이를 확인). 레이아웃 효과가 0이라 240ms 전환 무영향 · 언마운트가 아니라 E7b 세션 유지 그대로 · 박스 크기 불변이라 `toBeHidden()`/`toBeVisible()`도 그대로.
+**반증:** `inert` 없이 신규 테스트 실행 → `Tab 2회에 접힌 영역(.app__left)으로 포커스가 들어갔다 — <button class="app__left-tab" data-testid="left-tab-changes">`. `inert` 적용 후 119/119 통과.
+
+**IMPORTANT 2 — 애니메이션 본체에 회귀 테스트가 0건이었다.**
+`.app__main`의 `transition:` 선언을 통째로 지우고 다시 빌드해도 E13 신규 3건과 E12 접기 5건이 **전부 초록**이었다 — 전부 정착한 최종 상태만 본다. reduced-motion 테스트의 증거 (a)(`transitionDuration < 0.001`)조차 전환이 없을 때 통과해 전제가 무너졌다.
+→ 신규 e2e 1건: (a) 평상시 `transitionDuration`이 `0.24s` 두 대상 (b) 접는 동안 `.app__left` 트랙 폭이 중간값 프레임을 실제로 지난다(rAF 프레임 표본, 중간값 ≥3).
+**반증:** 선언 삭제 후 (a)는 `transitionDuration="0s"`로, (a)를 일시 제거하고 (b)만 남기면 `중간값 프레임 수 … Expected: >= 3 / Received: 0`으로 각각 빨개졌다. 중간값이 **구조적으로 0**이라(스타일 커밋 한 번에 366→0) 프레임률 흔들림과는 무관한 종류의 단언이다.
+
+**IMPORTANT 3 — 뭉개짐 수정(후속 ①)에도 회귀 테스트가 0건이었다.**
+최소 되돌림(안쪽 인라인 폭 → `'100%'`, `flex-shrink: 0` 제거, 도크 `height` → `'100%'`)으로도 관련 12건(E8 4 + E12 5 + E13 3)이 전부 초록이었다.
+→ 신규 e2e 1건: 접히는 내내 `.app__left-inner` 폭 / `.terminal-dock` 높이가 **전 프레임 불변**(허용 오차 1px = 서브픽셀 반올림만)이고, 안쪽이 트랙보다 큰(=잘리는) 프레임이 ≥3.
+**반증:** 되돌린 뒤 `.app__left-inner 폭이 흔들렸다 — 추이 366→366→362→346→312→254→186→…→0` / `.terminal-dock 높이가 흔들렸다 — 추이 240→…→0`. 복원 후 초록.
+
+**IMPORTANT 4 — 플랜이 `f523ed0`을 몰랐고 두 문장이 사실과 달랐다.** 위 「실행 기록」의 Task 3 두 줄에 정정을 달고(`height: 100%` 폐기 · ResizeObserver의 실제 역할), 「후속 ①」을 새로 썼다. `TerminalDock.tsx`의 같은 오기도 고쳤다.
+
+**NOTE 5 — `MAIN_GAP`이 4곳 중복이고 단위 테스트가 항진명제였다.** `grid-tracks.ts:MAIN_GAP`만 16→24로 바꿔도 `grid-tracks.test.ts` 10건과 루트 555건이 **전부 통과**했다(기대값을 상수 자신으로 쓴 탓). → `column-resize.ts`가 `MAIN_GAP`·`RESIZER_WIDTH`를 `grid-tracks.ts`에서 import(자기 `GRID_GAP=16`·`RESIZER_WIDTH=6` 삭제, `MAIN_CHROME`은 하드코딩 94 → 성분식). `grid-tracks.ts`가 가져가는 `ColumnCollapse`는 `import type`이라 지워지므로 런타임 순환은 없다. 단위 테스트에 리터럴 못박기 4건 추가(`MAIN_GAP`=16 · `RESIZER_WIDTH`=6 · `MAIN_TRACK_COUNT`=7 · `MAIN_ROW_COUNT`=3)와 "두 모듈이 같은 간격을 쓴다"는 유도식 검산 1건.
+**반증:** 16→24로 바꾸니 `expected 24 to be 16`. 옛 중복 상태(각자 자기 값)를 재현하니 유도식 검산까지 `expected 366 to be 342`.
+
+**NOTE 6 — 죽은 export 2개 → 삭제 쪽을 골랐다.** `MAIN_LEFT_GRID_ROW`·`MAIN_CONTENT_GRID_ROW`는 아무도 import하지 않았고 값은 `layout.css`에 리터럴로 따로 있었다. **`App.tsx`에서 쓰게 하는 대안을 버린 이유:** 그 넷(좌·중앙·리사이저·우)은 인라인 style이 아예 없는 요소라, 상수를 참조하게 하려면 정적 배치를 CSS에서 JSX로 끌어내야 한다 — 더 복잡해지지 더 안전해지지 않는다. 게다가 `buildMainRows`는 3트랙을 본문에 직접 적어 돌려주므로 `MAIN_ROW_COUNT`가 바뀐다고 자동으로 따라오지도 않는다(상수를 써도 "정본이 하나"가 되지 않는다). `MAIN_DOCK_GRID_ROW`만 남는 이유는 **쓰는 쪽이 이미 인라인 style이라서**다(`gridColumn`과 한 자리). 대신 ⓐ `MAIN_ROW_COUNT`를 단위 테스트로 리터럴 3에 못박고 ⓑ `layout.css`의 `grid-row: 1 / 4`에 "이 리터럴은 MAIN_ROW_COUNT에 걸려 있다"는 주석을 달아, 행 수를 바꾸려면 테스트가 먼저 빨개지게 했다.
+
+**NOTE 7 — 부팅 하드코딩 색이 토큰과 어긋나도 아무도 몰랐다.** `main/index.ts`의 `APP_BACKGROUND`와 `tokens.css`의 `--color-bg`를 맞대는 단위 테스트 3건 추가(`tokens-contrast.test.ts` — 이미 tokens.css를 파싱하고 있던 자리). `main/index.ts`를 import하지 않고 소스 텍스트를 정규식으로 읽는다(그 모듈은 최상단에서 electron을 import하고 `app.setName` 부작용을 실행해 vitest에서 로드되지 않는다 — `motion-tokens.test.ts`의 파일 파싱 관용구). 선언 자체를 못 찾으면 테스트가 조용히 무력화되므로 "찾아냈는가"도 함께 단언한다.
+**반증:** 앱 쪽만 `#ffffff`로 바꾸니 `expected '#ffffff' to be '#f4f5f7'`, 토큰 쪽만 바꾸니 `expected '#16181d' to be '#101216'` — 양방향 모두 잡힌다.
+
+## 게이트 표 (후속 ② 반영)
+
+| 시점 | 루트 테스트 | smoke | e2e 합 |
+| --- | --- | --- | --- |
+| Task 5 후(플랜 종료) | 555 | 110 | 116 |
+| 후속 ② 후 | +7 → **562** (상수 못박기 4 + 부팅 배경색 3) | +3 → **113** | **119** |

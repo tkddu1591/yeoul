@@ -7,6 +7,7 @@ import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 import { T } from '../src/renderer/src/terms'
 import { MAIN_GAP } from '../src/renderer/src/ui/grid-tracks'
+import { DOCK_HEIGHT_DEFAULT } from '../src/renderer/src/ui/terminal/dock-height'
 
 // cwd에 의존하지 않도록 앱 루트를 절대 경로로 지정한다
 const APP_ROOT = join(__dirname, '..')
@@ -3723,5 +3724,273 @@ test('E13 — reduced-motion에서는 접기·도크 전환이 즉시 반영된�
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E13 후속 (적대적 리뷰 BLOCKING) — **닫힌 도크·접힌 사이드가 Tab 순서에 남아 있으면 안 된다.**
+ *
+ * E13이 만든 회귀다. E12까지는 접힌 열이 `display: none`이거나 아예 언마운트라 포커스 대상에서
+ * 저절로 빠졌는데, E13이 "전환의 시작점을 남기려고" 항상 마운트로 바꾸면서 **박스만 0px일 뿐
+ * 포커스는 그대로 들어가는** 상태가 됐다. 마우스는 `overflow: hidden`이 히트 테스트까지 잘라
+ * 안전하지만 키보드는 아니다 — 리뷰어 실측: 도크를 닫은 채 body에서 Tab 15번이면 숨은
+ * `.xterm-helper-textarea`에 포커스가 앉고, 거기서 친 글자가 **살아 있는 pty에서 실제로
+ * 실행됐다**(다시 열었을 때 스크롤백에 출력이 남아 있었다). 접힌 사이드도 같은 부류로 21개씩
+ * 포커스 가능했다(변경 탭 버튼·커밋 메시지 입력 등).
+ *
+ * 고침은 세 클리퍼(.app__dock/.app__left/.app__right)에 `inert`(+`aria-hidden`) — 레이아웃
+ * 효과가 없어 240ms 전환을 건드리지 않고, 언마운트도 아니라 E7b의 "접어도 세션이 산다"도 지킨다.
+ *
+ * 이 테스트가 의미 있으려면 두 가지가 필요하다:
+ * ① 도크를 **한 번 열어 실제 pty·xterm을 만든 뒤** 닫아야 한다(열어 본 적 없는 도크는
+ *    세션이 없어 회귀 자체가 재현되지 않는다).
+ * ② Tab이 실제로 여러 곳을 돌았음을 함께 단언한다 — 전부 body에 머물렀다면 "안 들어갔다"는
+ *    공허하게 참이 된다.
+ */
+test('E13 후속 — 닫힌 도크·접힌 사이드로는 Tab 포커스가 들어가지 않는다 (유령 키 입력 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+
+    // ① 진짜 터미널을 만든 뒤 닫는다 — 리뷰어가 유령 입력을 재현한 그 상태
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    await expect(window.locator('.xterm-helper-textarea')).toHaveCount(1)
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeHidden()
+
+    // 좌·우 사이드도 접는다 — 전환이 끝나 트랙이 실제로 0px가 된 뒤에 Tab을 시작한다
+    await window.getByTestId('left-collapse-toggle').click()
+    await window.getByTestId('right-collapse-toggle').click()
+    await expect
+      .poll(async () => (await window.locator('.app__left').boundingBox())!.width, { timeout: 2000 })
+      .toBe(0)
+    await expect
+      .poll(async () => (await window.locator('.app__right').boundingBox())!.width, { timeout: 2000 })
+      .toBe(0)
+
+    // ② body에서 출발해 Tab 40번 — 리뷰어는 15번이면 닿았다. 여유 있게 돌린다
+    await window.evaluate(() => {
+      ;(document.activeElement as HTMLElement | null)?.blur()
+    })
+    const visited: string[] = []
+    for (let index = 1; index <= 40; index += 1) {
+      await window.keyboard.press('Tab')
+      const where = await window.evaluate(() => {
+        const el = document.activeElement
+        if (el === null) return null
+        const hidden = ['.app__dock', '.app__left', '.app__right'].find(
+          (selector) => el.closest(selector) !== null,
+        )
+        return {
+          hidden: hidden ?? null,
+          tag: el.tagName.toLowerCase(),
+          cls: typeof el.className === 'string' ? el.className : '',
+          testId: el.getAttribute('data-testid'),
+        }
+      })
+      expect(where, `Tab ${index}회 — activeElement가 없다`).not.toBeNull()
+      expect(
+        where!.hidden,
+        `Tab ${index}회에 접힌 영역(${where!.hidden})으로 포커스가 들어갔다 — ` +
+          `<${where!.tag} class="${where!.cls}" data-testid="${where!.testId}">`,
+      ).toBeNull()
+      visited.push(`${where!.tag}[${where!.testId ?? where!.cls}]`)
+    }
+    // 공허한 통과 방지 — 접히지 않은 곳(헤더·중앙)에서는 Tab이 실제로 여러 요소를 돌아야 한다
+    const distinct = new Set(visited.filter((entry) => !entry.startsWith('body')))
+    expect(distinct.size, `Tab이 실제로 돈 곳: ${[...distinct].join(', ')}`).toBeGreaterThanOrEqual(3)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * 접기 애니메이션을 프레임 단위로 표본하는 공용 루틴 (E13 후속 리뷰 IMPORTANT 2·3).
+ *
+ * 왜 페이지 안에서 재는가: Playwright의 `boundingBox()`는 호출마다 IPC 왕복이라 240ms 안에
+ * 몇 번 못 재고 시점도 흔들린다. `requestAnimationFrame`으로 페이지 안에서 재면 프레임마다
+ * 한 표본이 확실히 남는다(60Hz면 240ms에 약 14개).
+ *
+ * 표본은 **클릭 전부터** 시작한다 — 클릭이 페이지에 닿는 시점을 정확히 못 맞추므로, 시작값을
+ * 표본의 최댓값으로 되짚는다(클릭 전 프레임이 최소 하나는 들어온다). 고정 sleep은 쓰지 않는다.
+ */
+async function sampleCollapseFrames(
+  window: Page,
+  trackSelector: string,
+  innerSelector: string,
+  click: () => Promise<void>,
+): Promise<Array<{ t: number; trackW: number; trackH: number; innerW: number; innerH: number }>> {
+  await window.evaluate(
+    ({ track, inner }) => {
+      const store = window as unknown as { __e13: unknown[]; __e13done: boolean }
+      store.__e13 = []
+      store.__e13done = false
+      const trackEl = document.querySelector(track)!
+      const innerEl = document.querySelector(inner)!
+      const t0 = performance.now()
+      const tick = () => {
+        const t = performance.now() - t0
+        const a = trackEl.getBoundingClientRect()
+        const b = innerEl.getBoundingClientRect()
+        store.__e13.push({ t, trackW: a.width, trackH: a.height, innerW: b.width, innerH: b.height })
+        // 240ms 전환 + 클릭 왕복 + 여유. 끝나면 플래그로 알린다(고정 sleep 대신 폴링으로 회수)
+        if (t < 1500) requestAnimationFrame(tick)
+        else store.__e13done = true
+      }
+      requestAnimationFrame(tick)
+    },
+    { track: trackSelector, inner: innerSelector },
+  )
+  await click()
+  await expect
+    .poll(async () => window.evaluate(() => (window as unknown as { __e13done: boolean }).__e13done), {
+      timeout: 5000,
+    })
+    .toBe(true)
+  return window.evaluate(
+    () =>
+      (window as unknown as {
+        __e13: Array<{ t: number; trackW: number; trackH: number; innerW: number; innerH: number }>
+      }).__e13,
+  )
+}
+
+/**
+ * E13 후속 (적대적 리뷰 IMPORTANT 2) — **애니메이션 자체에 회귀 테스트를 건다.**
+ *
+ * 리뷰어 실측: `layout.css`의 `.app__main { transition: ... }` 선언을 통째로 지우고 다시
+ * 빌드해도 E13 신규 3건과 E12 접기 5건이 **전부 초록**이었다 — 기존 테스트는 정착한 최종
+ * 상태만 본다. reduced-motion 테스트의 증거 (a)(`transitionDuration < 0.001`)조차 전환이
+ * 아예 없을 때 통과해 전제가 무너진다.
+ *
+ * 여기서 두 가지를 못박는다:
+ * (a) 평상시 `.app__main`의 `transitionDuration`이 실제로 `0.24s`다(--motion-slow). 선언을
+ *     지우면 `0s`가 되어 즉시 빨개진다 — reduced-motion 테스트의 대조군이기도 하다.
+ * (b) 접는 동안 `.app__left`의 트랙 폭이 **처음도 0도 아닌 중간값**을 실제로 지난다.
+ *
+ * 표본 개수 기준(≥3)의 근거 — 리뷰어가 실측한 240ms 곡선은 3ms=366 · 37ms=311 · 70ms=185 ·
+ * 103ms=90 · 137ms=39 · 170ms=13 · 204ms=1.9 · 237ms=0으로, 60Hz면 중간값 프레임이 13개쯤
+ * 나온다. 3이면 프레임률이 4분의 1(≈15Hz)로 주저앉아도 견딘다. 반대로 전환이 없으면 중간값은
+ * **구조적으로 0개**다(스타일 커밋 한 번에 366→0으로 끝나 그 사이 프레임이 존재하지 않는다) —
+ * 즉 이 단언은 "느린 머신에서 흔들리는" 종류가 아니라 있고 없고가 갈리는 종류다.
+ */
+test('E13 후속 — 접기가 실제로 240ms 동안 중간값을 지난다 (애니메이션 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+
+    // (a) 전환 선언이 살아 있다 — 열·행 두 대상 모두 --motion-slow(0.24s)
+    const durations = await window.evaluate(() => {
+      const main = document.querySelector('.app__main') as HTMLElement
+      return getComputedStyle(main).transitionDuration
+    })
+    const parts = durations.split(',').map((part) => Number.parseFloat(part))
+    expect(parts.length, `transitionDuration="${durations}" — 열·행 두 대상이어야 한다`).toBe(2)
+    for (const seconds of parts) expect(seconds).toBeCloseTo(0.24, 3)
+
+    // (b) 접히는 동안 중간값을 지난다
+    const samples = await sampleCollapseFrames(window, '.app__left', '.app__left-inner', () =>
+      window.getByTestId('left-collapse-toggle').click(),
+    )
+    const start = Math.max(...samples.map((s) => s.trackW))
+    expect(start, '접기 전 좌측 트랙 폭').toBeGreaterThan(200)
+    expect(samples.at(-1)!.trackW, '표본 끝에는 전환이 끝나 0이어야 한다').toBe(0)
+    const middles = samples.filter((s) => s.trackW > 0.5 && s.trackW < start - 0.5)
+    expect(
+      middles.length,
+      `중간값 프레임 수 (표본 ${samples.length}개, 시작 ${start}px, ` +
+        `추이 ${samples.map((s) => Math.round(s.trackW)).join('→')})`,
+    ).toBeGreaterThanOrEqual(3)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E13 후속 (적대적 리뷰 IMPORTANT 3) — **뭉개짐 수정(f523ed0)에 회귀 테스트를 건다.**
+ *
+ * 사용자 피드백("접힐 때 텍스트가 뭉개진다")의 본체이자 이 브랜치의 가장 큰 구조 변경인데,
+ * 리뷰어가 최소 되돌림(안쪽 인라인 폭 → `'100%'`, `.app__right-inner`·`.terminal-dock`의
+ * `flex-shrink: 0` 제거, 도크 `height` → `'100%'`)을 해도 관련 12건(E8 4 + E12 5 + E13 3)이
+ * **전부 초록**이었다.
+ *
+ * 불변식: 클리퍼(.app__left / .app__dock)는 트랙을 따라 줄어들지만 그 안의 콘텐츠 상자
+ * (.app__left-inner / .terminal-dock)는 **전 프레임 같은 크기를 유지**하고, 넘치는 부분만
+ * 잘린다. 되돌리면 안쪽이 트랙을 따라 0까지 줄어 첫 단언이 바로 깨진다.
+ *
+ * 허용 오차 1px — 서브픽셀 반올림만 흡수하는 값이다. 뭉개짐이 살아나면 차이가 수백 px라
+ * 오차 폭과는 자릿수가 다르다.
+ */
+test('E13 후속 — 접히는 내내 안쪽 콘텐츠 상자는 펼친 크기 그대로다 (뭉개짐 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.app__left')).toBeVisible()
+
+    // ── 좌측 사이드: 가로축 ──────────────────────────────────────────────
+    const left = await sampleCollapseFrames(window, '.app__left', '.app__left-inner', () =>
+      window.getByTestId('left-collapse-toggle').click(),
+    )
+    const innerWidths = left.map((s) => s.innerW)
+    const expandedWidth = Math.max(...left.map((s) => s.trackW))
+    expect(
+      Math.max(...innerWidths) - Math.min(...innerWidths),
+      `.app__left-inner 폭이 흔들렸다 — 추이 ${innerWidths.map((w) => Math.round(w)).join('→')}`,
+    ).toBeLessThan(1)
+    expect(Math.min(...innerWidths), '안쪽 상자는 접혀도 펼친 폭 그대로').toBeCloseTo(expandedWidth, 0)
+    // 실제로 "잘리는" 상태를 지났다 — 안쪽이 트랙보다 넓은 프레임이 여러 번 있었다
+    const clippedFrames = left.filter((s) => s.innerW > s.trackW + 1)
+    expect(clippedFrames.length, '안쪽이 트랙보다 넓은(=잘리는) 프레임 수').toBeGreaterThanOrEqual(3)
+
+    // ── 터미널 도크: 세로축 ──────────────────────────────────────────────
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(1)
+    // 열림 전환이 완전히 정착한 뒤에 닫기 표본을 시작한다 — 시작값이 흔들리지 않게
+    await expect
+      .poll(async () => (await window.getByTestId('terminal-dock').boundingBox())!.height, {
+        timeout: 2000,
+      })
+      .toBe(DOCK_HEIGHT_DEFAULT)
+
+    const dock = await sampleCollapseFrames(window, '.app__dock', '.terminal-dock', () =>
+      window.getByTestId('terminal-toggle').click(),
+    )
+    const innerHeights = dock.map((s) => s.innerH)
+    expect(
+      Math.max(...innerHeights) - Math.min(...innerHeights),
+      `.terminal-dock 높이가 흔들렸다 — 추이 ${innerHeights.map((h) => Math.round(h)).join('→')}`,
+    ).toBeLessThan(1)
+    expect(Math.min(...innerHeights), '도크 본체는 닫혀도 펼친 높이 그대로').toBeCloseTo(
+      DOCK_HEIGHT_DEFAULT,
+      0,
+    )
+    expect(dock.at(-1)!.trackH, '표본 끝에는 도크 행 트랙이 0이어야 한다').toBe(0)
+    const clippedDockFrames = dock.filter((s) => s.innerH > s.trackH + 1)
+    expect(clippedDockFrames.length, '도크 본체가 행 트랙보다 높은 프레임 수').toBeGreaterThanOrEqual(3)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
   }
 })
