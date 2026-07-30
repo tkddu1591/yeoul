@@ -1,10 +1,27 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { WINDOW_CHANNELS } from '@git-gui/ipc-contract'
 import { registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
-import { registerSettingsHandlers } from './settings'
+import { readTheme, registerSettingsHandlers } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
+
+/** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
+ * 실측: 앱 최상위에서 실제로 페인트되는 배경은 --color-surface(카드·패널 전용)가 아니라
+ * body의 --color-bg다(base.css `body { background: var(--color-bg) }`) — #root와 .app은
+ * 배경을 지정하지 않아(layout.css) body 배경이 창 전체에 그대로 비친다. --color-surface를
+ * 썼다면 body 배경과 미묘하게 어긋나는 색이 창 생성 직후 잠깐 보였을 것이다.
+ * 값이 바뀌면 여기도 손으로 맞춘다 (use-terminal-sessions.ts TERMINAL_FONT_FAMILY와 같은 관례) */
+const APP_BACKGROUND = { light: '#f4f5f7', dark: '#16181d' } as const
+
+/** 창 배경색을 저장된 테마로 정한다 — 저장값이 없으면(첫 실행) renderer의 resolveInitialTheme과
+ * 같은 폴백(OS 다크모드 설정)을 쓴다. 이 색은 BrowserWindow가 생성되는 순간부터 칠해져 있어,
+ * 창이 페인트를 마치고 보이는 시점에 흰 배경이 낄 틈이 없다 */
+function resolveBackgroundColor(): string {
+  const saved = readTheme()
+  const dark = saved === 'dark' || (saved === undefined && nativeTheme.shouldUseDarkColors)
+  return dark ? APP_BACKGROUND.dark : APP_BACKGROUND.light
+}
 
 // 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),
 // 패키징 산출물(electron-builder productName)에서 완전히 "Git GUI"가 된다
@@ -42,8 +59,13 @@ function createWindow(): void {
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 20, y: 22 } }
       : {}),
-    // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제
-    show: !isE2E || isE2EShow,
+    // E13 — 창이 뜨는 순간부터 이 색으로 칠해져 있다(콘텐츠가 없는 흰 배경 대신). 저장된
+    // 테마를 못 읽는 극단적 실패에도 폴백값이 있어 undefined가 되지 않는다
+    backgroundColor: resolveBackgroundColor(),
+    // E13 — 페인트 전에 보여주지 않는다: 첫 페인트가 끝난 뒤(ready-to-show)에야 드러난다.
+    // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제는
+    // 그대로 유지된다(show 여부와 무관)
+    show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -52,6 +74,15 @@ function createWindow(): void {
       // 숨김 창의 타이머·rAF 스로틀로 E2E 대기가 길어지지 않게 — E2E에서만 해제
       backgroundThrottling: !isE2E,
     },
+  })
+
+  // E13 — 흰 화면 제거 2단계: 페인트가 끝난 뒤에만 보여준다. E2E 숨김 규칙(E6a)과 합성한다 —
+  // isE2E && !isE2EShow는 계속 숨긴 채로 둔다(이 분기를 안 타므로 창은 영원히 안 보인다).
+  // 그 외(일반 실행, GIT_GUI_E2E_SHOW=1)는 바뀐 게 시점뿐이다: 예전엔 창 생성 즉시(콘텐츠
+  // 없는 흰 화면) 보였다면, 이제는 첫 페인트가 끝난 뒤에야 보인다 — 그 사이는 backgroundColor가
+  // 대신 채운다
+  window.once('ready-to-show', () => {
+    if (!isE2E || isE2EShow) window.show()
   })
 
   // 전체화면에서는 신호등이 숨는다 — 헤더의 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가)

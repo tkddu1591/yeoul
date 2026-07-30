@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button } from '../Button'
 import { Tooltip } from '../Tooltip'
 import { useTerminalSessions } from './use-terminal-sessions'
@@ -37,6 +37,9 @@ export function TerminalDock({
   onClose,
 }: TerminalDockProps) {
   const sessions = useTerminalSessions(repoPath, theme)
+  // 아래 ResizeObserver가 관찰할 이 요소 자신의 DOM 참조 — 창 크기와 무관한 폭 변화(사이드
+  // 접기)를 잡는 용도다(그 effect 주석 참조, E13 후속에서 세로→가로로 역할 정정)
+  const dockRef = useRef<HTMLDivElement | null>(null)
   // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
   const groupKey = activeWorktree?.cwd ?? repoPath
   // 빈 상태 오버레이는 지금 보이는 탭 기준 (E12)
@@ -81,8 +84,34 @@ export function TerminalDock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 도크 폭이 **창 크기 변화 없이** 바뀌는 경우를 잡는다 — 좌·우 사이드 접기(⌘⌥1/⌘⌥2)다.
+  // 도크는 좌측 관리 존을 뺀 나머지 열 전부를 덮으므로(MAIN_DOCK_GRID_COLUMN) 좌측이 접히면
+  // 도크가 그만큼 넓어지는데, 창 크기는 그대로라 위 'resize' 리스너가 못 잡는다.
+  //
+  // E13 후속 정정 — 이 자리에 원래 "도크 행 전환(open/close) 240ms 동안 이 요소의 높이가 매
+  // 프레임 바뀌므로 그것을 추적한다"고 적혀 있었다. f523ed0 이후로는 **사실이 아니다**:
+  // 이 요소(.terminal-dock)는 인라인 고정 높이(dockHeight)를 유지하고, 줄어드는 쪽은 부모
+  // 클리퍼(.app__dock)다(실측: 행 트랙이 240↔0으로 오가는 내내 innerH는 240 고정). 즉 이
+  // 옵저버가 실제로 잡는 것은 이제 **세로가 아니라 가로**뿐이다. 세로는 위의 height prop
+  // effect가 담당한다(도크 높이 드래그·창 세로 축소 모두 그쪽 경로다)
+  useEffect(() => {
+    const el = dockRef.current
+    if (el === null) return
+    const observer = new ResizeObserver(() => sessions.refitActive())
+    observer.observe(el)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
-    <div className="terminal-dock" style={{ height }} data-testid="terminal-dock">
+    // E13 후속(사용자 실측: "접을 때 텍스트가 뭉개진다") — 높이를 고정으로 준다(부모
+    // .app__dock가 행 트랙 크기 그대로인 클리퍼, terminal-dock.css 주석 참조). height prop은
+    // App.tsx의 dockHeight — 닫혀도(open=false) 이 값 자체는 0이 되지 않는, 항상 "펼친" 높이다
+    // (App.tsx가 넘겨줄 때 열림 여부와 무관하게 그대로 넘긴다). data-testid="terminal-dock"은
+    // 부모(.app__dock)로 옮겼다 — 이 요소는 이제 고정 높이라 자기 박스가 안 줄어들어서, 여기
+    // 있으면 Playwright의 toBeHidden()이 닫혀도 거짓을 준다(예전에 고정 px를 쓰다 겪은 것과
+    // 같은 함정, terminal-dock.css 주석 참조)
+    <div className="terminal-dock" ref={dockRef} style={{ height }}>
       <div
         className="terminal-dock__bar"
         onPointerDown={onResizeStart}
