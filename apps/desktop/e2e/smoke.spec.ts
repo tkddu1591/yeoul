@@ -3408,9 +3408,11 @@ test('E11 — 상세 슬롯을 열었다 닫으면 우측 열 배치가 닫힘 �
 
 /**
  * E12 Task 6 ① — 좌측 접기 버튼으로 좌측 열이 사라지고(폭 0), 펼치면 되돌아온다.
- * 접힘은 별도 CSS 분기가 아니라 트랙 자체를 렌더에서 빼는 방식(App.tsx)이라, 접힌 동안은
- * `.app__left`가 아예 언마운트된다 — "폭 0"은 count 0으로 확인하고, 펼친 뒤 실제 폭이 양수인지로
- * "복귀"를 확인한다.
+ * E13 — 접힘은 더 이상 언마운트가 아니다(App.tsx). 트랙을 유지한 채 0px로 두어야
+ * grid-template-columns가 보간될 시작점이 생긴다(간격을 트랙으로 옮긴 grid-tracks.ts와 짝) —
+ * 그래서 `.app__left`는 접힌 동안도 count 1로 남는다. "폭 0"은 실제 boundingBox 폭으로,
+ * 그리고 (0-width 박스는 면적이 없어 Playwright가 보이지 않는다고 판단하므로) toBeVisible이
+ * 거짓임으로도 함께 확인한다. 전환에 240ms(--motion-slow)가 걸리므로 클릭 뒤 여유를 둔다
  */
 test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복귀한다', async () => {
   const repo = await createRepoWithChange()
@@ -3425,7 +3427,10 @@ test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복
     expect(before).toBeGreaterThan(0)
 
     await window.getByTestId('left-collapse-toggle').click()
-    await expect(window.locator('.app__left')).toHaveCount(0)
+    await window.waitForTimeout(320)
+    await expect(window.locator('.app__left')).toHaveCount(1)
+    await expect(window.locator('.app__left')).not.toBeVisible()
+    expect((await window.locator('.app__left').boundingBox())!.width).toBe(0)
 
     await window.getByTestId('left-collapse-toggle').click()
     await expect(window.locator('.app__left')).toBeVisible()
@@ -3442,6 +3447,7 @@ test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복
  * E12 Task 6 ② — ⌘⌥1이 좌측 접기 버튼과 같은 토글을 한다. macOS는 Option을 누른 채면
  * event.key가 '1'이 아닌 특수문자로 바뀌므로(App.tsx 실측 주석), 구현은 event.code(물리 키)를
  * 본다 — Playwright의 'Digit1' 키 이름은 정확히 그 물리 코드를 만든다.
+ * E13 — 위 테스트와 같은 이유로 count가 아니라 폭 0·not.toBeVisible로 접힘을 확인한다
  */
 test('E12 — ⌘⌥1 단축키로도 좌측 접기·펼치기가 동작한다', async () => {
   const repo = await createRepoWithChange()
@@ -3454,7 +3460,9 @@ test('E12 — ⌘⌥1 단축키로도 좌측 접기·펼치기가 동작한다',
     await expect(window.locator('.app__left')).toBeVisible()
 
     await window.keyboard.press('Meta+Alt+Digit1')
-    await expect(window.locator('.app__left')).toHaveCount(0)
+    await window.waitForTimeout(320)
+    await expect(window.locator('.app__left')).not.toBeVisible()
+    expect((await window.locator('.app__left').boundingBox())!.width).toBe(0)
 
     await window.keyboard.press('Meta+Alt+Digit1')
     await expect(window.locator('.app__left')).toBeVisible()
@@ -3467,6 +3475,8 @@ test('E12 — ⌘⌥1 단축키로도 좌측 접기·펼치기가 동작한다',
 /**
  * E12 Task 6 ③ — 접힘은 settingsApi로 영속화된다(loadLeftCollapsed/saveLeftCollapsed,
  * dockOpen과 같은 자리). 같은 GIT_GUI_USER_DATA로 재시작하면 접힘이 복원돼야 한다.
+ * E13 — 재시작 직후는 부팅 억제(noColumnTransition)가 걸려 있어 전환 없이 즉시 0px로
+ * 시작한다(App.tsx bootSuppress) — 그래서 두 번째 실행은 waitForTimeout 없이 바로 확인해도 된다
  */
 test('E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다', async () => {
   const repo = await createRepoWithChange()
@@ -3477,7 +3487,9 @@ test('E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다', asyn
     const window = await app.firstWindow()
     await expect(window.locator('.app__left')).toBeVisible()
     await window.getByTestId('left-collapse-toggle').click()
-    await expect(window.locator('.app__left')).toHaveCount(0)
+    await window.waitForTimeout(320)
+    await expect(window.locator('.app__left')).not.toBeVisible()
+    expect((await window.locator('.app__left').boundingBox())!.width).toBe(0)
   } finally {
     await app.close()
   }
@@ -3485,7 +3497,8 @@ test('E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다', asyn
   const second = await electron.launch({ args: [APP_ROOT], env })
   try {
     const window = await second.firstWindow()
-    await expect(window.locator('.app__left')).toHaveCount(0)
+    await expect(window.locator('.app__left')).not.toBeVisible()
+    expect((await window.locator('.app__left').boundingBox())!.width).toBe(0)
   } finally {
     await second.close()
     await rm(repo, { recursive: true, force: true })

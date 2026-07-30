@@ -61,10 +61,12 @@ const LAYOUT_PROPS = new Set([
   'line-height',
 ])
 
-/** grid-template-rows만 유일한 의도적 예외 — 상세 슬롯 열림에 쓴다(E11 스펙). 정확히 이
- * 토큰일 때만 허용한다: `transition: grid-template-rows, height`처럼 다른 항목과 나란히 오면
- * 그 다른 항목은 그대로 걸린다(허용은 항목 단위지 선언 전체 단위가 아니다) */
-const ALLOWED_EXACT = 'grid-template-rows'
+/** grid-template-rows(E11 상세 슬롯)·grid-template-columns(E13 사이드 접기) 딱 두 개만
+ * 의도적 예외 — 둘 다 Chromium이 실제로 보간하는 몇 안 되는 레이아웃 속성이다. grid-template과
+ * grid-template-areas는 계속 막는다(축약형·문자열 그리드는 이 보간 대상이 아니다). 정확히 이
+ * 토큰일 때만 허용한다: `transition: grid-template-columns, height`처럼 다른 항목과 나란히
+ * 오면 그 다른 항목은 그대로 걸린다(허용은 항목 단위지 선언 전체 단위가 아니다) */
+const ALLOWED_EXACT = new Set(['grid-template-rows', 'grid-template-columns'])
 
 /** `200ms ease` 처럼 속성명이 생략된 항목 — shorthand에서 속성 생략은 all과 동치라 위험하다 */
 const BARE_TIME = /^-?\d*\.?\d+m?s$/i
@@ -127,7 +129,7 @@ function collectTransitionViolations(): { layout: Violation[]; all: Violation[] 
     for (const { kind, value } of declarations) {
       for (const entry of splitTopLevel(value)) {
         const prop = propertyToken(entry)
-        if (!prop || prop === ALLOWED_EXACT) continue
+        if (!prop || ALLOWED_EXACT.has(prop)) continue
         if (prop === 'all') {
           all.push({ path, detail: `${kind}: ${value.trim()}` })
           continue
@@ -180,7 +182,7 @@ function collectKeyframeViolations(): Violation[] {
 }
 
 describe('모션 안전망', () => {
-  it('레이아웃 속성에 transition을 걸지 않는다 — grid-template-rows만 의도된 예외', () => {
+  it('레이아웃 속성에 transition을 걸지 않는다 — grid-template-rows·grid-template-columns만 의도된 예외', () => {
     const { layout } = collectTransitionViolations()
     expect(layout.map((v) => `${v.path}: ${v.detail}`)).toEqual([])
   })

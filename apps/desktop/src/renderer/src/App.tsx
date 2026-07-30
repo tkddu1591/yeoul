@@ -41,6 +41,7 @@ import {
   saveRightCollapsed,
   saveRightWidth,
 } from './ui/column-resize'
+import { buildMainColumns, MAIN_DOCK_GRID_COLUMN } from './ui/grid-tracks'
 import {
   clampDockHeight,
   loadDockHeight,
@@ -192,18 +193,44 @@ export function App() {
   )
   // 창 폭 — 좌·우 열이 창 폭에 따라 줄어드는 반응형 계산(computeColumns)의 입력 (E6a)
   const [viewportWidth, setViewportWidth] = useState<number>(() => window.innerWidth)
+  // E13 — .app__main의 grid-template-columns 전환(240ms)을 꺼야 하는 세 순간을 각자 독립된
+  // 플래그로 추적하고 OR로 합친다(부팅·드래그·창 크기 변경은 서로 다른 생명주기라 하나로
+  // 뭉치면 한쪽이 끝나며 다른 쪽 억제까지 같이 풀린다). 부팅은 E11 theme-switching과 같은
+  // idiom(rAF 두 번 — 첫 rAF는 새 스타일이 커밋된 뒤, 그 안의 두 번째 rAF에서 억제 해제)
+  const [bootSuppress, setBootSuppress] = useState(true)
+  const [dragSuppress, setDragSuppress] = useState(false)
+  const [resizeSuppress, setResizeSuppress] = useState(false)
+  const noColumnTransition = bootSuppress || dragSuppress || resizeSuppress
+  useEffect(() => {
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setBootSuppress(false))
+    })
+    return () => cancelAnimationFrame(raf1)
+    // 마운트 시 1회만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const resizeSuppressTimerRef = useRef<number | null>(null)
   useEffect(() => {
     const onWindowResize = () => {
+      // 창 가장자리를 뒤쫓는 동안은 전환을 끈다 — 마지막 resize 이벤트로부터 200ms 조용하면 푼다
+      setResizeSuppress(true)
+      if (resizeSuppressTimerRef.current !== null) window.clearTimeout(resizeSuppressTimerRef.current)
+      resizeSuppressTimerRef.current = window.setTimeout(() => setResizeSuppress(false), 200)
       setViewportWidth(window.innerWidth)
       setRightWidth((width) => clampRightWidth(width, window.innerWidth))
       // 도크도 창 세로 축소를 따라 재클램프 — 60% 상한 초과로 1행이 짓눌리는 것을 막는다 (품질 리뷰, rightWidth 선례)
       setDockHeight((height) => clampDockHeight(height, window.innerHeight))
     }
     window.addEventListener('resize', onWindowResize)
-    return () => window.removeEventListener('resize', onWindowResize)
+    return () => {
+      window.removeEventListener('resize', onWindowResize)
+      if (resizeSuppressTimerRef.current !== null) window.clearTimeout(resizeSuppressTimerRef.current)
+    }
   }, [])
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
+    // 드래그 중엔 커서를 1:1로 따라가야 한다 — 240ms 전환이 걸리면 손잡이가 커서에 뒤처진다
+    setDragSuppress(true)
     const onMove = (move: PointerEvent) => {
       setRightWidth(clampRightWidth(window.innerWidth - move.clientX - 20, window.innerWidth))
     }
@@ -212,6 +239,7 @@ export function App() {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       saveRightWidth(clampRightWidth(window.innerWidth - up.clientX - 20, window.innerWidth))
+      setDragSuppress(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -254,6 +282,16 @@ export function App() {
       return false
     })
   }
+  // E13 — 아래 ⌘F 키다운 리스너는 마운트 시 1회만 등록돼([] 의존성) 클로저가 접힘의 초기값을
+  // 그대로 굳힌다. 리스너 안에서 "지금" 접혀 있는지 읽으려면 최신값을 따라가는 ref가 필요하다
+  const leftCollapsedRef = useRef(leftCollapsed)
+  const rightCollapsedRef = useRef(rightCollapsed)
+  useEffect(() => {
+    leftCollapsedRef.current = leftCollapsed
+  }, [leftCollapsed])
+  useEffect(() => {
+    rightCollapsedRef.current = rightCollapsed
+  }, [rightCollapsed])
 
   // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
   // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
@@ -263,20 +301,13 @@ export function App() {
   })
   // E7k — 창이 좁으면 헤더 액션이 아이콘만 남는다(이름은 Tooltip이 담당). 판정만 여기서, 숨김은 CSS
   const compactHeader = isCompactHeader(viewportWidth)
-  // 접힌 열은 그 트랙 자체를 뺀다 — gap도 함께 없어져야 computeColumns의 예산(chrome) 산식과
-  // 실제 DOM이 맞는다(트랙이 있는데 0px만 주면 grid gap이 남아 폭이 어긋난다). 사이드 접기는
-  // E11 모션을 타지 않는다 — 인라인 style이라 transition을 넣지 않는다(사람이 지키는 안전망)
-  const gridTemplateColumns = [
-    leftCollapsed ? null : `${columns.left}px`,
-    'minmax(0, 1fr)',
-    rightCollapsed ? null : `6px ${columns.right}px`,
-  ]
-    .filter((track): track is string => track !== null)
-    .join(' ')
-  // 도크(터미널)는 좌측 관리 존을 제외한 나머지 트랙 전부를 덮는다 — 좌측이 있으면 2번째 줄부터,
-  // 없으면 1번째 줄부터. 끝 줄은 "지금 보이는 트랙 수 + 1"
-  const visibleTrackCount = (leftCollapsed ? 0 : 1) + 1 + (rightCollapsed ? 0 : 2)
-  const dockGridColumn = `${leftCollapsed ? 1 : 2} / ${visibleTrackCount + 1}`
+  // E13 — 접힌 열도 트랙을 유지하고 0px로 둔다(grid-tracks.ts). 간격도 트랙으로 옮겨져
+  // 열·간격·리사이저가 이 한 값 안에서 함께 보간된다 — .app__main의 transition이 이 값의
+  // 변화를 탄다(부팅·드래그·창 크기 변경 중엔 noColumnTransition으로 억제)
+  const gridTemplateColumns = buildMainColumns(columns, { left: leftCollapsed, right: rightCollapsed })
+  // 도크(터미널)는 좌측 관리 존(좌 트랙+그 간격)만 제외한 나머지 트랙 전부를 덮는다 — 트랙 수가
+  // 이제 접힘과 무관하게 항상 고정이라(grid-tracks.ts) 시작선도 항상 3번째로 고정이다
+  const dockGridColumn = MAIN_DOCK_GRID_COLUMN
 
   useEffect(() => {
     void store.init()
@@ -357,10 +388,22 @@ export function App() {
         event.preventDefault()
         const { x, y } = pointerRef.current
         const scopeEl = document.elementFromPoint(x, y)?.closest('[data-find-scope]')
-        const scope = (scopeEl?.getAttribute('data-find-scope') ??
-          'diff') as NonNullable<typeof findScope>
+        const rawScope = scopeEl?.getAttribute('data-find-scope') as
+          | NonNullable<typeof findScope>
+          | null
+        // E13 — 접힌 패널도 이제 DOM에 남는다(트랙만 0px, App.tsx가 언마운트하지 않는다 —
+        // 전환의 시작점을 유지하려고). elementFromPoint가 그 잔여 요소를 잡아채 스코프로
+        // 삼으면 찾기 오버레이가 안 보이는 접힌 열에 뜬다 — E12는 언마운트라 이 경로 자체가
+        // 없었다(그래서 아래 expand 방어 코드가 그때는 재현 불가였다). 접힌 쪽이면 버린다
+        const scope: NonNullable<typeof findScope> =
+          (rawScope === 'changes' && leftCollapsedRef.current) ||
+          ((rawScope === 'history' || rawScope === 'commit-files') && rightCollapsedRef.current)
+            ? 'diff'
+            : (rawScope ?? 'diff')
         // 접힌 패널을 대상으로 하면 먼저 편다 — 안 그러면 찾기 오버레이가 안 보이는 곳에 뜬다
-        // (E12 죽은 클릭 방지, 커밋 클릭과 같은 이유)
+        // (E12 죽은 클릭 방지, 커밋 클릭과 같은 이유). 위 스코프 대체 덕에 이제 이 두 분기는
+        // 도달할 수 없다(접힌 패널의 스코프는 이미 'diff'로 바뀐 뒤라서) — 방어선을 하나 더
+        // 두는 셈이라 그대로 둔다
         if (scope === 'history' || scope === 'commit-files') expandRightIfCollapsed()
         else if (scope === 'changes') expandLeftIfCollapsed()
         setFindScope(scope)
@@ -753,11 +796,14 @@ export function App() {
           </div>
         </div>
       )}
-      <main className="app__main" style={{ gridTemplateColumns }}>
+      <main
+        className={`app__main${noColumnTransition ? ' app__main--no-column-transition' : ''}`}
+        style={{ gridTemplateColumns }}
+      >
         {/* 좌측 열 = [변경 | 실험 공간] 탭 (E7a) — 변경 탭은 기존 그대로(목록+저장 폼, E6a), 커밋 흐름 무변.
             빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화).
-            E12 — 접히면 트랙째로 렌더에서 뺀다(gridTemplateColumns와 짝) */}
-        {!leftCollapsed && (
+            E13 — 접혀도 언마운트하지 않는다(트랙만 0px, gridTemplateColumns와 짝) — 전환의
+            시작점을 유지해야 grid-template-columns가 보간된다(E12 시절의 조건부 마운트 폐기) */}
         <div className="app__left">
           <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
             <button
@@ -929,7 +975,6 @@ export function App() {
             />
           ) : null}
         </div>
-        )}
         <div className="app__center" data-find-scope="diff">
           {store.conflictFile !== null ? (
             <ConflictPanel
@@ -974,10 +1019,8 @@ export function App() {
             />
           )}
         </div>
-        {/* E12 — 우측이 접히면 리사이저·우측 열 둘 다 트랙에서 빠진다(gridTemplateColumns와 짝) */}
-        {!rightCollapsed && (
-        <>
-        {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값 */}
+        {/* 우측 열 폭 조절 손잡이 — 드래그로 조절, 더블클릭으로 기본값.
+            E13 — 접혀도 언마운트하지 않는다(트랙만 0px, gridTemplateColumns와 짝) */}
         <div
           className="app__resizer"
           role="separator"
@@ -989,12 +1032,15 @@ export function App() {
         />
         {/* 우측 열 — 평소엔 트리 전체, 커밋 클릭 시에만 하단에 상세가 열린다 (E6a 사용자 제안).
             리뷰(PR) 상세만 대화형 화면이라 기존의 우측 전체 전환을 유지한다 (사용자 동의).
-            store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다 */}
+            store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다.
+            E13 — 접혀도 언마운트하지 않는다(트랙만 0px) */}
         <div
           className={`app__right${store.commitDetail !== null ? ' app__right--detail-open' : ''}`}
           // E7h ⑥ — 리뷰 상세가 열린 동안은 히스토리 스코프가 아니다(그 아래 commit-files
-          // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다)
-          data-find-scope={store.pullDetail === null ? 'history' : undefined}
+          // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다).
+          // E13 — 접힌 동안도 스코프를 비운다(⌘F 핸들러가 leftCollapsedRef/rightCollapsedRef로
+          // 한 번 더 거르지만, 속성 자체도 걸어 다른 소비자가 생겨도 안전하게)
+          data-find-scope={!rightCollapsed && store.pullDetail === null ? 'history' : undefined}
         >
           {store.pullDetail !== null ? (
             <ReviewDetailPanel
@@ -1065,7 +1111,10 @@ export function App() {
                   그래서 CommitDetailPanel은 계속 지연 마운트한다 */}
               <div
                 className="app__right-detail"
-                data-find-scope={store.commitDetail !== null ? 'commit-files' : undefined}
+                // E13 — 부모 app__right와 같은 이유로 접힌 동안은 스코프를 비운다
+                data-find-scope={
+                  !rightCollapsed && store.commitDetail !== null ? 'commit-files' : undefined
+                }
               >
                 {store.commitDetail !== null && (
                   <CommitDetailPanel
@@ -1099,10 +1148,8 @@ export function App() {
             </>
           )}
         </div>
-        </>
-        )}
         {/* E7b 터미널 도크 — 접힘은 display:none(세션 유지). 행(auto)은 숨김 시 0으로 접힌다.
-            E12 — 좌·우 접힘에 따라 도크가 덮는 열 범위도 함께 바뀐다(dockGridColumn) */}
+            E13 — 도크가 덮는 열 범위(dockGridColumn)는 이제 트랙 수가 고정이라 상수다 */}
         {store.repoPath !== null && (
           <div
             className="app__dock"

@@ -173,20 +173,40 @@ body.is-fullscreen .app__header {
    E7a의 padding-left 210px(탭 2개 시절 실측)는 탭이 늘며 깨졌다 — 하드코딩 폐기 */
 .app__main {
   display: grid;
-  /* 열 폭은 App이 inline style로 관리한다 (computeColumns — 중앙 380px 보장) — 여기 값은 초기 페인트 폴백 */
-  grid-template-columns: 380px minmax(0, 1fr) 6px 360px;
+  /* 열 폭은 App이 inline style로 관리한다 (buildMainColumns — 중앙 380px 보장) — 여기 값은 초기
+     페인트 폴백. 트랙 7개(좌·간격·중앙·간격·리사이저·간격·우)로 grid-tracks.ts와 짝을 맞춘다 (E13) */
+  grid-template-columns: 380px 16px minmax(0, 1fr) 16px 6px 16px 360px;
   /* 2행 = 터미널 도크 (E7b) — 도크가 숨겨지면 auto 행은 0으로 접힌다. 열 산식(MAIN_CHROME)과 무관 */
   grid-template-rows: minmax(0, 1fr) auto;
-  gap: var(--space-4);
+  /* E13 — gap을 지웠다. 간격도 이제 grid-template-columns의 트랙 하나다(grid-tracks.ts) —
+     grid gap은 트랙 크기와 무관하게 고정으로 붙어(E11 Task 4 실측) 접힌 열의 트랙만 0으로
+     둬도 gap 몫이 남는 계단이 생겼다. 간격을 트랙으로 옮기면 열·간격·리사이저가 이 한 속성
+     안에서 함께 보간된다. (부작용: 행 방향 gap도 함께 사라져 도크가 중앙/우측에 붙는다 —
+     Task 3에서 행 트랙으로 복원 전까지의 예정된 중간 상태) */
   padding: var(--space-4) var(--space-5);
   flex: 1;
   min-height: 0;
+  /* E13 — grid-template-rows(E11)에 이어 두 번째 예외. Chromium이 보간하는 몇 안 되는
+     레이아웃 속성 중 하나라 grid-template-columns도 안전망에 허용했다(motion-tokens.test.ts) */
+  transition: grid-template-columns var(--motion-slow) var(--ease-in-out);
+}
+/* E13 — 전환이 걸리면 안 되는 세 순간(App.tsx가 클래스를 붙인다): ① 부팅 첫 페인트(접힌 채
+   시작하면 240ms 애니메이션이 느린 부팅처럼 보인다) ② 드래그 리사이즈(커서를 1:1로 따라가야
+   한다) ③ 창 크기 변경(가장자리를 뒤쫓는 모양이 고무줄처럼 보인다). E11 theme-switching과
+   같은 관용구 — 요소 하나로 범위를 좁혔을 뿐 끄는 방식은 동일 */
+.app__main--no-column-transition {
+  transition: none !important;
 }
 .app__resizer {
   cursor: col-resize;
   /* 리사이저는 폭이 4px이라 control(6px)이면 원이 된다 — 의도적 예외 */
   border-radius: 3px;
   background: transparent;
+  /* E13 — 접혀도 트랙만 유지되고 언마운트되지 않는다(전환의 시작점을 남기려고) — 0px 트랙
+     안에서 클릭 영역이나 내용이 새어 나오지 않게 자른다 */
+  overflow: hidden;
+  /* E13 — app__left 주석 참조: 간격 트랙에 밀려나지 않도록 자기 트랙 번호(5)를 명시한다 */
+  grid-column: 5;
 }
 .app__resizer:hover {
   background: var(--color-border-strong);
@@ -205,6 +225,15 @@ body.is-fullscreen .app__header {
   min-height: 0;
   /* 좌측 관리 존은 도크 행까지 전체 높이 — 도크는 중앙+우측 아래에만 (E7b 스펙 v2) */
   grid-row: 1 / 3;
+  /* E13 — 간격을 트랙으로 옮기며 grid-template-columns이 7트랙(좌·간격·중앙·간격·리사이저·
+     간격·우)이 됐다. 이 넷(좌·중앙·리사이저·우)만 실제 DOM 자식이고 간격 트랙엔 아무도 없어,
+     암시적 배치(auto-placement)에 맡기면 DOM 순서대로 앞 트랙부터 채워 간격 트랙에 엉뚱하게
+     올라간다(실측: 리사이저가 중앙 트랙에, 우측이 간격 트랙에 들어가 폭이 16px로 무너졌다) —
+     그래서 넷 다 자기 트랙 번호를 명시한다. 좌=1 */
+  grid-column: 1;
+  /* E13 — 접혀도 언마운트되지 않고 트랙만 0px가 된다(전환 시작점 유지, App.tsx). 탭 라벨 같은
+     내용은 flex-shrink만으로 0폭까지 줄지 않으니(min-width:auto) 새어 나오지 않게 자른다 */
+  overflow: hidden;
 }
 /* E8 — 반반 고정이라 파일 2~3개일 때 좌측에 수백 px가 비었다. 이 레벨(.changes-panel)은
    원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다. "내용만큼만 차지"는 대신
@@ -265,6 +294,8 @@ body.is-fullscreen .app__header {
   /* 중앙 열을 컨테이너로 — 충돌 카드가 창 폭이 아니라 실제 열 폭에 반응한다 (품질 리뷰) */
   container-type: inline-size;
   container-name: center;
+  /* E13 — app__left 주석 참조: 간격 트랙에 밀려나지 않도록 자기 트랙 번호(3)를 명시한다 */
+  grid-column: 3;
 }
 .app__center > .ui-panel {
   flex: 1;
@@ -290,6 +321,11 @@ body.is-fullscreen .app__header {
   grid-template-rows: minmax(0, 11fr) minmax(0px, 0fr);
   min-height: 0;
   transition: grid-template-rows var(--motion-slow) var(--ease-in-out);
+  /* E13 — 접혀도 언마운트되지 않고 트랙만 0px가 된다(App.tsx) — 안의 트리·상세가 0폭 밖으로
+     새어 나오지 않게 자른다 (app__left와 짝) */
+  overflow: hidden;
+  /* E13 — app__left 주석 참조: 간격 트랙에 밀려나지 않도록 자기 트랙 번호(7)를 명시한다 */
+  grid-column: 7;
 }
 .app__right--detail-open {
   grid-template-rows: minmax(0, 11fr) minmax(240px, 9fr);

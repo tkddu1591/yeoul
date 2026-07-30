@@ -26,3 +26,13 @@ export function buildMainColumns(
     `${columns.right}px`,
   ].join(' ')
 }
+
+/** buildMainColumns가 만드는 트랙 수(좌·간격·중앙·간격·리사이저·간격·우 = 7) — 접힘과 무관하게
+ * 항상 고정이라 도크(터미널) grid-column 계산에도 그대로 쓴다 (E13) */
+export const MAIN_TRACK_COUNT = 7
+
+/** 터미널 도크가 덮는 열 범위 — 좌측 관리 존(좌 트랙+그 간격, 1~2번째)만 제외한 나머지 전부.
+ * 트랙 개수가 이제 항상 고정이라(위 buildMainColumns 주석) 좌측 접힘 여부와 무관하게 항상
+ * 3번째 트랙(중앙)부터 끝까지다 — 접히면 그 1~2번째 트랙이 0px가 될 뿐이라 시작선을 옮길
+ * 필요가 없다(App.tsx 옛 dockGridColumn의 leftCollapsed 분기 대체, E13) */
+export const MAIN_DOCK_GRID_COLUMN = `3 / ${MAIN_TRACK_COUNT + 1}`
