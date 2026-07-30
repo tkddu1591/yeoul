@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { cleanupScreens, electron } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 import { T } from '../src/renderer/src/terms'
+import { MAIN_GAP } from '../src/renderer/src/ui/grid-tracks'
 
 // cwd에 의존하지 않도록 앱 루트를 절대 경로로 지정한다
 const APP_ROOT = join(__dirname, '..')
@@ -3591,5 +3592,136 @@ test('E12 — 탭을 닫고 새로 만들면 빈 번호를 재사용한다', asy
     await app.close()
     await rm(repo, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E13 Task 5 ① — 접기가 끝나면(--motion-slow 240ms) 가운데(fr 트랙)가 정확히 그만큼 넓어져야
+ * 회귀가 아니다. 트랙 개수가 고정이라(grid-tracks.ts buildMainColumns) 좌측 폭 + 그 옆 간격
+ * 트랙(MAIN_GAP)이 통째로 가운데로 넘어가는 게 이 구현의 불변식 — 애니메이션이 없던 E12와
+ * 같은 최종값에 도달해야 한다.
+ * ⚠️ 240ms 동안 폭은 중간값이라 즉시 재면 흔들린다 — E12에서 없앤 ⌘F 플레이크가 정확히 이
+ * 원인(E11 애니메이션 중 좌표 샘플링, 이 파일 80행 hoverAndCmdF 주석 참고)이었다. 그래서 고정
+ * sleep 대신 최종값에 도달할 때까지 자동 재시도(expect.poll)로 기다린다.
+ */
+test('E13 — 좌측 접기가 끝나면 가운데 폭이 E12와 같은 최종값(좌측 폭+간격만큼 증가)에 도달한다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const left = window.locator('.app__left')
+    const center = window.locator('.app__center')
+    await expect(left).toBeVisible()
+    const leftWidthBefore = (await left.boundingBox())!.width
+    const centerWidthBefore = (await center.boundingBox())!.width
+    const expectedCenterWidth = centerWidthBefore + leftWidthBefore + MAIN_GAP
+
+    await window.getByTestId('left-collapse-toggle').click()
+
+    // 전환이 끝날 때까지 자동 재시도 — 중간값에서 우연히 걸리지 않는다
+    await expect.poll(async () => (await left.boundingBox())!.width, { timeout: 2000 }).toBe(0)
+    await expect
+      .poll(async () => (await center.boundingBox())!.width, { timeout: 2000 })
+      .toBeCloseTo(expectedCenterWidth, 0)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E13 Task 5 ② — 터미널 도크를 닫으면(행 트랙이 dockHeight+간격에서 0으로) 그 공간이 가운데
+ * (콘텐츠 행, minmax(0,1fr))로 돌아온다. "열기 전 기준선으로 정확히 복귀하는가"를 불변식으로
+ * 잡는다 — E11 Task 5 Step 1b("상세 슬롯을 열었다 닫으면 닫힘 기준선으로 정확히 돌아온다")와
+ * 같은 관례. ⚠️ 같은 이유로 고정 sleep 없이 자동 재시도로 최종값을 기다린다.
+ */
+test('E13 — 터미널 도크를 닫으면 그 공간이 가운데로 돌아온다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const center = window.locator('.app__center')
+    await expect(center).toBeVisible()
+    const closedBaseline = (await center.boundingBox())!.height
+
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeVisible()
+    // 도크가 열리는 동안 가운데는 줄어든다 — 전환이 끝난 값으로 자동 재시도
+    await expect
+      .poll(async () => (await center.boundingBox())!.height, { timeout: 2000 })
+      .toBeLessThan(closedBaseline)
+
+    await window.getByTestId('terminal-toggle').click()
+    await expect(window.getByTestId('terminal-dock')).toBeHidden()
+    // 닫힘 기준선으로 정확히 복귀 — 도크+간격 트랙이 통째로 가운데(fr)로 돌아왔다는 증거
+    await expect
+      .poll(async () => (await center.boundingBox())!.height, { timeout: 2000 })
+      .toBe(closedBaseline)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E13 Task 5 ③ — prefers-reduced-motion에서는 접기·도크 전환이 즉시 반영된다. 메커니즘은 E11
+ * Task 5 Step 1a(이 파일 3298행)가 확립한 것을 그대로 재사용한다 — `electron.launch`에는
+ * reducedMotion 컨텍스트 옵션이 없어 `page.emulateMedia({ reducedMotion: 'reduce' })`로 이 창의
+ * media feature를 CDP로 덮어쓴다.
+ *
+ * 증거는 두 가지:
+ * (a) E13이 전환에 새로 얹은 대상(.app__main의 grid-template-columns/rows) 자체의
+ *     transition-duration이 안전망(base.css)으로 0.01ms대까지 눌렸는지 — E11 테스트가 확인한
+ *     .ui-button과는 다른 대상이라 별도로 확인한다.
+ * (b) 클릭 뒤 --motion-slow(240ms)에 한참 못 미치는 시간 안에 최종값(폭 0 / 도크 보임)에
+ *     도달하는지 — 실제로 애니메이션이 걸린다면 못 미칠 여유(150ms)를 poll 타임아웃으로 주어,
+ *     고정 sleep 없이 "즉시"임을 검증한다.
+ */
+test('E13 — reduced-motion에서는 접기·도크 전환이 즉시 반영된다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    // firstWindow는 React 마운트 전에 반환될 수 있다(E7d ⑦ 주석, 426행) — .app__main이 실제로
+    // DOM에 붙은 뒤에 매체 쿼리를 확인해야 아래 querySelector가 null을 만나지 않는다
+    const left = window.locator('.app__left')
+    await expect(left).toBeVisible()
+
+    await window.emulateMedia({ reducedMotion: 'reduce' })
+    expect(
+      await window.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    ).toBe(true)
+
+    // 증거 (a) — E13이 새로 전환에 얹은 그리드 트랙 속성 자체가 강제로 즉시 끝나야 한다
+    const forcedDuration = await window.evaluate(() => {
+      const main = document.querySelector('.app__main') as HTMLElement
+      return getComputedStyle(main).transitionDuration
+    })
+    for (const part of forcedDuration.split(',')) {
+      // 0.01ms = 0.00001s ≪ 평소 --motion-slow(0.24s) — 자릿수가 넷 차이 나 우연히 통과할 수 없다
+      expect(Number.parseFloat(part)).toBeLessThan(0.001)
+    }
+
+    // 증거 (b) — 좌측 접기가 --motion-slow(240ms)에 한참 못 미치는 시간 안에 끝난다
+    await window.getByTestId('left-collapse-toggle').click()
+    await expect.poll(async () => (await left.boundingBox())!.width, { timeout: 150 }).toBe(0)
+
+    // 도크도 같은 안전망 — 열자마자(240ms를 기다리지 않고) 곧바로 보여야 한다
+    await window.getByTestId('terminal-toggle').click()
+    await expect
+      .poll(async () => window.getByTestId('terminal-dock').isVisible(), { timeout: 150 })
+      .toBe(true)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
   }
 })
