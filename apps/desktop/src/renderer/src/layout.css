@@ -227,9 +227,6 @@ body.is-fullscreen .app__header {
    아래(커밋 폼의 border-top 위)에 그대로 남는다 — 흡수하지 않는다(E8 마무리 —
    flex-grow:1 삭제, changes-panel.css 실측 참조) */
 .app__left {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
   min-height: 0;
   /* 좌측 관리 존은 도크 행까지 전체 높이 — 도크는 중앙+우측 아래에만 (E7b 스펙 v2).
      E13 Task 3 — 행이 3트랙(콘텐츠·간격·도크)이 되며 끝 라인이 3에서 4로 밀렸다 */
@@ -240,9 +237,30 @@ body.is-fullscreen .app__header {
      올라간다(실측: 리사이저가 중앙 트랙에, 우측이 간격 트랙에 들어가 폭이 16px로 무너졌다) —
      그래서 넷 다 자기 트랙 번호를 명시한다. 좌=1 */
   grid-column: 1;
-  /* E13 — 접혀도 언마운트되지 않고 트랙만 0px가 된다(전환 시작점 유지, App.tsx). 탭 라벨 같은
-     내용은 flex-shrink만으로 0폭까지 줄지 않으니(min-width:auto) 새어 나오지 않게 자른다 */
+  /* E13 — 접혀도 언마운트되지 않고 트랙만 0px가 된다(전환 시작점 유지, App.tsx). 이 요소
+     자신이 곧 트랙이라 클리퍼 역할만 한다 — overflow:hidden으로 안의 .app__left-inner(펼친
+     폭 그대로 고정)가 트랙 밖으로 새어 나오는 부분을 자른다.
+     E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — 예전엔 이 요소가 직접 flex column을
+     맡아 안의 탭바·패널이 트랙 폭을 따라 매 프레임 다시 흐르며(reflow) 눌렸다. overflow:hidden은
+     넘치는 걸 "자르기"만 하지 안의 내용이 좁아지는 것 자체는 못 막는다 — 그래서 flex 레이아웃
+     자체를 .app__left-inner로 옮기고 이 요소는 순수 클리퍼(고정 폭 없는 블록)로 남는다.
+     블록 자식은 명시 폭을 그대로 유지한 채 넘치므로(shrink-to-fit 없음), 기본 정렬(왼쪽 고정)이
+     이 트랙의 고정 변(왼쪽, app__main 왼쪽 패딩)과 그대로 맞아 별도 정렬이 필요 없다(app__right와
+     대칭 — 그쪽은 고정 변이 오른쪽이라 flex-end로 뒤집는다, 아래 주석 참조) */
   overflow: hidden;
+}
+/* E13 후속 — 펼친 폭을 고정으로 유지하는 실제 콘텐츠 상자. 폭은 App이 인라인 스타일로
+   지정한다(leftExpandedWidth — 접힌 동안에도 "지금 펼치면 몇 px일지"를 computeColumns로 다시
+   구한 값, App.tsx 주석 참조). .app__left가 트랙 폭(0~380px)을 그대로 따라가는 동안 이 상자는
+   항상 펼친 폭을 유지해 트랙보다 넓어지고, 넘치는 부분만 부모의 overflow:hidden이 자른다 —
+   그래서 접히는 동안 탭바·파일 행이 좁아지며 뭉개지는 대신, 트랙 밖으로 잘려 나가듯 보인다.
+   옛 .app__left의 flex column 레이아웃(탭바 위·패널 아래)을 그대로 옮겨왔다 */
+.app__left-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  height: 100%;
 }
 /* E8 — 반반 고정이라 파일 2~3개일 때 좌측에 수백 px가 비었다. 이 레벨(.changes-panel)은
    원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다. "내용만큼만 차지"는 대신
@@ -255,7 +273,7 @@ body.is-fullscreen .app__header {
    스크롤포트가 순환 참조로 0에 고정된다. 안쪽을 flex:0 1 auto(min-height:0)로 두면 바깥이
    확정 높이든 아니든 순환이 생기지 않는다 — 그래서 바깥은 원래 flex:1 그대로 두고,
    Important 1 이전 버전의 "바깥은 반드시 확정 높이여야 한다"는 설명은 폐기한다 */
-.app__left > .changes-panel {
+.app__left-inner > .changes-panel {
   flex: 1;
   min-height: 0;
 }
@@ -290,8 +308,8 @@ body.is-fullscreen .app__header {
   border-color: var(--color-border-strong);
   font-weight: 600;
 }
-.app__left > .branches-panel,
-.app__left > .ui-panel {
+.app__left-inner > .branches-panel,
+.app__left-inner > .ui-panel {
   flex: 1;
   min-height: 0;
 }
@@ -327,28 +345,46 @@ body.is-fullscreen .app__header {
    margin은 transition을 걸지 않는다 — 안전망이 막는 레이아웃 속성이라 즉시 전환(계단식)이고,
    grid-template-rows만 부드럽게 움직인다(의도된 절충, 보고 참조) */
 .app__right {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 11fr) minmax(0px, 0fr);
   min-height: 0;
-  transition: grid-template-rows var(--motion-slow) var(--ease-in-out);
   /* E13 — 접혀도 언마운트되지 않고 트랙만 0px가 된다(App.tsx) — 안의 트리·상세가 0폭 밖으로
      새어 나오지 않게 자른다 (app__left와 짝) */
   overflow: hidden;
   /* E13 — app__left 주석 참조: 간격 트랙에 밀려나지 않도록 자기 트랙 번호(7)를 명시한다 */
   grid-column: 7;
-  /* E13 Task 3 — app__resizer 주석 참조: 행 간격 트랙에 밀려나지 않도록 1행으로 명시한다.
-     (참고: 이 grid-template-rows·transition은 .app__right 자신의 중첩 grid — 상세 슬롯용(E11)이지
-     .app__main의 행 트랙과는 무관하다) */
+  /* E13 Task 3 — app__resizer 주석 참조: 행 간격 트랙에 밀려나지 않도록 1행으로 명시한다 */
   grid-row: 1;
+  /* E13 후속 — 이 요소는 이제 순수 클리퍼(app__left와 짝, 위 주석 참조)라 grid도 여기서
+     빠지고 .app__right-inner로 옮겼다. flex+justify-content:flex-end로 안의 고정폭 상자를
+     이 트랙의 "고정 변"에 맞춰 정렬한다 — app__right는 열 중 맨 끝(우측)이라 트랙이 줄어들
+     때 항상 오른쪽 끝(=app__main 오른쪽 패딩)이 고정이고 왼쪽(중앙쪽) 끝이 움직인다
+     (실측: 그리드에서 마지막 트랙의 끝 선은 컨테이너 끝과 같아 안 움직인다). app__left는
+     반대로 왼쪽 끝이 고정이라 기본 정렬(왼쪽)로 충분했지만, 여긴 기본 정렬(왼쪽)을 그대로
+     두면 고정폭 상자가 트랙의 움직이는 왼쪽 변에 붙어버려 "오른쪽 끝이 잘리며 사라지는" 것처럼
+     보인다(눌리는 것과 똑같이 어색함, 스펙 3번째 항목) — flex-end로 오른쪽에 고정해야
+     "왼쪽(중앙쪽)부터 잘려 나가 오른쪽으로 슬라이드 아웃"하는 모양이 된다 */
+  display: flex;
+  justify-content: flex-end;
 }
-.app__right--detail-open {
+/* E13 후속 — 펼친 폭을 고정으로 유지하는 실제 콘텐츠 상자(app__left-inner와 짝). 폭은 App이
+   인라인 스타일로 지정한다(rightExpandedWidth). E11의 상세 슬롯 중첩 grid(그리드 행 11fr/9fr)를
+   옛 .app__right에서 그대로 옮겨왔다 — 열림/닫힘 전환(--detail-open)은 이 안쪽 세로 축 얘기라
+   가로 폭 고정과는 별개 축이라 서로 간섭하지 않는다. flex-shrink:0 — 부모(.app__right)가 flex라
+   기본값(1)이면 트랙이 좁아질 때 이 상자까지 같이 눌린다(바로 우리가 없애려는 그 버그) */
+.app__right-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 11fr) minmax(0px, 0fr);
+  min-height: 0;
+  flex-shrink: 0;
+  transition: grid-template-rows var(--motion-slow) var(--ease-in-out);
+}
+.app__right-inner--detail-open {
   grid-template-rows: minmax(0, 11fr) minmax(240px, 9fr);
 }
-.app__right > .ui-panel {
+.app__right-inner > .ui-panel {
   min-height: 0;
 }
-.app__right--detail-open > .ui-panel {
+.app__right-inner--detail-open > .ui-panel {
   margin-bottom: var(--space-4);
 }
 .app__right-detail {

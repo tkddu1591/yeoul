@@ -99,7 +99,14 @@ export function TerminalDock({
   }, [])
 
   return (
-    <div className="terminal-dock" ref={dockRef} data-testid="terminal-dock">
+    // E13 후속(사용자 실측: "접을 때 텍스트가 뭉개진다") — 높이를 고정으로 준다(부모
+    // .app__dock가 행 트랙 크기 그대로인 클리퍼, terminal-dock.css 주석 참조). height prop은
+    // App.tsx의 dockHeight — 닫혀도(open=false) 이 값 자체는 0이 되지 않는, 항상 "펼친" 높이다
+    // (App.tsx가 넘겨줄 때 열림 여부와 무관하게 그대로 넘긴다). data-testid="terminal-dock"은
+    // 부모(.app__dock)로 옮겼다 — 이 요소는 이제 고정 높이라 자기 박스가 안 줄어들어서, 여기
+    // 있으면 Playwright의 toBeHidden()이 닫혀도 거짓을 준다(예전에 고정 px를 쓰다 겪은 것과
+    // 같은 함정, terminal-dock.css 주석 참조)
+    <div className="terminal-dock" ref={dockRef} style={{ height }}>
       <div
         className="terminal-dock__bar"
         onPointerDown={onResizeStart}

@@ -310,6 +310,22 @@ export function App() {
     left: leftCollapsed,
     right: rightCollapsed,
   })
+  // E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — 접힌 트랙(columns.left/right)은 0이라
+  // 그 값 그대로 안쪽 콘텐츠 폭에 쓰면 트랙을 따라 매 프레임 다시 흐르며 뭉개진다(버그의 원인).
+  // 안쪽 콘텐츠는 항상 "지금 펼치면 몇 px일지"를 유지해야 한다 — 그 값을 구하는 두 갈래:
+  // ① 접기 직전 값을 별도 상태로 기억해두기 ② 그 쪽만 펼쳤다고 가정해 computeColumns를 다시
+  // 부르기. ②를 골랐다 — 창 크기·우측 드래그 폭이 접힌 동안 바뀌어도(예: 접은 채 창을 줄이면
+  // 나중에 펼칠 폭도 좁아져야 맞다) 매번 최신값이고, 기억해 둘 상태·동기화할 effect가 따로
+  // 필요 없다(정본이 하나 — computeColumns). 펼쳐진 동안은 이 값이 columns.left/right와
+  // 정확히 같은 계산이라(반대쪽 접힘만 반영) 다른 열 폭 테스트(드래그·960px 최소 창)에 영향이 없다
+  const leftExpandedWidth = computeColumns(viewportWidth, rightWidth, {
+    left: false,
+    right: rightCollapsed,
+  }).left
+  const rightExpandedWidth = computeColumns(viewportWidth, rightWidth, {
+    left: leftCollapsed,
+    right: false,
+  }).right
   // E7k — 창이 좁으면 헤더 액션이 아이콘만 남는다(이름은 Tooltip이 담당). 판정만 여기서, 숨김은 CSS
   const compactHeader = isCompactHeader(viewportWidth)
   // E13 — 접힌 열도 트랙을 유지하고 0px로 둔다(grid-tracks.ts). 간격도 트랙으로 옮겨져
@@ -820,8 +836,12 @@ export function App() {
         {/* 좌측 열 = [변경 | 실험 공간] 탭 (E7a) — 변경 탭은 기존 그대로(목록+저장 폼, E6a), 커밋 흐름 무변.
             빠른 전환은 헤더 스위처가 계속 담당하고, 탭은 관리 화면이다 (스펙: 이원화).
             E13 — 접혀도 언마운트하지 않는다(트랙만 0px, gridTemplateColumns와 짝) — 전환의
-            시작점을 유지해야 grid-template-columns가 보간된다(E12 시절의 조건부 마운트 폐기) */}
+            시작점을 유지해야 grid-template-columns가 보간된다(E12 시절의 조건부 마운트 폐기).
+            E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — .app__left는 이제 순수
+            클리퍼(트랙 폭 그대로)이고, 실제 탭바·패널은 안의 .app__left-inner가 펼친 폭
+            (leftExpandedWidth)을 고정으로 유지한 채 담는다(layout.css 주석 참조) */}
         <div className="app__left">
+          <div className="app__left-inner" style={{ width: leftExpandedWidth }}>
           <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
             <button
               type="button"
@@ -991,6 +1011,7 @@ export function App() {
               }}
             />
           ) : null}
+          </div>
         </div>
         <div className="app__center" data-find-scope="diff">
           {store.conflictFile !== null ? (
@@ -1050,15 +1071,24 @@ export function App() {
         {/* 우측 열 — 평소엔 트리 전체, 커밋 클릭 시에만 하단에 상세가 열린다 (E6a 사용자 제안).
             리뷰(PR) 상세만 대화형 화면이라 기존의 우측 전체 전환을 유지한다 (사용자 동의).
             store 상태(commitDetail·CLEAR_SELECTIONS)는 무변 — 렌더 위치만 바꿨다.
-            E13 — 접혀도 언마운트하지 않는다(트랙만 0px) */}
+            E13 — 접혀도 언마운트하지 않는다(트랙만 0px).
+            E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — .app__right는 이제 순수
+            클리퍼(트랙 폭 그대로)이고, 실제 트리·상세는 안의 .app__right-inner가 펼친 폭
+            (rightExpandedWidth)을 고정으로 유지한 채 담는다. 오른쪽 끝에 고정(justify-content:
+            flex-end, layout.css)해 왼쪽(중앙쪽)부터 잘려 나가 오른쪽으로 슬라이드 아웃하는
+            모양을 낸다 */}
         <div
-          className={`app__right${store.commitDetail !== null ? ' app__right--detail-open' : ''}`}
+          className="app__right"
           // E7h ⑥ — 리뷰 상세가 열린 동안은 히스토리 스코프가 아니다(그 아래 commit-files
           // 래퍼가 자기 attribute로 더 구체적으로 잡아채므로, 여기선 그 경우만 비워둔다).
           // E13 — 접힌 동안도 스코프를 비운다(⌘F 핸들러가 leftCollapsedRef/rightCollapsedRef로
           // 한 번 더 거르지만, 속성 자체도 걸어 다른 소비자가 생겨도 안전하게)
           data-find-scope={!rightCollapsed && store.pullDetail === null ? 'history' : undefined}
         >
+          <div
+            className={`app__right-inner${store.commitDetail !== null ? ' app__right-inner--detail-open' : ''}`}
+            style={{ width: rightExpandedWidth }}
+          >
           {store.pullDetail !== null ? (
             <ReviewDetailPanel
               key={store.pullDetail.detail.number}
@@ -1164,13 +1194,23 @@ export function App() {
               </div>
             </>
           )}
+          </div>
         </div>
         {/* E7b 터미널 도크 — 세션 유지를 위해 항상 마운트한다(언마운트 금지).
             E13 Task 3 — display:none 대신 행 트랙 자체가 0px↔dockHeight로 전환된다(gridTemplateRows,
             좌·우 열이 트랙을 유지하는 것과 같은 이유). 열 범위(dockGridColumn)·행 범위(dockGridRow)
-            모두 트랙 수가 고정이라 상수다 */}
+            모두 트랙 수가 고정이라 상수다.
+            E13 후속(사용자 실측: "접힐 때 텍스트가 뭉개진다") — .app__dock가 클리퍼(행 트랙
+            그대로)라 data-testid="terminal-dock"을 여기로 옮겼다(TerminalDock.tsx의 안쪽
+            .terminal-dock에서 이전 — 그쪽은 이제 고정 높이라 자기 박스가 안 줄어든다, 아래
+            TerminalDock 주석·terminal-dock.css 참조). Playwright의 toBeHidden()/toBeVisible()이
+            이 요소를 봐야 실제로 접혔는지 정확히 잡는다 */}
         {store.repoPath !== null && (
-          <div className="app__dock" style={{ gridColumn: dockGridColumn, gridRow: dockGridRow }}>
+          <div
+            className="app__dock"
+            data-testid="terminal-dock"
+            style={{ gridColumn: dockGridColumn, gridRow: dockGridRow }}
+          >
             <TerminalDock
               repoPath={store.repoPath}
               theme={theme}

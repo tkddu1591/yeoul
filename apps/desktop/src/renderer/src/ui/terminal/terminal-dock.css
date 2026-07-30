@@ -1,24 +1,45 @@
 /* E7b 터미널 도크 — 중앙+우측 하단. 좌측 관리 존은 전체 높이 유지 (스펙 v2 목업).
    grid-column·grid-row는 App.tsx가 grid-tracks.ts 상수로 inline style 지정한다(E13) —
-   여기 값은 지우지 않고 App이 항상 덮어쓴다는 사실만 유지 */
+   여기 값은 지우지 않고 App이 항상 덮어쓴다는 사실만 유지.
+   E13 후속(사용자 실측: "접을 때 텍스트가 뭉개진다") — 이 요소가 클리퍼(app__left/app__right와
+   같은 자리)다. data-testid="terminal-dock"도 여기로 옮겼다(TerminalDock.tsx에서 이전) —
+   Playwright의 toBeHidden()/toBeVisible()이 "이 요소 자신의 박스가 0인가"를 보는데, 그 박스는
+   행 트랙 크기 그대로인 이 요소(.app__dock)여야 맞다. 안의 .terminal-dock은 이제 고정 높이를
+   유지해(아래 주석) 자기 박스가 안 줄어들므로, 거기에 testid가 있으면 닫혀도 "보임"으로 잘못
+   잡힌다(Task 3 배경 설명과 같은 함정 — 아래 .terminal-dock 주석 참조) */
 .app__dock {
   min-height: 0;
   /* E13 Task 3 — display:none 폐기, 행 트랙이 0px↔dockHeight로 전환된다(App.tsx). 이 그리드
      아이템 자신의 박스가 곧 행 트랙 크기라 별도 처리가 필요 없지만, stretch로 생긴 박스보다
-     안의 내용(.terminal-dock)이 커지는 순간(전환 도중)이 있을 수 있어 방어적으로 자른다 */
+     안의 내용(.terminal-dock)이 커지는 순간(전환 도중)이 있을 수 있어 방어적으로 자른다.
+     E13 후속 — 이제 그 "커지는 순간"이 항상이다(.terminal-dock이 고정 높이라 행 트랙보다 큰
+     채로 있는 게 기본이다) — 그래서 overflow:hidden이 예전보다 더 적극적으로 일한다 */
   overflow: hidden;
+  /* E13 후속 — flex+align-items:flex-end로 안의 고정폭 상자를 이 행 트랙의 "고정 변(아래)"에
+     맞춘다. 도크 행은 콘텐츠·간격·도크 3트랙 중 마지막이라(app__right가 열 중 마지막인 것과
+     같은 이유, layout.css 주석 참조) 트랙이 줄어들 때 항상 아래쪽 끝이 고정이고 위쪽 끝이
+     움직인다 — 기본 정렬(위)로 두면 도크가 위에서부터 뭉개지듯 사라져 보인다. flex-end로
+     아래에 고정해야 "위(콘텐츠 쪽)부터 잘려 나가 아래로 슬라이드 아웃"하는 모양이 된다 */
+  display: flex;
+  align-items: flex-end;
 }
 .terminal-dock {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* E13 Task 3 — 고정 px 대신 부모(.app__dock, 곧 행 트랙 크기)를 그대로 채운다. 열림/닫힘
-     전환 내내 이 값이 실제로 바뀌어야 (a) FitAddon이 매 프레임 올바른 크기를 재기 위한
-     ResizeObserver(TerminalDock.tsx)가 뭔가 관찰할 대상이 생기고 (b) 닫힘일 때 이 요소 자신의
-     박스가 진짜 0이 되어 Playwright의 not.toBeVisible()이 성립한다(고정 높이였다면 부모가
-     overflow:hidden으로 가려도 이 요소 자신의 bounding box는 0이 아니라 여전히 "보임"으로
-     잡힌다 — app__left 등 다른 접힘 트랙이 전부 "그리드 아이템 자신이 곧 트랙"인 것과 같은 이유) */
-  height: 100%;
+  /* E13 Task 3 — 원래 고정 px 대신 부모(.app__dock, 행 트랙 크기)를 height:100%로 그대로
+     채웠었다. E13 후속(사용자 실측: "접을 때 텍스트가 뭉개진다") — 그 100%가 매 프레임
+     바뀌는 게 바로 크러시의 원인이다(터미널 바·탭·본문이 좁아지는 박스를 프레임마다 다시
+     흐른다). 이제 App.tsx가 이 요소에 인라인 style height(dockHeight prop, 항상 "펼친" 높이
+     — 닫혀도 이 prop 자체는 0이 되지 않는다, TerminalDock.tsx 주석 참조)를 고정으로 준다.
+     .app__dock(부모, 위 주석)이 실제 행 트랙 크기대로 줄어들며 클리퍼 역할을 하므로, 이 상자는
+     항상 같은 높이를 유지한 채 넘치는 부분만 부모가 자른다 — 그래서 접히는 동안 안의 내용이
+     좁아지며 뭉개지는 대신, 트랙 밖(위쪽)으로 잘려 나가듯 보인다.
+     flex-shrink:0 — 부모가 flex라 기본값(1)이면 행이 낮아질 때 이 상자까지 같이 눌린다(바로
+     우리가 없애려는 그 버그). width:100% — 가로는 여전히 부모(도크가 덮는 열 범위, 좌우 접힘에
+     따라 실제로 바뀐다)를 따라가야 해서 고정하지 않는다(세로만 고정) */
+  flex-shrink: 0;
+  width: 100%;
   /* E12 — 패널들과 같은 위계로: border-strong은 도크만 유독 진해 보여 다른 층처럼 읽혔다.
      panel.css의 .ui-panel과 같은 --color-border로 내려 시각적으로 같은 층에 앉힌다.
      E13 Task 3 — border가 아니라 inset box-shadow로 그린다: border는 box-sizing:border-box라도

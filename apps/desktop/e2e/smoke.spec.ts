@@ -2896,7 +2896,7 @@ test('E8 — 변경이 없으면 목록이 빈 상자로 자리를 먹지 않는
     // E8 — 내용 기반 크기는 .changes-panel 자신(flex:1, 열 전체를 채우는 확정 높이)이 아니라
     // 그 안의 두 카드(.ui-panel)가 flex:0 1 auto로 담당한다 (changes-panel.css 실측)
     const heights = await window.evaluate(() =>
-      Array.from(document.querySelectorAll('.app__left > .changes-panel .ui-panel')).map(
+      Array.from(document.querySelectorAll('.app__left-inner > .changes-panel .ui-panel')).map(
         (el) => (el as HTMLElement).getBoundingClientRect().height,
       ),
     )
@@ -2930,7 +2930,7 @@ test('E8 — 목록 길이가 크게 다를 때 짧은 쪽 카드가 눌려 사�
     await expect(window.getByTestId('file-staged-file-0.txt')).toBeVisible()
     const box = await window.evaluate(() => {
       const container = document.querySelector('.changes-panel') as HTMLElement
-      const panels = Array.from(document.querySelectorAll('.app__left > .changes-panel .ui-panel')) as HTMLElement[]
+      const panels = Array.from(document.querySelectorAll('.app__left-inner > .changes-panel .ui-panel')) as HTMLElement[]
       return {
         containerHeight: container.getBoundingClientRect().height,
         panelHeights: panels.map((p) => p.getBoundingClientRect().height),
