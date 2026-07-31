@@ -138,15 +138,15 @@ describe('runRead — 늦게 온 응답을 버린다 (busy 재진입 거부가 �
 
 /**
  * Blocking 1 — seq는 target 안에서만 돈다. refresh는 target이 'snapshot'이면서
- * center·right·left 상태까지 쓰므로(reviveSelections), writes로 그 자리들의 seq도 잡아야 한다.
+ * center·right·left 상태까지 쓰므로(reviveSelections), 그 자리들도 함께 봐야 한다.
  * 실측 재현: 창 포커스 → refresh 시작 → 사용자가 b.txt 클릭 → 늦게 끝난 refresh가 a.txt를 되살림.
  */
-describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () => {
-  it('writes에 적은 target을 남이 건드리면 낡은 것이 된다', async () => {
+describe('runRead claims — 교차 target 선점 (스펙 §2-4-2 B1)', () => {
+  it('claims에 적은 target을 남이 건드리면 낡은 것이 된다', async () => {
     const store = createFakeStore()
     const slow = deferred()
     let snapshotWasCurrent: boolean | null = null
-    // refresh 역할 — 표시는 snapshot이지만 실제로는 center·right까지 쓴다
+    // 선점형 조회 — 표시는 snapshot이지만 center·right까지 자기 것이라 주장한다
     const snapshotRead = runRead(
       store.set,
       store.get,
@@ -155,7 +155,7 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
         await slow.promise
         snapshotWasCurrent = isCurrent()
       },
-      ['snapshot', 'center', 'right'],
+      { claims: ['snapshot', 'center', 'right'] },
     )
     // 그사이 사용자가 다른 파일을 눌렀다 (center)
     await runRead(store.set, store.get, 'center', async () => {})
@@ -165,7 +165,7 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
     expect(snapshotWasCurrent).toBe(false)
   })
 
-  it('writes에 없는 target은 무효화하지 않는다 — 넓히는 게 아니라 정확히 적는 것이다', async () => {
+  it('claims에 없는 target은 무효화하지 않는다 — 넓히는 게 아니라 정확히 적는 것이다', async () => {
     const store = createFakeStore()
     const slow = deferred()
     let snapshotWasCurrent: boolean | null = null
@@ -177,7 +177,7 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
         await slow.promise
         snapshotWasCurrent = isCurrent()
       },
-      ['snapshot', 'center'],
+      { claims: ['snapshot', 'center'] },
     )
     // reviews는 이 조회가 쓰지 않는 자리다 — 리뷰 목록 갱신이 스냅샷을 낡게 만들면 안 된다
     await runRead(store.set, store.get, 'reviews', async () => {})
@@ -195,14 +195,16 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
       await slow.promise
       centerWasCurrent = isCurrent()
     })
-    await runRead(store.set, store.get, 'snapshot', async () => {}, ['snapshot', 'center', 'right'])
+    await runRead(store.set, store.get, 'snapshot', async () => {}, {
+      claims: ['snapshot', 'center', 'right'],
+    })
     slow.resolve()
     await centerRead
 
     expect(centerWasCurrent).toBe(false)
   })
 
-  it('writes를 안 주면 target 하나만 잡는다 (기본값 — 기존 호출부 15곳의 동작)', async () => {
+  it('claims를 안 주면 target 하나만 잡는다 (기본값 — 기존 호출부 15곳의 동작)', async () => {
     const store = createFakeStore()
     const slow = deferred()
     let leftWasCurrent: boolean | null = null
@@ -217,7 +219,7 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
     expect(leftWasCurrent).toBe(true)
   })
 
-  it('카운터(=스피너)는 표시용 target에만 붙는다 — writes를 넓혀도 스피너가 번지지 않는다', async () => {
+  it('카운터(=스피너)는 표시용 target에만 붙는다 — claims를 넓혀도 스피너가 번지지 않는다', async () => {
     const store = createFakeStore()
     let during: Record<ReadTarget, number> | null = null
     await runRead(
@@ -227,9 +229,144 @@ describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () =>
       async () => {
         during = { ...store.peek().reads }
       },
-      ['snapshot', 'center', 'right'],
+      { claims: ['snapshot', 'center', 'right'] },
     )
     expect(during).toEqual({ snapshot: 1, center: 0, right: 0, left: 0, reviews: 0 })
+  })
+})
+
+/**
+ * §2-4-3 — 배경 조회는 사용자 조회를 이기면 안 된다.
+ *
+ * §2-4-2가 선점(claims)과 양보(defersTo)를 `writes` 하나로 뭉갠 탓에 거울상 버그가 났다:
+ * 배경 refresh가 center를 선점해 사용자의 클릭을 무효화하고 자기가 읽어둔 옛 파일을 되살렸다
+ * (실측: 마지막으로 누른 파일=b.txt인데 화면엔 a.txt — main 대비 회귀).
+ * 규칙은 비대칭이다. 아래 두 방향을 모두 고정한다.
+ */
+describe('runRead defersTo — 배경 조회는 양보한다 (스펙 §2-4-3)', () => {
+  it('(a) 사용자 조회가 먼저 돌고 있으면, 늦게 시작한 배경 조회가 양보한다', async () => {
+    const store = createFakeStore()
+    const slowUser = deferred()
+    // 사용자가 b.txt를 눌러 조회가 도는 중 (center 선점)
+    const userRead = runRead(store.set, store.get, 'center', async () => {
+      await slowUser.promise
+    })
+    // 그 뒤 창 포커스 복귀로 배경 새로고침이 시작된다 — center를 잡지 않고 양보만 한다
+    let centerTaken: boolean | null = null
+    const background = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (_isCurrent, isTaken) => {
+        // 사용자 조회가 먼저 끝나 화면을 그린다
+        slowUser.resolve()
+        await userRead
+        centerTaken = isTaken('center')
+      },
+      { defersTo: ['center'] },
+    )
+    await background
+
+    // seq만 비교하면 여기서 false가 나온다 — 선점이 배경 조회 **시작 전**에 일어났기 때문이다
+    expect(centerTaken).toBe(true)
+  })
+
+  it('(b) 배경 조회가 먼저 시작했어도 그사이 사용자가 선점하면 양보한다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let centerTaken: boolean | null = null
+    const background = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (_isCurrent, isTaken) => {
+        await slow.promise
+        centerTaken = isTaken('center')
+      },
+      { defersTo: ['center'] },
+    )
+    // 그사이 사용자가 파일을 눌렀다
+    await runRead(store.set, store.get, 'center', async () => {})
+    slow.resolve()
+    await background
+
+    expect(centerTaken).toBe(true)
+  })
+
+  it('양보는 seq를 올리지 않는다 — 배경 조회가 사용자 조회를 무효화하면 안 된다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let userWasCurrent: boolean | null = null
+    const userRead = runRead(store.set, store.get, 'center', async (isCurrent) => {
+      await slow.promise
+      userWasCurrent = isCurrent()
+    })
+    // 배경 조회가 통째로 시작하고 끝난다
+    await runRead(store.set, store.get, 'snapshot', async () => {}, {
+      defersTo: ['center', 'right', 'left'],
+    })
+    slow.resolve()
+    await userRead
+
+    // claims였다면 여기서 false가 됐다 — 그게 §2-4-3이 고친 회귀다
+    expect(userWasCurrent).toBe(true)
+  })
+
+  it('아무도 안 건드렸으면 양보하지 않는다 — 배경 갱신이 제 일을 계속한다', async () => {
+    const store = createFakeStore()
+    let taken: boolean[] | null = null
+    await runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (_isCurrent, isTaken) => {
+        taken = [isTaken('center'), isTaken('right'), isTaken('left')]
+      },
+      { defersTo: ['center', 'right', 'left'] },
+    )
+    expect(taken).toEqual([false, false, false])
+  })
+
+  it('양보 대상이 아닌 자리는 언제나 false다 — 묻지 않은 것에 답하지 않는다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let reviewsTaken: boolean | null = null
+    const background = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (_isCurrent, isTaken) => {
+        await slow.promise
+        reviewsTaken = isTaken('reviews')
+      },
+      { defersTo: ['center'] },
+    )
+    await runRead(store.set, store.get, 'reviews', async () => {})
+    slow.resolve()
+    await background
+
+    expect(reviewsTaken).toBe(false)
+  })
+
+  it('양보해도 자기 자리(snapshot)는 여전히 선점한다 — 늦게 온 배경 갱신은 버려진다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let wasCurrent: boolean | null = null
+    const first = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (isCurrent) => {
+        await slow.promise
+        wasCurrent = isCurrent()
+      },
+      { defersTo: ['center'] },
+    )
+    await runRead(store.set, store.get, 'snapshot', async () => {}, { defersTo: ['center'] })
+    slow.resolve()
+    await first
+
+    expect(wasCurrent).toBe(false)
   })
 })
 

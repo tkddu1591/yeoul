@@ -376,18 +376,40 @@ const CLEAR_SELECTIONS = {
 } as const
 
 /**
- * `refresh`·`externalRefresh`가 실제로 쓰는 상태 (E14a 스펙 §2-4-2 B1).
+ * 배경 새로고침(`refresh`·`externalRefresh`)이 **양보하는** 자리 (E14a 스펙 §2-4-3).
  *
- * 표시용 target은 'snapshot' 하나지만, 이 둘은 `reviveSelections`를 거치며
- * `selected`·`diff`(center) · `commitDetail`·`commitFile`(right) · `branchCompare`(left)까지
- * 되살린다. seq는 target 안에서만 도니, 여기 안 적은 자리는 이 조회가 무효화하지도 무효화당하지도
- * 못한다 — 그 구멍이 "그사이 누른 파일이 되돌아간다" 버그였다.
- *
- * 스펙 §2-4-2는 center·right 셋만 적었지만 `reviveSelections` 3번 항목이 `branchCompare`도
- * 되살리므로 'left'를 더했다 — 빼면 비교 뷰에 같은 버그가 그대로 남는다 (§2-4-2 본문의
- * "writes는 이 조회가 실제로 건드리는 상태다"를 따른 것).
+ * 표시용 target은 'snapshot' 하나지만 이 둘은 `reviveSelections`를 거치며 선택 상태와 비교 뷰까지
+ * 되살린다. 그렇다고 그 자리를 **선점**하면 안 된다 — 배경 갱신이 사용자의 클릭을 무효화하는
+ * 거울상 버그가 된다(§2-4-3 실측). 쓰긴 하지만 소유하지는 않는다는 뜻으로 양보만 한다.
  */
-const SNAPSHOT_WRITES: ReadTarget[] = ['snapshot', 'center', 'right', 'left']
+const SNAPSHOT_DEFERS: ReadTarget[] = ['center', 'right', 'left']
+
+/**
+ * 배경 새로고침이 되살린 상태 중, 그사이 사용자가 가져간 자리를 빼고 돌려준다 (스펙 §2-4-3).
+ *
+ * **필드가 target별로 안 갈린다 — 실측으로 확인한 편차.** 스펙은 `selected`·`diff`는 center,
+ * `commitDetail`·`commitFile`은 right로 갈릴 것이라고 봤지만, 실제로는 두 target의 액션이 같은
+ * 필드 집합을 함께 쓴다: `selectFile`(center)은 `commitDetail`·`commitFile`을 null로 밀고,
+ * `selectCommit`(right)은 `selected`·`diff`·`diffLabel`을 null로 민다. 가운데 패널이 하나뿐이라
+ * 두 뷰가 **상호 배타**이기 때문이고, 그 배타를 각 액션이 스스로 유지한다.
+ *
+ * 그래서 선택 상태는 center∪right 한 덩어리로 양보한다. 이게 손해가 아닌 이유도 같다 — 사용자가
+ * 파일을 눌렀다면 `commitDetail`은 이미 그 액션이 null로 만들어 뒀으므로, 통째로 안 건드려도
+ * 결과가 같다. `branchCompare`만 left로 따로 논다(비교 뷰는 좌측의 독립된 자리다).
+ */
+const SELECTION_KEYS = (Object.keys(CLEAR_SELECTIONS) as (keyof typeof CLEAR_SELECTIONS)[]).filter(
+  (key) => key !== 'branchCompare',
+)
+
+function deferSelections(
+  patch: Partial<RepositoryStore>,
+  isTaken: (target: ReadTarget) => boolean,
+): Partial<RepositoryStore> {
+  const next = { ...patch }
+  if (isTaken('center') || isTaken('right')) for (const key of SELECTION_KEYS) delete next[key]
+  if (isTaken('left')) delete next.branchCompare
+  return next
+}
 
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
@@ -471,10 +493,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy를 켜지 않고 억제 창도 무장하지 않는다. 억제를 걸면 그사이
     // 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10) (E14a)
-    // writes에 center·right가 있는 이유: reviveSelections가 selected·diff·commitDetail을 되살려
-    // 실제로는 가운데·우측 상태까지 쓴다. 'snapshot' seq만으로는 그사이 사용자가 누른 파일을
-    // 무효화하지 못해, 늦게 끝난 이 조회가 이전 파일을 되돌려 놓는다 (E14a 스펙 §2-4-2 B1)
-    await runRead(set, get, 'snapshot', async (isCurrent) => {
+    // 이 조회는 'snapshot'만 선점하고 center·right·left에는 **양보한다** — reviveSelections로
+    // 그 자리를 쓰긴 하지만 소유하지는 않는다. 선점하면 배경 갱신이 사용자의 클릭을 무효화한다
+    // (E14a 스펙 §2-4-3). 착지 때 남이 가져간 자리만 빼고 스냅샷 나머지는 그대로 반영한다
+    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
       // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
       // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
@@ -492,8 +514,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const hostingStatus = await hosting().status(repoPath)
       // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
-      set({ ...CLEAR_SELECTIONS, ...kept, ...revived, hostingStatus, ...snapshot })
-    }, SNAPSHOT_WRITES)
+      set({
+        ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken),
+        hostingStatus,
+        ...snapshot,
+      })
+    }, { defersTo: SNAPSHOT_DEFERS })
   },
 
   async externalRefresh() {
@@ -507,8 +533,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 저장마다** 도니, 켜면 에디터에서 파일을 저장하기만 해도 앱 전체가 깜빡인다
     // (E14a 실측: 외부 저장 1회에 헤더 속성 변형 20건). 억제 창도 무장하지 않는다 —
     // 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
-    // writes는 refresh와 같다 — 이 경로도 reviveSelections로 가운데·우측을 쓴다 (스펙 §2-4-2 B1)
-    await runRead(set, get, 'snapshot', async (isCurrent) => {
+    // 선점·양보는 refresh와 같다 — 이 경로도 reviveSelections로 선택 상태를 쓰되 소유하진 않는다.
+    // 오히려 여기가 더 중요하다: 에디터 자동 저장마다 도니, 선점하면 파일을 훑는 내내
+    // 배경 갱신이 클릭을 되돌린다 (E14a 스펙 §2-4-3)
+    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
       // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
       // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
       // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
@@ -523,8 +551,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const revived = await reviveSelections(repoPath, get(), snapshot.status)
       // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
-      set({ ...CLEAR_SELECTIONS, ...kept, ...revived, ...snapshot })
-    }, SNAPSHOT_WRITES)
+      set({ ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken), ...snapshot })
+    }, { defersTo: SNAPSHOT_DEFERS })
   },
 
   async switchBranch(name) {

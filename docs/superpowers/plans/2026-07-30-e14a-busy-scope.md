@@ -1353,6 +1353,44 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **README를 갱신했다** — 이 저장소의 README는 에픽마다 사용자가 체감하는 변화를 한 문장씩
   덧붙이는 형식이고, E14a는 눈에 보이는 동작 변화라 해당한다.
 
+#### Task 8 — `writes` 하나로는 부족했다 (스펙 §2-4-3 신설)
+
+Task 7이 §2-4-2대로 넣은 `writes`는 **선점(claim)과 양보(defer to)를 뭉갠 개념**이었다. 그래서
+B1을 막는 대신 거울상 버그를 만들었다 — `refresh`가 `center` seq를 잡는 순간 **배경 갱신이 사용자
+클릭을 무효화**한다. Task 7 보고서는 이걸 "수정 전·후 동일한 잔여 편차"로 올렸는데, **틀렸다.**
+거기서 말한 "수정 전"은 Task 7 이전의 E14a였지 `main`이 아니었다. 같은 하니스를 `main`
+워크트리에서 돌려 확인한 결과:
+
+| 시나리오 | main | Task 7 (`writes`) | Task 8 (`claims`/`defersTo`) |
+| --- | --- | --- | --- |
+| refresh 먼저 → 클릭 | `a.txt` ✗ | `b.txt` ✓ | `b.txt` ✓ |
+| 클릭 먼저 → refresh | **`b.txt` ✓** | **`a.txt` ✗ (회귀)** | `b.txt` ✓ |
+| 그때 스냅샷(status) | **통째로 버려짐** | 반영됨 | 반영됨 |
+
+`main`이 옳았던 이유는 설계가 아니라 부작용이다 — `selectFile`이 켠 `busy` 때문에 포커스
+`refresh`가 `guard`에 **통째로 거부됐다**. 선택은 지켜졌지만 스냅샷 갱신도 같이 날아갔다.
+§2-4-3은 둘 다 얻는다: 선택은 지키고, 스냅샷의 나머지는 반영한다.
+
+편차 2건:
+
+- **`isTaken`을 "시작 시점 seq 비교"만으로 구현하면 한 방향이 안 잡힌다.** 사용자 조회가 배경
+  조회보다 **먼저** 시작해 아직 도는 중이면 그 선점은 이미 시작 시점 seq에 반영돼 있어, 착지 때
+  비교해도 변화가 없다. 시작 시점의 `reads[t] > 0`(그 자리에 이미 도는 조회가 있었는가)을 함께
+  기억해 양보 조건에 넣었다. 단위 테스트 (a)가 이 변이를 잡는다.
+- **되살린 필드는 target별로 안 갈린다.** 스펙은 `selected`·`diff`=center,
+  `commitDetail`·`commitFile`=right로 갈릴 것으로 봤지만, 실제로는 `selectFile`(center)이
+  `commitDetail`을 null로 밀고 `selectCommit`(right)이 `selected`·`diff`를 null로 민다 —
+  가운데 패널이 하나뿐이라 두 뷰가 **상호 배타**이고 그 배타를 각 액션이 스스로 유지하기 때문이다.
+  그래서 선택 상태는 center∪right 한 덩어리로 양보하고 `branchCompare`만 left로 따로 뺐다.
+  손해가 없는 이유도 같다 — 사용자가 파일을 눌렀다면 `commitDetail`은 이미 그 액션이 비워 뒀다.
+- **`repository-store.ts`에 처음으로 단위 테스트를 붙였다**(`test/repository-store-refresh.test.ts`,
+  5건). `run-guard` 테스트만으로는 이 회귀가 안 잡히기 때문이다 — `SNAPSHOT_DEFERS`를 `claims`로
+  바꿔도 `run-guard.test.ts` 33건은 전부 초록이다(실측). 가짜 IPC 브리지에 지연을 주입해 완료
+  순서를 결정적으로 만든다.
+- 그 파일의 "아무도 안 건드리면 되살린다" 단언은 **처음에 검출력이 0이었다** — "언제나 양보"
+  변이에서도 초록이었다(안 건드리니 이전 상태가 그대로 남아 통과). 대상이 사라졌을 때 닫히는지를
+  보는 단언을 더해서야 그 변이가 빨강이 됐다.
+
 ### 반증 요약
 
 | 대상 | 변이 | 결과 |
@@ -1361,6 +1399,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 | 깜빡임 회귀 E2E 2건 | `runRead`에 `busy` 토글 복원 + 재빌드 | 둘 다 빨강. **Task 6에서 같은 변이를 다시 태워 헤더 30건을 재현**했고, 그 내역이 스펙 §1의 `disabled`×10·`tabindex`×10·`data-disabled`×10과 정확히 일치했다 |
 | 경합 E2E | `isCurrent`를 `()=>true` + 재빌드 | **6/9(67%) 빨강** (`--repeat-each=3`·`=6` 실측. 픽스처 크기를 세제곱으로 벌린 뒤 — 선형에선 1/3) |
 | 로딩 표시 E2E | `--motion-pending-delay`를 `0ms` + 재빌드 | 기존 불투명도 단언은 **초록(검출력 0)** → 단언 2개를 추가. 추가분은 각각 빨강 |
+| `defersTo` 단위 6건 | `defersTo`를 `claims`처럼 취급 / `busyAtStart` 제거 / `isTaken` 상수 false·true / 미지정 자리도 양보 / 자기 target 선점 해제 | 여섯 변이의 합으로 **6건 전부** 검출력 확인. `busyAtStart` 제거 변이가 (a)만 빨강 — 스펙의 "시작 시점 seq" 문구가 부족했다는 증거 |
+| 스토어 단위 5건 | `defersTo`→`claims`(=Task 7 회귀 재현) / `deferSelections` 무력화 / 양보 시 스냅샷까지 폐기(main 방식) / 언제나 양보 | 네 변이의 합으로 5건 전부 검출력 확인. 첫 변이가 Task 7의 회귀를 그대로 재현해 2건 빨강 |
 
 ### 증거 스크린샷
 

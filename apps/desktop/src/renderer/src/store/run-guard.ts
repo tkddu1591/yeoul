@@ -105,26 +105,56 @@ export async function runWrite(
  * 먼저 떨어진 뒤 A가 다른 파일의 diff로 덮어쓴다. 지금까지는 busy 재진입 거부가 이 경합을 우연히
  * 막고 있었고, 그걸 빼는 순간 열린다. 호출부는 결과 set을 반드시 if (isCurrent())로 감싼다.
  *
- * target과 writes를 가른 이유 (스펙 §2-4-2 B1): target은 **표시용**(스피너가 뜰 자리)이고 writes는
- * **이 조회가 실제로 건드리는 상태**다. refresh는 target이 'snapshot'이지만 reviveSelections로
- * center·right 상태까지 쓴다 — 이때 writes를 안 넓히면 사용자가 그사이 누른 파일을 늦게 끝난
- * refresh가 되돌려 놓는다(실측: 마지막으로 누른 파일=b.txt인데 화면엔 a.txt). 그래서 writes의
- * 모든 seq를 올리고, isCurrent()는 **전부**에서 최신일 때만 참이다.
+ * target·claims·defersTo가 셋 다 필요한 이유 (스펙 §2-4-2 → §2-4-3):
+ *
+ * - `target`은 **표시용**이다 — 스피너가 뜰 자리 하나.
+ * - `claims`는 **선점**이다. 이 조회가 자기 것이라고 주장하는 자리. 여기 적힌 자리의 seq를 올리므로
+ *   같은 자리를 노리는 다른 조회를 무효화하고, 자기도 남에게 무효화당한다.
+ * - `defersTo`는 **양보**다. seq를 올리지 않는다. 착지할 때 "그사이 남이 가져갔는가"만 묻는다.
+ *
+ * 왜 둘을 갈랐나: §2-4-2는 이 둘을 `writes` 하나로 뭉갰고, 그래서 **배경 새로고침이 사용자 클릭을
+ * 무효화하는 거울상 버그**를 만들었다(실측: b.txt를 눌렀는데 화면엔 a.txt — main 대비 회귀였다).
+ * refresh는 center를 *쓰긴* 하지만 *소유하지는 않는다*. 규칙은 비대칭이다 —
+ * **사용자 조회는 배경 조회를 이기고, 반대는 성립하지 않는다.**
+ *
+ * isTaken이 seq 비교만으로 부족한 이유(실측): 사용자 조회가 **배경 조회보다 먼저 시작해** 아직
+ * 도는 중이면, 그 선점은 배경 조회의 시작 시점 seq에 이미 반영돼 있어 착지 때 비교해도 변화가 없다.
+ * 그 사이 사용자 조회가 끝나 b.txt를 그려도 배경 조회가 뒤늦게 a.txt로 덮는다. 그래서 시작 시점에
+ * **그 자리에 이미 도는 조회가 있었는지**(reads[t] > 0)도 함께 기억해 양보 조건에 넣는다.
  */
+export interface ReadScope {
+  /** 선점할 자리 — 기본값은 표시 target 하나 */
+  claims?: ReadTarget[]
+  /** 양보할 자리 — 잡지 않고, 착지 시점에 남이 가져갔는지만 본다 */
+  defersTo?: ReadTarget[]
+}
+
 export async function runRead(
   set: GuardSet,
   get: GuardGet,
   target: ReadTarget,
-  run: (isCurrent: () => boolean) => Promise<void>,
-  writes: ReadTarget[] = [target],
+  run: (isCurrent: () => boolean, isTaken: (target: ReadTarget) => boolean) => Promise<void>,
+  scope: ReadScope = {},
 ): Promise<boolean> {
-  const claimed = writes.map((write) => [write, (readSeq[write] += 1)] as const)
-  const isCurrent = () => claimed.every(([write, seq]) => seq === readSeq[write])
+  const claimed = (scope.claims ?? [target]).map((claim) => [claim, (readSeq[claim] += 1)] as const)
+  const isCurrent = () => claimed.every(([claim, seq]) => seq === readSeq[claim])
+  // 양보 대상은 **잡지 않는다** — 시작 시점의 번호와 "그때 이미 도는 조회가 있었는가"만 남긴다.
+  // reads는 표시 target 기준이라, 여기 잡히는 것은 결과가 그 자리에 떨어지는 사용자 조회뿐이다
+  const deferred = new Map(
+    (scope.defersTo ?? []).map(
+      (defer) => [defer, { seq: readSeq[defer], busyAtStart: get().reads[defer] > 0 }] as const,
+    ),
+  )
+  const isTaken = (query: ReadTarget) => {
+    const mark = deferred.get(query)
+    if (mark === undefined) return false
+    return mark.busyAtStart || mark.seq !== readSeq[query]
+  }
   // set이 함수형 갱신자를 안 받으므로(StoreSet은 Partial만 받는다) get()으로 읽어 펼친다.
   // get()과 set() 사이에 await가 없어 단일 스레드에서 안전하다
   set({ reads: { ...get().reads, [target]: get().reads[target] + 1 } })
   try {
-    await run(isCurrent)
+    await run(isCurrent, isTaken)
     return true
   } catch (cause) {
     if (isCurrent()) set({ error: toErrorMessage(cause) })
