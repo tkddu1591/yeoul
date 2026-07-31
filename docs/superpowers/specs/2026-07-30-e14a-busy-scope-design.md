@@ -301,7 +301,35 @@ main에서는 같은 시나리오가 다른 방식으로 깨져 있었다(조회
 1. `runRead`에 `writes?: ReadTarget[]`를 더한다(기본값 `[target]`). 시작할 때 `writes`의 **모든**
    target seq를 올리고, `isCurrent()`는 **전부**에서 최신일 때만 참이다. `target`은 그대로 표시용
    (스피너가 뜰 자리)이고, `writes`는 "이 조회가 실제로 건드리는 상태"다.
-   `refresh`·`externalRefresh`는 `target: 'snapshot'` · `writes: ['snapshot', 'center', 'right']`.
+
+   **`refresh`·`externalRefresh`의 `writes`는 `['snapshot', 'center', 'right', 'left']`다** —
+   `reviveSelections`가 `selected`·`diff`(center) · `commitDetail`(right) 뿐 아니라
+   **`branchCompare`(left)까지**(`repository-store.ts:355`) 되살린다. 초안이 `left`를 빠뜨렸는데,
+   그러면 비교 뷰에 B1과 똑같은 버그가 그대로 남는다 (구현자 실측으로 정정).
+
+### 2-4-3. 배경 새로고침은 사용자의 선택을 이기면 안 된다 (§2-4-2의 후속 정정)
+
+§2-4-2의 `writes`는 **"claim(선점)"과 "defer to(양보)"를 뭉갰다.** 그래서 거울상 버그가 생긴다:
+
+```
+사용자가 b.txt 클릭(조회 시작) → 그 직후 창 포커스 복귀로 refresh 시작
+→ refresh가 center seq를 잡아 사용자의 클릭을 무효화
+→ refresh가 자기 시작 시점에 읽은 a.txt를 되살린다
+[실측] 마지막으로 누른 파일=b.txt · 화면에 남은 파일=a.txt
+```
+
+**이건 `main` 대비 회귀다.** main에서는 `selectFile`이 켠 `busy` 때문에 포커스 `refresh`가 `guard`에
+거부돼 `b.txt`가 그대로 남았다 — 올바른 동작이었다.
+
+**규칙:** 사용자가 시작한 조회는 배경 조회를 이긴다. 반대는 성립하지 않는다.
+
+- `selectFile` 같은 **사용자 조회**는 자기 target을 **선점**한다(seq를 올린다).
+- `refresh`·`externalRefresh` 같은 **배경 조회**는 `snapshot`만 선점하고, `center`·`right`·`left`에는
+  **양보**한다 — 시작 시점의 seq를 기억해 두었다가, 착지할 때 그 target이 그사이 선점됐으면
+  **해당 필드만 버린다**(스냅샷의 나머지는 여전히 유효하므로 통째로 버리지 않는다).
+
+즉 `runRead`의 인자는 `writes`(선점) 하나가 아니라 `claims`와 `defersTo` 두 갈래다. `defersTo`는
+착지 시점에 "그사이 남이 가져갔는가"만 묻고 자신은 아무것도 잡지 않는다.
 2. `invalidateReads()`를 `run-guard`에서 내보내 **모든 target의 seq를 한 칸씩 올린다.** 호출처:
    - `runWrite` 진입 — 쓰기는 상태를 갈아엎으므로 진행 중이던 조회 결과는 전부 낡았다 (B2 해소)
    - `clearSelection()` · 비교 뷰 닫기 — "닫았으면 닫힌 채로" (I1의 근본 해소)
