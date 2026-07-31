@@ -48,7 +48,7 @@
 - Produces: `ReadTarget`, `createEmptyReads()`, `WATCH_SUPPRESS_MS`, `isWithinSuppressWindow()`, `resetSuppression()`, `runWrite(set, get, run)`, `runRead(set, get, target, run)`. Task 2가 전부 쓴다.
 - Consumes: 없음 (독립 모듈).
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 `apps/desktop/test/run-guard.test.ts`:
 
@@ -273,12 +273,12 @@ describe('억제 창', () => {
 })
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/run-guard.test.ts`
 Expected: FAIL — `Failed to resolve import "../src/renderer/src/store/run-guard"`
 
-- [ ] **Step 3: 모듈을 구현한다**
+- [x] **Step 3: 모듈을 구현한다**
 
 `apps/desktop/src/renderer/src/store/run-guard.ts`:
 
@@ -399,18 +399,18 @@ function toMessage(cause: unknown): string {
 }
 ```
 
-- [ ] **Step 4: 통과를 확인한다**
+- [x] **Step 4: 통과를 확인한다**
 
 Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/run-guard.test.ts`
 Expected: PASS — 16 passed
 
-- [ ] **Step 5: 반증한다 — 테스트가 실제로 무는지**
+- [x] **Step 5: 반증한다 — 테스트가 실제로 무는지**
 
 `runRead`의 `set({ reads: … })` 두 줄을 잠시 지우고 재실행 → 카운터 테스트 2건이 빨개져야 한다.
 `isCurrent`를 `() => true`로 고정하고 재실행 → 늦은 응답 테스트 3건이 빨개져야 한다.
 확인 후 **원복**하고 다시 통과를 확인한다. 빨강/초록 출력을 그대로 보고에 붙인다.
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -451,7 +451,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 > 전환 후 `grep -c "armSuppression" repository-store.ts`가 **0**이어야 하고,
 > `grep -c "runRead(" repository-store.ts`가 **15**여야 한다.
 
-- [ ] **Step 1: 상태와 import를 바꾼다**
+- [x] **Step 1: 상태와 import를 바꾼다**
 
 `repository-store.ts` 상단 import에 추가:
 
@@ -482,14 +482,14 @@ export { WATCH_SUPPRESS_MS } from './run-guard'
   reads: createEmptyReads(),
 ```
 
-- [ ] **Step 2: `guard`와 `lastGuardEndAt`을 지운다**
+- [x] **Step 2: `guard`와 `lastGuardEndAt`을 지운다**
 
 `:373-409`의 `lastGuardEndAt` 선언, `WATCH_SUPPRESS_MS` 선언, `guard` 함수 전체를 삭제한다.
 `:454`의 `lastGuardEndAt = 0`을 `resetSuppression()`으로,
 `:524`의 `if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return`을
 `if (isWithinSuppressWindow()) return`으로 바꾼다.
 
-- [ ] **Step 3: 쓰기 50개를 `runWrite`로 바꾼다 (기계적)**
+- [x] **Step 3: 쓰기 50개를 `runWrite`로 바꾼다 (기계적)**
 
 `guard(set, get, async () => {` → `runWrite(set, get, async () => {`.
 꼬리의 `})` 는 그대로. 이 50개는 `armSuppression` 인자가 없던 것들이다.
@@ -498,7 +498,7 @@ export { WATCH_SUPPRESS_MS } from './run-guard'
 > 세던 50이 총계가 아니라 **쓰기 개수**였고, 조회 15개는 다중행 호출이라 그 grep에 안 잡혔다.
 > 실제 분할은 쓰기 50 · 조회 15 · 총 65다.
 
-- [ ] **Step 4: 조회 15개를 `runRead`로 바꾼다**
+- [x] **Step 4: 조회 15개를 `runRead`로 바꾼다**
 
 `selectFile`을 본보기로 삼는다 — 나머지 14개도 같은 모양이다:
 
@@ -548,21 +548,21 @@ export { WATCH_SUPPRESS_MS } from './run-guard'
 비우는 코드를 새로 넣지 않기만 하면 된다. 전환 중 위 목록과 다른 모양을 발견하면 임의로
 판단하지 말고 플랜 실행 기록에 적고 컨트롤러에게 보고한다.
 
-- [ ] **Step 5: 타입·단위 게이트**
+- [x] **Step 5: 타입·단위 게이트**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm typecheck && pnpm test
 ```
 Expected: typecheck 6/6 · Tests **578 passed** (562 + Task 1의 16건)
 
-- [ ] **Step 6: 잔재를 확인한다**
+- [x] **Step 6: 잔재를 확인한다**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui/apps/desktop/src/renderer/src/store" && grep -c "armSuppression" repository-store.ts; grep -c "runRead(" repository-store.ts; grep -c "runWrite(" repository-store.ts
 ```
 Expected: `0` · `15` · `50`  (조회 15 · 쓰기 50 · 총 65 — 위 Step 3 정정 참조)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -590,7 +590,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: Task 2의 동작(조회가 `busy`를 안 켠다).
 - Produces: 없음.
 
-- [ ] **Step 1: 테스트를 쓴다**
+- [x] **Step 1: 테스트를 쓴다**
 
 `smoke.spec.ts` 끝에 추가한다. 기존 헬퍼 `createRepoWithChange`가 파일 1개만 만든다면
 아래처럼 자체 픽스처를 쓴다(파일 2개가 필요하다 — A→B로 재야 하기 때문이다).
@@ -752,7 +752,7 @@ test('E14a — 에디터에서 저장해도 앱이 잠기지 않는다 (외부 �
 })
 ```
 
-- [ ] **Step 2: 통과를 확인한다**
+- [x] **Step 2: 통과를 확인한다**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
@@ -760,14 +760,14 @@ cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 (**단일 포그라운드 호출 · `timeout: 600000`**)
 Expected: **121 passed** (119 + 2)
 
-- [ ] **Step 3: 반증한다**
+- [x] **Step 3: 반증한다**
 
 `run-guard.ts`의 `runRead`가 `set({ busy: true })`를 켰다 끄도록 잠시 되돌린 뒤
 **`pnpm --filter @git-gui/desktop e2e`로 재빌드해서** 실행 → 두 테스트가 빨개져야 한다.
 `npx playwright test`는 빌드하지 않으므로 쓰지 않는다. 확인 후 원복하고 다시 통과를 확인한다.
 빨강/초록 출력을 그대로 보고에 붙인다.
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -798,7 +798,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: Task 2의 `store.reads`.
 - Produces: `Panel`의 `pending?: boolean` prop.
 
-- [ ] **Step 1: 토큰을 추가한다**
+- [x] **Step 1: 토큰을 추가한다**
 
 `ui/tokens.css`의 `--motion-slow: 240ms;` 줄 바로 아래:
 
@@ -807,7 +807,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
                                     평범한 조회는 전부 이 안에서 끝나 한 프레임도 보이지 않는다 (E14a) */
 ```
 
-- [ ] **Step 2: 키프레임과 클래스를 추가한다**
+- [x] **Step 2: 키프레임과 클래스를 추가한다**
 
 `ui/base.css`의 `@keyframes ui-fade { … }` 블록 바로 아래:
 
@@ -844,7 +844,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 `transform: rotate`와 `opacity`는 안전망(`motion-tokens.test.ts`)이 막는 레이아웃 속성이 아니다.
 
-- [ ] **Step 3: `Panel`에 `pending`을 단다**
+- [x] **Step 3: `Panel`에 `pending`을 단다**
 
 `ui/Panel.tsx`:
 
@@ -891,7 +891,7 @@ export function Panel({ title, titleHint, accessory, pending, children, testId }
 }
 ```
 
-- [ ] **Step 4: App에서 배선한다**
+- [x] **Step 4: App에서 배선한다**
 
 `App.tsx`에서 각 패널에 넘긴다. target은 스펙 §2-2 표를 따른다:
 
@@ -937,14 +937,14 @@ export function DiffPanel({ /* …기존… */ pending }: DiffPanelProps) {
 `ReviewPopover`는 `Panel`을 쓰지 않으므로 자기 헤더에 `<span className="ui-pending" />`을
 `store.reads.reviews > 0`일 때 직접 넣는다.
 
-- [ ] **Step 5: 게이트**
+- [x] **Step 5: 게이트**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm typecheck && pnpm test
 ```
 Expected: typecheck 6/6 · Tests **578 passed** (변동 없음 — 이 태스크는 단위 테스트를 늘리지 않는다)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -973,7 +973,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: Task 2의 `isCurrent()` 배선 · Task 4의 `data-testid="panel-pending"`.
 
-- [ ] **Step 1: 테스트를 쓴다**
+- [x] **Step 1: 테스트를 쓴다**
 
 ```ts
 /**
@@ -1111,14 +1111,14 @@ test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', asy
 > ("runWrite 중에도 조회는 시작된다")가 이미 정확히 고정하고 있고, 그게 더 나은 자리다.
 > 여기 E2E는 대신 **새로 열린 위험(늦게 온 응답이 최신을 덮는 것)**을 실제 앱에서 태운다.
 
-- [ ] **Step 2: 통과를 확인한다**
+- [x] **Step 2: 통과를 확인한다**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **123 passed** (121 + 2)
 
-- [ ] **Step 3: 반증한다**
+- [x] **Step 3: 반증한다**
 
 두 건 각각 무력화한다.
 
@@ -1134,7 +1134,7 @@ Expected: **123 passed** (121 + 2)
 
 원복 후 다시 통과를 확인한다. 빨강/초록 출력을 그대로 붙인다.
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -1152,7 +1152,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `docs/superpowers/plans/2026-07-30-e14a-busy-scope.md` (이 파일 — 실행 기록 절 추가)
 - Modify: `README.md` (해당하면)
 
-- [ ] **Step 1: 네 게이트를 전부 실행한다**
+- [x] **Step 1: 네 게이트를 전부 실행한다**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
@@ -1162,18 +1162,18 @@ cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: 6/6 · **578** · 성공 · **123**
 
-- [ ] **Step 2: 수정 후 실측을 다시 잰다**
+- [x] **Step 2: 수정 후 실측을 다시 잰다**
 
 Task 3의 두 테스트가 이미 0을 단언하지만, 스펙 §1의 표와 나란히 놓을 "수정 후" 숫자를
 같은 방식(구역별 MutationObserver)으로 한 번 더 재서 실행 기록에 표로 남긴다.
 
-- [ ] **Step 3: 스크린샷 2장**
+- [x] **Step 3: 스크린샷 2장**
 
 Playwright 창 캡처로만 찍는다(OS 전체 화면 금지). 스크래치패드 경로에 쓴다:
 - `e14a-1-pending-spinner.png` — 느린 조회에서 스피너가 배어난 순간(지연 토큰을 임시로 늘려 촬영하고, 촬영용 변경은 커밋하지 않는다)
 - `e14a-2-writing-locked.png` — 진짜 쓰기 작업 중에는 지금처럼 전역이 잠긴다는 증거
 
-- [ ] **Step 4: 실행 기록을 쓴다**
+- [x] **Step 4: 실행 기록을 쓴다**
 
 이 플랜 말미에 「실행 기록」절을 추가한다. 반드시 담을 것:
 - 플랜과 다르게 구현한 모든 편차와 그 이유
@@ -1183,7 +1183,7 @@ Playwright 창 캡처로만 찍는다(OS 전체 화면 금지). 스크래치패�
 - 최종 게이트 숫자
 - 수정 전/후 실측 대조표
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
@@ -1200,3 +1200,191 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **구독 셀렉터화·`React.memo`** — App이 셀렉터 없이 스토어 전체를 구독(`App.tsx:95`)하고 셀렉터 사용처가 0건이라 모든 스토어 변경이 전체 트리를 리렌더한다. 깜빡임의 원인은 아니었지만(헤더 텍스트 변경 0 · 속성만 30) 리렌더 비용은 남아 있다.
 - **E14b — eslint + Rules of React + React Compiler.** `HistoryPanel.tsx:204`의 렌더 중 ref 쓰기는 E7i 리뷰가 실측 재현으로 잡은 버그의 가드라 조심해서 다뤄야 한다. eslint 설정이 저장소에 아예 없어 `eslint-disable react-hooks/exhaustive-deps` 16곳이 한 번도 검사된 적 없다.
 - **좌측 `name`×36 · `type`×18 속성 처닝** — 파일 클릭 시 잡히는 별개 냄새(입력 요소 속성 재설정 — key 불안정이나 react-aria id 재생성 의심). 원인이 달라 별도 조사가 필요하다.
+
+---
+
+## 실행 기록 (2026-07-31)
+
+> 이 절이 E14a의 정본이다. 플랜 본문은 "하려던 것", 이 절은 **실제로 한 것과 왜 달라졌는지**다.
+> 뒤에 오는 작업은 본문이 아니라 여기를 먼저 읽는다.
+
+### 최종 게이트 (Task 6에서 전부 재실행)
+
+| 게이트 | 명령 | 시작 시점 | 결과 |
+| --- | --- | --- | --- |
+| 타입 | `pnpm typecheck` | 6/6 | **6/6** |
+| 단위 | `pnpm test` | 562 | **580 passed (48 files)** |
+| 빌드 | `pnpm --filter @git-gui/desktop build` | 성공 | **성공** |
+| E2E | `pnpm --filter @git-gui/desktop e2e` | 119 | **123 passed (2.9m)** |
+
+단위 +18의 내역: Task 1의 `run-guard` 16건 + `toErrorMessage` 회귀 2건.
+**플랜 Task 6 Step 1이 적은 기대치 578은 틀렸다** — 그 2건을 세지 않은 숫자다(아래 Task 1 편차 참조).
+
+### 수정 전/후 실측 대조표
+
+`MutationObserver`를 구역별(`.app__header` · `.app__left` · `.app__right` · `.app__center`)로 붙이고
+속성·텍스트·노드를 전부 세는, 스펙 §1과 같은 계측기다.
+
+**편차 — 스펙 §1의 숫자를 그대로 "수정 전" 열에 쓰지 않았다.** §1은 사용자의 실제 저장소에서 잰
+값이고 Task 6은 E2E 픽스처(파일 2개·40~50줄)에서 잰다. 픽스처가 다르면 절대값이 달라져
+나란히 놓으면 거짓말이 된다. 그래서 **같은 픽스처에서 `runRead`에 `set({busy:true/false})`를
+임시로 되돌려 수정 전 동작을 재현**해 한 번 더 쟀다(Task 3 반증과 같은 변이). 재현값이 §1과
+얼마나 맞는지도 함께 적는다.
+
+**파일 A → 파일 B 클릭 1회**
+
+| 구역 | 수정 전(같은 픽스처 재현) | 수정 후 | 스펙 §1(사용자 저장소) |
+| --- | --- | --- | --- |
+| 헤더 | 속성 **30** (`disabled`×10 · `tabindex`×10 · `data-disabled`×10) | **0** | 속성 30 — 내역까지 동일 |
+| 좌측 | 텍스트 **2**("작업 중이에요"→"스테이지에 올린 파일이 없어요") · 속성 39(`disabled`×10 · `name`×18 · `type`×9 · `class`×2) | 텍스트 **0** · 속성 **29**(`name`×18 · `type`×9 · `class`×2) | 텍스트 2 · 속성 78 |
+| 우측 | 속성 **2** (`disabled`×2) | **0** | 속성 2 |
+| 가운데 | 텍스트 1 · 노드 59 · 속성 62(`style`×55 · `data-tooltip`×1 · `disabled`/`tabindex`/`data-disabled` 각 2) | 텍스트 1 · 노드 59 · 속성 **56**(`style`×55 · `data-tooltip`×1) | 텍스트 1 · 노드 5 · 속성 10 |
+
+**외부 저장(에디터가 파일을 쓰기만 함) 1회**
+
+| 구역 | 수정 전(재현) | 수정 후 | 스펙 §1-2 |
+| --- | --- | --- | --- |
+| 헤더 | 속성 **30** (세 속성 기준) | **0** | 30(세 속성) / 20(두 속성) |
+| 좌측 | 텍스트 3("작업 중이에요" 포함) · 노드 5 · 속성 19(`disabled`×3 포함) | 텍스트 **1**("1") · 노드 5 · 속성 **16**(`disabled` **0**) | 좌측 변형 6 |
+| 우측 | 속성 2 | **0** | — |
+| 가운데 | 0 | **0** | — |
+
+읽어야 할 것:
+
+- **헤더·우측은 두 시나리오 모두 정확히 0이 됐다.** 사용자가 제보한 "헤더부터 사이드바 전체가
+  깜빡인다"의 직접 원인(`busy`발 `disabled`/`tabindex`/`data-disabled` 토글)이 사라졌다.
+- **좌측에서 사라진 건 `disabled` 계열과 "작업 중이에요" 텍스트뿐**이다. 남은
+  `name`×18 · `type`×9 · `class`×2는 **수정 전에도 같은 수**였다 — 즉 E14a가 줄인 것이 아니라
+  애초에 다른 원인의 처닝이다. 후속 노트의 "좌측 `name`·`type` 속성 처닝" 항목이 이 실측으로
+  독립 사안임이 확정됐다(플랜 작성 시점엔 추정이었다).
+- **가운데의 감소분 6 = `disabled`/`tabindex`/`data-disabled` 각 2**다. 가운데 패널의 자기 툴바
+  버튼도 남의 조회 때문에 잠겼다 풀리고 있었다. 나머지(노드 59 · `style`×55)는 diff를 실제로
+  b.txt로 갈아 끼우는 정당한 일이고 **픽스처 크기에 비례**한다 — §1의 5/10과 절대값이 다른 건
+  그 때문이지 회귀가 아니다. 가운데 열은 시나리오 간 비교용이 아니라 "여기만 바뀌어야 한다"의
+  확인용으로만 읽어야 한다.
+
+### 편차 — 플랜과 다르게 간 것 전부
+
+#### Task 1 — `run-guard` 모듈
+
+- **플랜 Step 5의 반증 예상이 틀렸다.** "카운터 2건 빨강"은 실제 **1건**, "늦은 응답 3건"은 실제
+  **2건**이었다. 원인을 규명한 뒤(한 단언이 다른 단언에 이미 포함돼 있었다) 변이 **A2(감소만 삭제)**
+  와 **C(`readSeq`를 대상별이 아니라 전역 하나로)** 를 추가 설계해 **16건 전부의 검출력**을 확인했다.
+  "예상보다 적게 빨개졌으니 통과"로 넘기지 않았다.
+- **플랜이 지어낸 `toMessage`가 결함이었다.** 그 함수는 Electron IPC 래핑 접두사를 벗기지 않아,
+  그대로 뒀으면 스토어 액션 전체의 오류 문구가 나빠질 뻔했다("저장할 게 없어요" →
+  `Error invoking remote method 'git:commit': Error: 저장할 게 없어요`). 기존 `toErrorMessage`를
+  `run-guard`로 옮겨 해결하고(`d3c65ce`) 회귀 테스트 2건을 더했다 — 이것이 578이 아니라 580인 이유다.
+
+#### Task 2 — 스토어 전환
+
+- **`guard` 호출은 50개가 아니라 65개**(쓰기 50 · 조회 15). 플랜 초안의 grep이 단일행 호출만 세고
+  다중행 조회 호출을 놓쳤다. 스펙·플랜 정정 `ab667ce`.
+- **`WATCH_SUPPRESS_MS` 재export를 삭제했다.** 플랜은 "다른 곳이 여기서 가져다 쓴다"고 적었지만
+  실제 importer는 **0곳**인 죽은 export였다 — 근거 없는 추측이었다.
+- **`refreshPulls`의 결과 `set()`은 하나가 아니라 둘이다.** `catch`의 `set({pulls: null})`도 결과를
+  쓰므로 둘 다 `isCurrent()`로 지켰다.
+- **`revealHead`의 결과 `set()`은 for 루프 안**이라 플랜이 열거한 세 유형 어디에도 없었다.
+- **`openPullDetail`의 최대 5초 `busy` 대기 루프를 삭제했다**(`b3693cf`). 그 루프는 "조회가 전역
+  busy를 잡아 첫 클릭이 삼켜진다"는 병리의 우회책이었고, E14a가 그 병리 자체를 없앴다. 남겨두면
+  스펙 §2-4("쓰기 중에도 조회는 허용")를 정면으로 어긴다.
+- **`refresh`/`externalRefresh`는 `set()` 객체 리터럴 안에 `await`가 섞여 있었다.** 원래 평가 순서를
+  보존하며 폈다. `hostingStatus`가 여전히 매번 무조건 조회된다는 점도 확인했다(의도 유지).
+- **`StoreSet`/`StoreGet` 타입 별칭이 죽어 삭제**했고, 사라진 `guard`를 가리키던 **주석 13곳을 정정**
+  했다(그중 2곳은 내용까지 거짓이 돼 있었다).
+
+#### Task 2 보완 — e2e 2건 실패, 그리고 그것이 드러낸 것
+
+- **`busy`는 표시가 아니라 재진입 차단기이기도 했다.** `HistoryPanel:271`의 "바닥에 닿으면 더
+  불러오기" 이펙트는 `onLoadMore`가 매 렌더 새 참조라 **원래부터 렌더마다 재발화**하고 있었고,
+  `!busy`만이 그 사슬을 끊고 있었다. 조회가 `busy`를 안 켜자 무한 렌더 루프 → React error #185로
+  우측 열이 통째로 언마운트됐다. `!pending`으로 차단기를 복원하고 **스펙 §2-4-1을 신설**했다
+  (`ab3a9b7`, 수정 `2248be0`). 이 패턴이 저장소에 이 한 곳뿐임을 전수 확인했다.
+- **E10 포커스 테스트 실패는 회귀가 아니라 계측 도구의 소실이었다.** 그 테스트는 새로고침 버튼의
+  `disabled` 토글로 재조회 횟수를 셌는데, 그 토글이 바로 이 에픽이 없애는 대상이다. 대체 계측으로
+  제안된 `window.gitApi` 래핑은 **불가능**했다 — contextBridge가 deep-freeze하며
+  (`writable:false` · `configurable:false`), 게다가 경로가 `gitApi.status`가 아니라 `gitApi.repo.status`다.
+  대신 **main 프로세스에서 `repo:status` IPC 핸들러를 감싸** 셌다. `ipcMain._invokeHandlers`는
+  Electron 내부 필드라 업그레이드 시 깨질 수 있으나, `patched` 단언을 둬서 **조용히 통과하는 대신
+  명시적으로 실패**한다.
+
+#### Task 3 — 깜빡임 회귀 E2E
+
+- **`data-testid="diff-panel"`은 빈 상태 패널에도 붙어 있다**(`DiffPanel.tsx:36`). 플랜의 사전조건
+  `toBeVisible()`은 부팅 즉시 참이라, 측정이 "선택 없음 → 첫 파일"에서 시작될 수 있었다 — 그건
+  이 테스트가 **명시적으로 피하려던 케이스**다(좌측 행 액션이 정당하게 활성화된다). `toContainText('a.txt')`로 교체.
+- **플랜의 정착 대기가 공허했다.** `.ui-pending` 개수를 폴링했는데 **그 클래스는 Task 4에서야 생긴다** —
+  항상 0이라 아무것도 기다리지 않았다. "직전 간격 동안 변형 0"이 될 때까지 폴링하는 방식으로 교체.
+- **외부 저장 기준값은 20이 아니라 30**이다(스펙의 20은 속성 2개, 테스트는 3개 기준). 정정 `599fa1c`.
+
+#### Task 4 — 로딩 표시
+
+- **플랜의 `margin-left: auto`가 결함이었다.** `.ui-panel__head > .ui-button:first-of-type`에 이미 같은
+  규칙이 있어 자동 여백이 둘이 되면 남은 공간을 반씩 나눈다 — 실측으로 `diff-close` 버튼의 x좌표가
+  **703 → 637로 66px 밀렸다 돌아왔다**. 로딩 표시가 이 에픽이 없애려는 깜빡임을 새로 만들 뻔했다.
+  절대 배치로 흐름에서 빼 해결.
+- **`data-testid="panel-pending"`을 패널 7개가 공유한다** → 이후 테스트는 반드시 패널로 스코프해야 한다.
+- 개별 패널 컴포넌트는 `pending: boolean`(필수), `Panel`은 `pending?: boolean`(선택)으로 갈랐다 — 의도적 편차.
+
+#### Task 5 — 경합·로딩 표시 E2E
+
+- **플랜의 불투명도 단언은 구조적으로 실패할 수 없었다.** 빠른 조회에서 스피너는 정확히 한 프레임만
+  DOM에 살고, `rAF` 콜백은 페인트 전이라 **지연이 0ms여도 computed opacity가 0**이다. 검출력 0.
+  "스피너가 한 프레임이라도 붙었는가" + "스피너 **자신의** `animation-delay`가 `0.4s`인가"
+  두 단언으로 교체하고 각각 반증했다.
+- 플랜의 `panel-pending` 셀렉터가 미스코프였다.
+- 테스트 1에 동기화가 없어 "아직 안 덮었을 뿐"인 상태를 통과로 오독할 수 있었다.
+- **테스트 1의 픽스처 크기(선형 200·400·600·800)로는 검출력이 1/3**이었다 → 세제곱(200·1600·5400·12800)
+  으로 벌려 5/5. 크기 차가 줄면 검출력이 즉시 떨어지므로, **경합의 정밀한 고정은 단위 테스트의 몫**이고
+  이 E2E는 배선 확인용이라는 것을 테스트 주석에 남겼다.
+
+#### Task 6 — 최종 게이트
+
+- 플랜 Step 1의 단위 기대치 **578은 580으로 정정**(Task 1 참조).
+- 수정 후 실측을 스펙 §1과 그대로 대조하지 않고 **같은 픽스처에서 수정 전을 재현해 나란히** 쟀다
+  (위 대조표의 편차 문단).
+- 스크린샷 2장은 **임시 소스 변이**로 찍었고 **커밋하지 않았다**(아래).
+- 계측·촬영용 스펙 2개(`e2e/e14a-measure.spec.ts` · `e2e/e14a-shot.spec.ts`)는 찍은 뒤 삭제했다.
+  저장소에 남는 검증은 회귀 E2E 4건과 단위 16건이다.
+- **README를 갱신했다** — 이 저장소의 README는 에픽마다 사용자가 체감하는 변화를 한 문장씩
+  덧붙이는 형식이고, E14a는 눈에 보이는 동작 변화라 해당한다.
+
+### 반증 요약
+
+| 대상 | 변이 | 결과 |
+| --- | --- | --- |
+| `run-guard` 단위 16건 | 카운터 증감 삭제 / 감소만 삭제(A2) / `isCurrent`를 `()=>true` / `readSeq` 전역 하나(C) | 네 변이의 합으로 **16건 전부** 검출력 확인 (플랜 예상 2·3건은 실제 1·2건 — 규명 후 변이 추가) |
+| 깜빡임 회귀 E2E 2건 | `runRead`에 `busy` 토글 복원 + 재빌드 | 둘 다 빨강. **Task 6에서 같은 변이를 다시 태워 헤더 30건을 재현**했고, 그 내역이 스펙 §1의 `disabled`×10·`tabindex`×10·`data-disabled`×10과 정확히 일치했다 |
+| 경합 E2E | `isCurrent`를 `()=>true` + 재빌드 | 5/5 빨강 (단, 픽스처 크기를 세제곱으로 벌린 뒤. 선형에선 1/3) |
+| 로딩 표시 E2E | `--motion-pending-delay`를 `0ms` + 재빌드 | 교체 전 단언은 **초록(검출력 0)** → 단언 자체를 교체. 교체 후 각각 빨강 |
+
+### 증거 스크린샷
+
+`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`
+(Playwright 창 캡처만 — OS 전체 화면 금지)
+
+- **`e14a-1-pending-spinner.png`** — 느린 조회에서 스피너가 배어나는 순간. `runRead`에 임시로
+  2500ms 지연을 넣고 클릭 후 455ms에 캡처했다(캡처 직전 computed opacity **0.835**, 직후 1 —
+  400ms 지연이 끝나고 150ms 페이드가 도는 한가운데다). 이 장면이 동시에 증명하는 것:
+  헤더·좌측·우측 컨트롤이 **전부 살아 있고**, 커밋 컴포저는 "작업 중이에요"가 아니라
+  "스테이지에 올린 파일이 없어요"이며, 가운데는 **아직 a.txt의 diff를 그대로 들고 있다**
+  (스펙 §2-3 "조회 중에도 이전 내용을 그대로 둔다").
+- **`e14a-2-writing-locked.png`** — 진짜 쓰기(스테이지에 올리기) 진행 중. `runWrite`에 임시로
+  1500ms 지연을 넣고 250ms에 캡처했다. **헤더 컨트롤 5개가 비활성**이고 커밋 상태 슬롯이
+  **"작업 중이에요"**다 — E14a가 전역 잠금을 **없앤 것이 아니라 쓰기로 좁힌 것**임의 증거다.
+
+두 임시 변이는 촬영 직후 `git checkout`으로 되돌리고 재빌드해 작업 트리를 깨끗이 했다.
+
+### 후속 (E14a 범위 밖)
+
+- **구독 셀렉터화 · `React.memo`** — App이 `App.tsx:95`에서 셀렉터 없이 스토어 전체를 구독한다.
+  깜빡임의 원인은 아니었지만(헤더 텍스트 변경 0 · 속성만 30) 리렌더 비용은 그대로 남아 있다.
+- **E14b — eslint 도입 + Rules of React 위반 수정 + React Compiler.** 저장소에 eslint 설정이 아예
+  없어 `eslint-disable react-hooks/exhaustive-deps` **16곳이 한 번도 검사된 적이 없다**.
+  `HistoryPanel.tsx`의 렌더 중 ref 쓰기는 E7i 리뷰가 실측으로 잡은 버그의 가드라 조심히 다뤄야 한다.
+  **E14a가 근거 하나를 더했다: `onLoadMore`가 매 렌더 새 참조인 것이 무한 루프의 연료였다** —
+  React Compiler가 있었으면 안정 참조가 됐을 자리다.
+- **`apps/desktop/tsconfig.json`의 `include`가 `["src"]`뿐**이라 `apps/desktop/test/**`가 타입 검사를
+  전혀 안 받는다. `packages/*/test/**`는 `tsconfig.base.json`에 포함돼 있어 대칭이 깨져 있다.
+- **좌측 `name`×18 · `type`×9 속성 처닝** — 위 대조표에서 **수정 전후가 동일**함이 확인된 별개 냄새다
+  (입력 요소 속성 재설정 — key 불안정이나 react-aria id 재생성 의심). 원인이 달라 별도 조사가 필요하다.
