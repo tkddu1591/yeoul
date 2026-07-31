@@ -51,10 +51,36 @@
 
 ## 2. 설계
 
-### 2-1. `guard` → `runWrite` / `runRead`
+### 2-1. `guard` → `runWrite` / `runRead` (새 모듈 `store/run-guard.ts`)
+
+**별도 모듈로 뺀다.** `repository-store.ts`는 1678줄이고 **스토어 단위 테스트가 하나도 없다**
+(테스트 31개가 전부 순수 함수 모듈이다 — 스토어가 `git()` IPC 브리지에 묶여 있어서다).
+그런데 `guard`는 이미 `(set, get, run)`을 인자로 받아 **스토어에 대해 순수**하다. 그대로 꺼내면
+가짜 `set`/`get`으로 단위 테스트가 되고, 이 저장소의 지배적 패턴에 정확히 맞는다.
+
+모듈은 스토어 타입 전체가 아니라 **필요한 필드만** 구조적으로 요구한다(`RepositoryStore`가 이를
+구조적으로 만족하므로 캐스팅이 필요 없다):
+
+```ts
+export type ReadTarget = 'snapshot' | 'center' | 'right' | 'left' | 'reviews'
+interface GuardState {
+  busy: boolean
+  error: string | null
+  notice: string | null
+  reads: Record<ReadTarget, number>
+}
+type GuardSet = (partial: Partial<GuardState>) => void
+type GuardGet = () => GuardState
+```
+
+억제 창 상태(`lastGuardEndAt`)도 이 모듈로 함께 옮긴다 — `runWrite`가 쓰고
+`externalRefresh`(`repository-store.ts:524`)와 `init`(`:454`)이 읽고 지우므로, 두 개의 함수로 노출한다:
+`isWithinSuppressWindow()` · `resetSuppression()`. `resetSuppression()`은 `init`이 이미 필요로 하던
+동작이라 **테스트 전용 API가 아니다**(테스트도 같은 함수로 격리한다).
 
 `guard`는 이름만 `runWrite`로 바뀌고 동작은 그대로다: 전역 `busy` 직렬화(`if (get().busy) return false`),
-`error`/`notice` 초기화, 종료 시 `lastGuardEndAt` 무장.
+`error`/`notice` 초기화, 종료 시 억제 창 무장. `armSuppression` 인자는 사라진다 — 그 구분이 곧
+두 함수의 구분이 됐기 때문이다.
 
 조회 15개는 새 `runRead(set, get, target, run)`으로 간다.
 
@@ -63,25 +89,47 @@
 const readSeq: Record<ReadTarget, number> = { snapshot: 0, center: 0, right: 0, left: 0, reviews: 0 }
 
 async function runRead(
-  set: StoreSet,
-  get: StoreGet,
+  set: GuardSet,
+  get: GuardGet,
   target: ReadTarget,
-  run: () => Promise<void>,
+  run: (isCurrent: () => boolean) => Promise<void>,
 ): Promise<boolean> {
   const seq = (readSeq[target] += 1)
-  set((s) => ({ reads: { ...s.reads, [target]: s.reads[target] + 1 } }))
+  const isCurrent = () => seq === readSeq[target]
+  set({ reads: { ...get().reads, [target]: get().reads[target] + 1 } })
   try {
-    await run()
+    await run(isCurrent)
     return true
   } catch (cause) {
-    // 늦게 온 실패는 최신 결과를 덮지 않는다
-    if (seq === readSeq[target]) set({ error: toErrorMessage(cause) })
+    if (isCurrent()) set({ error: toErrorMessage(cause) }) // 늦게 온 실패는 최신을 안 덮는다
     return false
   } finally {
-    set((s) => ({ reads: { ...s.reads, [target]: s.reads[target] - 1 } }))
+    set({ reads: { ...get().reads, [target]: get().reads[target] - 1 } })
   }
 }
 ```
+
+**`isCurrent`가 반드시 필요한 이유 (설계 결함 교정).** 결과를 스토어에 넣는 `set()`은 `runRead`가
+아니라 **`run` 안에서** 일어난다. 그래서 `runRead`만으로는 늦게 온 응답을 막을 수 없다 —
+느린 조회 A와 빠른 조회 B가 겹치면 B가 먼저 떨어진 뒤 A가 **다른 파일의 diff로 덮어쓴다**.
+지금까지는 `busy` 재진입 거부가 우연히 이 경합을 막고 있었고, 그걸 빼는 순간 열린다.
+
+따라서 **조회 15개 전부, 결과를 넣는 `set()`을 `if (isCurrent())`로 감싼다.** 예:
+
+```ts
+await runRead(set, get, 'center', async (isCurrent) => {
+  const diff = await git().changes.diff(repoPath, selected.change.path, { … })
+  if (!isCurrent()) return // 그 사이 다른 파일을 눌렀다 — 이 결과는 버린다
+  set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
+})
+```
+
+`reads` 카운터는 `isCurrent`와 무관하게 항상 증감한다 — 표시는 "지금 뭔가 돌고 있는가"이지
+"최신인가"가 아니기 때문이다.
+
+**`set`이 함수형 갱신자를 안 받는다.** 기존 `StoreSet`은 `(partial: Partial<RepositoryStore>) => void`라
+`set((s) => …)`을 쓸 수 없다. `get()`으로 현재 값을 읽어 펼친다 — `get()`과 `set()` 사이에 `await`가
+없으므로 단일 스레드에서 안전하다(기존 `guard`도 같은 방식으로 `get().busy`를 읽는다).
 
 **전역 `busy`를 아예 건드리지 않는다.** `error`/`notice`를 안 지우는 것과 억제 창을 안 무장하는
 것은 이제 **구성상 저절로** 지켜진다 — E10이 `armSuppression=false`라는 인자로 표현하던 규칙이
@@ -161,7 +209,8 @@ JS 타이머로 "150ms 넘으면 띄운다"를 만들지 않는다. 처음부터
 ### 2-4. 경합·동시성
 
 - **write끼리**: 지금 그대로 `busy` 하나로 직렬화된다. 무변.
-- **read끼리**: 대상별 카운터라 겹쳐도 안전하고, 대상별 `seq`로 늦게 온 응답을 버린다.
+- **read끼리**: 대상별 카운터라 겹쳐도 안전하고, 대상별 `seq` + `isCurrent()`로 늦게 온 응답을
+  버린다(§2-1의 교정 참조 — 이건 선택이 아니라 `busy` 재진입 거부가 하던 일을 대신하는 필수 장치다).
 - **write 중 read**: **허용한다.** git은 읽기가 쓰기와 겹쳐도 안전하고, write가 끝나면 스냅샷이
   다시 돌아 낡게 본 값은 곧 교정된다. 커밋이 도는 30초 동안 diff를 못 넘기는 편이 더 나쁘다.
 - **read 중 write**: `busy`가 false이므로 그대로 시작된다. 무변.
@@ -180,12 +229,16 @@ JS 타이머로 "150ms 넘으면 띄운다"를 만들지 않는다. 처음부터
 
 ## 3. 테스트
 
-### 3-1. 단위
+### 3-1. 단위 — `test/run-guard.test.ts` (가짜 `set`/`get`)
 
 - `runRead`가 `busy`를 켜지 않는다
 - `runRead`가 대상별 카운터를 올렸다 내린다 (성공·실패 양쪽)
+- **늦게 온 조회의 결과가 최신 결과를 덮지 않는다** — 느린 A·빠른 B를 겹쳐 돌리고, A의
+  `isCurrent()`가 `false`임을 확인한다 (§2-1 교정의 회귀 테스트)
 - 늦게 온 조회 실패가 최신 `error`를 덮지 않는다
+- 서로 다른 target의 조회는 상대의 `isCurrent()`를 무너뜨리지 않는다
 - `runWrite`의 재진입 거부·`error`/`notice` 초기화·억제 창 무장이 기존과 동일하다
+- `runWrite` 중에도 `runRead`가 시작된다 (§2-4의 동시성 결정)
 
 ### 3-2. E2E — 실측을 그대로 테스트로
 
