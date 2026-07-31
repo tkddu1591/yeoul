@@ -4002,3 +4002,176 @@ test('E13 후속 — 접히는 내내 안쪽 콘텐츠 상자는 펼친 크기 �
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E14a — 파일을 옮겨 다닐 때 앱 전체가 깜빡이면 안 된다.
+ *
+ * 사용자 제보: "파일 누르면 왜 헤더부터 사이드바 전체가 다 텍스트가 리렌더링되는것처럼
+ * 깜빡이는거야? diff부분만 바뀌면 될 것 같은데.."
+ *
+ * 원인은 selectFile이 diff만 읽는 조회인데도 전역 busy를 켰다 끈 것이다. busy는 렌더러
+ * 118곳에 스레드돼 있다. 수정 전 실측(MutationObserver, 파일 A→B 클릭 1회):
+ *   헤더  텍스트 0 · 속성 30 (disabled×10 · tabindex×10 · data-disabled×10)
+ *   좌측  텍스트 2 · 속성 78 (그 텍스트가 CommitForm의 '작업 중이에요'다)
+ *   헤더 컨트롤이 비활성으로 머문 시간 28.8ms
+ *
+ * **왜 A→B인가:** "선택 없음 → 첫 파일"은 좌측 행 액션이 정당하게 활성화된다(실측: disabled
+ * 대상 20→3). 그 경우엔 좌측 변형 0을 요구할 수 없다. 이미 한 파일을 보고 있는 상태에서
+ * 다른 파일로 옮기면 그 정당한 변화가 이미 끝나 있어, 남는 변형은 전부 busy 탓이다.
+ */
+test('E14a — 파일을 옮겨도 헤더가 잠기지 않는다 (전체 깜빡임 회귀)', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) {
+      await writeFile(join(repo, name), 'base\n'.repeat(50))
+    }
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) {
+      await writeFile(join(repo, name), 'changed\n'.repeat(50))
+    }
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      // 먼저 a.txt를 골라 "이미 보고 있는" 상태를 만든다.
+      // 빈 상태 패널도 testId가 diff-panel이라 toBeVisible로는 선택이 끝났는지 알 수 없다 —
+      // 제목(=경로)이 a.txt가 될 때까지 기다려야 진짜 A→B 측정이 된다
+      await window.getByTestId('file-unstaged-a.txt').click()
+      await expect(window.getByTestId('diff-panel')).toContainText('a.txt')
+
+      const counts = await window.evaluate(async () => {
+        const log = { header: 0, composerText: [] as string[] }
+        const headerObserver = new MutationObserver((records) => {
+          log.header += records.length
+        })
+        headerObserver.observe(document.querySelector('.app__header')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled', 'tabindex'],
+        })
+        const leftObserver = new MutationObserver((records) => {
+          for (const record of records) {
+            if (record.type === 'characterData') {
+              log.composerText.push(String((record.target as CharacterData).data))
+            }
+          }
+        })
+        leftObserver.observe(document.querySelector('.app__left')!, {
+          subtree: true,
+          characterData: true,
+        })
+
+        ;(document.querySelector('[data-testid="file-unstaged-b.txt"]') as HTMLElement).click()
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        headerObserver.disconnect()
+        leftObserver.disconnect()
+        return log
+      })
+
+      expect(counts.header, '헤더 잠금 변형 — 수정 전 실측 30건').toBe(0)
+      expect(
+        counts.composerText.filter((text) => text.includes('작업 중이에요')),
+        '커밋 컴포저가 "작업 중이에요"로 번쩍이면 안 된다',
+      ).toEqual([])
+      // 공허한 통과 방지 — 가운데는 실제로 b.txt로 바뀌었어야 한다
+      await expect(window.getByTestId('diff-panel')).toContainText('b.txt')
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14a — 앱을 만지지 않아도 깜빡이던 경로. externalRefresh(E10 워킹트리 감시)도 조회인데
+ * 전역 busy를 켰다. 즉 **에디터에서 파일을 저장하기만 해도** 헤더가 잠겼다 풀렸다.
+ * 에디터 자동저장을 켜두면 상시로 돈다. 수정 전 실측: 외부 저장 1회 → 헤더 변형 20건.
+ *
+ * 여기서는 사용자가 앱을 만지지 않았으므로 좌측 disabled 변형도 0을 요구할 수 있다.
+ */
+test('E14a — 에디터에서 저장해도 앱이 잠기지 않는다 (외부 변경 깜빡임 회귀)', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-ext-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    await writeFile(join(repo, 'a.txt'), 'base\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      await expect(window.locator('.app__header')).toBeVisible()
+      await expect(window.getByTestId('history-count')).toHaveText('1')
+
+      await window.evaluate(() => {
+        const log = { header: 0, left: 0 }
+        ;(window as unknown as { __e14a: typeof log }).__e14a = log
+        new MutationObserver((records) => {
+          log.header += records.length
+        }).observe(document.querySelector('.app__header')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled', 'tabindex'],
+        })
+        new MutationObserver((records) => {
+          log.left += records.length
+        }).observe(document.querySelector('.app__left')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled'],
+        })
+      })
+
+      // 부팅 직후의 초기 작업(init은 쓰기라 전역 busy를 켠다)이 남긴 변형과 섞이면 안 된다.
+      // "직전 간격 동안 변형 0"이 될 때까지 기다리며 그때까지의 계수를 버린다 —
+      // 이 폴은 매 호출마다 계수기를 0으로 되돌리므로 성공한 순간의 계수기는 0이다.
+      // (플랜은 여기서 .ui-pending 개수가 0이 되길 기다리라고 했지만 그 클래스는 Task 4에서야
+      //  생긴다 — 지금 쓰면 항상 0이라 아무것도 기다리지 않는 공허한 대기가 된다)
+      await expect
+        .poll(
+          async () =>
+            window.evaluate(() => {
+              const log = (window as unknown as { __e14a: { header: number; left: number } }).__e14a
+              const seen = log.header + log.left
+              log.header = 0
+              log.left = 0
+              return seen
+            }),
+          { timeout: 5000 },
+        )
+        .toBe(0)
+
+      // 에디터가 파일을 저장한 상황을 그대로 재현한다 (E10 워킹트리 감시 경로)
+      await writeFile(join(repo, 'a.txt'), 'edited by editor\n')
+      // 변경이 실제로 화면에 반영될 때까지 기다린다 — 반영도 안 됐는데 0건이면 공허하다
+      await expect(window.getByTestId('file-unstaged-a.txt')).toBeVisible()
+
+      const log = await window.evaluate(
+        () => (window as unknown as { __e14a: { header: number; left: number } }).__e14a,
+      )
+      expect(log.header, '헤더 잠금 변형 — 수정 전 실측 20건').toBe(0)
+      expect(log.left, '좌측 잠금 변형 — 사용자가 만지지 않았으므로 0이어야 한다').toBe(0)
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
