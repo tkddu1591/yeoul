@@ -38,6 +38,12 @@ interface HistoryPanelProps {
   localBranches: string[]
   selectedHash: string | null
   busy: boolean
+  /**
+   * 우측 열로 떨어지는 조회(더 불러오기 등)가 진행 중인가 (E14a).
+   * busy와 나눠 받는 이유: 예전엔 busy 하나가 "작업 중 표시"와 "재진입 차단기"를 겸했는데,
+   * E14a가 조회를 전역 busy에서 빼면서 차단기 역할만 빈다 — 더 불러오기 이펙트가 그 자리를 밟는다
+   */
+  pending: boolean
   /** merging 등 진행 중에는 이력 조작(이동·가져오기·되돌리기·실행취소·메시지 고치기)을 비활성 */
   actionsDisabled: boolean
   /** 역사 조회 중인 브랜치 — non-null이면 "조회 중" 알약을 보여준다 (E7g) */
@@ -158,6 +164,7 @@ export function HistoryPanel({
   localBranches,
   selectedHash,
   busy,
+  pending,
   actionsDisabled,
   historyRef,
   findOpen,
@@ -267,10 +274,16 @@ export function HistoryPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headHash, headFound])
 
-  // 마지막 행이 렌더 범위에 들어오면 다음 페이지를 불러온다 (⑩) — busy·상한은 store가 이중 방어한다
+  // 마지막 행이 렌더 범위에 들어오면 다음 페이지를 불러온다 (⑩) — 상한은 store가 이중 방어한다.
+  //
+  // !pending이 없으면 무한 루프다 (E14a 실측: React error #185로 우측 열이 통째로 언마운트).
+  // onLoadMore는 App에서 매 렌더 새로 만들어지는 화살표 함수라 이 이펙트는 렌더마다 재발화하는데,
+  // 예전엔 loadMoreHistory가 켠 busy가 그 사슬을 끊고 있었다 — busy는 "작업 중 표시"이자 사실상
+  // **재진입 차단기**였다. E14a가 조회를 전역 busy에서 빼자 차단기만 사라져 호출 → reads 변경 →
+  // 재렌더 → 새 onLoadMore → 재발화가 끝없이 돌았다. 조회는 조회의 진행 상태(pending)로 막는다
   useEffect(() => {
-    if (truncated && !busy && lastRendered >= history.length - 1) onLoadMore()
-  }, [truncated, busy, lastRendered, history.length, onLoadMore])
+    if (truncated && !busy && !pending && lastRendered >= history.length - 1) onLoadMore()
+  }, [truncated, busy, pending, lastRendered, history.length, onLoadMore])
 
   // 메뉴 8항목 + 구분선 — HEAD 전용 항목은 숨기지 않고 사유와 함께 비활성 (상태를 숨기지 않는다)
   const buildMenu = (commit: CommitSummary): ContextMenuEntry[] => {

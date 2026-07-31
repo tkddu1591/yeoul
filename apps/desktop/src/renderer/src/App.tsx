@@ -1114,6 +1114,7 @@ export function App() {
                 localBranches={store.branches.map((branch) => branch.name)}
                 selectedHash={store.commitDetail?.hash ?? null}
                 busy={store.busy}
+                pending={store.reads.right > 0}
                 actionsDisabled={status?.state !== 'normal'}
                 historyRef={store.historyRef}
                 findOpen={findScope === 'history'}

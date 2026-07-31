@@ -3202,11 +3202,14 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BrowserWindow.getAllWindows()[0]
  * 이 바로 그 창이므로).
  *
- * 재조회 호출 자체는 window.gitApi로 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze해
- * (실측: Object.isFrozen(gitApi.repo) === true) 재할당이 조용히 무시된다. 대신 "새로고침"
- * 버튼(store.busy로 disabled가 묶여 있다)의 disabled 속성이 true→false로 도는 것을
- * MutationObserver로 지켜본다 — guard()의 busy 전이는 refresh()가 실제로 실행됐다는
- * 직접 증거다. 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 전이를 만들 수 없다.
+ * 재조회 호출 자체는 렌더러에서 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze한다
+ * (재실측: Object.isFrozen(gitApi.repo) === true · window.gitApi는 writable:false·
+ * configurable:false라 통째 교체도 defineProperty도 "Cannot redefine property"로 막힌다).
+ * 예전엔 그래서 "새로고침" 버튼(store.busy로 disabled가 묶여 있다)의 disabled 전이를 셌지만,
+ * E14a가 조회를 전역 busy에서 빼면서 그 전이가 사라져 계측 도구 자체가 무효가 됐다(회귀가 아니라
+ * 프록시의 소멸이다). 대신 main 프로세스에서 repo:status IPC 핸들러를 감싸 호출 수를 센다 —
+ * 프록시가 아니라 재조회 그 자체라 더 직접적이고, 프로덕션 코드는 한 줄도 건드리지 않는다.
+ * 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 호출을 만들 수 없다.
  *
  * ⚠️ 다음 사람에게: "진짜 포커스가 아니니 불완전하다"며 blur()/focus() + GIT_GUI_E2E_SHOW로
  * 되돌리지 말 것 — 그 버전이 바로 위에서 설명한 경합 플레이크의 원인이었다.
@@ -3222,20 +3225,25 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     const window = await app.firstWindow()
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
-    // "새로고침" 버튼의 disabled 전이 횟수를 센다 — refresh()의 guard()가 busy를
-    // true로 돌릴 때마다 하나씩 늘어난다
-    await window.evaluate(() => {
-      const button = document.querySelector('[data-testid="refresh"]')!
-      const win = window as unknown as { __refreshCycles: number }
-      win.__refreshCycles = 0
-      new MutationObserver((records) => {
-        for (const record of records) {
-          if (record.attributeName === 'disabled' && button.hasAttribute('disabled')) {
-            win.__refreshCycles += 1
-          }
-        }
-      }).observe(button, { attributes: true })
+    // repo:status IPC 핸들러를 감싸 호출 수를 센다 — refresh()의 fetchSnapshot이 반드시 거치는
+    // 길목이다. ipcMain의 핸들러 맵은 Electron 내부 필드라 테스트에서만 손대고, 감싼 뒤에도
+    // 원래 핸들러를 그대로 호출하므로 앱 동작은 바뀌지 않는다
+    const patched = await app.evaluate(({ ipcMain }) => {
+      const impl = ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
+      }
+      const original = impl._invokeHandlers.get('repo:status')
+      if (original === undefined) return false
+      const globals = globalThis as unknown as { __refreshCycles: number }
+      globals.__refreshCycles = 0
+      impl._invokeHandlers.set('repo:status', (...args: unknown[]) => {
+        globals.__refreshCycles += 1
+        return original(...args)
+      })
+      return true
     })
+    // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
+    expect(patched, 'repo:status 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(true)
 
     // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
     // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
@@ -3245,7 +3253,7 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     })
     await expect
       .poll(
-        () => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles),
+        () => app.evaluate(() => (globalThis as unknown as { __refreshCycles: number }).__refreshCycles),
         { timeout: 5_000 },
       )
       .toBeGreaterThan(0)
