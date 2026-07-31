@@ -253,8 +253,61 @@ useEffect(() => {
 `reads.right > 0`, §2-3의 표시와 같은 값이다). Task 4가 이 패널에 `pending`을 이미 내려주므로
 새 배선이 필요 없다.
 
-**전수 확인:** 이 패턴(`useEffect` 안에서 `busy`를 차단기로 쓰는 곳)은 저장소 전체에서 **이 한 곳뿐**이다
-(`grep -rn -B8 "!busy"`로 확인). 다른 `busy` 소비처 117곳은 전부 `isDisabled`/`disabled` 같은 표시용이다.
+**~~전수 확인~~ — 이 문장은 틀렸다 (최종 적대적 리뷰가 정정).** 초안은 "`useEffect` 안에서 `busy`를
+차단기로 쓰는 곳은 이 한 곳뿐이고 나머지 117곳은 전부 표시용"이라고 썼다. `!busy`만 grep한
+불완전한 조사였다. **`isDisabled={busy}`로 위장한 경합 가드가 두 곳 더 있다** — 둘 다 자기 주석에
+목적을 명시하고 있었다:
+
+- `components/DiffPanel.tsx:13` — *"in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다"*
+- `components/BranchesPanel.tsx:219` — *"in-flight revive가 clear를 덮어쓰는 레이스 방지"*
+
+조회가 `busy`를 안 켜게 되면서 이 두 버튼이 조회 중에도 활성이 되고, 주석이 막던 경합이 **UI로
+도달 가능해진다**(리뷰 실측: 닫은 뒤 선택이 `a.txt`로 되살아남). 근본 해법은 §2-4-2다.
+
+**교훈:** `busy`의 역할을 "표시"와 "차단기"로 나눠 세려면 `!busy`가 아니라 **`busy`의 모든 사용처를
+읽어야** 한다. `isDisabled={busy}`는 겉보기에 표시지만 실제로는 차단기일 수 있다.
+
+### 2-4-2. seq는 target 안에서만 돈다 — 교차 무효화가 필요하다 (최종 리뷰 Blocking 2건)
+
+§2-2의 target 모델은 **"각 target은 서로 겹치지 않는 상태를 소유한다"**고 암묵적으로 가정했다.
+거짓이다. 리뷰가 실측으로 두 경로를 깼다.
+
+**(B1) `snapshot` 조회가 `center`·`right` 상태를 쓴다.** `refresh`/`externalRefresh`가 부르는
+`reviveSelections`(`repository-store.ts:302`)는 `revived.selected` · `revived.diff` ·
+`revived.commitDetail`을 채운다 — 즉 보고 있던 파일을 재조회해 되살린다(E7d ⑤). 그런데 `seq`는
+target별이라 `snapshot`과 `center`가 서로를 무효화하지 못한다:
+
+```
+창 포커스 복귀 → refresh 시작 → 사용자가 b.txt 클릭 → refresh의 revive가 늦게 끝남
+→ 화면에 a.txt가 남는다
+[실측] 마지막으로 누른 파일=b.txt · 화면에 남은 파일=a.txt
+```
+
+`refresh`의 지연 구간은 revive + `hosting().status()`(gh CLI 셸아웃)까지라 수백 ms급이다.
+**이 에픽이 막으려던 바로 그 실패 모드**(다른 파일의 diff가 남는다)가 교차 target 경로로 열려 있었다.
+
+**(B2) `runWrite`가 in-flight 조회를 무효화하지 않는다.** `openRepository`가 도는 동안 이전
+저장소의 조회가 끝나면, **새 저장소 화면에 옛 저장소의 선택이 되살아난다**:
+
+```
+[실측] repoPath=/other 인데 남은 선택= a.txt (/repo의 파일)
+```
+
+main에서는 같은 시나리오가 다른 방식으로 깨져 있었다(조회가 잡은 `busy` 때문에 `openRepository`
+자체가 무시됐다) — 어느 쪽도 옳지 않지만 E14a는 **저장소 간 내용 유출**이라는 새 모양을 만든다.
+
+**조치 — 무효화를 1급 연산으로 만든다.**
+
+1. `runRead`에 `writes?: ReadTarget[]`를 더한다(기본값 `[target]`). 시작할 때 `writes`의 **모든**
+   target seq를 올리고, `isCurrent()`는 **전부**에서 최신일 때만 참이다. `target`은 그대로 표시용
+   (스피너가 뜰 자리)이고, `writes`는 "이 조회가 실제로 건드리는 상태"다.
+   `refresh`·`externalRefresh`는 `target: 'snapshot'` · `writes: ['snapshot', 'center', 'right']`.
+2. `invalidateReads()`를 `run-guard`에서 내보내 **모든 target의 seq를 한 칸씩 올린다.** 호출처:
+   - `runWrite` 진입 — 쓰기는 상태를 갈아엎으므로 진행 중이던 조회 결과는 전부 낡았다 (B2 해소)
+   - `clearSelection()` · 비교 뷰 닫기 — "닫았으면 닫힌 채로" (I1의 근본 해소)
+
+`isDisabled={busy}` 두 곳은 그대로 둔다 — 경합은 이제 스토어에서 막히므로 그 버튼의 비활성은
+**쓰기 중 잠금**이라는 원래 의미만 남는다. 주석은 그 사실에 맞게 고친다.
 
 ### 2-5. 소비처 118곳 — 대부분 손대지 않는다
 
