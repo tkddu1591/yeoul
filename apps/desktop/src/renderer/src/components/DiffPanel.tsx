@@ -10,7 +10,12 @@ import './diff-panel.css'
 interface DiffPanelProps {
   path: string | null
   diff: FileDiff | null
-  /** in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 */
+  /**
+   * 쓰기(커밋·병합 등)가 도는 동안 닫기를 잠근다 — 그게 전부다.
+   * 예전엔 "in-flight selectFile이 clear를 덮어쓰는 레이스 방지"도 겸했지만, 조회가 더는 busy를
+   * 켜지 않으므로 그 역할은 성립하지 않는다. 경합은 이제 스토어에서 막는다 —
+   * `clearSelection()`이 `invalidateReads()`로 진행 중인 조회를 무효화한다 (E14a 스펙 §2-4-2)
+   */
   busy: boolean
   /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
   findOpen: boolean

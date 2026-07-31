@@ -19,6 +19,7 @@ import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-co
 import { applyBlockChoice } from '../components/conflict-markers'
 import {
   createEmptyReads,
+  invalidateReads,
   isWithinSuppressWindow,
   resetSuppression,
   runRead,
@@ -374,6 +375,20 @@ const CLEAR_SELECTIONS = {
   branchCompare: null,
 } as const
 
+/**
+ * `refresh`·`externalRefresh`가 실제로 쓰는 상태 (E14a 스펙 §2-4-2 B1).
+ *
+ * 표시용 target은 'snapshot' 하나지만, 이 둘은 `reviveSelections`를 거치며
+ * `selected`·`diff`(center) · `commitDetail`·`commitFile`(right) · `branchCompare`(left)까지
+ * 되살린다. seq는 target 안에서만 도니, 여기 안 적은 자리는 이 조회가 무효화하지도 무효화당하지도
+ * 못한다 — 그 구멍이 "그사이 누른 파일이 되돌아간다" 버그였다.
+ *
+ * 스펙 §2-4-2는 center·right 셋만 적었지만 `reviveSelections` 3번 항목이 `branchCompare`도
+ * 되살리므로 'left'를 더했다 — 빼면 비교 뷰에 같은 버그가 그대로 남는다 (§2-4-2 본문의
+ * "writes는 이 조회가 실제로 건드리는 상태다"를 따른 것).
+ */
+const SNAPSHOT_WRITES: ReadTarget[] = ['snapshot', 'center', 'right', 'left']
+
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
   status: null,
@@ -456,6 +471,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy를 켜지 않고 억제 창도 무장하지 않는다. 억제를 걸면 그사이
     // 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10) (E14a)
+    // writes에 center·right가 있는 이유: reviveSelections가 selected·diff·commitDetail을 되살려
+    // 실제로는 가운데·우측 상태까지 쓴다. 'snapshot' seq만으로는 그사이 사용자가 누른 파일을
+    // 무효화하지 못해, 늦게 끝난 이 조회가 이전 파일을 되돌려 놓는다 (E14a 스펙 §2-4-2 B1)
     await runRead(set, get, 'snapshot', async (isCurrent) => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
       // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
@@ -475,7 +493,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
       set({ ...CLEAR_SELECTIONS, ...kept, ...revived, hostingStatus, ...snapshot })
-    })
+    }, SNAPSHOT_WRITES)
   },
 
   async externalRefresh() {
@@ -489,6 +507,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 저장마다** 도니, 켜면 에디터에서 파일을 저장하기만 해도 앱 전체가 깜빡인다
     // (E14a 실측: 외부 저장 1회에 헤더 속성 변형 20건). 억제 창도 무장하지 않는다 —
     // 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
+    // writes는 refresh와 같다 — 이 경로도 reviveSelections로 가운데·우측을 쓴다 (스펙 §2-4-2 B1)
     await runRead(set, get, 'snapshot', async (isCurrent) => {
       // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
       // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
@@ -505,7 +524,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
       set({ ...CLEAR_SELECTIONS, ...kept, ...revived, ...snapshot })
-    })
+    }, SNAPSHOT_WRITES)
   },
 
   async switchBranch(name) {
@@ -671,6 +690,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   },
 
   clearSelection() {
+    // "닫았으면 닫힌 채로" — 진행 중인 조회(selectFile의 diff, refresh의 revive)가 방금 닫은
+    // 선택을 되살리는 것을 막는다. 예전엔 DiffPanel의 닫기 버튼을 busy로 잠가 이 경합을 피했는데,
+    // 조회가 busy를 안 켜게 되면서 버튼이 살아나 경합이 UI로 도달 가능해졌다 (E14a 스펙 §2-4-2)
+    invalidateReads()
     set({ selected: null, diff: null, diffLabel: null })
   },
 
@@ -1008,6 +1031,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   },
 
   clearBranchCompare() {
+    // clearSelection과 같은 이유 — 진행 중인 compareBranch·refresh의 revive가 방금 닫은
+    // 비교 뷰를 되살리지 못하게 한다 (E14a 스펙 §2-4-2)
+    invalidateReads()
     set({ branchCompare: null })
   },
 

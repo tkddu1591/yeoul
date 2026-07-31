@@ -116,8 +116,14 @@ export function ReviewPopover({
                 <span data-testid="review-login">@{status.login}</span>
                 {/* 목록을 다시 불러오는 동안에도 이전 목록은 그대로 둔다 — 비우면 그게 깜빡임이다
                     (E14a 스펙 §2-3). Panel을 쓰지 않는 화면이라 스피너를 여기 직접 단다 */}
+                {/* role="status" — 없으면 role=generic이라 Chromium이 aria-label을 버린다 (Panel 관례, E14a) */}
                 {pending ? (
-                  <span className="ui-pending" data-testid="review-pending" aria-label="불러오는 중" />
+                  <span
+                    className="ui-pending"
+                    data-testid="review-pending"
+                    role="status"
+                    aria-label="불러오는 중"
+                  />
                 ) : null}
                 <Button
                   variant="ghost"

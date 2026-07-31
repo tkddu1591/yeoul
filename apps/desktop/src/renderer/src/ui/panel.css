@@ -41,6 +41,16 @@
 .ui-panel__head {
   position: relative;
 }
+/* E14a 후속 — 스피너에 자기 차선을 준다.
+   스피너는 절대 배치라 헤더의 오른쪽 **여백** 안에 산다. 여백이 --space-4(16px)이고 스피너가
+   12px + right 4px이면 버튼 오른쪽 끝과의 간격이 정확히 0px이다(리뷰 실측: 겹치진 않지만 붙는다).
+   `right`를 8px로 키우면 스피너가 왼쪽으로 가 **버튼을 4px 파고든다**(실측 gap=-4) — 반대다.
+   벌리는 유일한 방법은 여백 자체를 스피너 폭+간격만큼 키우는 것이다: 16+8=24px.
+   그러면 버튼 끝 ↔ 스피너 간격이 8px가 되고, 스피너는 그대로 패널 가장자리에서 4px에 선다.
+   조회가 켜지고 꺼져도 이 여백은 상수라 레이아웃은 여전히 움직이지 않는다 */
+.ui-panel__head {
+  padding-right: calc(var(--space-4) + var(--space-2));
+}
 .ui-panel__head .ui-pending {
   position: absolute;
   right: var(--space-1);

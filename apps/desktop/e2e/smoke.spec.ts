@@ -4265,13 +4265,15 @@ test('E14a — 파일을 연달아 빠르게 눌러도 마지막 파일의 diff�
  * E14a — 로딩 표시는 느린 조회에만 배어난다.
  * 빠른 조회(실측 29ms)는 --motion-pending-delay(400ms) 안에 끝나 한 프레임도 보이지 않는다.
  *
- * "느림"을 토큰 0으로 흉내내지 않는다 — 그러면 지연 자체를 검증하지 못한다. 대신 (1) 빠른 조회
- * 동안 스피너의 실제 불투명도를 rAF로 표본해 하나도 보이지 않았음을 단언하고, (2) 지연이 정말
- * 토큰 값으로 걸려 있는지를 computed style로 확인한다. (2)가 없으면 (1)은 "스피너가 아예 없어서"
- * 통과할 수 있다.
+ * "느림"을 토큰 0으로 흉내내지 않는다 — 그러면 지연 자체를 검증하지 못한다. 대신 (1) 스피너가
+ * 조회 중에 DOM에 붙기는 했는지, (2) 그 스피너 **자신의** computed animation-delay가 토큰 값인지를
+ * 본다. (1)이 없으면 (2)는 잴 대상이 없고, (2)가 없으면 (1)은 지연에 대해 아무 말도 못 한다.
  *
  * 표본 창 600ms는 지연 400ms + 페이드 150ms보다 길다 — 배어날 것이었다면 이 안에서 보였다.
  * 조건 대기가 아니라 표본 구간이라 고정 시간이 맞다.
+ *
+ * 짝이 되는 반대 방향(느린 조회에서는 실제로 배어난다)은 바로 아래 테스트가 잰다 — 이 테스트만
+ * 있으면 `--motion-pending-delay: 999s`로 스피너를 영영 안 보이게 해도 초록이다 (최종 리뷰 Note 4).
  */
 test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-pending-'))
@@ -4322,12 +4324,15 @@ test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', asy
       })
 
       const trace = `불투명도 표본 ${samples.opacities.join(',')} / 지연 ${samples.delays.join(' ')}`
-      const visible = samples.opacities.filter((value) => value > 0.05)
-      expect(visible.length, `빠른 조회에서 스피너가 보였다 — ${trace}`).toBe(0)
-      // 조회가 실제로 일어났는지는 결과로 확인한다 — 클릭이 먹지 않았다면 위 단언은 공허하다
+      // 조회가 실제로 일어났는지는 결과로 확인한다 — 클릭이 먹지 않았다면 아래 단언은 공허하다
       await expect(window.getByTestId('diff-panel')).toContainText('b.txt')
 
-      // 공허 방지 ①: 스피너가 애초에 붙지도 않았다면 위 단언은 아무것도 말하지 않는다.
+      // 여기 있던 "불투명도 > 0.05인 표본이 0개" 단언은 **구조적으로 실패할 수 없어 삭제했다**
+      // (최종 리뷰 Important 3). 빠른 조회에서 스피너는 정확히 한 프레임만 DOM에 살고 rAF
+      // 콜백은 페인트 전에 돈다 — `--motion-pending-delay`를 `0ms`로 바꿔 재빌드해도 computed
+      // opacity는 여전히 0이라 초록이었다. 검출력은 아래 두 단언에만 있다.
+      //
+      // 공허 방지 ①: 스피너가 애초에 붙지도 않았다면 아무것도 말하지 않는다.
       // 실측(이 테스트로 표본을 찍어 확인): 빠른 조회에서도 조회 시작 프레임 한 장은 DOM에 붙고
       // 그 프레임의 불투명도가 정확히 0이다 — 표본 36칸 중 첫 칸만 0, 나머지 35칸은 -1(없음)이었다.
       // 프레임이 아니라 IPC 왕복이 경계라 이 한 장은 안정적이다 — 카운터 증가는 클릭 이벤트의
@@ -4343,6 +4348,118 @@ test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', asy
         getComputedStyle(document.documentElement).getPropertyValue('--motion-pending-delay').trim(),
       )
       expect(delay).toBe('400ms')
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * 픽스처 — "조회가 오래 걸린다"를 소스 변이 없이 진짜로 만든다.
+ *
+ * 두 번 헛짚고 나서 이 모양에 도달했다(실측):
+ * ① **전면 변경된 큰 파일은 못 쓴다.** 40만 줄을 통째로 바꾸면 조회 자체는 1.7초로 충분히 느리지만,
+ *    응답이 커서 렌더러가 역직렬화하느라 **주 스레드가 1.2초 멎는다**. 멎은 동안엔 CSS 애니메이션도
+ *    안 돈다 — rAF 표본이 t=400ms에서 t=1676ms로 건너뛰고, 깨어났을 땐 조회가 이미 끝나 스피너가
+ *    없다. 즉 "느린데 스피너가 안 보이는" 가짜 실패를 만든다.
+ * ② 따라서 **주 프로세스만 오래 걸리고 응답은 작아야** 렌더러가 놀며 애니메이션을 돌린다.
+ *
+ * 줄을 섞은 파일이 그 조건을 만족한다 — git의 diff 계산이 비싸지고, 파일 자체는 18MB뿐이다.
+ * 실측: 30만 줄 = 조회 1730ms · 최대 프레임 공백 18ms(=한 번도 안 멎었다). 표시 시작선은
+ * 지연 400ms + 페이드 150ms = 550ms라 여유가 3배다. 15만 줄(1000ms)로도 뜨지만 여유가 적어 키웠다.
+ */
+const PENDING_SLOW_ROWS = 300_000
+
+/** 결정적 셔플 — 시드가 고정이라 실행마다 같은 파일이 나온다(픽스처는 재현 가능해야 한다) */
+function shuffledRows(seed: number): string {
+  const rows = Array.from({ length: PENDING_SLOW_ROWS }, (_, i) => `row ${i} `.padEnd(60, 'y'))
+  let x = seed
+  for (let i = rows.length - 1; i > 0; i--) {
+    x = (x * 1103515245 + 12345) % 2147483648
+    const j = x % (i + 1)
+    ;[rows[i], rows[j]] = [rows[j]!, rows[i]!]
+  }
+  return `${rows.join('\n')}\n`
+}
+
+/**
+ * E14a — 느린 조회에서는 로딩 표시가 실제로 배어난다 (최종 리뷰 Note 4).
+ *
+ * 왜 이게 따로 필요한가: 바로 위 테스트는 "빠른 조회에서 안 보인다"만 잰다. 그것만으로는
+ * `--motion-pending-delay`를 `999s`로 바꿔 스피너를 **영영 안 보이게** 만들어도 전부 초록이다.
+ * 이 테스트가 반대 방향을 잡아 지연이 "안 보이게 하는 장치"가 아니라 "늦추는 장치"임을 고정한다.
+ *
+ * "느림"을 소스 변이나 가짜 지연으로 만들지 않는다 — 진짜 큰 파일의 진짜 diff 왕복이 느리다.
+ * 픽스처 크기는 실측으로 정했다(위 상수 주석). 고정 sleep 대신 `expect.poll`로 재측정하므로,
+ * 조회가 예상보다 빨리 끝나면 실패하지 느리게 통과하지 않는다.
+ */
+test('E14a — 느린 조회에서는 로딩 표시가 배어난다', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-slow-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    await writeFile(join(repo, 'small.txt'), 'base\n')
+    await writeFile(join(repo, 'big.txt'), shuffledRows(1))
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    await writeFile(join(repo, 'small.txt'), 'changed\n')
+    await writeFile(join(repo, 'big.txt'), shuffledRows(99))
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      // 빠른 조회 테스트와 같은 전제 — 이미 한 파일을 보고 있는 상태에서 옮긴다
+      await window.getByTestId('file-unstaged-small.txt').click()
+      await expect(window.getByTestId('diff-panel')).toContainText('small.txt')
+
+      // 표본기를 클릭 **전에** 페이지 안에 심는다 — 밖에서 폴링하면 왕복 간격 사이에 배어났다
+      // 사라진 구간을 통째로 놓칠 수 있다. 페이지 안 rAF는 그 틈이 없다
+      await window.evaluate(() => {
+        const state = { max: -1, trace: [] as string[] }
+        ;(globalThis as any).__e14aPending = state
+        const t0 = performance.now()
+        const tick = () => {
+          const spinner = document.querySelector(
+            '[data-testid="diff-panel"] [data-testid="panel-pending"]',
+          )
+          // -1 = DOM에 없다 (있는데 투명한 것과 구분한다)
+          const value = spinner === null ? -1 : Number(getComputedStyle(spinner).opacity)
+          if (value > state.max) state.max = value
+          if (state.trace.length < 150)
+            state.trace.push(`${Math.round(performance.now() - t0)}:${value}`)
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+
+      await window.getByTestId('file-unstaged-big.txt').click()
+      // 밖에서는 "지금까지 본 최대"만 폴링한다 — 고정 sleep이 없고, 배어난 순간을 놓치지 않는다
+      await expect
+        .poll(
+          async () =>
+            window.evaluate(() => {
+              const state = (globalThis as any).__e14aPending
+              return `${state.max} | ${state.trace.join(' ')}`
+            }),
+          {
+            message: '느린 조회인데 스피너가 배어나지 않았다 (지연이 표시를 아예 막고 있는가?)',
+            timeout: 20_000,
+            intervals: [100, 100, 200, 400, 800, 1600],
+          },
+        )
+        .toMatch(/^(0\.[6-9]|1)/)
+
+      // 공허 방지: 스피너가 뜬 채로 조회가 끝나지 않는 게 아니라, 끝나면 사라지고 결과가 나온다
+      await expect(window.getByTestId('diff-panel')).toContainText('big.txt', { timeout: 60_000 })
+      await expect(window.getByTestId('diff-panel').getByTestId('panel-pending')).toHaveCount(0)
     } finally {
       await app.close()
     }

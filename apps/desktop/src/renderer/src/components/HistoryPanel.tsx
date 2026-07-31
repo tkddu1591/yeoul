@@ -249,7 +249,9 @@ export function HistoryPanel({
   const jumpTo = async (index: number) => {
     if (index >= historyLenRef.current) {
       await onEnsureLoaded(index)
-      // ensureHistoryLoaded는 busy(guard)면 조용히 아무것도 안 하고 끝난다 — 로드 후에도
+      // ensureHistoryLoaded는 조회(runRead)라 busy와 무관하게 언제나 실제로 돈다 — 예전엔
+      // busy면 조용히 끝났고 그래서 로드 없이 돌아올 수 있었다(E14a가 개선한 지점). 그래도
+      // 상한(HISTORY_MAX)이나 늦게 온 응답 폐기로 로드가 안 될 수 있으니, 로드 후에도
       // 범위 밖이면 스크롤을 건너뛴다(안 그러면 가상 목록이 바닥으로 튄다). historyLenRef는
       // 렌더마다 갱신되므로 이 시점에 store가 반영한 최신 길이를 읽는다 (리뷰 가드 — E7i)
       if (index >= historyLenRef.current) return

@@ -216,7 +216,9 @@ export function BranchesPanel({
       >
         <div className="branches-panel">
           <div>
-            {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
+            {/* 쓰기가 도는 동안만 잠근다 (DiffPanel 관례). 예전엔 "in-flight revive가 clear를
+                덮어쓰는 레이스 방지"도 겸했으나(E7d ⑤), 조회가 busy를 안 켜게 된 뒤로는
+                `clearBranchCompare()`의 `invalidateReads()`가 그 경합을 막는다 (E14a 스펙 §2-4-2) */}
             <Button
               variant="ghost"
               size="sm"

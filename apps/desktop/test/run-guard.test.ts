@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   createEmptyReads,
+  invalidateReads,
   isWithinSuppressWindow,
   resetSuppression,
   runRead,
@@ -132,6 +133,198 @@ describe('runRead — 늦게 온 응답을 버린다 (busy 재진입 거부가 �
     slow.resolve()
     await a
     expect(centerWasCurrent).toBe(true)
+  })
+})
+
+/**
+ * Blocking 1 — seq는 target 안에서만 돈다. refresh는 target이 'snapshot'이면서
+ * center·right·left 상태까지 쓰므로(reviveSelections), writes로 그 자리들의 seq도 잡아야 한다.
+ * 실측 재현: 창 포커스 → refresh 시작 → 사용자가 b.txt 클릭 → 늦게 끝난 refresh가 a.txt를 되살림.
+ */
+describe('runRead writes — 교차 target 무효화 (스펙 §2-4-2 B1)', () => {
+  it('writes에 적은 target을 남이 건드리면 낡은 것이 된다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let snapshotWasCurrent: boolean | null = null
+    // refresh 역할 — 표시는 snapshot이지만 실제로는 center·right까지 쓴다
+    const snapshotRead = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (isCurrent) => {
+        await slow.promise
+        snapshotWasCurrent = isCurrent()
+      },
+      ['snapshot', 'center', 'right'],
+    )
+    // 그사이 사용자가 다른 파일을 눌렀다 (center)
+    await runRead(store.set, store.get, 'center', async () => {})
+    slow.resolve()
+    await snapshotRead
+
+    expect(snapshotWasCurrent).toBe(false)
+  })
+
+  it('writes에 없는 target은 무효화하지 않는다 — 넓히는 게 아니라 정확히 적는 것이다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let snapshotWasCurrent: boolean | null = null
+    const snapshotRead = runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async (isCurrent) => {
+        await slow.promise
+        snapshotWasCurrent = isCurrent()
+      },
+      ['snapshot', 'center'],
+    )
+    // reviews는 이 조회가 쓰지 않는 자리다 — 리뷰 목록 갱신이 스냅샷을 낡게 만들면 안 된다
+    await runRead(store.set, store.get, 'reviews', async () => {})
+    slow.resolve()
+    await snapshotRead
+
+    expect(snapshotWasCurrent).toBe(true)
+  })
+
+  it('반대 방향도 막는다 — 늦게 시작한 스냅샷 조회가 진행 중인 center 조회를 낡게 만든다', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let centerWasCurrent: boolean | null = null
+    const centerRead = runRead(store.set, store.get, 'center', async (isCurrent) => {
+      await slow.promise
+      centerWasCurrent = isCurrent()
+    })
+    await runRead(store.set, store.get, 'snapshot', async () => {}, ['snapshot', 'center', 'right'])
+    slow.resolve()
+    await centerRead
+
+    expect(centerWasCurrent).toBe(false)
+  })
+
+  it('writes를 안 주면 target 하나만 잡는다 (기본값 — 기존 호출부 15곳의 동작)', async () => {
+    const store = createFakeStore()
+    const slow = deferred()
+    let leftWasCurrent: boolean | null = null
+    const leftRead = runRead(store.set, store.get, 'left', async (isCurrent) => {
+      await slow.promise
+      leftWasCurrent = isCurrent()
+    })
+    await runRead(store.set, store.get, 'center', async () => {})
+    slow.resolve()
+    await leftRead
+
+    expect(leftWasCurrent).toBe(true)
+  })
+
+  it('카운터(=스피너)는 표시용 target에만 붙는다 — writes를 넓혀도 스피너가 번지지 않는다', async () => {
+    const store = createFakeStore()
+    let during: Record<ReadTarget, number> | null = null
+    await runRead(
+      store.set,
+      store.get,
+      'snapshot',
+      async () => {
+        during = { ...store.peek().reads }
+      },
+      ['snapshot', 'center', 'right'],
+    )
+    expect(during).toEqual({ snapshot: 1, center: 0, right: 0, left: 0, reviews: 0 })
+  })
+})
+
+/**
+ * Blocking 2 — 쓰기는 상태를 갈아엎으므로 그 전에 시작된 조회 결과는 전부 낡았다.
+ * 실측 재현: openRepository가 도는 동안 옛 저장소의 조회가 끝나 새 저장소 화면에
+ * 옛 저장소의 선택(a.txt)이 되살아났다.
+ */
+describe('invalidateReads — 진행 중인 조회를 전부 낡게 만든다 (스펙 §2-4-2 B2)', () => {
+  it('runWrite가 진입할 때 진행 중인 조회를 무효화한다', async () => {
+    const store = createFakeStore()
+    const slowRead = deferred()
+    let readWasCurrent: boolean | null = null
+    // 옛 저장소의 조회가 아직 in-flight
+    const read = runRead(store.set, store.get, 'center', async (isCurrent) => {
+      await slowRead.promise
+      readWasCurrent = isCurrent()
+    })
+    // 그사이 저장소를 새로 연다 (쓰기)
+    await runWrite(store.set, store.get, async () => {})
+    // 이제 옛 조회가 도착한다
+    slowRead.resolve()
+    await read
+
+    expect(readWasCurrent).toBe(false)
+  })
+
+  it('재진입이 거부된 runWrite는 무효화하지 않는다 — 아무 일도 일어나지 않았기 때문이다', async () => {
+    const store = createFakeStore()
+    const slowWrite = deferred()
+    const slowRead = deferred()
+    // 조회를 먼저 띄운다
+    let readWasCurrent: boolean | null = null
+    const read = runRead(store.set, store.get, 'center', async (isCurrent) => {
+      await slowRead.promise
+      readWasCurrent = isCurrent()
+    })
+    // 쓰기 A가 진입 — 여기서 한 번 무효화된다
+    const writeA = runWrite(store.set, store.get, async () => {
+      await slowWrite.promise
+    })
+    // 조회를 새로 띄운다 (무효화 이후라 최신이다)
+    let laterReadWasCurrent: boolean | null = null
+    const laterSlow = deferred()
+    const laterRead = runRead(store.set, store.get, 'center', async (isCurrent) => {
+      await laterSlow.promise
+      laterReadWasCurrent = isCurrent()
+    })
+    // 쓰기 B는 busy라 거부된다 — 이게 무효화하면 laterRead가 억울하게 낡는다
+    expect(await runWrite(store.set, store.get, async () => {})).toBe(false)
+
+    slowWrite.resolve()
+    await writeA
+    slowRead.resolve()
+    await read
+    laterSlow.resolve()
+    await laterRead
+
+    expect(readWasCurrent).toBe(false)
+    expect(laterReadWasCurrent).toBe(true)
+  })
+
+  it('직접 부르면 모든 target의 진행 중 조회가 낡는다 (clearSelection·비교 뷰 닫기가 쓰는 경로)', async () => {
+    const store = createFakeStore()
+    const targets: ReadTarget[] = ['snapshot', 'center', 'right', 'left', 'reviews']
+    const gates = targets.map(() => deferred())
+    const seen: Record<string, boolean> = {}
+    const reads = targets.map((target, index) =>
+      runRead(store.set, store.get, target, async (isCurrent) => {
+        await gates[index]!.promise
+        seen[target] = isCurrent()
+      }),
+    )
+    // 사용자가 닫기를 눌렀다
+    invalidateReads()
+    for (const gate of gates) gate.resolve()
+    await Promise.all(reads)
+
+    expect(seen).toEqual({
+      snapshot: false,
+      center: false,
+      right: false,
+      left: false,
+      reviews: false,
+    })
+  })
+
+  it('무효화 뒤에 시작한 조회는 최신이다 — 영구히 막아버리지 않는다', async () => {
+    const store = createFakeStore()
+    invalidateReads()
+    let wasCurrent: boolean | null = null
+    await runRead(store.set, store.get, 'center', async (isCurrent) => {
+      wasCurrent = isCurrent()
+    })
+    expect(wasCurrent).toBe(true)
   })
 })
 
