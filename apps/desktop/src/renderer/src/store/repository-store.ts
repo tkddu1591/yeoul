@@ -374,12 +374,6 @@ const CLEAR_SELECTIONS = {
   branchCompare: null,
 } as const
 
-/**
- * 억제 창 상수를 여기서도 내보낸다 — 예전엔 이 파일이 정의처였다. 정의는 run-guard로 옮겼지만
- * 이름은 그대로 통하게 둬, 스토어를 아는 쪽이 굳이 새 모듈 경로를 알 필요가 없게 한다 (E14a)
- */
-export { WATCH_SUPPRESS_MS } from './run-guard'
-
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
   status: null,
@@ -1547,12 +1541,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async openPullDetail(number) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 팝오버 열기 직후 목록 조회(refreshPulls)와 겹친다 — 예전엔 그게 전역 busy를 잡아 첫 클릭이
-    // 조용히 삼켜졌고, 그래서 busy가 풀릴 때까지 기다린다(상한 5초) (품질 리뷰).
-    // E14a로 조회는 busy를 켜지 않으니 그 경합은 사라졌고, 이 대기는 이제 진짜 쓰기 작업 중일 때만 걸린다
-    for (let waited = 0; get().busy && waited < 5000; waited += 50) {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
+    // 예전엔 여기서 busy가 풀릴 때까지 최대 5초 기다렸다 — 팝오버를 열자마자 도는 목록 조회
+    // (refreshPulls)가 전역 busy를 잡아 첫 클릭이 조용히 삼켜졌기 때문이다(품질 리뷰). E14a가
+    // 조회를 전역 잠금에서 빼면서 그 전제가 사라졌으므로 대기를 걷어낸다 — 남겨두면 진짜 쓰기가
+    // 도는 동안 리뷰 열기만 멈춰, "쓰기 중에도 조회는 시작된다"는 결정(스펙 §2-4)을 어긴다
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
     await runRead(set, get, 'right', async (isCurrent) => {
       const pullDetail = await hosting().pulls.detail(repoPath, number)
