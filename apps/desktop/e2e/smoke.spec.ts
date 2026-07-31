@@ -4095,7 +4095,9 @@ test('E14a — 파일을 옮겨도 헤더가 잠기지 않는다 (전체 깜빡�
 /**
  * E14a — 앱을 만지지 않아도 깜빡이던 경로. externalRefresh(E10 워킹트리 감시)도 조회인데
  * 전역 busy를 켰다. 즉 **에디터에서 파일을 저장하기만 해도** 헤더가 잠겼다 풀렸다.
- * 에디터 자동저장을 켜두면 상시로 돈다. 수정 전 실측: 외부 저장 1회 → 헤더 변형 20건.
+ * 에디터 자동저장을 켜두면 상시로 돈다. 수정 전 실측: 외부 저장 1회 → 헤더 변형 30건
+ * (스펙 §1-2가 적은 20은 disabled·data-disabled 두 속성만 센 값이다 — 아래 관찰자는 tabindex까지
+ * 세 개를 세므로 같은 기준으로는 30이다. 단언은 어느 쪽이든 0이라 결과에는 영향이 없다).
  *
  * 여기서는 사용자가 앱을 만지지 않았으므로 좌측 disabled 변형도 0을 요구할 수 있다.
  */
@@ -4165,7 +4167,7 @@ test('E14a — 에디터에서 저장해도 앱이 잠기지 않는다 (외부 �
       const log = await window.evaluate(
         () => (window as unknown as { __e14a: { header: number; left: number } }).__e14a,
       )
-      expect(log.header, '헤더 잠금 변형 — 수정 전 실측 20건').toBe(0)
+      expect(log.header, '헤더 잠금 변형 — 수정 전 실측 30건(세 속성 기준)').toBe(0)
       expect(log.left, '좌측 잠금 변형 — 사용자가 만지지 않았으므로 0이어야 한다').toBe(0)
     } finally {
       await app.close()
