@@ -20,6 +20,8 @@ interface ReviewDetailPanelProps {
   onApprove(): void
   /** 병합 — 확인창은 App이 관리한다(실제 병합은 확인 후) */
   onMerge(): void
+  /** 이 패널로 떨어질 조회(우측)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 /** 상태 배지 — 병합됨 > 닫힘 > 승인됨 > 열림 순으로 판정한다(§5 일상어+원어 병기) */
@@ -58,6 +60,7 @@ export function ReviewDetailPanel({
   onComment,
   onApprove,
   onMerge,
+  pending,
 }: ReviewDetailPanelProps) {
   const [reply, setReply] = useState('')
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -80,6 +83,7 @@ export function ReviewDetailPanel({
   return (
     <Panel
       title={`#${view.detail.number} ${view.detail.title}`}
+      pending={pending}
       accessory={
         <>
           <span className="review-detail__status" data-testid="review-detail-status">

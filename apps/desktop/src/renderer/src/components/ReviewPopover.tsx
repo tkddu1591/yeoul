@@ -30,6 +30,8 @@ interface ReviewPopoverProps {
   onSelectPull(number: number): void
   /** 리뷰 요청을 브라우저로 — 주소는 main이 보관한 목록에서만 찾는다. 항목의 바깥 링크 아이콘 전용 */
   onOpenPull(number: number): void
+  /** 목록 조회가 진행 중인가 — Panel을 쓰지 않으므로 헤더에 직접 단다 (E14a) */
+  pending: boolean
 }
 
 /** 리뷰 (스펙 §9 E3a·E3b) — GitHub 연결·리뷰 요청 생성·목록·상세 진입. ShelfPopover 패턴 */
@@ -46,6 +48,7 @@ export function ReviewPopover({
   onCreate,
   onSelectPull,
   onOpenPull,
+  pending,
 }: ReviewPopoverProps) {
   // 다이얼로그를 여는 동작은 팝오버를 닫고 시작한다 — 모달과 팝오버의 포커스 경합을 피한다
   const [open, setOpen] = useState(false)
@@ -111,6 +114,11 @@ export function ReviewPopover({
             <>
               <div className="review-popover__head">
                 <span data-testid="review-login">@{status.login}</span>
+                {/* 목록을 다시 불러오는 동안에도 이전 목록은 그대로 둔다 — 비우면 그게 깜빡임이다
+                    (E14a 스펙 §2-3). Panel을 쓰지 않는 화면이라 스피너를 여기 직접 단다 */}
+                {pending ? (
+                  <span className="ui-pending" data-testid="review-pending" aria-label="불러오는 중" />
+                ) : null}
                 <Button
                   variant="ghost"
                   size="sm"

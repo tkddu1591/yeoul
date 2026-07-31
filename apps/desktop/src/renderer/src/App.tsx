@@ -636,6 +636,7 @@ export function App() {
             }}
             onSelectPull={(number) => void store.openPullDetail(number)}
             onOpenPull={(number) => void store.openPull(number)}
+            pending={store.reads.reviews > 0}
           />
           <Tooltip content={`${T.push} (push)`} summary={T.push} describedBy={false}>
             <Button
@@ -913,6 +914,7 @@ export function App() {
               currentBranch={status?.branch.name ?? null}
               historyRef={store.historyRef}
               busy={store.busy}
+              pending={store.reads.left > 0}
               actionsDisabled={status?.state !== 'normal'}
               onCloseCompare={() => store.clearBranchCompare()}
               onAction={(action) => {
@@ -1038,6 +1040,7 @@ export function App() {
               }
               onSaveText={(content) => store.saveConflictText(content)}
               onReset={() => void store.resetConflict()}
+              pending={store.reads.center > 0}
             />
           ) : (
             <DiffPanel
@@ -1055,6 +1058,7 @@ export function App() {
               onClose={() =>
                 store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
               }
+              pending={store.reads.center > 0}
             />
           )}
         </div>
@@ -1103,6 +1107,7 @@ export function App() {
               onComment={(body) => store.addPullComment(body)}
               onApprove={() => void store.approvePull()}
               onMerge={() => setConfirmingMerge(true)}
+              pending={store.reads.right > 0}
             />
           ) : (
             <>
@@ -1174,6 +1179,7 @@ export function App() {
                     shelfPreview={shelfPreview}
                     selectedFile={store.commitFile}
                     busy={store.busy}
+                    pending={store.reads.right > 0}
                     findOpen={findScope === 'commit-files'}
                     findNonce={findNonce}
                     onFindClose={() => setFindScope(null)}

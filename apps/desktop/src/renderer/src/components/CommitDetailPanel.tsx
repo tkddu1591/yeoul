@@ -33,6 +33,8 @@ interface CommitDetailPanelProps {
   /** 우클릭 → "지금 코드와 비교" — 그 시점과 미저장 워크트리의 비교 (E5a 피드백 6) */
   onCompareFile(file: CommitFileChange): void
   onBack(): void
+  /** 이 패널로 떨어질 조회(우측)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 function CommitFileRow({
@@ -105,6 +107,7 @@ export function CommitDetailPanel({
   onRestoreFile,
   onCompareFile,
   onBack,
+  pending,
 }: CommitDetailPanelProps) {
   // 우클릭 메뉴·확인창 상태는 패널이 관리한다 (HistoryPanel·다이얼로그 관례)
   const [menu, setMenu] = useState<{ x: number; y: number; file: CommitFileChange } | null>(null)
@@ -146,6 +149,7 @@ export function CommitDetailPanel({
     <Panel
       title={shelfPreview ? `${T.stash} 내용` : `${T.commit} 내용`}
       titleHint={shelfPreview ? 'stash' : 'commit'}
+      pending={pending}
       accessory={
         <Button
           variant="ghost"

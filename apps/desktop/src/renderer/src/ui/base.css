@@ -73,6 +73,35 @@ select {
   }
 }
 
+/* E14a — 조회 로딩. JS 타이머로 "150ms 넘으면 띄운다"를 만들지 않고, 처음부터 DOM에 붙이되
+   animation-delay로 늦춘다. 지연이 끝나기 전에 사라지는 빠른 조회는 한 프레임도 보이지 않는다.
+   prefers-reduced-motion 블록(아래)이 animation-duration만 0.01ms로 줄이고 animation-delay는
+   건드리지 않으므로, 모션 줄이기에서도 "지연 400ms는 그대로, 페이드만 없음"이 저절로 된다 —
+   페이드까지 없애면 지연도 함께 사라져 빠른 조회가 오히려 번쩍인다 */
+@keyframes ui-pending-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ui-pending-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.ui-pending {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-text-muted);
+  /* 지연 중에도 DOM에 있으므로 클릭을 가로채지 않게 한다 */
+  pointer-events: none;
+  animation:
+    ui-pending-in var(--motion-base) var(--ease-out) var(--motion-pending-delay) both,
+    ui-pending-spin 700ms linear var(--motion-pending-delay) infinite;
+}
+
 /* E11 — 테마 토글 순간, 호버·눌림에 걸어둔 배경색 transition이 토큰 값 변경에도 동시 발화해
    화면 전체가 물결친다(실측 — Step 4). ui/theme.ts가 전환 전후 한 프레임만 이 클래스를 건다 */
 .theme-switching,

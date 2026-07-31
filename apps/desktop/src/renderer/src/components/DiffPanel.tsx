@@ -18,6 +18,8 @@ interface DiffPanelProps {
   findNonce: number
   onFindClose(): void
   onClose(): void
+  /** 이 패널로 떨어질 조회(가운데)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 export function DiffPanel({
@@ -28,12 +30,13 @@ export function DiffPanel({
   findNonce,
   onFindClose,
   onClose,
+  pending,
 }: DiffPanelProps) {
   const [view, setView] = useState<'unified' | 'split'>('unified')
 
   if (!path || diff === null) {
     return (
-      <Panel title={T.diff} testId="diff-panel">
+      <Panel title={T.diff} testId="diff-panel" pending={pending}>
         <p className="diff-panel__empty">파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
       </Panel>
     )
@@ -41,6 +44,7 @@ export function DiffPanel({
   return (
     <Panel
       title={path}
+      pending={pending}
       accessory={
         <>
           {/* 가시 라벨이 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}

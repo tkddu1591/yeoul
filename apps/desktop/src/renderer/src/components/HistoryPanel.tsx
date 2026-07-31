@@ -354,6 +354,7 @@ export function HistoryPanel({
     <Panel
       title={T.history}
       titleHint="log"
+      pending={pending}
       accessory={
         <>
           {historyRef !== null && (

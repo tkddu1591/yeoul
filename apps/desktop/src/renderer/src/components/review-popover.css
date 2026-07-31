@@ -18,6 +18,11 @@
   font-weight: 600;
   margin-bottom: var(--space-2);
 }
+/* E14a — 스피너는 계정 이름 옆에 붙고, 남은 공간은 전부 이 자동 여백이 먹는다.
+   space-between에 맡기면 세 번째 항목이 생기면서 [연결 해제]가 가운데로 밀린다 */
+.review-popover__head .ui-pending {
+  margin-right: auto;
+}
 .review-popover__empty {
   margin: 0;
   padding: var(--space-4) 0;

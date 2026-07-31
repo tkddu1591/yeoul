@@ -31,6 +31,23 @@
 .ui-panel__head h2 {
   min-width: 72px;
 }
+/* E14a — 스피너는 헤더 오른쪽 끝에 붙되 **자리를 차지하지 않는다**(절대 배치).
+   흐름 안에 넣으면 조회가 시작될 때마다 헤더가 움직인다 — 실측(파일 A→B 클릭, diff-close 버튼
+   x좌표): margin-left:auto로 흐름에 넣으면 703 → 637로 **66px** 밀렸다가 돌아온다. 이미
+   `.ui-panel__head > .ui-button:first-of-type`가 margin-left:auto를 쓰고 있어 자동 여백이 둘이
+   되면 남은 공간이 반씩 갈리기 때문이다. 자동 여백을 지워도 폭(12px)+gap(8px)만큼은 여전히 민다.
+   조회가 화면을 움직이지 않게 하는 게 이 에픽의 목적이라 아예 흐름에서 뺀다 — 헤더 오른쪽
+   여백(--space-4=16px) 안에 12px 스피너가 들어가므로 버튼과 겹치지도 않는다 */
+.ui-panel__head {
+  position: relative;
+}
+.ui-panel__head .ui-pending {
+  position: absolute;
+  right: var(--space-1);
+  /* transform은 회전 애니메이션이 쓰므로 세로 가운데는 음수 margin으로 맞춘다 (12px의 절반) */
+  top: 50%;
+  margin-top: -6px;
+}
 .ui-panel__head > .ui-badge {
   flex: 0 1 auto;
   min-width: 0;
