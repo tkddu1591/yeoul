@@ -17,6 +17,7 @@ import type {
 } from '@git-gui/domain'
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
+import { toErrorMessage } from './run-guard'
 import { findRevivableChange } from './selection-revive'
 import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
@@ -242,12 +243,6 @@ interface RepositoryStore {
   approvePull(): Promise<void>
   /** 병합(병합 커밋) — 성공 여부 반환(App이 기본 공간 이동 제안을 연다). 성공 후 상세 재조회 */
   mergePull(): Promise<boolean>
-}
-
-/** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함) */
-function toErrorMessage(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : String(cause)
-  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
 /** 상태·역사·실험 공간·보관함을 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */

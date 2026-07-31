@@ -178,6 +178,27 @@ describe('runWrite — 기존 guard와 동일하다', () => {
   })
 })
 
+describe('오류 문구 — IPC 래핑 접두사를 벗긴다', () => {
+  /** main에서 던진 오류가 렌더러에 도착할 때 Electron이 실제로 붙이는 형태 그대로다 */
+  const wrapped = new Error("Error invoking remote method 'git:commit': Error: 저장할 게 없어요")
+
+  it('runWrite의 오류가 사용자 문구만 남긴다', async () => {
+    const store = createFakeStore()
+    await runWrite(store.set, store.get, async () => {
+      throw wrapped
+    })
+    expect(store.peek().error).toBe('저장할 게 없어요')
+  })
+
+  it('runRead의 오류가 사용자 문구만 남긴다', async () => {
+    const store = createFakeStore()
+    await runRead(store.set, store.get, 'center', async () => {
+      throw wrapped
+    })
+    expect(store.peek().error).toBe('저장할 게 없어요')
+  })
+})
+
 describe('runWrite 중에도 조회는 시작된다 (E14a 동시성 결정)', () => {
   it('busy가 켜져 있어도 runRead가 실행된다', async () => {
     const store = createFakeStore()

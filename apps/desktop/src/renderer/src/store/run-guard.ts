@@ -69,7 +69,7 @@ export async function runWrite(
     await run()
     return true
   } catch (cause) {
-    set({ error: toMessage(cause) })
+    set({ error: toErrorMessage(cause) })
     return false
   } finally {
     lastWriteEndAt = Date.now()
@@ -102,13 +102,22 @@ export async function runRead(
     await run(isCurrent)
     return true
   } catch (cause) {
-    if (isCurrent()) set({ error: toMessage(cause) })
+    if (isCurrent()) set({ error: toErrorMessage(cause) })
     return false
   } finally {
     set({ reads: { ...get().reads, [target]: get().reads[target] - 1 } })
   }
 }
 
-function toMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
+/**
+ * IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함)
+ *
+ * repository-store.ts에 있던 것을 오류 처리와 같은 자리로 옮겼다 — 순수 함수이고, 이제 이 파일의
+ * runWrite·runRead가 스토어 액션 50개의 오류 문구를 전부 만들어내는 자리이기 때문이다. 벗기지
+ * 않으면 사용자가 보던 "저장할 게 없어요"가
+ * "Error invoking remote method 'git:commit': Error: 저장할 게 없어요"가 된다 (E14a).
+ */
+export function toErrorMessage(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
