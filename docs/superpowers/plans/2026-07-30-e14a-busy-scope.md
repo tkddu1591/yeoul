@@ -489,10 +489,14 @@ export { WATCH_SUPPRESS_MS } from './run-guard'
 `:524`의 `if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return`을
 `if (isWithinSuppressWindow()) return`으로 바꾼다.
 
-- [ ] **Step 3: 쓰기 35개를 `runWrite`로 바꾼다 (기계적)**
+- [ ] **Step 3: 쓰기 50개를 `runWrite`로 바꾼다 (기계적)**
 
 `guard(set, get, async () => {` → `runWrite(set, get, async () => {`.
-꼬리의 `})` 는 그대로. 이 35개는 `armSuppression` 인자가 없던 것들이다.
+꼬리의 `})` 는 그대로. 이 50개는 `armSuppression` 인자가 없던 것들이다.
+
+> **정정(Task 2 실측):** 플랜 초안이 "35개"라고 쓴 것은 틀렸다. `grep -c "guard(set, get"` 이
+> 세던 50이 총계가 아니라 **쓰기 개수**였고, 조회 15개는 다중행 호출이라 그 grep에 안 잡혔다.
+> 실제 분할은 쓰기 50 · 조회 15 · 총 65다.
 
 - [ ] **Step 4: 조회 15개를 `runRead`로 바꾼다**
 
@@ -556,7 +560,7 @@ Expected: typecheck 6/6 · Tests **578 passed** (562 + Task 1의 16건)
 ```bash
 cd "/Users/sangyeop_kim/git gui/apps/desktop/src/renderer/src/store" && grep -c "armSuppression" repository-store.ts; grep -c "runRead(" repository-store.ts; grep -c "runWrite(" repository-store.ts
 ```
-Expected: `0` · `15` · `35`
+Expected: `0` · `15` · `50`  (조회 15 · 쓰기 50 · 총 65 — 위 Step 3 정정 참조)
 
 - [ ] **Step 7: 커밋**
 
