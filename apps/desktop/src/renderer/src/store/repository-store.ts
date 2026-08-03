@@ -17,6 +17,16 @@ import type {
 } from '@git-gui/domain'
 import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
+import {
+  createEmptyReads,
+  invalidateReads,
+  isWithinSuppressWindow,
+  resetSuppression,
+  runRead,
+  runWrite,
+  toErrorMessage,
+  type ReadTarget,
+} from './run-guard'
 import { findRevivableChange } from './selection-revive'
 import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
@@ -83,6 +93,8 @@ interface RepositoryStore {
   notice: string | null
   error: string | null
   busy: boolean
+  /** 조회가 진행 중인 자리별 개수 — busy와 달리 전역을 잠그지 않고 그 패널만 로딩을 보인다 (E14a) */
+  reads: Record<ReadTarget, number>
 
   init(): Promise<void>
   openRepository(): Promise<void>
@@ -127,7 +139,7 @@ interface RepositoryStore {
   backupBranch(name: string): Promise<void>
   /** "지금과 비교" 열기 — 결과는 branchCompare로, 실험 공간 탭이 비교 뷰가 된다 (E7a) */
   compareBranch(name: string): Promise<void>
-  /** 비교 뷰 닫기 — 동기라 guard 불필요 */
+  /** 비교 뷰 닫기 — 동기라 잠금 불필요 */
   clearBranchCompare(): void
   /** 원격 공간을 추적 로컬로 가져와 이동 (E7a) */
   checkoutRemoteBranch(name: string): Promise<void>
@@ -148,7 +160,7 @@ interface RepositoryStore {
   openWorktree(path: string): Promise<boolean>
   /** Finder에서 보기 (E7c) */
   revealWorktree(path: string): Promise<void>
-  /** 수동 원격 새로고침 — guard 경유(에러 배너). 억제 창이 감시 이벤트를 삼키므로 직접 스냅샷 (E7e 실측 6) */
+  /** 수동 원격 새로고침 — runWrite 경유(에러 배너). 억제 창이 감시 이벤트를 삼키므로 직접 스냅샷 (E7e 실측 6) */
   fetchRemotes(): Promise<void>
   /** 자동 원격 새로고침 — 조용히(배너·busy 없음), 실패 무시. 갱신은 감시가 담당 (E7e) */
   autoFetchRemotes(): Promise<void>
@@ -160,7 +172,7 @@ interface RepositoryStore {
   clearHistoryView(): Promise<void>
   /** 충돌 파일 열기 — 워크트리 내용을 읽어 충돌 뷰로 */
   selectConflict(path: string): Promise<void>
-  /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 guard 없이. 실패 시 null */
+  /** 충돌 뷰 내용 재조회(외부 편집 반영) — 읽기 전용이라 잠금 없이. 실패 시 null */
   reloadConflict(path: string): Promise<string | null>
   /** 충돌을 한쪽으로 확정한다 */
   resolveConflict(path: string, choice: 'ours' | 'theirs'): Promise<void>
@@ -183,7 +195,7 @@ interface RepositoryStore {
   /** 파일 하나를 디스크에서 삭제한다 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 */
   removeFile(path: string): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
-  /** diff 선택 해제 — 동기 상태 변경이라 guard 불필요 */
+  /** diff 선택 해제 — 동기 상태 변경이라 잠금 불필요 */
   clearSelection(): void
   selectCommit(hash: string): Promise<void>
   selectCommitFile(file: CommitFileChange): Promise<void>
@@ -191,18 +203,19 @@ interface RepositoryStore {
   restoreFileFromCommit(hash: string, path: string): Promise<void>
   /** 그 시점과 지금 워크트리의 비교를 공용 diff 슬롯에 띄운다 — 제목은 diffLabel로 구분 */
   compareFileWithWorktree(hash: string, path: string, origPath: string | null): Promise<void>
-  /** 커밋 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
+  /** 커밋 상세 닫기 — 동기 상태 변경이라 잠금 불필요 */
   clearCommit(): void
-  /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 guard 불필요 */
+  /** 커밋 상세 안의 파일 diff만 닫는다 — 상세(파일 목록)는 유지. 동기라 잠금 불필요 */
   clearCommitFile(): void
-  /** 전역 에러를 지운다 — 다이얼로그를 새로 열 때 이전 작업 에러가 인라인으로 새어들지 않게. 동기라 guard 불필요 */
+  /** 전역 에러를 지운다 — 다이얼로그를 새로 열 때 이전 작업 에러가 인라인으로 새어들지 않게. 동기라 잠금 불필요 */
   clearError(): void
-  /** notice만 지운다 — 자동 소멸 타이머(App) 전용. 동기라 guard 불필요 */
+  /** notice만 지운다 — 자동 소멸 타이머(App) 전용. 동기라 잠금 불필요 */
   clearNotice(): void
   /**
    * 감시(repo:changed)발 재조회 (E7b) — 새로고침과 같은 의미론(선택 무효화)이되 hosting 호출은
-   * 없다(감시 폭주가 네트워크를 때리지 않게). busy면 guard가 거부 = 자기 작업 이벤트 드롭(실측 1),
-   * 작업 종료 직후 억제 창은 트레일링 이벤트를 흡수한다
+   * 없다(감시 폭주가 네트워크를 때리지 않게). 작업 종료 직후 억제 창이 트레일링 이벤트를 흡수한다.
+   * E14a 전에는 busy 재진입 거부가 자기 작업 이벤트를 함께 떨궜지만(실측 1), 이제 이 경로는
+   * 조회라 busy를 보지 않는다 — 자기 꼬리 흡수는 억제 창 하나가 담당한다 (스펙 §2-4)
    */
   externalRefresh(): Promise<void>
   /** 스크롤 끝에서 히스토리 상한을 늘려 다시 불러온다 (⑩) */
@@ -234,7 +247,7 @@ interface RepositoryStore {
   openPull(number: number): Promise<void>
   /** 리뷰 상세 열기(상세+코멘트 한 번에) — 우측 열이 리뷰 상세로 전환된다. 커밋 상세와 상호 배타 */
   openPullDetail(number: number): Promise<void>
-  /** 리뷰 상세 닫기 — 동기 상태 변경이라 guard 불필요 */
+  /** 리뷰 상세 닫기 — 동기 상태 변경이라 잠금 불필요 */
   closePullDetail(): void
   /** 답변 달기 — 성공 여부 반환(성공 시에만 입력을 비운다). 성공 후 타임라인을 서버 상태로 재조회 */
   addPullComment(body: string): Promise<boolean>
@@ -242,12 +255,6 @@ interface RepositoryStore {
   approvePull(): Promise<void>
   /** 병합(병합 커밋) — 성공 여부 반환(App이 기본 공간 이동 제안을 연다). 성공 후 상세 재조회 */
   mergePull(): Promise<boolean>
-}
-
-/** IPC 에러 메시지의 Electron 래핑 접두사를 벗겨 사용자 메시지만 남긴다 (GitError 등 커스텀 이름 포함) */
-function toErrorMessage(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : String(cause)
-  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
 }
 
 /** 상태·역사·실험 공간·보관함을 동시 조회해 같은 렌더에 함께 갱신한다 — 시점 차이를 최소화 (원자 스냅샷은 아님) */
@@ -368,45 +375,40 @@ const CLEAR_SELECTIONS = {
   branchCompare: null,
 } as const
 
-type StoreSet = (partial: Partial<RepositoryStore>) => void
-type StoreGet = () => RepositoryStore
-
-/** 마지막 guard 작업이 끝난 시각 — 감시발 재조회의 억제 창 기준 (E7b 실측 1: 트레일링 이벤트 흡수) */
-let lastGuardEndAt = 0
-/** 작업 종료 후 이 시간 안의 감시 이벤트는 자기 작업의 꼬리로 보고 무시한다 (디바운스 300ms + 여유) */
-export const WATCH_SUPPRESS_MS = 800
+/**
+ * 배경 새로고침(`refresh`·`externalRefresh`)이 **양보하는** 자리 (E14a 스펙 §2-4-3).
+ *
+ * 표시용 target은 'snapshot' 하나지만 이 둘은 `reviveSelections`를 거치며 선택 상태와 비교 뷰까지
+ * 되살린다. 그렇다고 그 자리를 **선점**하면 안 된다 — 배경 갱신이 사용자의 클릭을 무효화하는
+ * 거울상 버그가 된다(§2-4-3 실측). 쓰긴 하지만 소유하지는 않는다는 뜻으로 양보만 한다.
+ */
+const SNAPSHOT_DEFERS: ReadTarget[] = ['center', 'right', 'left']
 
 /**
- * busy 재진입을 거부하고 busy/error 처리를 일원화한다. 성공 여부를 반환한다.
- * armSuppression(기본 true) — 억제 창은 "이 작업이 만든 감시 이벤트"를 삼키기 위한 것이라,
- * 워크트리를 쓰지 않는 읽기 전용 작업(refresh, externalRefresh, selectFile 등 조회성 호출)은
- * false로 넘겨 억제를 걸지 않는다 — 그렇지 않으면 읽기 전용 재조회가 그다음 진짜 외부 변경까지
- * 삼켜버린다 (E10)
+ * 배경 새로고침이 되살린 상태 중, 그사이 사용자가 가져간 자리를 빼고 돌려준다 (스펙 §2-4-3).
  *
- * error/notice 초기화도 같은 구분을 따른다 — 읽기 전용 재조회는 "사용자가 뭔가 새로 시작했다"는
- * 신호가 아니라 화면을 최신화할 뿐이라, 이전 작업이 남긴 배너를 지울 이유가 없다. 지우면 diff를
- * 훑어보거나(selectFile) 창에 포커스만 줘도(focus 재조회) 안내가 사라진다 — 특히 워킹트리
- * 감시(E10)가 붙은 뒤로는 에디터 자동 저장마다 externalRefresh가 돌며 이 문제가 상시화된다.
- * 실제로 무언가를 실행하는(armSuppression=true) 작업만 "새로 시작"이므로 여기서 지운다 (E10 보완 — Important 3)
+ * **필드가 target별로 안 갈린다 — 실측으로 확인한 편차.** 스펙은 `selected`·`diff`는 center,
+ * `commitDetail`·`commitFile`은 right로 갈릴 것이라고 봤지만, 실제로는 두 target의 액션이 같은
+ * 필드 집합을 함께 쓴다: `selectFile`(center)은 `commitDetail`·`commitFile`을 null로 밀고,
+ * `selectCommit`(right)은 `selected`·`diff`·`diffLabel`을 null로 민다. 가운데 패널이 하나뿐이라
+ * 두 뷰가 **상호 배타**이기 때문이고, 그 배타를 각 액션이 스스로 유지한다.
+ *
+ * 그래서 선택 상태는 center∪right 한 덩어리로 양보한다. 이게 손해가 아닌 이유도 같다 — 사용자가
+ * 파일을 눌렀다면 `commitDetail`은 이미 그 액션이 null로 만들어 뒀으므로, 통째로 안 건드려도
+ * 결과가 같다. `branchCompare`만 left로 따로 논다(비교 뷰는 좌측의 독립된 자리다).
  */
-async function guard(
-  set: StoreSet,
-  get: StoreGet,
-  run: () => Promise<void>,
-  armSuppression = true,
-): Promise<boolean> {
-  if (get().busy) return false
-  set(armSuppression ? { busy: true, error: null, notice: null } : { busy: true })
-  try {
-    await run()
-    return true
-  } catch (cause) {
-    set({ error: toErrorMessage(cause) })
-    return false
-  } finally {
-    if (armSuppression) lastGuardEndAt = Date.now()
-    set({ busy: false })
-  }
+const SELECTION_KEYS = (Object.keys(CLEAR_SELECTIONS) as (keyof typeof CLEAR_SELECTIONS)[]).filter(
+  (key) => key !== 'branchCompare',
+)
+
+function deferSelections(
+  patch: Partial<RepositoryStore>,
+  isTaken: (target: ReadTarget) => boolean,
+): Partial<RepositoryStore> {
+  const next = { ...patch }
+  if (isTaken('center') || isTaken('right')) for (const key of SELECTION_KEYS) delete next[key]
+  if (isTaken('left')) delete next.branchCompare
+  return next
 }
 
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
@@ -425,6 +427,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   notice: null,
   error: null,
   busy: false,
+  reads: createEmptyReads(),
   hostingStatus: null,
   branchOverview: null,
   branchCompare: null,
@@ -438,7 +441,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   pullDetail: null,
 
   async init() {
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const initial = await git().repo.initialPath()
       if (!initial) return
       set({
@@ -448,10 +451,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       })
       void git().repo.watch(initial)
     })
-    // 이 guard는 읽기 전용(상태 조회)이라 자기 꼬리 이벤트가 없다 — 시작 직후 도착하는 첫 감시
+    // 이 runWrite는 읽기 전용(상태 조회)이라 자기 꼬리 이벤트가 없다 — 시작 직후 도착하는 첫 감시
     // 이벤트까지 억제 창에 걸려 삼켜지지 않도록 초기화한다 (E7b: 실측 — 실제 앱 기동~외부 커밋
     // 간격이 800ms 억제 창보다 짧을 수 있어 재현됨)
-    lastGuardEndAt = 0
+    resetSuppression()
     // 감시 구독은 앱 수명 1회 — 이벤트가 온 저장소가 지금 저장소일 때만 재조회한다 (E7b)
     git().repo.onChanged((changedPath) => {
       if (get().repoPath === changedPath) void get().externalRefresh()
@@ -463,10 +466,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   },
 
   async openRepository() {
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const path = await git().repo.select()
       if (!path) return
-      // guard가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.
+      // runWrite가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.
       // 다른 저장소다 — 히스토리 상한도 첫 페이지로 되돌린다
       // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
       // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
@@ -488,67 +491,74 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async refresh() {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용이라 억제를 걸지 않는다 — 워크트리를 쓰지 않으니 자기 꼬리 이벤트가 없고,
-    // 걸면 그사이 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10)
-    await guard(
-      set,
-      get,
-      async () => {
-        // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
-        // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
-        // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
-        // 대상이 아니지만, 그렇다고 CLEAR_SELECTIONS로 매번 닫아 버리면 저장할 때마다 열어 둔
-        // 리뷰 패널이 사라진다 (E10 보완 — Important 3). diffLabel만 남고 diff는 못 살아난 경우도
-        // DiffPanel이 diff===null이면 빈 상태를 그려 안전하다(실측 — apps/desktop/.../DiffPanel.tsx)
-        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-        set({
-          ...CLEAR_SELECTIONS,
-          conflictFile: get().conflictFile,
-          pullDetail: get().pullDetail,
-          diffLabel: get().diffLabel,
-          ...(await reviveSelections(repoPath, get(), snapshot.status)),
-          hostingStatus: await hosting().status(repoPath),
-          ...snapshot,
-        })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy를 켜지 않고 억제 창도 무장하지 않는다. 억제를 걸면 그사이
+    // 도착한 진짜 외부 변경의 재조회를 막아버린다 (E10) (E14a)
+    // 이 조회는 'snapshot'만 선점하고 center·right·left에는 **양보한다** — reviveSelections로
+    // 그 자리를 쓰긴 하지만 소유하지는 않는다. 선점하면 배경 갱신이 사용자의 클릭을 무효화한다
+    // (E14a 스펙 §2-4-3). 착지 때 남이 가져간 자리만 빼고 스냅샷 나머지는 그대로 반영한다
+    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
+      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
+      // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
+      // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
+      // 대상이 아니지만, 그렇다고 CLEAR_SELECTIONS로 매번 닫아 버리면 저장할 때마다 열어 둔
+      // 리뷰 패널이 사라진다 (E10 보완 — Important 3). diffLabel만 남고 diff는 못 살아난 경우도
+      // DiffPanel이 diff===null이면 빈 상태를 그려 안전하다(실측 — apps/desktop/.../DiffPanel.tsx)
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+      // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
+      const kept = {
+        conflictFile: get().conflictFile,
+        pullDetail: get().pullDetail,
+        diffLabel: get().diffLabel,
+      }
+      const revived = await reviveSelections(repoPath, get(), snapshot.status)
+      const hostingStatus = await hosting().status(repoPath)
+      // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({
+        ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken),
+        hostingStatus,
+        ...snapshot,
+      })
+    }, { defersTo: SNAPSHOT_DEFERS })
   },
 
   async externalRefresh() {
     const { repoPath } = get()
     if (!repoPath) return
     // 자기 작업 꼬리 이벤트 억제 — 작업(쓰기) 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다.
-    // 이 억제는 마지막 "쓰기" 작업 기준으로만 걸린다(guard의 armSuppression) — 읽기 전용 재조회는
+    // 이 억제는 마지막 "쓰기" 작업 기준으로만 걸린다(runWrite만 창을 무장한다) — 읽기 전용 재조회는
     // 여기 걸리지 않으므로, 연속된 외부 변경이 서로를 삼키지 않는다 (E10)
-    if (Date.now() - lastGuardEndAt < WATCH_SUPPRESS_MS) return
-    await guard(
-      set,
-      get,
-      async () => {
-        // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
-        // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
-        // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
-        // 지우면 에디터 자동 저장 한 번에 열어 둔 리뷰 패널이 닫힌다 (E10 보완 — Important 3)
-        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-        set({
-          ...CLEAR_SELECTIONS,
-          conflictFile: get().conflictFile,
-          pullDetail: get().pullDetail,
-          diffLabel: get().diffLabel,
-          ...(await reviveSelections(repoPath, get(), snapshot.status)),
-          ...snapshot,
-        })
-      },
-      // 읽기 전용이라 억제를 걸지 않는다 — 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
-      false,
-    )
+    if (isWithinSuppressWindow()) return
+    // 읽기 전용 조회 — 전역 busy를 켜지 않는다. 이 경로는 워킹트리 감시가 붙잡은 **모든 외부
+    // 저장마다** 도니, 켜면 에디터에서 파일을 저장하기만 해도 앱 전체가 깜빡인다
+    // (E14a 실측: 외부 저장 1회에 헤더 속성 변형 20건). 억제 창도 무장하지 않는다 —
+    // 걸면 이 재조회 자체가 다음 진짜 외부 변경을 삼킨다 (E10)
+    // 선점·양보는 refresh와 같다 — 이 경로도 reviveSelections로 선택 상태를 쓰되 소유하진 않는다.
+    // 오히려 여기가 더 중요하다: 에디터 자동 저장마다 도니, 선점하면 파일을 훑는 내내
+    // 배경 갱신이 클릭을 되돌린다 (E14a 스펙 §2-4-3)
+    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
+      // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
+      // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
+      // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
+      // 지우면 에디터 자동 저장 한 번에 열어 둔 리뷰 패널이 닫힌다 (E10 보완 — Important 3)
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+      // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
+      const kept = {
+        conflictFile: get().conflictFile,
+        pullDetail: get().pullDetail,
+        diffLabel: get().diffLabel,
+      }
+      const revived = await reviveSelections(repoPath, get(), snapshot.status)
+      // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({ ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken), ...snapshot })
+    }, { defersTo: SNAPSHOT_DEFERS })
   },
 
   async switchBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const result = await git().branches.switch(repoPath, name)
       // 다른 공간이다 — 보던 것들을 비우고 역사도 첫 페이지부터
       set({
@@ -581,7 +591,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async createBranch(name, fromHash) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().branches.create(repoPath, name, fromHash)
       // 전환이 실패해도 브랜치는 이미 생겼다 — finally로 목록을 실제 상태에 맞춰
       // "만들었는데 안 보이고, 재시도하면 이미 있다"는 혼란을 막는다 (리뷰 반영)
@@ -605,7 +615,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async shelfSave() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().shelf.save(repoPath, '직접 스태시')
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -614,7 +624,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async shelfRestore(ref) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 겹침 에러가 나도 이미 충돌 표시가 적용됐을 수 있다 — finally로 실제 상태를 다시 읽는다
       try {
         await git().shelf.restore(repoPath, ref)
@@ -627,7 +637,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async shelfDrop(ref) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().shelf.drop(repoPath, ref)
       // 지운 항목을 미리보기로 열어 둔 채면 stale 상세가 남는다 — restore와 대칭으로 선택을 지운다 (품질 리뷰)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
@@ -637,7 +647,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async stage(paths) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().changes.stage(repoPath, paths)
       // stage 후에는 보고 있던 diff의 의미가 달라진다(오인 커밋 방지) — 선택을 비운다
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
@@ -647,7 +657,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async unstage(paths) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().changes.unstage(repoPath, paths)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -656,7 +666,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async discard(trackedPaths, untrackedPaths) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 파괴적 작업 — 부분 실행으로 실패해도 이미 지워진 것이 있다.
       // finally로 스냅샷을 갱신해 stale한 "수정됨" 표시를 남기지 않는다 (리뷰 실측 반영)
       try {
@@ -670,7 +680,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async removeFile(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 파괴적 작업 — 실패해도 디스크가 이미 바뀌었을 수 있다. finally로 실제 상태를 다시 읽는다 (discard 관례)
       try {
         await git().changes.removeFile(repoPath, path)
@@ -688,74 +698,70 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await get().selectConflict(selected.change.path)
       return
     }
-    // 읽기 전용 재조회(diff만 읽는다) — 억제를 걸지 않는다. 이 앱에서 가장 잦은 조작이라,
-    // 걸어두면 사용자가 diff를 훑어보는 내내 억제 창이 거의 상시로 걸려 그사이 도착한 외부
-    // 변경이 조용히 삼켜진다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const untracked = selected.change.unstaged === 'untracked'
-        const diff = await git().changes.diff(repoPath, selected.change.path, {
-          staged: selected.staged,
-          untracked,
-          // staged rename은 원래 경로를 동봉해야 rename으로 표시된다 (unstage와 대칭)
-          origPath: selected.staged ? selected.change.origPath : null,
-        })
-        // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
-        set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
-      },
-      false,
-    )
+    // 읽기 전용 조회(diff만 읽는다) — 전역 busy를 켜지 않는다. 이 앱에서 가장 잦은 조작이라
+    // 켜면 파일을 넘길 때마다 헤더·사이드바가 통째로 깜빡인다(E14a 실측: 헤더 속성 변형 30건,
+    // 29ms). 억제 창도 무장하지 않는다 — 걸어두면 사용자가 diff를 훑어보는 내내 억제 창이 거의
+    // 상시로 걸려 그사이 도착한 외부 변경이 조용히 삼켜진다 (E10 보완 — Important 2)
+    await runRead(set, get, 'center', async (isCurrent) => {
+      const untracked = selected.change.unstaged === 'untracked'
+      const diff = await git().changes.diff(repoPath, selected.change.path, {
+        staged: selected.staged,
+        untracked,
+        // staged rename은 원래 경로를 동봉해야 rename으로 표시된다 (unstage와 대칭)
+        origPath: selected.staged ? selected.change.origPath : null,
+      })
+      // 그 사이 다른 파일을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
+      set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
+    })
   },
 
   clearSelection() {
+    // "닫았으면 닫힌 채로" — 진행 중인 조회(selectFile의 diff, refresh의 revive)가 방금 닫은
+    // 선택을 되살리는 것을 막는다. 예전엔 DiffPanel의 닫기 버튼을 busy로 잠가 이 경합을 피했는데,
+    // 조회가 busy를 안 켜게 되면서 버튼이 살아나 경합이 UI로 도달 가능해졌다 (E14a 스펙 §2-4-2)
+    invalidateReads()
     set({ selected: null, diff: null, diffLabel: null })
   },
 
   async selectCommit(hash) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const commitDetail = await git().commits.show(repoPath, hash)
-        // 우측 열은 하나 — 리뷰 상세가 열려 있었다면 닫고 커밋 상세로 전환한다 (상호 배타)
-        set({
-          commitDetail,
-          commitFile: null,
-          conflictFile: null,
-          selected: null,
-          diff: null,
-          diffLabel: null,
-          pullDetail: null,
-        })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      const commitDetail = await git().commits.show(repoPath, hash)
+      // 그 사이 다른 커밋을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      // 우측 열은 하나 — 리뷰 상세가 열려 있었다면 닫고 커밋 상세로 전환한다 (상호 배타)
+      set({
+        commitDetail,
+        commitFile: null,
+        conflictFile: null,
+        selected: null,
+        diff: null,
+        diffLabel: null,
+        pullDetail: null,
+      })
+    })
   },
 
   async selectCommitFile(file) {
     const { repoPath, commitDetail } = get()
     if (!repoPath || !commitDetail) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
-        set({ diff, commitFile: file, diffLabel: null })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'center', async (isCurrent) => {
+      const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
+      // 그 사이 다른 파일을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({ diff, commitFile: file, diffLabel: null })
+    })
   },
 
   async restoreFileFromCommit(hash, path) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 파괴 작업 — 자동 보관까지 간 뒤 실패해도 보관함 카운트가 낡지 않게 스냅샷은 finally로 (revert 관례).
       // 실패 시에는 선택(커밋 상세)을 유지해 맥락을 잃지 않는다 (품질 리뷰)
       let succeeded = false
@@ -780,18 +786,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async compareFileWithWorktree(hash, path, origPath) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
-        // 같은 diff 슬롯 재사용 — 부모 대비 diff(commitFile 제목)와 오인하지 않게 제목만 diffLabel로 덮는다.
-        // commitFile은 비워 부모 대비 제목 규칙이 끼어들지 않게 한다 (상세 파일 목록은 열린 채 유지)
-        set({ diff, diffLabel: `${path} — 지금 코드와 비교`, commitFile: null })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'center', async (isCurrent) => {
+      const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
+      // 그 사이 가운데에 다른 것을 띄웠다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      // 같은 diff 슬롯 재사용 — 부모 대비 diff(commitFile 제목)와 오인하지 않게 제목만 diffLabel로 덮는다.
+      // commitFile은 비워 부모 대비 제목 규칙이 끼어들지 않게 한다 (상세 파일 목록은 열린 채 유지)
+      set({ diff, diffLabel: `${path} — 지금 코드와 비교`, commitFile: null })
+    })
   },
 
   clearCommit() {
@@ -801,7 +804,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async mergeBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
       let notice: string | null = null
       try {
@@ -828,7 +831,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async abortMerge() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().merge.abort(repoPath)
       set({
         ...CLEAR_SELECTIONS,
@@ -841,7 +844,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async pullLatest() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
       let notice: string | null = null
       try {
@@ -869,7 +872,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async revertCommit(hash) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (통합 리뷰)
       let notice: string | null = null
       try {
@@ -893,7 +896,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async abortRevert() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().commits.revertAbort(repoPath)
       set({
         ...CLEAR_SELECTIONS,
@@ -906,7 +909,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async cherryPickCommit(hash) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (revert 관례)
       let notice: string | null = null
       try {
@@ -933,7 +936,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async abortCherryPick() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().commits.cherryPickAbort(repoPath)
       set({
         ...CLEAR_SELECTIONS,
@@ -946,7 +949,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async createTag(name, hash) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().commits.createTag(repoPath, name, hash)
       // 파괴 작업이 아니다 — 보던 것은 유지하고 태그 배지만 스냅샷으로 반영한다
       set({
@@ -959,7 +962,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async undoLastCommit(hash) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 이력을 바꾸는 파괴 작업 — 실패해도 낡은 목록을 남기지 않게 스냅샷은 finally로 (discard 관례)
       let notice: string | null = null
       try {
@@ -974,7 +977,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async rewordLastCommit(hash, message) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().commits.reword(repoPath, hash, message)
       // HEAD 해시가 바뀐다 — 보던 상세·diff를 비우고 새 목록으로
       set({
@@ -990,7 +993,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return { needsForce: false, usedByWorktree: null }
     let needsForce = false
     let usedByWorktree: string | null = null
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const result = await git().branches.remove(repoPath, name, force)
       needsForce = result.needsForce
       usedByWorktree = result.usedByWorktree
@@ -1007,7 +1010,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async renameBranch(oldName, newName) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().branches.rename(repoPath, oldName, newName)
       set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -1016,7 +1019,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async updateBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().branches.update(repoPath, name)
       // 비교 뷰가 바로 이 공간을 보고 있었다면 낡은 목록이 남는다 — 대상일 때만 닫는다 (품질 리뷰)
       const stale = get().branchCompare?.name === name ? { branchCompare: null } : {}
@@ -1031,7 +1034,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async backupBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const result = await git().branches.backup(repoPath, name)
       // push는 ref를 움직이지 않는다 — 비교 뷰 무효화 불필요 (update와의 비대칭은 의도 — 품질 리뷰)
       set({
@@ -1046,26 +1049,26 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async compareBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const result = await git().branches.compare(repoPath, name)
-        set({ branchCompare: { name, result } })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'left', async (isCurrent) => {
+      const result = await git().branches.compare(repoPath, name)
+      // 그 사이 다른 공간을 비교했다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({ branchCompare: { name, result } })
+    })
   },
 
   clearBranchCompare() {
+    // clearSelection과 같은 이유 — 진행 중인 compareBranch·refresh의 revive가 방금 닫은
+    // 비교 뷰를 되살리지 못하게 한다 (E14a 스펙 §2-4-2)
+    invalidateReads()
     set({ branchCompare: null })
   },
 
   async checkoutRemoteBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const result = await git().branches.checkoutRemote(repoPath, name)
       // 다른 공간이다 — 보던 것들을 비우고 역사도 첫 페이지부터 (switchBranch 관례)
       set({
@@ -1082,7 +1085,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async removeRemoteBranch(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().branches.removeRemote(repoPath, name)
       // 비교 뷰가 바로 이 공간을 보고 있었다면 낡은 목록이 남는다 — 대상일 때만 닫는다 (품질 리뷰)
       const stale = get().branchCompare?.name === name ? { branchCompare: null } : {}
@@ -1097,7 +1100,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async rebaseOnto(name) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 자동 보관까지 간 뒤 2차 시도가 실패해도 보관함 카운트가 낡지 않게 — 스냅샷은 finally로 보장 (merge 관례)
       let notice: string | null = null
       try {
@@ -1123,7 +1126,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async continueRebase() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       let notice: string | null = null
       try {
         const result = await git().rebase.continue(repoPath)
@@ -1142,7 +1145,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async abortRebase() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().rebase.abort(repoPath)
       set({
         ...CLEAR_SELECTIONS,
@@ -1155,7 +1158,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async addWorktree(path, branch, createBranch) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().worktrees.add(repoPath, path, branch, createBranch === true)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
@@ -1168,7 +1171,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return false
     let needsForce = false
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const result = await git().worktrees.remove(repoPath, path, force)
       needsForce = result.needsForce
       if (result.removed) {
@@ -1184,7 +1187,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async openWorktree(path) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       // 검증·allowlist 등록은 main — 통과하면 정규화 경로가 돌아온다 (E7c 보안 가드)
       const opened = await git().repo.openPath(repoPath, path)
       // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)
@@ -1207,7 +1210,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async revealWorktree(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용·즉발 — busy 직렬화(guard) 없이 언제나 동작한다. 실패만 배너로 (E7d ⑥)
+    // 읽기 전용·즉발 — busy 직렬화(runWrite) 없이 언제나 동작한다. 실패만 배너로 (E7d ⑥)
     try {
       await git().worktrees.reveal(repoPath, path)
     } catch (cause) {
@@ -1218,9 +1221,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async fetchRemotes() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().remotes.fetch(repoPath)
-      // guard 종료 직후 억제 창(800ms)이 fetch발 감시 이벤트를 삼킨다(실측 6) —
+      // 쓰기(runWrite) 종료 직후 억제 창(800ms)이 fetch발 감시 이벤트를 삼킨다(실측 6) —
       // 감시에 맡기지 않고 여기서 직접 스냅샷을 뜬다. 보던 화면은 유지(E7d ⑤ 관례)
       const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
       set({
@@ -1254,59 +1257,56 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async viewHistory(ref) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        set({ historyRef: ref })
-        set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      // await 앞의 즉시 피드백 — "조회 중: <ref> ✕" 알약이 클릭 즉시 뜨게 한다 (E7g).
+      // 조회 결과가 아니므로 isCurrent로 감싸지 않는다. fetchSnapshot이 이 값을 읽는다
+      set({ historyRef: ref })
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+      // 그 사이 다른 계보를 조회했다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({ ...snapshot })
+    })
   },
 
   async clearHistoryView() {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        set({ historyRef: null })
-        set({ ...(await fetchSnapshot(repoPath, get().historyLimit)) })
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      // await 앞의 즉시 피드백 — 알약이 클릭 즉시 사라지게 한다 (E7g, viewHistory와 대칭)
+      set({ historyRef: null })
+      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+      // 그 사이 다른 계보를 조회했다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({ ...snapshot })
+    })
   },
 
   async selectConflict(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 읽기 전용 재조회(충돌 파일 내용만 읽는다) — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const content = await git().files.readText(repoPath, path)
-        set({
-          conflictFile: { path, content },
-          selected: null,
-          diff: null,
-          diffLabel: null,
-          commitDetail: null,
-          commitFile: null,
-        })
-      },
-      false,
-    )
+    // 읽기 전용 조회(충돌 파일 내용만 읽는다) — 전역 busy도 억제 창도 건드리지 않는다
+    // (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'center', async (isCurrent) => {
+      const content = await git().files.readText(repoPath, path)
+      // 그 사이 가운데에 다른 것을 띄웠다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      set({
+        conflictFile: { path, content },
+        selected: null,
+        diff: null,
+        diffLabel: null,
+        commitDetail: null,
+        commitFile: null,
+      })
+    })
   },
 
   async reloadConflict(path) {
     const { repoPath } = get()
     if (!repoPath) return null
-    // 읽기 전용 재조회 — guard(busy)를 잡지 않아 확인 흐름을 막지 않는다
+    // 읽기 전용 재조회 — 전역 잠금(busy)을 잡지 않아 확인 흐름을 막지 않는다
     try {
       const content = await git().files.readText(repoPath, path)
       set({ conflictFile: { path, content } })
@@ -1320,7 +1320,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async resolveConflict(path, choice) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().conflicts.resolve(repoPath, path, choice)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -1329,7 +1329,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async markConflictResolved(path) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().conflicts.markResolved(repoPath, path)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -1338,7 +1338,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async chooseConflictBlock(blockIndex, choice) {
     const { repoPath, conflictFile } = get()
     if (!repoPath || !conflictFile) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       // 외부 편집과의 경합 — 열 때 읽어 둔 내용이 아니라 최신 내용에 적용한다
       const fresh = await git().files.readText(repoPath, conflictFile.path)
       const next = applyBlockChoice(fresh, blockIndex, choice)
@@ -1362,7 +1362,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async saveConflictText(content) {
     const { repoPath, conflictFile } = get()
     if (!repoPath || !conflictFile) return false
-    return await guard(set, get, async () => {
+    return await runWrite(set, get, async () => {
       await git().conflicts.saveText(repoPath, conflictFile.path, content)
       set({
         conflictFile: { path: conflictFile.path, content },
@@ -1374,7 +1374,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async resetConflict() {
     const { repoPath, conflictFile } = get()
     if (!repoPath || !conflictFile) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await git().conflicts.reset(repoPath, conflictFile.path)
       const content = await git().files.readText(repoPath, conflictFile.path)
       set({
@@ -1400,29 +1400,30 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, history, historyLimit } = get()
     // 끝까지 다 봤거나(뒤가 없음) 상한에 닿았으면 더 부르지 않는다
     if (!repoPath || history.length < historyLimit || historyLimit >= HISTORY_MAX) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
-        const ref = get().historyRef ?? undefined
-        try {
-          set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
-        } catch (error) {
-          // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
-          if (ref === undefined) throw error
-          set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
-        }
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
+      const ref = get().historyRef ?? undefined
+      try {
+        const history = await git().history.list(repoPath, next, ref)
+        // 그 사이 다른 역사 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+        if (!isCurrent()) return
+        set({ history, historyLimit: next })
+      } catch (error) {
+        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀(fetchSnapshot과 같은 원칙)
+        if (ref === undefined) throw error
+        const history = await git().history.list(repoPath, next)
+        // 폴백도 결과를 쓰는 것은 마찬가지다 — 낡았으면 똑같이 버린다 (E14a)
+        if (!isCurrent()) return
+        set({ historyRef: null, history, historyLimit: next })
+      }
+    })
   },
 
   async searchHistory(query) {
     const { repoPath } = get()
     if (!repoPath) return { indices: [], hashes: [], truncated: false }
-    // 검색은 조회성 — guard(busy 잠금·에러 배너)를 쓰지 않고, 실패해도 조용히 빈 결과를 준다
+    // 검색은 조회성 — runWrite(busy 잠금·에러 배너)를 쓰지 않고, 실패해도 조용히 빈 결과를 준다
     try {
       return await git().history.search(repoPath, query, get().historyRef ?? undefined)
     } catch {
@@ -1434,7 +1435,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, headInfos } = get()
     const key = `${path}::${headHash ?? ''}`
     if (!repoPath || key in headInfos) return
-    // 조회성 — guard(busy 잠금·에러 배너)를 쓰지 않고 실패는 조용히 null로 캐시한다
+    // 조회성 — runWrite(busy 잠금·에러 배너)를 쓰지 않고 실패는 조용히 null로 캐시한다
     try {
       const info = await git().worktrees.headInfo(repoPath, path)
       set({ headInfos: { ...get().headInfos, [key]: info } })
@@ -1448,49 +1449,48 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || index < history.length) return
     const next = Math.min(Math.max(index + 1, historyLimit + HISTORY_PAGE), SEARCH_JUMP_MAX)
     if (next <= historyLimit) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const ref = get().historyRef ?? undefined
-        try {
-          set({ history: await git().history.list(repoPath, next, ref), historyLimit: next })
-        } catch (error) {
-          // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀 (loadMoreHistory와 같은 원칙)
-          if (ref === undefined) throw error
-          set({ historyRef: null, history: await git().history.list(repoPath, next), historyLimit: next })
-        }
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      const ref = get().historyRef ?? undefined
+      try {
+        const history = await git().history.list(repoPath, next, ref)
+        // 그 사이 다른 역사 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+        if (!isCurrent()) return
+        set({ history, historyLimit: next })
+      } catch (error) {
+        // 조회 브랜치가 사라졌으면 조용히 전체 그래프로 복귀 (loadMoreHistory와 같은 원칙)
+        if (ref === undefined) throw error
+        const history = await git().history.list(repoPath, next)
+        // 폴백도 결과를 쓰는 것은 마찬가지다 — 낡았으면 똑같이 버린다 (E14a)
+        if (!isCurrent()) return
+        set({ historyRef: null, history, historyLimit: next })
+      }
+    })
   },
 
   async revealHead() {
     const { repoPath, status } = get()
     const headHash = status?.headHash ?? null
     if (!repoPath || headHash === null) return
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
-        let limit = get().historyLimit
-        for (let round = 0; round < 10; round += 1) {
-          if (get().history.some((commit) => commit.hash === headHash)) return
-          limit += 2000
-          set({ historyLimit: limit, history: await git().history.list(repoPath, limit) })
-        }
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
+      let limit = get().historyLimit
+      for (let round = 0; round < 10; round += 1) {
+        if (get().history.some((commit) => commit.hash === headHash)) return
+        limit += 2000
+        const history = await git().history.list(repoPath, limit)
+        // 그 사이 다른 역사 조회가 끝났다면 넓히던 이 결과는 낡았다 — 덮지 않고 그만둔다 (E14a)
+        if (!isCurrent()) return
+        set({ historyLimit: limit, history })
+      }
+    })
   },
 
   async commit(message) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       await git().commits.create(repoPath, message)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
@@ -1499,7 +1499,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async backup() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const result = await git().sync.push(repoPath)
       // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신. 첫 연결이면 알린다 (E7e ③)
       set({
@@ -1517,27 +1517,26 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || hostingStatus === null || !hostingStatus.connected || hostingStatus.repo === null) {
       return
     }
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        try {
-          set({ pulls: await hosting().pulls.list(repoPath) })
-        } catch (cause) {
-          // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰)
-          set({ pulls: null })
-          throw cause
-        }
-      },
-      false,
-    )
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'reviews', async (isCurrent) => {
+      try {
+        const pulls = await hosting().pulls.list(repoPath)
+        // 그 사이 더 최신 목록 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+        if (!isCurrent()) return
+        set({ pulls })
+      } catch (cause) {
+        // 실패를 빈 목록("없어요")으로 위장하지 않는다 — null은 "못 불러왔어요" 표시 (품질 리뷰).
+        // 늦게 온 실패가 최신 목록을 "못 불러왔어요"로 되돌리면 안 되므로 이것도 지킨다 (E14a)
+        if (isCurrent()) set({ pulls: null })
+        throw cause
+      }
+    })
   },
 
   async connectGh() {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const login = await hosting().connect.gh()
       set({
         hostingStatus: await hosting().status(repoPath),
@@ -1549,7 +1548,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async connectToken(token) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const login = await hosting().connect.token(token)
       set({
         hostingStatus: await hosting().status(repoPath),
@@ -1561,7 +1560,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async disconnectHosting() {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await hosting().disconnect()
       set({
         hostingStatus: await hosting().status(repoPath),
@@ -1574,7 +1573,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async createPull(title) {
     const { repoPath } = get()
     if (!repoPath) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const pull = await hosting().pulls.create(repoPath, { title, body: '' })
       // 백업(push)이 함께 일어났을 수 있다 — 리뷰 목록과 git 스냅샷(ahead/behind)을 함께 갱신한다
       set({
@@ -1588,7 +1587,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async openPull(number) {
     const { repoPath } = get()
     if (!repoPath) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       await hosting().pulls.open(repoPath, number)
     })
   },
@@ -1596,22 +1595,18 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async openPullDetail(number) {
     const { repoPath } = get()
     if (!repoPath) return
-    // 팝오버 열기 직후에는 refreshPulls가 busy를 잡고 있다 — 첫 클릭을 조용히 삼키지 않게
-    // busy가 풀릴 때까지 잠깐 기다린다(상한 5초 — 넘으면 guard가 재진입 거부로 처리) (품질 리뷰)
-    for (let waited = 0; get().busy && waited < 5000; waited += 50) {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    // 읽기 전용 재조회 — 억제를 걸지 않는다 (E10 보완 — Important 2)
-    await guard(
-      set,
-      get,
-      async () => {
-        const pullDetail = await hosting().pulls.detail(repoPath, number)
-        // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
-        set({ ...CLEAR_SELECTIONS, pullDetail })
-      },
-      false,
-    )
+    // 예전엔 여기서 busy가 풀릴 때까지 최대 5초 기다렸다 — 팝오버를 열자마자 도는 목록 조회
+    // (refreshPulls)가 전역 busy를 잡아 첫 클릭이 조용히 삼켜졌기 때문이다(품질 리뷰). E14a가
+    // 조회를 전역 잠금에서 빼면서 그 전제가 사라졌으므로 대기를 걷어낸다 — 남겨두면 진짜 쓰기가
+    // 도는 동안 리뷰 열기만 멈춰, "쓰기 중에도 조회는 시작된다"는 결정(스펙 §2-4)을 어긴다
+    // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
+    await runRead(set, get, 'right', async (isCurrent) => {
+      const pullDetail = await hosting().pulls.detail(repoPath, number)
+      // 그 사이 다른 리뷰를 열었다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+      if (!isCurrent()) return
+      // 우측 열은 하나다 — 커밋 상세·diff·충돌 뷰를 정리하고 리뷰 상세로 전환한다
+      set({ ...CLEAR_SELECTIONS, pullDetail })
+    })
   },
 
   closePullDetail() {
@@ -1621,7 +1616,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async addPullComment(body) {
     const { repoPath, pullDetail } = get()
     if (!repoPath || pullDetail === null) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const number = pullDetail.detail.number
       await hosting().pulls.comment(repoPath, number, body)
       // 내 답변만 붙이지 않고 서버 상태로 다시 읽는다 — 그 사이 달린 다른 코멘트도 함께 온다.
@@ -1637,7 +1632,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async approvePull() {
     const { repoPath, pullDetail } = get()
     if (!repoPath || pullDetail === null) return
-    await guard(set, get, async () => {
+    await runWrite(set, get, async () => {
       const number = pullDetail.detail.number
       await hosting().pulls.approve(repoPath, number)
       // 재조회 실패가 이미 성공한 승인을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
@@ -1657,7 +1652,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async mergePull() {
     const { repoPath, pullDetail } = get()
     if (!repoPath || pullDetail === null) return false
-    return guard(set, get, async () => {
+    return runWrite(set, get, async () => {
       const number = pullDetail.detail.number
       const base = pullDetail.detail.baseBranch
       await hosting().pulls.merge(repoPath, number)

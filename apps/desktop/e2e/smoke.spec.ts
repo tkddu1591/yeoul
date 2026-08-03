@@ -3202,11 +3202,14 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BrowserWindow.getAllWindows()[0]
  * 이 바로 그 창이므로).
  *
- * 재조회 호출 자체는 window.gitApi로 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze해
- * (실측: Object.isFrozen(gitApi.repo) === true) 재할당이 조용히 무시된다. 대신 "새로고침"
- * 버튼(store.busy로 disabled가 묶여 있다)의 disabled 속성이 true→false로 도는 것을
- * MutationObserver로 지켜본다 — guard()의 busy 전이는 refresh()가 실제로 실행됐다는
- * 직접 증거다. 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 전이를 만들 수 없다.
+ * 재조회 호출 자체는 렌더러에서 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze한다
+ * (재실측: Object.isFrozen(gitApi.repo) === true · window.gitApi는 writable:false·
+ * configurable:false라 통째 교체도 defineProperty도 "Cannot redefine property"로 막힌다).
+ * 예전엔 그래서 "새로고침" 버튼(store.busy로 disabled가 묶여 있다)의 disabled 전이를 셌지만,
+ * E14a가 조회를 전역 busy에서 빼면서 그 전이가 사라져 계측 도구 자체가 무효가 됐다(회귀가 아니라
+ * 프록시의 소멸이다). 대신 main 프로세스에서 repo:status IPC 핸들러를 감싸 호출 수를 센다 —
+ * 프록시가 아니라 재조회 그 자체라 더 직접적이고, 프로덕션 코드는 한 줄도 건드리지 않는다.
+ * 파일은 끝까지 건드리지 않으니 감시(watcher)는 이 호출을 만들 수 없다.
  *
  * ⚠️ 다음 사람에게: "진짜 포커스가 아니니 불완전하다"며 blur()/focus() + GIT_GUI_E2E_SHOW로
  * 되돌리지 말 것 — 그 버전이 바로 위에서 설명한 경합 플레이크의 원인이었다.
@@ -3222,20 +3225,25 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     const window = await app.firstWindow()
     await expect(window.getByTestId('unstaged-count')).toHaveText('0')
 
-    // "새로고침" 버튼의 disabled 전이 횟수를 센다 — refresh()의 guard()가 busy를
-    // true로 돌릴 때마다 하나씩 늘어난다
-    await window.evaluate(() => {
-      const button = document.querySelector('[data-testid="refresh"]')!
-      const win = window as unknown as { __refreshCycles: number }
-      win.__refreshCycles = 0
-      new MutationObserver((records) => {
-        for (const record of records) {
-          if (record.attributeName === 'disabled' && button.hasAttribute('disabled')) {
-            win.__refreshCycles += 1
-          }
-        }
-      }).observe(button, { attributes: true })
+    // repo:status IPC 핸들러를 감싸 호출 수를 센다 — refresh()의 fetchSnapshot이 반드시 거치는
+    // 길목이다. ipcMain의 핸들러 맵은 Electron 내부 필드라 테스트에서만 손대고, 감싼 뒤에도
+    // 원래 핸들러를 그대로 호출하므로 앱 동작은 바뀌지 않는다
+    const patched = await app.evaluate(({ ipcMain }) => {
+      const impl = ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
+      }
+      const original = impl._invokeHandlers.get('repo:status')
+      if (original === undefined) return false
+      const globals = globalThis as unknown as { __refreshCycles: number }
+      globals.__refreshCycles = 0
+      impl._invokeHandlers.set('repo:status', (...args: unknown[]) => {
+        globals.__refreshCycles += 1
+        return original(...args)
+      })
+      return true
     })
+    // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
+    expect(patched, 'repo:status 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(true)
 
     // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
     // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
@@ -3245,7 +3253,7 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     })
     await expect
       .poll(
-        () => window.evaluate(() => (window as unknown as { __refreshCycles: number }).__refreshCycles),
+        () => app.evaluate(() => (globalThis as unknown as { __refreshCycles: number }).__refreshCycles),
         { timeout: 5_000 },
       )
       .toBeGreaterThan(0)
@@ -3990,6 +3998,472 @@ test('E13 후속 — 접히는 내내 안쪽 콘텐츠 상자는 펼친 크기 �
     expect(clippedDockFrames.length, '도크 본체가 행 트랙보다 높은 프레임 수').toBeGreaterThanOrEqual(3)
   } finally {
     await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14a — 파일을 옮겨 다닐 때 앱 전체가 깜빡이면 안 된다.
+ *
+ * 사용자 제보: "파일 누르면 왜 헤더부터 사이드바 전체가 다 텍스트가 리렌더링되는것처럼
+ * 깜빡이는거야? diff부분만 바뀌면 될 것 같은데.."
+ *
+ * 원인은 selectFile이 diff만 읽는 조회인데도 전역 busy를 켰다 끈 것이다. busy는 렌더러
+ * 118곳에 스레드돼 있다. 수정 전 실측(MutationObserver, 파일 A→B 클릭 1회):
+ *   헤더  텍스트 0 · 속성 30 (disabled×10 · tabindex×10 · data-disabled×10)
+ *   좌측  텍스트 2 · 속성 78 (그 텍스트가 CommitForm의 '작업 중이에요'다)
+ *   헤더 컨트롤이 비활성으로 머문 시간 28.8ms
+ *
+ * **왜 A→B인가:** "선택 없음 → 첫 파일"은 좌측 행 액션이 정당하게 활성화된다(실측: disabled
+ * 대상 20→3). 그 경우엔 좌측 변형 0을 요구할 수 없다. 이미 한 파일을 보고 있는 상태에서
+ * 다른 파일로 옮기면 그 정당한 변화가 이미 끝나 있어, 남는 변형은 전부 busy 탓이다.
+ */
+test('E14a — 파일을 옮겨도 헤더가 잠기지 않는다 (전체 깜빡임 회귀)', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) {
+      await writeFile(join(repo, name), 'base\n'.repeat(50))
+    }
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) {
+      await writeFile(join(repo, name), 'changed\n'.repeat(50))
+    }
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      // 먼저 a.txt를 골라 "이미 보고 있는" 상태를 만든다.
+      // 빈 상태 패널도 testId가 diff-panel이라 toBeVisible로는 선택이 끝났는지 알 수 없다 —
+      // 제목(=경로)이 a.txt가 될 때까지 기다려야 진짜 A→B 측정이 된다
+      await window.getByTestId('file-unstaged-a.txt').click()
+      await expect(window.getByTestId('diff-panel')).toContainText('a.txt')
+
+      const counts = await window.evaluate(async () => {
+        const log = { header: 0, composerText: [] as string[] }
+        const headerObserver = new MutationObserver((records) => {
+          log.header += records.length
+        })
+        headerObserver.observe(document.querySelector('.app__header')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled', 'tabindex'],
+        })
+        const leftObserver = new MutationObserver((records) => {
+          for (const record of records) {
+            if (record.type === 'characterData') {
+              log.composerText.push(String((record.target as CharacterData).data))
+            }
+          }
+        })
+        leftObserver.observe(document.querySelector('.app__left')!, {
+          subtree: true,
+          characterData: true,
+        })
+
+        ;(document.querySelector('[data-testid="file-unstaged-b.txt"]') as HTMLElement).click()
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        headerObserver.disconnect()
+        leftObserver.disconnect()
+        return log
+      })
+
+      expect(counts.header, '헤더 잠금 변형 — 수정 전 실측 30건').toBe(0)
+      expect(
+        counts.composerText.filter((text) => text.includes('작업 중이에요')),
+        '커밋 컴포저가 "작업 중이에요"로 번쩍이면 안 된다',
+      ).toEqual([])
+      // 공허한 통과 방지 — 가운데는 실제로 b.txt로 바뀌었어야 한다
+      await expect(window.getByTestId('diff-panel')).toContainText('b.txt')
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14a — 앱을 만지지 않아도 깜빡이던 경로. externalRefresh(E10 워킹트리 감시)도 조회인데
+ * 전역 busy를 켰다. 즉 **에디터에서 파일을 저장하기만 해도** 헤더가 잠겼다 풀렸다.
+ * 에디터 자동저장을 켜두면 상시로 돈다. 수정 전 실측: 외부 저장 1회 → 헤더 변형 30건
+ * (스펙 §1-2가 적은 20은 disabled·data-disabled 두 속성만 센 값이다 — 아래 관찰자는 tabindex까지
+ * 세 개를 세므로 같은 기준으로는 30이다. 단언은 어느 쪽이든 0이라 결과에는 영향이 없다).
+ *
+ * 여기서는 사용자가 앱을 만지지 않았으므로 좌측 disabled 변형도 0을 요구할 수 있다.
+ */
+test('E14a — 에디터에서 저장해도 앱이 잠기지 않는다 (외부 변경 깜빡임 회귀)', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-ext-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    await writeFile(join(repo, 'a.txt'), 'base\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      await expect(window.locator('.app__header')).toBeVisible()
+      await expect(window.getByTestId('history-count')).toHaveText('1')
+
+      await window.evaluate(() => {
+        const log = { header: 0, left: 0 }
+        ;(window as unknown as { __e14a: typeof log }).__e14a = log
+        new MutationObserver((records) => {
+          log.header += records.length
+        }).observe(document.querySelector('.app__header')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled', 'tabindex'],
+        })
+        new MutationObserver((records) => {
+          log.left += records.length
+        }).observe(document.querySelector('.app__left')!, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['disabled', 'data-disabled'],
+        })
+      })
+
+      // 부팅 직후의 초기 작업(init은 쓰기라 전역 busy를 켠다)이 남긴 변형과 섞이면 안 된다.
+      // "직전 간격 동안 변형 0"이 될 때까지 기다리며 그때까지의 계수를 버린다 —
+      // 이 폴은 매 호출마다 계수기를 0으로 되돌리므로 성공한 순간의 계수기는 0이다.
+      // (플랜은 여기서 .ui-pending 개수가 0이 되길 기다리라고 했지만 그 클래스는 Task 4에서야
+      //  생긴다 — 지금 쓰면 항상 0이라 아무것도 기다리지 않는 공허한 대기가 된다)
+      await expect
+        .poll(
+          async () =>
+            window.evaluate(() => {
+              const log = (window as unknown as { __e14a: { header: number; left: number } }).__e14a
+              const seen = log.header + log.left
+              log.header = 0
+              log.left = 0
+              return seen
+            }),
+          { timeout: 5000 },
+        )
+        .toBe(0)
+
+      // 에디터가 파일을 저장한 상황을 그대로 재현한다 (E10 워킹트리 감시 경로)
+      await writeFile(join(repo, 'a.txt'), 'edited by editor\n')
+      // 변경이 실제로 화면에 반영될 때까지 기다린다 — 반영도 안 됐는데 0건이면 공허하다
+      await expect(window.getByTestId('file-unstaged-a.txt')).toBeVisible()
+
+      const log = await window.evaluate(
+        () => (window as unknown as { __e14a: { header: number; left: number } }).__e14a,
+      )
+      expect(log.header, '헤더 잠금 변형 — 수정 전 실측 30건(세 속성 기준)').toBe(0)
+      expect(log.left, '좌측 잠금 변형 — 사용자가 만지지 않았으므로 0이어야 한다').toBe(0)
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14a — 파일 사이를 빠르게 옮겨 다녀도 마지막에 고른 파일의 diff가 남는다.
+ *
+ * 전역 직렬화(busy 재진입 거부)를 빼면서 조회가 겹칠 수 있게 됐다. 그 대가로 새 위험이 열렸다:
+ * 늦게 끝난 조회가 먼저 끝난 최신 조회를 덮으면 **누른 것과 다른 파일의 diff가 남는다.**
+ * runRead의 isCurrent()가 그걸 막는다(run-guard.ts 주석 참조). 이 테스트는 사용자가 실제로 하는
+ * 행동(목록을 훑으며 연달아 클릭)으로 그 경로를 태운다.
+ *
+ * **검출력(실측):** isCurrent를 `() => true`로 고정하고 재빌드해 돌리면 5/5 빨강이다 — 실제로
+ * 순서가 뒤집혀 b.txt의 diff가 마지막에 누른 a.txt를 덮는다. 다만 그건 파일 크기 차가 충분할
+ * 때다: 처음에 200·400·600·800줄로 잡았을 땐 3번 중 1번만 빨갰다. 그래서 크기를 세제곱으로
+ * 벌려(200·1600·5400·12800줄) 앞선 조회가 확실히 더 오래 걸리게 했다. 이 숫자를 줄이면
+ * 테스트가 회귀를 놓치기 시작한다.
+ *
+ * 그래도 경합의 정밀한 고정은 단위 테스트(test/run-guard.test.ts)의 몫이다 — 거기서는 지연을
+ * 수동으로 풀어 완료 순서를 100% 뒤집는다. 여기는 실제 앱에서 그 배선이 이어져 있는지를 본다.
+ */
+test('E14a — 파일을 연달아 빠르게 눌러도 마지막 파일의 diff가 남는다', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-race-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const names = ['a.txt', 'b.txt', 'c.txt', 'd.txt']
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    // 파일마다 크기를 크게 벌린다(200·1600·5400·12800줄) — 조회 시간이 갈려야 순서가 뒤집힌다.
+    // 선형 증가(200·400·600·800)로는 반증이 3번 중 1번만 빨갰다 (위 주석의 실측)
+    for (const [index, name] of names.entries()) {
+      await writeFile(join(repo, name), `base ${name}\n`.repeat(200 * (index + 1) ** 3))
+    }
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    for (const [index, name] of names.entries()) {
+      await writeFile(join(repo, name), `changed ${name}\n`.repeat(200 * (index + 1) ** 3))
+    }
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      await expect(window.getByTestId('file-unstaged-a.txt')).toBeVisible()
+
+      // 큰 파일 → 작은 파일 순으로 기다리지 않고 연달아 누른다. 앞의 것이 더 오래 걸리므로,
+      // isCurrent()가 없으면 마지막(a.txt)을 앞선 조회가 덮을 수 있다
+      await window.evaluate((fileNames) => {
+        for (const name of [...fileNames].reverse()) {
+          ;(document.querySelector(`[data-testid="file-unstaged-${name}"]`) as HTMLElement).click()
+        }
+      }, names)
+
+      // 겹친 조회 4개가 전부 끝날 때까지 기다린다 — 고정 sleep이 아니라 가운데 패널의 로딩 표시가
+      // 사라지는 것으로 잰다(reads.center === 0의 관찰 가능한 대응물). 아직 진행 중인 조회가
+      // 남은 채로 단언하면 "아직 덮지 않았을 뿐"인 상태를 통과로 오독한다
+      await expect
+        .poll(
+          async () =>
+            window.evaluate(
+              () =>
+                document.querySelectorAll(
+                  '[data-testid="diff-panel"] [data-testid="panel-pending"]',
+                ).length,
+            ),
+          { timeout: 5000 },
+        )
+        .toBe(0)
+
+      // 마지막으로 누른 것은 a.txt다 — 조회가 전부 끝난 뒤에도 그대로여야 한다.
+      // 빈 상태 패널도 testId가 diff-panel이므로 제목(=경로) 내용으로 단언한다
+      await expect(window.getByTestId('diff-panel')).toContainText('a.txt')
+      for (const other of names.slice(1)) {
+        await expect(window.getByTestId('diff-panel')).not.toContainText(other)
+      }
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14a — 로딩 표시는 느린 조회에만 배어난다.
+ * 빠른 조회(실측 29ms)는 --motion-pending-delay(400ms) 안에 끝나 한 프레임도 보이지 않는다.
+ *
+ * "느림"을 토큰 0으로 흉내내지 않는다 — 그러면 지연 자체를 검증하지 못한다. 대신 (1) 스피너가
+ * 조회 중에 DOM에 붙기는 했는지, (2) 그 스피너 **자신의** computed animation-delay가 토큰 값인지를
+ * 본다. (1)이 없으면 (2)는 잴 대상이 없고, (2)가 없으면 (1)은 지연에 대해 아무 말도 못 한다.
+ *
+ * 표본 창 600ms는 지연 400ms + 페이드 150ms보다 길다 — 배어날 것이었다면 이 안에서 보였다.
+ * 조건 대기가 아니라 표본 구간이라 고정 시간이 맞다.
+ *
+ * 짝이 되는 반대 방향(느린 조회에서는 실제로 배어난다)은 바로 아래 테스트가 잰다 — 이 테스트만
+ * 있으면 `--motion-pending-delay: 999s`로 스피너를 영영 안 보이게 해도 초록이다 (최종 리뷰 Note 4).
+ */
+test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-pending-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) await writeFile(join(repo, name), 'base\n')
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    for (const name of ['a.txt', 'b.txt']) await writeFile(join(repo, name), 'changed\n')
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      await window.getByTestId('file-unstaged-a.txt').click()
+      await expect(window.getByTestId('diff-panel')).toContainText('a.txt')
+
+      // 클릭 직후부터 rAF로 스피너의 실제 불투명도를 표본한다.
+      // panel-pending은 패널 7개가 공유하는 testId라 반드시 가운데 패널로 좁힌다 —
+      // 좁히지 않으면 우측·좌측 패널의 조회를 대신 재고 있을 수 있다
+      const samples = await window.evaluate(async () => {
+        const opacities: number[] = []
+        const delays: string[] = []
+        let running = true
+        const tick = () => {
+          const spinner = document.querySelector(
+            '[data-testid="diff-panel"] [data-testid="panel-pending"]',
+          )
+          // -1 = 그 프레임엔 스피너가 DOM에 없었다 (있는데 투명한 것과 구분해 남긴다)
+          if (spinner === null) opacities.push(-1)
+          else {
+            const style = getComputedStyle(spinner)
+            opacities.push(Number(style.opacity))
+            delays.push(style.animationDelay)
+          }
+          if (running) requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+        ;(document.querySelector('[data-testid="file-unstaged-b.txt"]') as HTMLElement).click()
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        running = false
+        return { opacities, delays }
+      })
+
+      const trace = `불투명도 표본 ${samples.opacities.join(',')} / 지연 ${samples.delays.join(' ')}`
+      // 조회가 실제로 일어났는지는 결과로 확인한다 — 클릭이 먹지 않았다면 아래 단언은 공허하다
+      await expect(window.getByTestId('diff-panel')).toContainText('b.txt')
+
+      // 여기 있던 "불투명도 > 0.05인 표본이 0개" 단언은 **구조적으로 실패할 수 없어 삭제했다**
+      // (최종 리뷰 Important 3). 빠른 조회에서 스피너는 정확히 한 프레임만 DOM에 살고 rAF
+      // 콜백은 페인트 전에 돈다 — `--motion-pending-delay`를 `0ms`로 바꿔 재빌드해도 computed
+      // opacity는 여전히 0이라 초록이었다. 검출력은 아래 두 단언에만 있다.
+      //
+      // 공허 방지 ①: 스피너가 애초에 붙지도 않았다면 아무것도 말하지 않는다.
+      // 실측(이 테스트로 표본을 찍어 확인): 빠른 조회에서도 조회 시작 프레임 한 장은 DOM에 붙고
+      // 그 프레임의 불투명도가 정확히 0이다 — 표본 36칸 중 첫 칸만 0, 나머지 35칸은 -1(없음)이었다.
+      // 프레임이 아니라 IPC 왕복이 경계라 이 한 장은 안정적이다 — 카운터 증가는 클릭 이벤트의
+      // 마이크로태스크에서 커밋되고 결과는 그보다 뒤인 매크로태스크로 돌아온다
+      expect(samples.delays.length, `스피너가 한 프레임도 붙지 않았다 — ${trace}`).toBeGreaterThan(0)
+      // 공허 방지 ②: 그 한 장에 지연이 실제로 걸려 있었는가. 루트 토큰만 보면 스피너가 그 토큰을
+      // 안 쓰고 있어도 통과하므로, 스피너 자신의 computed animation-delay를 본다
+      // (애니메이션 2개 — 페이드·회전 — 이라 값도 2개다)
+      expect(samples.delays[0], `스피너에 지연이 안 걸렸다 — ${trace}`).toBe('0.4s, 0.4s')
+
+      // 토큰 정본도 함께 고정한다 — 위 0.4s가 어디서 왔는지의 근거다
+      const delay = await window.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--motion-pending-delay').trim(),
+      )
+      expect(delay).toBe('400ms')
+    } finally {
+      await app.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * 픽스처 — "조회가 오래 걸린다"를 소스 변이 없이 진짜로 만든다.
+ *
+ * 두 번 헛짚고 나서 이 모양에 도달했다(실측):
+ * ① **전면 변경된 큰 파일은 못 쓴다.** 40만 줄을 통째로 바꾸면 조회 자체는 1.7초로 충분히 느리지만,
+ *    응답이 커서 렌더러가 역직렬화하느라 **주 스레드가 1.2초 멎는다**. 멎은 동안엔 CSS 애니메이션도
+ *    안 돈다 — rAF 표본이 t=400ms에서 t=1676ms로 건너뛰고, 깨어났을 땐 조회가 이미 끝나 스피너가
+ *    없다. 즉 "느린데 스피너가 안 보이는" 가짜 실패를 만든다.
+ * ② 따라서 **주 프로세스만 오래 걸리고 응답은 작아야** 렌더러가 놀며 애니메이션을 돌린다.
+ *
+ * 줄을 섞은 파일이 그 조건을 만족한다 — git의 diff 계산이 비싸지고, 파일 자체는 18MB뿐이다.
+ * 실측: 30만 줄 = 조회 1730ms · 최대 프레임 공백 18ms(=한 번도 안 멎었다). 표시 시작선은
+ * 지연 400ms + 페이드 150ms = 550ms라 여유가 3배다. 15만 줄(1000ms)로도 뜨지만 여유가 적어 키웠다.
+ */
+const PENDING_SLOW_ROWS = 300_000
+
+/** 결정적 셔플 — 시드가 고정이라 실행마다 같은 파일이 나온다(픽스처는 재현 가능해야 한다) */
+function shuffledRows(seed: number): string {
+  const rows = Array.from({ length: PENDING_SLOW_ROWS }, (_, i) => `row ${i} `.padEnd(60, 'y'))
+  let x = seed
+  for (let i = rows.length - 1; i > 0; i--) {
+    x = (x * 1103515245 + 12345) % 2147483648
+    const j = x % (i + 1)
+    ;[rows[i], rows[j]] = [rows[j]!, rows[i]!]
+  }
+  return `${rows.join('\n')}\n`
+}
+
+/**
+ * E14a — 느린 조회에서는 로딩 표시가 실제로 배어난다 (최종 리뷰 Note 4).
+ *
+ * 왜 이게 따로 필요한가: 바로 위 테스트는 "빠른 조회에서 안 보인다"만 잰다. 그것만으로는
+ * `--motion-pending-delay`를 `999s`로 바꿔 스피너를 **영영 안 보이게** 만들어도 전부 초록이다.
+ * 이 테스트가 반대 방향을 잡아 지연이 "안 보이게 하는 장치"가 아니라 "늦추는 장치"임을 고정한다.
+ *
+ * "느림"을 소스 변이나 가짜 지연으로 만들지 않는다 — 진짜 큰 파일의 진짜 diff 왕복이 느리다.
+ * 픽스처 크기는 실측으로 정했다(위 상수 주석). 고정 sleep 대신 `expect.poll`로 재측정하므로,
+ * 조회가 예상보다 빨리 끝나면 실패하지 느리게 통과하지 않는다.
+ */
+test('E14a — 느린 조회에서는 로딩 표시가 배어난다', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'git-gui-e14a-slow-'))
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    await execGitOrThrow(['init', '--initial-branch=main'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: repo })
+    await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: repo })
+    await writeFile(join(repo, 'small.txt'), 'base\n')
+    await writeFile(join(repo, 'big.txt'), shuffledRows(1))
+    await execGitOrThrow(['add', '-A'], { cwd: repo })
+    await execGitOrThrow(['commit', '-m', 'init'], { cwd: repo })
+    await writeFile(join(repo, 'small.txt'), 'changed\n')
+    await writeFile(join(repo, 'big.txt'), shuffledRows(99))
+
+    const app = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const window = await app.firstWindow()
+      // 빠른 조회 테스트와 같은 전제 — 이미 한 파일을 보고 있는 상태에서 옮긴다
+      await window.getByTestId('file-unstaged-small.txt').click()
+      await expect(window.getByTestId('diff-panel')).toContainText('small.txt')
+
+      // 표본기를 클릭 **전에** 페이지 안에 심는다 — 밖에서 폴링하면 왕복 간격 사이에 배어났다
+      // 사라진 구간을 통째로 놓칠 수 있다. 페이지 안 rAF는 그 틈이 없다
+      await window.evaluate(() => {
+        const state = { max: -1, trace: [] as string[] }
+        ;(globalThis as any).__e14aPending = state
+        const t0 = performance.now()
+        const tick = () => {
+          const spinner = document.querySelector(
+            '[data-testid="diff-panel"] [data-testid="panel-pending"]',
+          )
+          // -1 = DOM에 없다 (있는데 투명한 것과 구분한다)
+          const value = spinner === null ? -1 : Number(getComputedStyle(spinner).opacity)
+          if (value > state.max) state.max = value
+          if (state.trace.length < 150)
+            state.trace.push(`${Math.round(performance.now() - t0)}:${value}`)
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+
+      await window.getByTestId('file-unstaged-big.txt').click()
+      // 밖에서는 "지금까지 본 최대"만 폴링한다 — 고정 sleep이 없고, 배어난 순간을 놓치지 않는다
+      await expect
+        .poll(
+          async () =>
+            window.evaluate(() => {
+              const state = (globalThis as any).__e14aPending
+              return `${state.max} | ${state.trace.join(' ')}`
+            }),
+          {
+            message: '느린 조회인데 스피너가 배어나지 않았다 (지연이 표시를 아예 막고 있는가?)',
+            timeout: 20_000,
+            intervals: [100, 100, 200, 400, 800, 1600],
+          },
+        )
+        .toMatch(/^(0\.[6-9]|1)/)
+
+      // 공허 방지: 스피너가 뜬 채로 조회가 끝나지 않는 게 아니라, 끝나면 사라지고 결과가 나온다
+      await expect(window.getByTestId('diff-panel')).toContainText('big.txt', { timeout: 60_000 })
+      await expect(window.getByTestId('diff-panel').getByTestId('panel-pending')).toHaveCount(0)
+    } finally {
+      await app.close()
+    }
+  } finally {
     await rm(repo, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
   }

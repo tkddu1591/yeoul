@@ -36,6 +36,8 @@
   --motion-fast: 100ms; /* 호버·눌림·포커스 — 손끝에 붙는 피드백 */
   --motion-base: 150ms; /* 내용 교체 페이드, 등장 */
   --motion-slow: 240ms; /* 크게 움직이는 것 — 상세 슬롯 열림/닫힘 */
+  --motion-pending-delay: 400ms; /* 조회 로딩이 배어나오기 시작하는 시점 — 실측 diff 조회가 29ms라
+                                    평범한 조회는 전부 이 안에서 끝나 한 프레임도 보이지 않는다 (E14a) */
   --ease-out: cubic-bezier(0.2, 0, 0, 1); /* 등장·사용자가 시작한 동작 */
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 양방향으로 오가는 상태 */
   --shadow-1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);

@@ -41,6 +41,8 @@ interface BranchesPanelProps {
   onFetchRemotes(): void
   onAction(action: BranchPanelAction): void
   onCloseCompare(): void
+  /** 이 패널로 떨어질 조회(좌측 비교)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 interface MenuState {
@@ -64,6 +66,7 @@ export function BranchesPanel({
   onFetchRemotes,
   onAction,
   onCloseCompare,
+  pending,
 }: BranchesPanelProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -205,10 +208,17 @@ export function BranchesPanel({
       </>
     )
     return (
-      <Panel title={`지금 ↔ "${compare.name}"`} titleHint="compare" testId="branches-panel">
+      <Panel
+        title={`지금 ↔ "${compare.name}"`}
+        titleHint="compare"
+        testId="branches-panel"
+        pending={pending}
+      >
         <div className="branches-panel">
           <div>
-            {/* in-flight revive가 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 (DiffPanel 관례, E7d ⑤) */}
+            {/* 쓰기가 도는 동안만 잠근다 (DiffPanel 관례). 예전엔 "in-flight revive가 clear를
+                덮어쓰는 레이스 방지"도 겸했으나(E7d ⑤), 조회가 busy를 안 켜게 된 뒤로는
+                `clearBranchCompare()`의 `invalidateReads()`가 그 경합을 막는다 (E14a 스펙 §2-4-2) */}
             <Button
               variant="ghost"
               size="sm"
@@ -355,7 +365,7 @@ export function BranchesPanel({
   const remoteRows = flattenBranchTree(buildBranchTree(remotes), collapsed)
 
   return (
-    <Panel title={T.branch} titleHint="branch" testId="branches-panel">
+    <Panel title={T.branch} titleHint="branch" testId="branches-panel" pending={pending}>
       <div className="branches-panel">
         <div className="branches-panel__fetch">
           <Button variant="ghost" size="sm" isDisabled={busy} onPress={onFetchRemotes} testId="fetch-remotes">

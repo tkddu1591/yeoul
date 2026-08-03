@@ -30,6 +30,8 @@ interface ConflictPanelProps {
   onSaveText(content: string): Promise<boolean>
   /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m). 확인창은 이 컴포넌트가 담당한다 */
   onReset(): void
+  /** 이 패널로 떨어질 조회(가운데)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 /**
@@ -49,6 +51,7 @@ export function ConflictPanel({
   onChooseBlock,
   onSaveText,
   onReset,
+  pending,
 }: ConflictPanelProps) {
   const takenLabel =
     mode === 'reverting'
@@ -134,7 +137,12 @@ export function ConflictPanel({
   }
 
   return (
-    <Panel title={`${path} — ${T.conflict} 해결`} titleHint="conflict" testId="conflict-panel">
+    <Panel
+      title={`${path} — ${T.conflict} 해결`}
+      titleHint="conflict"
+      testId="conflict-panel"
+      pending={pending}
+    >
       {view === 'cards' ? (
         <>
           <p className="conflict-panel__hint">

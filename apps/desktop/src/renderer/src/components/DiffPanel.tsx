@@ -10,7 +10,12 @@ import './diff-panel.css'
 interface DiffPanelProps {
   path: string | null
   diff: FileDiff | null
-  /** in-flight selectFile이 clear를 덮어쓰는 레이스 방지 — busy 중엔 닫기도 잠근다 */
+  /**
+   * 쓰기(커밋·병합 등)가 도는 동안 닫기를 잠근다 — 그게 전부다.
+   * 예전엔 "in-flight selectFile이 clear를 덮어쓰는 레이스 방지"도 겸했지만, 조회가 더는 busy를
+   * 켜지 않으므로 그 역할은 성립하지 않는다. 경합은 이제 스토어에서 막는다 —
+   * `clearSelection()`이 `invalidateReads()`로 진행 중인 조회를 무효화한다 (E14a 스펙 §2-4-2)
+   */
   busy: boolean
   /** ⌘F로 이 패널이 검색 대상으로 잡혔는가 (E7h ⑥) */
   findOpen: boolean
@@ -18,6 +23,8 @@ interface DiffPanelProps {
   findNonce: number
   onFindClose(): void
   onClose(): void
+  /** 이 패널로 떨어질 조회(가운데)가 진행 중인가 (E14a) */
+  pending: boolean
 }
 
 export function DiffPanel({
@@ -28,12 +35,13 @@ export function DiffPanel({
   findNonce,
   onFindClose,
   onClose,
+  pending,
 }: DiffPanelProps) {
   const [view, setView] = useState<'unified' | 'split'>('unified')
 
   if (!path || diff === null) {
     return (
-      <Panel title={T.diff} testId="diff-panel">
+      <Panel title={T.diff} testId="diff-panel" pending={pending}>
         <p className="diff-panel__empty">파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
       </Panel>
     )
@@ -41,6 +49,7 @@ export function DiffPanel({
   return (
     <Panel
       title={path}
+      pending={pending}
       accessory={
         <>
           {/* 가시 라벨이 접근 이름이 된다 — aria-label로 덮지 않는다 (WCAG 2.5.3) */}
