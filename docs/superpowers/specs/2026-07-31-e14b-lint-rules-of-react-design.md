@@ -98,9 +98,14 @@ E14a 후속. E14a가 `busy` 구역화를 하며 드러낸 것 — **이 저장�
 
 ### 4-1. `purity` 5건 — 렌더 중 `Date.now()`
 
-`BranchSwitcher:47` · `BranchesPanel:376` · `ReviewDetailPanel:42` · `ShelfPopover:81` ·
-`WorktreesPanel:132`. 다섯 다 `formatRelativeTime(x, Date.now())` 한 패턴이다
+린트가 잡은 다섯: `BranchSwitcher:47` · `BranchesPanel:376` · `ReviewDetailPanel:42` ·
+`ShelfPopover:81` · `WorktreesPanel:132`. 전부 `formatRelativeTime(x, Date.now())` 한 패턴이다
 (`components/relative-time.ts:2` — `(epochSeconds, nowMs)`).
+
+**실제로는 일곱 곳이다 (플랜 작성 중 실측 — §4-5의 사각지대).** `grep`으로 전수를 세니
+`HistoryPanel:520` · `CommitDetailPanel:260`도 같은 패턴인데 **린트가 못 잡는다** — 그 두
+컴포넌트가 `incompatible-library`로 통째 건너뛰어져 규칙이 아예 돌지 않기 때문이다.
+**일곱 곳 모두 고친다.** 다섯만 고치면 같은 버그가 남고, 남은 둘은 어떤 게이트도 안 잡는다.
 
 `useNow()` 훅 하나를 만들어 `nowMs`를 넘긴다. 틱 주기는 **60초**.
 
@@ -160,6 +165,15 @@ ref 객체에 쓰는 일이고, 19곳을 깨뜨릴 위험을 감수할 만한 �
 
 완화책(가상화 부분만 잎 컴포넌트로 빼 부모는 컴파일되게)은 존재하지만, 이득이 측정되기 전에는
 하지 않는다.
+
+**단, 이건 최적화만의 문제가 아니다 — 규칙 사각지대다.** 건너뛰어진 컴포넌트에서는 `purity`도
+`set-state-in-effect`도 **아무것도 보고되지 않는다.** 실제로 `HistoryPanel:520`과
+`CommitDetailPanel:260`이 §4-1의 `Date.now()` 버그를 그대로 갖고 있는데 린트가 침묵한다
+(플랜 작성 중 `grep` 전수로 발견). 렌더러 컴포넌트 5개가 어떤 React 규칙 검사도 못 받는다는 뜻이다.
+
+**따라서 이 에픽의 게이트는 완전하지 않다.** 게이트가 초록이어도 그 5개 안의 위반은 안 잡힌다.
+다음 에픽에서 잎 컴포넌트 분리나 라이브러리 교체를 판단할 때, "최적화 이득"뿐 아니라 **"검사 범위
+회복"도 근거에 넣어야 한다** — 이쪽이 오히려 더 확실한 이득일 수 있다.
 
 ---
 
