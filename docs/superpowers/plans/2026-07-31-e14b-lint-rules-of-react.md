@@ -28,7 +28,7 @@
 | --- | --- |
 | **생성** `eslint.config.mjs` (저장소 루트) | 렌더러 대상 · `react-hooks` recommended · 영구 완화(`incompatible-library`) · 임시 부채 목록 |
 | **수정** `package.json` (루트) | `lint` 스크립트 |
-| **수정** `apps/desktop/package.json` | eslint 관련 devDependency |
+| **수정** `package.json` (루트) | eslint 관련 devDependency — **`apps/desktop`이 아니다**(Task 1 정정) |
 | **생성** `apps/desktop/src/renderer/src/ui/use-now.ts` | 공용 60초 틱 — 렌더 중 `Date.now()` 제거 |
 | **생성** `apps/desktop/test/use-now.test.ts` | 위 훅의 단위 테스트 |
 | **수정** 7개 컴포넌트 | `formatRelativeTime(x, Date.now())` → `useNow()` |
@@ -43,7 +43,10 @@
 **Files:**
 - Create: `eslint.config.mjs`
 - Modify: `package.json` (루트, `scripts`)
-- Modify: `apps/desktop/package.json` (devDependencies)
+> **정정(Task 1 실측):** 초안은 `apps/desktop`에 깔라고 했으나 **틀렸다.** `eslint.config.mjs`와
+> `lint` 스크립트가 둘 다 루트에 있어 desktop에만 깔면 `eslint: command not found`가 나고,
+> 설정의 `import`도 루트에서 해석된다. **워크스페이스 루트에 넣는다** — `apps/desktop/package.json`은
+> 건드리지 않는다.
 
 **Interfaces:**
 - Produces: `pnpm lint` 스크립트. 이후 모든 태스크가 이걸로 자기 작업을 검증한다.
@@ -57,7 +60,7 @@
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
-pnpm --filter @git-gui/desktop add -D eslint@^10 eslint-plugin-react-hooks@^7 typescript-eslint@^8
+pnpm add -w -D eslint@^10 eslint-plugin-react-hooks@^7 typescript-eslint@^8
 ```
 
 - [ ] **Step 2: `eslint.config.mjs`를 만든다**
@@ -121,6 +124,22 @@ export default [
 ]
 ```
 
+> **정정(Task 1 실측) — 블록이 하나 더 필요하다.** 기반 블록의 `reportUnusedDisableDirectives: 'error'`와
+> 죽은 억제 3건(Task 7 몫)이 충돌해, 위 설정 그대로는 「에러 0」이 성립하지 않는다(3 errors).
+> 죽은 억제를 **별도 부채 블록**으로 뺀다 — `reportUnusedDisableDirectives`는 `rules`가 아니라
+> `linterOptions`라 위 블록의 `rules`로는 못 낮추고, 무엇보다 **걷어내는 태스크가 다르다**
+> (`App.tsx`의 규칙 부채는 Task 5, 억제 3건은 Task 7). 한 블록에 묶으면 Task 5가 `App.tsx`를
+> 빼는 순간 브랜치가 빨개진다 — ratchet이 정확히 막으려던 상황이다.
+>
+> ```js
+> {
+>   files: ['apps/desktop/src/renderer/src/App.tsx'],
+>   linterOptions: { reportUnusedDisableDirectives: 'warn' },
+> }
+> ```
+>
+> **실제로 커밋된 설정(`6341e24`의 `eslint.config.mjs`)이 정본이다** — 이후 태스크는 그 파일을 보고 걷어낸다.
+
 루트 `package.json`의 `scripts`에 더한다:
 
 ```json
@@ -138,15 +157,15 @@ Expected: **에러 0.** 경고는 나온다(`incompatible-library` 5 + 부채 �
 - [ ] **Step 4: 부채 목록이 실제로 무언가를 강등하고 있는지 확인한다 (공허한 게이트 방지)**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint 2>&1 | grep -c "warning"
+cd "/Users/sangyeop_kim/git gui" && npx eslint . -f json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).reduce((n,f)=>n+f.messages.length,0)))'
 ```
-Expected: **19**. 0이면 규칙이 아예 안 돌고 있는 것이다 — 설정이 렌더러를 못 잡고 있으니 고친다.
+Expected: **19**. (초안의 `grep -c "warning"`은 **21**을 준다 — 요약 두 줄도 그 단어를 포함한다. Task 1 실측 정정.) 0이면 규칙이 아예 안 돌고 있는 것이다 — 설정이 렌더러를 못 잡고 있으니 고친다.
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 cd "/Users/sangyeop_kim/git gui"
-git add eslint.config.mjs package.json apps/desktop/package.json pnpm-lock.yaml
+git add eslint.config.mjs package.json pnpm-lock.yaml
 git commit -m "chore: E14b eslint 게이트 도입 — 이 저장소의 첫 lint
 
 react-hooks recommended를 렌더러에만 켠다. 지금까지 이 저장소에는 lint가 하나도 없어
