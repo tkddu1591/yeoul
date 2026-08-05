@@ -1,10 +1,23 @@
+import { stat } from 'node:fs/promises'
 import { app, dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import type { DiffOptions } from '@git-gui/domain'
-import { execGit, execGitOrThrow } from '@git-gui/git-process'
-import { CHANNELS } from '@git-gui/ipc-contract'
+import { execGit, execGitOrThrow, type GitResult } from '@git-gui/git-process'
+import { CHANNELS, type RepoOpenResult } from '@git-gui/ipc-contract'
 import { watchRepository, watchWorkingTree } from './repo-watcher'
+import {
+  assertAbsoluteRepoPath,
+  isMissingDirectoryError,
+  repoGone,
+  repoNotARepository,
+  repoOpenUnchecked,
+} from './repo-open-guard'
 import { assertOpenableWorktree } from './worktree-open-guard'
+
+/** `.catch((cause) => cause)`로 합쳐 받은 값이 결과인지 오류인지 가른다 (repoOpen) */
+function isGitResult(value: unknown): value is GitResult {
+  return typeof value === 'object' && value !== null && 'exitCode' in value
+}
 
 /** main이 직접 검증해 돌려준 경로만 이후 요청에서 신뢰한다 — renderer는 경로를 만들어낼 수 없다 */
 const allowedRepoPaths = new Set<string>()
@@ -128,21 +141,27 @@ export function registerGitHandlers(): void {
   })
 
   // 최근 목록에서 고른 경로로 연다 (E15a). 인자는 디스크 settings.json에서 온 렌더러 입력이라
-  // repoSelect와 **똑같이** 검증한다 — 그냥 registerRepoPath에 넘기면 렌더러가 임의
-  // 디렉터리에서 git을 돌리는 통로가 된다
-  ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown) => {
-    const path = assertString(repoPath)
-    // 폴더가 지워졌으면 execGit이 exit code가 아니라 spawn 단계에서 reject한다(실측: ENOENT,
-    // "spawn git ENOENT"). 그 문구가 그대로 화면에 뜨면 git이 안 깔린 것처럼 읽히고, 없어진
-    // 폴더는 정확히 최근 목록이 겪는 경우라 검증 실패와 같은 문구로 모은다
-    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
-      () => null,
-    )
-    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
-    if (check === null || check.exitCode !== 0 || check.stdout.trim() !== 'true') {
-      throw new Error('그 폴더는 이제 Git 저장소가 아니에요. 목록에서 지울게요.')
+  // repoSelect와 **똑같이** 검증하고, 거기에 절대 경로일 것을 더한다 (E15a 리뷰 ③) — 그냥
+  // registerRepoPath에 넘기면 렌더러가 임의 디렉터리에서 git을 돌리는 통로가 된다
+  ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown): Promise<RepoOpenResult> => {
+    const path = assertAbsoluteRepoPath(repoPath)
+    // 폴더가 있는지는 git이 아니라 fs에게 묻는다 (E15a 리뷰 ④) — spawn 실패로는 "없는 폴더"와
+    // "PATH에 git 없음"을 구별할 수 없기 때문이다(둘 다 "spawn git ENOENT"다 — repo-open-guard 참조).
+    // 여기서 갈라야 목록 자동 제거가 사인을 단정하지 않는다
+    try {
+      const info = await stat(path)
+      if (!info.isDirectory()) return repoGone()
+    } catch (cause) {
+      return isMissingDirectoryError(cause) ? repoGone() : repoOpenUnchecked(cause)
     }
-    return registerRepoPath(path)
+    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
+      (cause: unknown) => cause,
+    )
+    // 폴더는 실재하는데 git 실행이 실패했다 — 원인을 모르니 목록은 그대로 둔다
+    if (!isGitResult(check)) return repoOpenUnchecked(check)
+    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
+    if (check.exitCode !== 0 || check.stdout.trim() !== 'true') return repoNotARepository()
+    return { ok: true, path: await registerRepoPath(path) }
   })
 
   ipcMain.handle(CHANNELS.repoInitialPath, async () => {

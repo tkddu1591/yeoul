@@ -4882,10 +4882,12 @@ test('E15a — 최근 목록은 재시작 후에도 남는다 (최신이 앞)', 
 /**
  * E15a ③ — 없어진 폴더를 누르면 열리지 않고, 그 자리에서 목록에서 빠진다.
  *
- * 최근 목록의 항목은 언제든 지워지거나 옮겨질 수 있다. 검증은 main이 한다 —
- * 지워진 폴더에서 `execGit`은 exit code가 아니라 **spawn 단계에서 ENOENT로 reject**하므로
- * (Task 2 실측: "spawn git ENOENT"), 그 문구가 그대로 화면에 뜨면 git이 안 깔린 것처럼 읽힌다.
- * 그래서 handler가 검증 실패와 같은 문구로 모은다.
+ * 최근 목록의 항목은 언제든 지워지거나 옮겨질 수 있다. 검증은 main이 한다.
+ *
+ * E15a 리뷰 ④로 문구가 갈렸다 — 예전엔 모든 실패가 "이제 Git 저장소가 아니에요"였다.
+ * 지워진 폴더에서 `execGit`은 spawn 단계에서 ENOENT로 reject하는데(Task 2 실측:
+ * "spawn git ENOENT"), **PATH에 git이 없을 때도 바이트까지 같은 오류가 온다**(리뷰 ④ 실측).
+ * 그래서 폴더 존재는 이제 fs.stat에게 묻고, 없어진 폴더는 자기 문구를 받는다.
  *
  * 목록 제거는 스토어의 `try/catch` 안에서 일어난다(호출부가 아니라) — `runWrite`는 재진입
  * 거부(busy)에도 `false`를 주므로 호출부에서 판정하면 멀쩡한 저장소를 목록에서 날린다.
@@ -4909,8 +4911,9 @@ test('E15a — 없어진 저장소를 누르면 열리지 않고 최근 목록�
     await window.getByTestId('repo-switcher').click()
     await window.getByTestId(`repo-switcher-item-${pathB}`).click()
 
-    // 열리지 않았다 — 화면은 그대로 A이고 이유가 문구로 뜬다
-    await expect(window.getByTestId('error')).toContainText('이제 Git 저장소가 아니에요')
+    // 열리지 않았다 — 화면은 그대로 A이고 이유가 문구로 뜬다 (E15a 리뷰 ④: "저장소가 아니다"가
+    // 아니라 "폴더가 없다" — 사인을 단정하지 않는다)
+    await expect(window.getByTestId('error')).toContainText('그 폴더가 없어요')
     await expect(window.getByTestId('repo-path')).toHaveText(pathA)
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
 

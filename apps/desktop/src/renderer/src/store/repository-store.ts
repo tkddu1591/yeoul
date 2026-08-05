@@ -512,18 +512,28 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     return runWrite(set, get, async () => {
       // 인자가 있으면 최근 목록에서 고른 것 — 다이얼로그를 건너뛴다. 검증은 main이 한다 (E15a)
       let opened: string | null
-      try {
-        opened = path === undefined ? await git().repo.select() : await git().repo.open(path)
-      } catch (cause) {
-        // 열기가 막힌 경로는 최근 목록에서 뺀다 — main이 "이제 Git 저장소가 아니에요"로 거절한
-        // 그 경로다. 여기서만 지우는 이유: runWrite가 false를 주는 경우는 재진입 거부(busy)도
-        // 있어서, 호출부의 false 판정으로 지우면 멀쩡한 저장소를 목록에서 날린다 (E15a)
-        if (path !== undefined) {
-          const recentRepos = removeRecentRepo(get().recentRepos, path)
-          set({ recentRepos })
-          saveRecentRepos(recentRepos)
+      if (path === undefined) {
+        opened = await git().repo.select()
+      } else {
+        const result = await git().repo.open(path)
+        if (!result.ok) {
+          // E15a 리뷰 ④ — **원인이 확실할 때만** 목록에서 뺀다. 예전엔 catch 하나가 모든 실패를
+          // "그 폴더는 이제 Git 저장소가 아니에요"로 뭉개고 항목을 실제로 지웠다: 마운트 안 된
+          // 외장 디스크, EACCES, PATH에 git이 없는 경우까지. 멀쩡히 존재하는 저장소가 목록에서
+          // 사라지고, 되살리려면 다이얼로그로 다시 열어야 했다.
+          //
+          // 판정은 계약서의 reason으로만 한다 — 예외(형식 오류 등)로는 절대 지우지 않는다.
+          // 여기서만 지우는 이유는 그대로다: runWrite가 false를 주는 경우엔 재진입 거부(busy)도
+          // 있어서, 호출부의 false 판정으로 지우면 멀쩡한 저장소를 목록에서 날린다 (E15a)
+          if (result.reason !== 'failed') {
+            const recentRepos = removeRecentRepo(get().recentRepos, path)
+            set({ recentRepos })
+            saveRecentRepos(recentRepos)
+          }
+          // 배너 문구는 main이 만든 것을 그대로 쓴다 — runWrite의 catch가 error로 옮긴다
+          throw new Error(result.message)
         }
-        throw cause
+        opened = result.path
       }
       if (!opened) return
       // runWrite가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.

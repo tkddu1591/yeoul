@@ -31,10 +31,11 @@ function makeGitApi() {
   return {
     repo: {
       select: async () => '/other',
-      // E15a Task 2가 더한 채널 — 최근 목록에서 고른 경로로 다이얼로그 없이 연다
+      // E15a Task 2가 더한 채널 — 최근 목록에서 고른 경로로 다이얼로그 없이 연다.
+      // E15a 리뷰 ④로 반환이 결과 객체가 됐다(실패 원인을 렌더러가 알아야 목록 제거를 정한다)
       open: async (path: string) => {
         await sleep(openDelay)
-        return path
+        return { ok: true, path } as const
       },
       status: async (repoPath: string) => {
         if (repoPath === '/repo') await sleep(oldRepoDelay)
