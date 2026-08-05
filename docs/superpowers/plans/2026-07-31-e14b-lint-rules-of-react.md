@@ -962,8 +962,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ## 후속 노트 (이 에픽에서 하지 않음)
 
-- **E14c — 참조 안정화.** `exhaustive-deps` 14건. App의 스토어 전체 구독을 셀렉터로 쪼개고, `useTerminalSessions`의 반환을 안정화하고, 콜백을 안정 참조로 만든다. Task 7이 남긴 주석이 인수인계다.
-- **React Compiler.** Task 8의 기준선을 보고 판단한다. 컴파일러가 건너뛰는 5개가 하필 가장 무거운 가상 스크롤 목록들이라 기대 이득의 상당 부분이 실현되지 않는다.
+- **E14c — 참조 안정화.** `exhaustive-deps` **12건**(초안의 "14건"은 틀렸다 — Task 5·7이 셋을 지운 뒤 남은 실제 수는 12다. `refs` 억제 1건을 더해 억제 지시자 총 13개). App의 스토어 전체 구독을 셀렉터로 쪼개고, `useTerminalSessions`의 반환을 안정화하고, 콜백을 안정 참조로 만든다. Task 7이 남긴 주석이 인수인계다.
+- **React Compiler.** Task 8의 기준선을 보고 판단한다. **판단은 났다 — 성능을 근거로는 하지 말아야 한다**(스펙 §6-3). 컴파일러가 건너뛰는 5개가 하필 가장 무거운 가상 스크롤 목록들인 것은 맞지만(조작당 비용의 43~52%), 그 절대량이 **조작당 2.5~3.4ms**라 나머지를 전부 없애도 사람이 못 느낀다.
 - **`@tanstack/react-virtual` 잎 컴포넌트 분리 또는 교체.** 최적화 이득뿐 아니라 **검사 범위 회복**이 근거다 — 지금 그 5개 컴포넌트는 어떤 React 규칙 검사도 못 받는다(실제로 `Date.now()` 버그 2건이 그 안에 숨어 있었다).
 - **lint 범위 확대.** 지금은 렌더러 + `react-hooks`만이다. `packages/*`·`src/main`이나 `typescript-eslint` 규칙셋은 별도 판단.
 - `apps/desktop/test/**`가 `tsconfig.json`의 `include`(`["src"]`) 밖이라 타입 검사를 안 받는다. `packages/*/test/**`와 비대칭.
@@ -975,3 +975,149 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   refit도 실제로는 동작한 적이 없다(탭 전환·높이 변화는 `:83` 이펙트가 최신 클로저로 담당해
   터미널이 멀쩡해 보일 뿐). **E14c에서 참조를 안정화하고 의존성을 채우는 것이 곧 이 버그의
   수정이다** — 의존성만 채우지 말고 refit이 실제로 도는지 확인해야 한다.
+
+---
+
+## 실행 기록 (2026-08-05)
+
+> 이 절이 E14b의 정본이다. 플랜 본문은 "하려던 것", 이 절은 **실제로 한 것과 왜 달라졌는지**다.
+> 뒤에 오는 작업은 본문이 아니라 여기를 먼저 읽는다.
+
+### 최종 게이트 (Task 8에서 전부 재실행)
+
+| 게이트 | 명령 | 시작 시점 | 결과 |
+| --- | --- | --- | --- |
+| 린트 | `pnpm lint` | **없었다 — 이 에픽이 도입** | **0 errors, 5 warnings** |
+| 타입 | `pnpm typecheck` | 6/6 | **6/6** |
+| 단위 | `pnpm test` | 600 | **606 passed (50 files, 36s)** |
+| 빌드 | `pnpm --filter @git-gui/desktop build` | 성공 | **성공** |
+| E2E | `pnpm --filter @git-gui/desktop e2e` | 124 | **126 passed (3.2m)** |
+
+단위 +6 = Task 2의 `useNow` 6건. E2E +2 = Task 4의 회귀 2건.
+남는 경고 5건은 전부 `incompatible-library`이고 자리는 다음과 같다(전부 `useVirtualizer(` 호출):
+`ChangesPanel.tsx:170` · `CommitDetailPanel.tsx:134` · `ConflictPanel.tsx:80` · `DiffView.tsx:73` ·
+`HistoryPanel.tsx:192`. **이 다섯은 규칙이 통째로 안 돈다** — 게이트가 초록이어도 그 안은
+검사되지 않았다는 뜻이다(스펙 §4-5, eslint.config.mjs 주석).
+
+### 플랜이 틀렸던 곳 — 태스크별
+
+**모든 태스크가 플랜에서 실제 오류를 찾았다.** 아래가 전부다.
+
+**Task 1 — eslint 게이트**
+- 의존성 설치 위치를 `apps/desktop`이라고 썼는데 틀렸다. `eslint.config.mjs`도 `lint` 스크립트도
+  **워크스페이스 루트**에 있으므로 의존성도 루트에 들어가야 한다.
+- Step 3의 「에러 0」과 Step 4의 「경고 19」가 서로 모순이었다. `reportUnusedDisableDirectives: 'error'`가
+  Task 7이 치우기로 한 죽은 억제와 충돌해, Step 3 시점에는 에러가 0일 수 없다. 설정 블록을 나눠
+  풀었다(부채 목록 블록 = 규칙 완화, 죽은 억제 블록 = 지시자 검사 완화).
+- 검증 명령 `grep -c "warning"`이 19가 아니라 **21**을 낸다 — 요약 줄(`… warnings`)과 규칙 이름 줄까지
+  세기 때문이다. 지금 상태에서도 같은 이유로 5가 아니라 **6**이 나온다. 이 명령은 눈금이 아니다.
+
+**Task 2 — `useNow()`**
+- **반증 예측 3개가 전부 틀렸다.** 어떤 변이가 어떤 테스트를 무는지 초안이 하나도 못 맞혔다
+  (본문 Task 2의 정정표 참조).
+- **모듈 전역 타이머 상태가 테스트 사이에 샌다.** `vi.useRealTimers()`는 모듈 변수 `timer`를 못
+  지운다 — 변이 3에서 리스너가 남으면 그 뒤 모든 테스트가 엉뚱한 이유로 빨개진다. 그래서
+  **어긋난 변이는 반드시 `-t`로 단독 실행해 다시 확인한다**(실패 메시지 방향으로 진짜 탐지와
+  오염을 가른다: `expected 1 to be +0` = 진짜, `expected +0 to be 1` = 전파).
+- **사정거리가 없는 테스트 2건**을 기록했다 — 「`NOW_TICK_MS`는 60초」(계약 문서형)와
+  「틱마다 구독자를 부른다」(세 변이가 전부 해제 경로만 건드림).
+
+**Task 3 — 렌더 중 `Date.now()`**
+- 플랜은 "목록인 곳이 셋"(HistoryPanel · ShelfPopover · WorktreesPanel)이라 했지만
+  **`ReviewDetailPanel`이 네 번째 목록 자리**였다. 그 시각은 코멘트마다 그려지는 `CommentRow`
+  안에 있어 클로저로 못 잡고 **`now`를 props로 내려야** 했다.
+- 린트가 잡는 것은 5곳뿐이고 나머지 둘(`HistoryPanel:520` · `CommitDetailPanel:260`)은
+  `incompatible-library`로 건너뛰어진 파일 안이라 침묵한다. grep 전수로 찾아 함께 고쳤다.
+  **이 두 건이 "게이트가 완전한 검사가 아니다"의 실측 증거다.**
+
+**Task 4 — 다이얼로그 2건**
+- `PromptDialog` 호출부는 6곳이 아니라 **7곳**이고, 그중 하나는 `App.tsx`가 아니라
+  **`ManageBranchesDialog.tsx:101`**이다(App.tsx 6 + ManageBranchesDialog 1).
+- "E1a의 입력 보존 요구를 덮는 테스트가 없다"는 플랜의 주장은 **거짓이었다** —
+  `hosting.spec.ts:364`가 이미 `toHaveValue('wrong-token')`으로 덮고 있었다. 없는 공백을 있다고
+  하지 않는다.
+- 그래도 회귀 2건을 새로 넣었다(`key` remount가 그 보존을 깨지 않는지 + 취소 후 재개봉 초기화):
+  - `E14b — 이름 짓기가 실패해도 입력한 값이 남아 있다`:
+    `header-branch` → `branch-new` → `prompt-input`.fill → `prompt-submit` → 같은 이름 재시도 →
+    `prompt-error` 보임 + `prompt-input`이 `dup-branch` 유지.
+  - `E14b — 워크트리 만들기를 닫았다 열면 폼이 초기화된다`:
+    `left-tab-worktrees` → `worktree-add` → `add-worktree-mode-new` → `add-worktree-path`.fill →
+    `add-worktree-cancel` → 재개봉 → `add-worktree-path`가 그 값이 **아님**.
+
+**Task 5 — `App.tsx`의 `set-state-in-effect` 2건**
+- **플랜이 적어 준 `findScope` 파생 코드가 ⌘F를 통째로 망가뜨린다.** `{ scope, repo }` 한 묶음
+  상태로 만들면서 `setFindScope`를 `repoPath` 클로저로 감싸는데, ⌘F 키다운 리스너는 `[]`로 마운트
+  시 1회만 등록되므로 **첫 렌더의 `repoPath`(= `null`, RepoPicker 화면)를 영영 붙든다.**
+  실측: ⌘F E2E 7건 전부 빨강. `useState`가 준 안정된 setter를 그대로 두고 **비교용 상태만 따로**
+  두는 형태로 바꿨다(`findScopeRepo`).
+- 우측 열 펼침은 **(가)안(호출부로 이동)**을 골랐다. `commitDetail`을 `null`→값으로 바꾸는 경로는
+  `store.selectCommit` 하나뿐이고 **호출부가 2곳**(`ShelfPopover onPreview` · `HistoryPanel onSelect`)
+  이었다. 상세 도착을 안 기다리고 클릭 즉시 펴진다.
+- **반증에서 그물이 없다는 것이 드러났다.** `repoPath` 비교를 죽이고 E2E 전량을 돌렸는데 126건이
+  그대로 초록이었다 — **저장소를 두 번 여는 E2E가 하나도 없다**(전부 `GIT_GUI_E2E_REPO`로 하나만
+  연다). 저장소 전환 시 스코프 무효화에는 지금도 그물이 없다.
+
+**Task 6 — `Tooltip`**
+- 억제는 `ref:` **위**가 아니라 **`cloneElement(` 호출 줄 위**에 달아야 한다(규칙이 인자 객체를 여는
+  줄에 보고한다). 엉뚱한 줄에 달면 그 자체가 unused-directive **에러**가 된다. 블록 주석이어야 한다.
+- **"Task 8이 빈 부채 블록을 확인하고 지운다"는 도달할 수 없는 상태였다.** eslint 10은 `files: []`를
+  거부하고 **설정 로드 자체가 실패해 lint가 통째로 죽는다**(`Key "files": Expected value to be a
+  non-empty array`). 그래서 **마지막 항목을 빼는 태스크가 곧 블록을 지우는 태스크**다 — 규칙 부채
+  블록은 Task 6이, 죽은 억제 블록은 Task 7이 각각 지웠다. Task 8 Step 1은 "이미 지워졌음을 확인"으로
+  바뀌었고, 확인 결과 `eslint.config.mjs`에는 **기본 블록 + 영구 `incompatible-library` 블록 둘뿐**이다.
+- `Tooltip` 호출부는 19곳이 아니라 **31곳**이다(E7j Task 3이 "title 19곳 교체"로 시작한 뒤 늘었다).
+- **ref 병합 경로에는 상시 그물이 없다** — 호출부 31곳 중 자기 ref를 넘기는 곳이 0곳이다. 임시
+  프로브로 함수·객체 두 분기가 실제로 도는 것을 확인했고(`assignRef`를 no-op으로 바꾸면 프로브만
+  빨강) 그 사실을 코드 주석에 남겼다.
+- **플랜 파일 자체가 훼손됐던 사고:** 컨트롤러의 docs 커밋이 플랜을 1012줄에서 715줄로 잘라
+  **Task 6~8을 통째로 지웠다.** 구현자가 직전 커밋에서 복구했다(`3039a94`).
+
+**Task 7 — 억제 위생**
+- 플랜 표의 「가상화 인스턴스가 매 렌더 새 참조라서」는 **거짓이다.** `@tanstack/react-virtual` v3는
+  인스턴스를 `useState(() => new Virtualizer(...))`로 **한 번만** 만든다(패키지 소스에서 확인).
+  그 자리들의 진짜 이유는 `items`와 `headIndex`다.
+- 예고된 죽은 억제 3건 중 `:471`은 **Task 5가 그 이펙트를 지우며 함께 사라졌고**, 남은 `:221`·`:355`를
+  Task 7이 지웠다(App.tsx에서 바깥 값을 하나도 안 읽는 마운트 1회 이펙트 둘 — 억제할 것이 애초에 없었다).
+- **정직한 근거를 쓰다 잠복 버그를 발견했다** — `TerminalDock`의 `[]` 이펙트 둘이 마운트 시점
+  `sessions`를 클로저에 굳혀 `refitActive`의 `activeId`가 늘 `null`이다. **창 폭 변화 refit도 사이드
+  접기 refit도 실제로는 한 번도 돈 적이 없다.** 자세한 것은 위 「후속 노트」.
+- 남는 `exhaustive-deps` 억제는 **12곳**이고(App 3 · TerminalDock 5 · HistoryPanel 2 · ConflictPanel 2)
+  거기에 `Tooltip`의 `refs` 억제 1건을 더해 **지시자 총 13개**다. 스펙 §7이 적은 "13곳"은
+  `exhaustive-deps`만 세면 12가 맞다. **13개가 전부 살아 있다는 것은 게이트가 증명한다** —
+  `reportUnusedDisableDirectives: 'error'`라 하나라도 죽으면 lint가 빨개진다.
+
+### 리렌더 기준선 (Task 8 Step 2 — 표는 스펙 §6)
+
+전체 표와 해석은 **스펙 §6-1 ~ §6-3**에 있다. 여기에는 재는 과정에서 알게 된 것만 적는다.
+
+- **프로덕션 react-dom은 `Profiler`의 `onRender`를 아예 부르지 않는다.** 플랜이 적어 준 계측 모양을
+  그대로 넣고 돌렸더니 표가 **통째로 비어서** 나왔다(에러도, 경고도 없다). 개발 빌드로 재면 숫자가
+  부풀어 쓸모가 없으므로, `react-dom/client`만 `react-dom/profiling`으로 임시 별칭했다.
+  **`react-dom` 자체를 별칭하면 안 된다** — 그 번들이 내부에서 `require('react-dom')`을 해 순환이
+  되어 앱이 로드 중에 죽는다(실측: `Cannot read properties of undefined (reading 'd')`).
+- **`window.__renders = {}`로는 초기화되지 않는다.** 계측 모듈이 그 객체의 참조를 붙들고 있어서다.
+  전용 리셋 함수를 노출해야 한다(플랜 Step 2의 e2e 코드 조각은 이 점에서 틀렸다).
+- **Profiler의 count와 실제 렌더 횟수는 다른 값이다.** Profiler는 "그 서브트리가 낀 커밋 수"를 세므로
+  자식의 국소 갱신까지 포함한다. App 본체에 별도 카운터를 박아야 **App발 커밋과 패널 자체 갱신이
+  갈린다.** 실측: 네 조작 전부 **App 본체는 3렌더**로 같고, 패널별 초과분(ChangesPanel 7, DiffPanel 6,
+  HistoryPanel 6)은 전부 가상 스크롤의 측정 갱신이었다.
+- **계측 코드는 전부 걷어냈다** — `App.tsx`·`main.tsx`·`electron.vite.config.ts`·`use-now.ts`를
+  `git checkout`으로 되돌리고 임시 모듈(`__profile.tsx`)과 임시 스펙(`e2e/rerender-baseline.spec.ts`),
+  `test-results/`를 지웠다. 되돌린 뒤 `git status`가 클린임을 확인했다.
+
+### 플레이크 (게이트 재현성)
+
+- **E2E 첫 실행에서 4건이 빨갰다가 재실행에서 126 전부 초록이었다.** 빨간 4건은
+  `좌측 파일 우클릭 — 올리기(stage)와 파일 삭제(delete)`(staged-count 0),
+  `히스토리 전체 그래프 …`, `E7h — 터미널 탭이 워크트리별 묶음으로 …`(터미널 탭 0개),
+  `E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다`(60s timeout)였고, **그 4건만 골라 다시 돌리면
+  4/4 초록**이다. 셋이 터미널(pty spawn)·컨텍스트 메뉴처럼 외부 프로세스에 기대는 테스트라
+  머신 부하에 민감하다(측정 실행이 방금 1500파일 픽스처를 돌린 직후였다).
+- **`E13 — reduced-motion` 계열은 전체 실행 5회에 1회꼴로 빨개진다** — 150ms 폴링 경계에 걸리는
+  타이밍이고 재실행하면 통과한다. 이번 두 번의 전체 실행에서는 안 나왔다.
+
+### README
+
+`pnpm lint`가 이 저장소에 **처음** 생겼으므로 「실행」 블록에 한 줄 넣었다(`pnpm typecheck`도 함께 —
+있었지만 적혀 있지 않았다). 「현재 상태」에는 사용자에게 보이는 유일한 변화인
+**"상대 시각이 시간이 지나면 실제로 갱신된다"**를 한 문장 넣었다.
