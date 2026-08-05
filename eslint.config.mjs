@@ -40,10 +40,10 @@ export default [
     // 사라졌음을 확인한다 — 남아 있으면 그 태스크가 안 끝난 것이다.
     // Task 3이 purity 5건(BranchSwitcher·BranchesPanel·ReviewDetailPanel·ShelfPopover·
     // WorktreesPanel)을 걷어냈다 — 이제 그 파일들에서 purity는 경고가 아니라 에러다.
+    // Task 4가 set-state-in-effect 2건(PromptDialog·AddWorktreeDialog)을 key remount로
+    // 걷어냈다 — 남는 set-state-in-effect 2건은 App.tsx(Task 5) 몫이다.
     files: [
       'apps/desktop/src/renderer/src/App.tsx',
-      'apps/desktop/src/renderer/src/components/AddWorktreeDialog.tsx',
-      'apps/desktop/src/renderer/src/ui/PromptDialog.tsx',
       'apps/desktop/src/renderer/src/ui/Tooltip.tsx',
     ],
     rules: {

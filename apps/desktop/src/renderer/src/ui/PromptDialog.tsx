@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dialog, Heading, Input, Label, Modal, ModalOverlay, TextField } from 'react-aria-components'
 import { Button } from './Button'
 import { isSubmitEnter } from './keyboard'
@@ -24,7 +24,18 @@ interface PromptDialogProps {
 }
 
 /** 한 줄 입력 다이얼로그 — Enter로 제출(IME 조합 중 제외), ESC·바깥 클릭은 취소. 닫힐 때 입력을 비운다 */
-export function PromptDialog({
+export function PromptDialog(props: PromptDialogProps) {
+  // E14b — 예전엔 안쪽에서 useEffect + setValue로 "열릴 때 채우고 닫힐 때 비우기"를 했다
+  // (react-hooks/set-state-in-effect). 이 컴포넌트는 닫혀도 언마운트되지 않아 상태가 살아남기
+  // 때문이었다 — react-aria Modal은 isOpen으로 표시만 제어하고 PromptDialog 함수 자신은 계속
+  // 렌더된다(호출부 7곳 전부 조건 없이 렌더한다: App.tsx 6곳 + ManageBranchesDialog 1곳).
+  // 열림 여부를 key로 주면 열고 닫을 때 알맹이가 새로 만들어져 초기값 한 번이면 충분하고,
+  // **열려 있는 동안에는 remount가 없어** 실패로 열린 채 입력이 보존된다
+  // (E1a 요구사항 — E2E 「이름 짓기가 실패해도 입력한 값이 남아 있다」가 고정한다)
+  return <PromptDialogBody key={props.isOpen ? 'open' : 'closed'} {...props} />
+}
+
+function PromptDialogBody({
   isOpen,
   title,
   description,
@@ -37,11 +48,7 @@ export function PromptDialog({
   onSubmit,
   onCancel,
 }: PromptDialogProps) {
-  const [value, setValue] = useState('')
-  // 열릴 때 초기값으로 채우고, 닫힐 때 비운다 — 실패로 열려 있는 동안에는 입력이 보존된다
-  useEffect(() => {
-    setValue(isOpen ? (initialValue ?? '') : '')
-  }, [isOpen, initialValue])
+  const [value, setValue] = useState(initialValue ?? '')
   const submit = () => {
     const trimmed = value.trim()
     if (trimmed === '') return
