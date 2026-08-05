@@ -130,9 +130,14 @@ ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown) => {
 | `activeWorktree` | 옛 저장소의 워크트리를 가리킨 채 남으면 터미널 cwd·도크 라벨이 틀린다. **가장 위험** — 그리고 **스토어 밖이다**(`App.tsx:116`의 `useState`). `openRepository()`가 아무리 정리해도 여기엔 닿지 않으므로 App에서 따로 리셋해야 한다. 이펙트가 아니라 E14b가 `findScope`에 쓴 **렌더 중 파생**(`repoPath`가 바뀌면 비운다) 관용구를 쓴다 — `set-state-in-effect`는 이제 lint 에러다 |
 | `lastFetchAt` | 옛 저장소의 마지막 페치 시각이 새 저장소 화면에 뜬다 |
 | `headInfos` | `경로::HEAD` 키 캐시 — 옛 항목이 남는다(무해하지만 누수) |
-| `notice` · `error` | 옛 저장소의 안내·오류가 새 화면에 남는다 |
+| ~~`notice` · `error`~~ | **가설이 틀렸다 (플랜 작성 중 실측)** — `runWrite`가 진입할 때 `set({ busy: true, error: null, notice: null })`로 이미 지운다(`run-guard.ts:85`, E14a). 유출 아님 |
 
-**이 표는 코드를 읽고 세운 가설이고, 플랜이 하나씩 실제로 재서 확정한다.** E14a에서 정확히 이
+**실측 결과 (플랜 작성 중 확정):** 스토어 27개 필드를 `openRepository`가 쓰는 것과 대조한 결과
+**실제 유출은 3건**이다 — `headInfos` · `lastFetchAt`(스토어) + `activeWorktree`(App 로컬).
+그중 **`lastFetchAt`은 사용자에게 보인다**: `BranchesPanel:376`이 "n분 전 가져옴"으로 그린다.
+나머지 24개는 `CLEAR_SELECTIONS`·`fetchSnapshot`·`runWrite`·명시 `set`이 이미 덮는다.
+
+**원래 이 표는 코드를 읽고 세운 가설이었다.** E14a에서 정확히 이
 부류(`openRepository` 중 옛 저장소의 선택이 새 화면에 되살아남)가 Blocking이었다.
 
 **순서를 지킨다: 유출을 잡는 E2E를 먼저 쓰고(현재 코드에서 빨간 것을 확인) 그다음 고친다.**
