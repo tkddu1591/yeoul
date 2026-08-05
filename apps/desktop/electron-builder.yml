@@ -22,3 +22,10 @@ mac:
   # 로컬 사용(서명·공증 없음) — 서명 없는 배포에 hardenedRuntime은 불필요·번거로움만 는다.
   # (node-pty는 packed 경로 require 시 정상 — Task 4 실측: unpacked 직접 require만 replace 이중치환으로 죽는다)
   hardenedRuntime: false
+  # ad-hoc 서명 (E14b 후속 실측). 이걸 빼면 electron-builder가 "유효한 인증서 0개"라며 서명을
+  # 통째로 건너뛰고, Electron 바이너리의 원본 linker-signed 서명이 남는다. 번들 내용은 바뀌었으니
+  # 그 서명은 무효가 되고 `codesign --verify`가 "code has no resources but signature indicates
+  # they must be present"로 거부한다 → macOS가 LaunchServices 경로(Finder·open)로 실행을 막는다
+  # (터미널에서 바이너리를 직접 때리면 그 경로를 안 거쳐 떠서 "빌드는 됐는데 안 열린다"가 된다).
+  # "-"는 ad-hoc 식별자다 — 인증서 없이 번들 실제 내용으로 서명해 Identifier도 dev.gitgui.app이 된다
+  identity: "-"

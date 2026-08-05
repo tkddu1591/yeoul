@@ -26,8 +26,13 @@ function resolveBackgroundColor(): string {
 // 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),
 // 패키징 산출물(electron-builder productName)에서 완전히 "Git GUI"가 된다
 app.setName('Git GUI')
-// dev에서도 독에 Electron 아이콘 대신 앱 아이콘 (macOS — 패키징 전에도 정체성 유지)
-if (process.platform === 'darwin') {
+// dev에서도 독에 Electron 아이콘 대신 앱 아이콘 (macOS — 패키징 전에도 정체성 유지).
+// !app.isPackaged가 반드시 필요하다: 이 png는 electron-builder의 files 목록에 없어 asar에 안 들어가고
+// (패키징 앱은 Info.plist가 가리키는 icon.icns로 이미 아이콘을 받는다), 패키징 앱에서 부르면
+// "Failed to load image from path …/app.asar/resources/icon.png"로 **앱이 즉시 죽는다**.
+// E7f가 이 줄을 넣은 뒤로 패키징 산출물은 한 번도 뜬 적이 없었다 — verify-app-bundle.mjs가
+// 아이콘 파일 존재만 보고 실제 실행은 보지 않았기 때문이다 (E14b 후속 실측)
+if (process.platform === 'darwin' && !app.isPackaged) {
   app.dock?.setIcon(join(__dirname, '../../resources/icon.png'))
 }
 
