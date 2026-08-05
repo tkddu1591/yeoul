@@ -1,6 +1,7 @@
 import { Archive } from 'lucide-react'
 import { useState } from 'react'
 import { useEscapeFallback } from '../ui/use-escape-fallback'
+import { useNow } from '../ui/use-now'
 import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import type { ShelfEntry } from '@git-gui/domain'
 import { Badge } from '../ui/Badge'
@@ -29,6 +30,8 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
   const [open, setOpen] = useState(false)
   // 버리기 확인창이 위에 떠 있는 동안에는 ESC를 확인창에 양보한다 (E6b 실측 2 — body 포커스 fallback)
   useEscapeFallback(open && dropTarget === null, () => setOpen(false))
+  // E14b — 보관 목록 행마다가 아니라 여기서 한 번만 구독한다 (행마다 부르면 항목 수만큼 구독자가 생긴다)
+  const now = useNow()
   return (
     <>
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
@@ -78,7 +81,7 @@ export function ShelfPopover({ shelf, busy, onSave, onPreview, onRestore, onDrop
                               {parseShelfMessage(entry.message).branch}
                             </span>
                           )}
-                          {formatRelativeTime(entry.savedAt, Date.now())}
+                          {formatRelativeTime(entry.savedAt, now)}
                         </span>
                       </button>
                     </Tooltip>

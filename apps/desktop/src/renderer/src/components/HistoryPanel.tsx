@@ -7,6 +7,7 @@ import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Pictogram } from '../ui/Pictogram'
 import { Tooltip } from '../ui/Tooltip'
+import { useNow } from '../ui/use-now'
 import { FindBar } from './FindBar'
 import { cycleIndex } from './find-matches'
 import { buildGraph, type GraphRow } from './history-graph'
@@ -179,6 +180,10 @@ export function HistoryPanel({
   onClearView,
 }: HistoryPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; commit: CommitSummary } | null>(null)
+  // E14b — 커밋 행마다가 아니라 여기서 한 번만 구독한다. 가상화로 보이는 행만 그리지만 목록은
+  // 수천 개라 행마다 부르면 구독자가 그만큼 생긴다. 이 파일은 incompatible-library로 규칙이
+  // 통째로 건너뛰어져 린트가 렌더 중 Date.now()를 잡지 못했다 — grep 전수로 찾아 고쳤다
+  const now = useNow()
   const truncated = history.length >= historyLimit
   // 수천 커밋에서도 DOM은 가시 범위만 유지한다 (#4)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -517,7 +522,7 @@ export function HistoryPanel({
                           <span className="history-item__subject">{commit.subject}</span>
                         </span>
                         <span className="history-item__meta">
-                          {formatRelativeTime(commit.committedAt, Date.now())} · {commit.authorName}
+                          {formatRelativeTime(commit.committedAt, now)} · {commit.authorName}
                         </span>
                       </div>
                       <span className="history-item__hash">{commit.shortHash}</span>

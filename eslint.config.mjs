@@ -38,14 +38,11 @@ export default [
     // 게이트를 먼저 세우고 위반을 태스크별로 걷어내기 위한 ratchet이다.
     // 태스크가 한 파일을 고칠 때마다 여기서 그 항목을 지운다. Task 8이 이 블록 전체가
     // 사라졌음을 확인한다 — 남아 있으면 그 태스크가 안 끝난 것이다.
+    // Task 3이 purity 5건(BranchSwitcher·BranchesPanel·ReviewDetailPanel·ShelfPopover·
+    // WorktreesPanel)을 걷어냈다 — 이제 그 파일들에서 purity는 경고가 아니라 에러다.
     files: [
       'apps/desktop/src/renderer/src/App.tsx',
       'apps/desktop/src/renderer/src/components/AddWorktreeDialog.tsx',
-      'apps/desktop/src/renderer/src/components/BranchSwitcher.tsx',
-      'apps/desktop/src/renderer/src/components/BranchesPanel.tsx',
-      'apps/desktop/src/renderer/src/components/ReviewDetailPanel.tsx',
-      'apps/desktop/src/renderer/src/components/ShelfPopover.tsx',
-      'apps/desktop/src/renderer/src/components/WorktreesPanel.tsx',
       'apps/desktop/src/renderer/src/ui/PromptDialog.tsx',
       'apps/desktop/src/renderer/src/ui/Tooltip.tsx',
     ],
