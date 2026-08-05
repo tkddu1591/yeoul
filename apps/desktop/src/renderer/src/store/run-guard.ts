@@ -127,6 +127,20 @@ export interface ReadScope {
   claims?: ReadTarget[]
   /** 양보할 자리 — 잡지 않고, 착지 시점에 남이 가져갔는지만 본다 */
   defersTo?: ReadTarget[]
+  /**
+   * 이 조회가 매인 맥락이 아직 그대로인가 — 거짓이면 `isCurrent()`도 거짓이 된다 (E15a 리뷰 ①).
+   *
+   * **seq만으로는 못 잡는 경합이 있다.** `runWrite`의 `invalidateReads()`는 **진입 시 1회**라,
+   * 쓰기가 시작된 *뒤에* 출발한 조회는 무효화 대상이 아니다. 그 조회는 자기 자리의 seq를 새로
+   * 선점하고, 쓰기 쪽은 `runRead`를 안 거쳐 seq를 더 올리지 않으므로 착지 때 seq 비교가 참이 된다.
+   * 저장소 전환이 정확히 그 경우다 — 옛 저장소를 향해 출발한 조회가 새 저장소 화면에 착지한다
+   * (실측: `openRepository` 도중 시작된 `refresh`가 새 저장소의 `status`를 옛 저장소 것으로 덮었다).
+   * seq는 "누가 이 자리를 더 최근에 잡았나"만 알 뿐 **"이 결과가 어느 저장소 것인가"는 모른다.**
+   *
+   * 여기를 `repoPath: string`이 아니라 술어로 둔 이유: run-guard는 스토어 모양을 모르는 순수
+   * 모듈이다(파일 머리말). 무엇에 매였는지는 호출부가 알고, 여기는 "아직 유효한가"만 묻는다.
+   */
+  boundTo?: () => boolean
 }
 
 export async function runRead(
@@ -137,7 +151,11 @@ export async function runRead(
   scope: ReadScope = {},
 ): Promise<boolean> {
   const claimed = (scope.claims ?? [target]).map((claim) => [claim, (readSeq[claim] += 1)] as const)
-  const isCurrent = () => claimed.every(([claim, seq]) => seq === readSeq[claim])
+  // boundTo를 앞에 두는 이유는 값싸서만이 아니다 — 이 조회가 애초에 다른 맥락(옛 저장소) 것이면
+  // seq 비교는 볼 필요조차 없다. 아래 catch의 `if (isCurrent())`도 같이 닫힌다 (E15a 리뷰 ①):
+  // 옛 저장소를 향해 나갔다 실패한 조회가 새 저장소 화면에 에러 배너를 띄우지 않는다
+  const isCurrent = () =>
+    (scope.boundTo?.() ?? true) && claimed.every(([claim, seq]) => seq === readSeq[claim])
   // 양보 대상은 **잡지 않는다** — 시작 시점의 번호와 "그때 이미 도는 조회가 있었는가"만 남긴다.
   // reads는 표시 target 기준이라, 여기 잡히는 것은 결과가 그 자리에 떨어지는 사용자 조회뿐이다
   const deferred = new Map(

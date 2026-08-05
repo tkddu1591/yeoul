@@ -25,6 +25,7 @@ import {
   runRead,
   runWrite,
   toErrorMessage,
+  type ReadScope,
   type ReadTarget,
 } from './run-guard'
 import { findRevivableChange } from './selection-revive'
@@ -410,6 +411,38 @@ const SELECTION_KEYS = (Object.keys(CLEAR_SELECTIONS) as (keyof typeof CLEAR_SEL
   (key) => key !== 'branchCompare',
 )
 
+type StoreSet = (partial: Partial<RepositoryStore>) => void
+type StoreGet = () => RepositoryStore
+
+/**
+ * **저장소에 매인 조회** — `runRead`에 "착지 시점에도 아직 그 저장소인가"를 얹는다 (E15a 리뷰 ①).
+ *
+ * 이 스토어의 조회는 예외 없이 진입 시 `repoPath`를 캡처해 그 저장소에 질문을 던진다. 그러니
+ * 결과도 그 저장소의 것이다 — 착지했을 때 화면이 다른 저장소로 갔다면 그 결과는 낡은 게 아니라
+ * **남의 것**이다. `isCurrent()`(seq)는 그 차이를 못 본다: `runWrite`의 `invalidateReads()`는
+ * 진입 시 1회뿐이라 전환 *도중* 출발한 조회를 못 잡고, `openRepository`는 `runRead`를 안 거쳐
+ * snapshot seq를 올리지도 않는다(run-guard의 `boundTo` 주석 참조).
+ *
+ * 왜 조회마다 판단하지 않고 `runRead` 대신 이걸 쓰게 만드는가: 어떤 조회가 위험한지의 근거가
+ * 전부 "그 버튼이 busy 동안 `disabled`인가"로 흐르는데, E14a는 **"쓰기 중에도 조회는 시작된다"**를
+ * 명시적 결정으로 삼았다(스펙 §2-4). 즉 `disabled`는 직렬화 장치가 아니라 UI 사정이고, 그 위에
+ * 안전을 얹으면 버튼 하나 살릴 때마다 이 버그가 되살아난다. 결합을 기본값으로 두면 새 조회가
+ * 늘어도 저절로 지켜진다.
+ */
+async function runRepoRead(
+  set: StoreSet,
+  get: StoreGet,
+  target: ReadTarget,
+  repoPath: string,
+  run: (isCurrent: () => boolean, isTaken: (target: ReadTarget) => boolean) => Promise<void>,
+  scope: ReadScope = {},
+): Promise<boolean> {
+  return runRead(set, get, target, run, {
+    ...scope,
+    boundTo: () => get().repoPath === repoPath,
+  })
+}
+
 function deferSelections(
   patch: Partial<RepositoryStore>,
   isTaken: (target: ReadTarget) => boolean,
@@ -497,12 +530,19 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 다른 저장소다 — 히스토리 상한도 첫 페이지로 되돌린다
       // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
       // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
+      //
+      // E15a 리뷰 ① — 선해제와 스냅샷 사이에 await가 있으면 그 틈이 다시 열린다. hosting().status()는
+      // gh CLI 셸아웃이라 수백 ms급이고, 그사이 시작된 viewHistory가 historyRef를 도로 채우면
+      // fetchSnapshot이 그 ref로 **새 저장소의** 역사를 걸러 읽는다. 아래 리터럴의 historyRef:null이
+      // 알약은 지우므로 화면은 정확히 그 '알약 없는 필터 역사'가 된다 — 조회를 앞으로 빼 틈을 없앤다
+      const hostingStatus = await hosting().status(opened)
       set({ historyRef: null })
+      const snapshot = await fetchSnapshot(opened, HISTORY_LIMIT)
       set({
         repoPath: opened,
         historyLimit: HISTORY_LIMIT,
         historyRef: null,
-        hostingStatus: await hosting().status(opened),
+        hostingStatus,
         pulls: [],
         // E15a — 다른 저장소다. 이 둘은 저장소에 매인 값이라 남으면 안 된다:
         // lastFetchAt은 옛 저장소에서 가져온 시각을 새 저장소의 "n분 전 가져옴"으로 그리고,
@@ -510,7 +550,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         lastFetchAt: null,
         headInfos: {},
         ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(opened, HISTORY_LIMIT)),
+        ...snapshot,
       })
       // 새 저장소로 감시 교체 (E7b) — 이전 저장소 감시는 main이 새 watch 호출에서 정리한다
       void git().repo.watch(opened)
@@ -530,7 +570,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 이 조회는 'snapshot'만 선점하고 center·right·left에는 **양보한다** — reviveSelections로
     // 그 자리를 쓰긴 하지만 소유하지는 않는다. 선점하면 배경 갱신이 사용자의 클릭을 무효화한다
     // (E14a 스펙 §2-4-3). 착지 때 남이 가져간 자리만 빼고 스냅샷 나머지는 그대로 반영한다
-    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
+    await runRepoRead(set, get, 'snapshot', repoPath, async (isCurrent, isTaken) => {
       // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
       // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
       // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
@@ -570,7 +610,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 선점·양보는 refresh와 같다 — 이 경로도 reviveSelections로 선택 상태를 쓰되 소유하진 않는다.
     // 오히려 여기가 더 중요하다: 에디터 자동 저장마다 도니, 선점하면 파일을 훑는 내내
     // 배경 갱신이 클릭을 되돌린다 (E14a 스펙 §2-4-3)
-    await runRead(set, get, 'snapshot', async (isCurrent, isTaken) => {
+    await runRepoRead(set, get, 'snapshot', repoPath, async (isCurrent, isTaken) => {
       // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
       // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
       // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
@@ -736,7 +776,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 켜면 파일을 넘길 때마다 헤더·사이드바가 통째로 깜빡인다(E14a 실측: 헤더 속성 변형 30건,
     // 29ms). 억제 창도 무장하지 않는다 — 걸어두면 사용자가 diff를 훑어보는 내내 억제 창이 거의
     // 상시로 걸려 그사이 도착한 외부 변경이 조용히 삼켜진다 (E10 보완 — Important 2)
-    await runRead(set, get, 'center', async (isCurrent) => {
+    await runRepoRead(set, get, 'center', repoPath, async (isCurrent) => {
       const untracked = selected.change.unstaged === 'untracked'
       const diff = await git().changes.diff(repoPath, selected.change.path, {
         staged: selected.staged,
@@ -763,7 +803,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       const commitDetail = await git().commits.show(repoPath, hash)
       // 그 사이 다른 커밋을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
@@ -784,7 +824,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, commitDetail } = get()
     if (!repoPath || !commitDetail) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'center', async (isCurrent) => {
+    await runRepoRead(set, get, 'center', repoPath, async (isCurrent) => {
       const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
       // 그 사이 다른 파일을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
@@ -821,7 +861,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'center', async (isCurrent) => {
+    await runRepoRead(set, get, 'center', repoPath, async (isCurrent) => {
       const diff = await git().commits.diffAgainstWorktree(repoPath, hash, path, origPath)
       // 그 사이 가운데에 다른 것을 띄웠다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
@@ -1084,7 +1124,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'left', async (isCurrent) => {
+    await runRepoRead(set, get, 'left', repoPath, async (isCurrent) => {
       const result = await git().branches.compare(repoPath, name)
       // 그 사이 다른 공간을 비교했다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
@@ -1227,15 +1267,18 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)
       // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
       // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
+      // 선해제와 스냅샷 사이에 await를 두지 않는다 — openRepository와 같은 이유 (E15a 리뷰 ①)
+      const hostingStatus = await hosting().status(opened)
       set({ historyRef: null })
+      const snapshot = await fetchSnapshot(opened, HISTORY_LIMIT)
       set({
         repoPath: opened,
         historyLimit: HISTORY_LIMIT,
         historyRef: null,
-        hostingStatus: await hosting().status(opened),
+        hostingStatus,
         pulls: [],
         ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(opened, HISTORY_LIMIT)),
+        ...snapshot,
       })
       void git().repo.watch(opened)
     })
@@ -1277,6 +1320,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 무변화면 FETCH_HEAD 필터 제외 덕에 아무 일도 없다 (E7e ① — 실패는 다음 주기 재시도)
     try {
       await git().remotes.fetch(repoPath)
+      // E15a 리뷰 ① — 이 주기 작업만은 runWrite도 runRead도 안 거쳐 seq 무효화 대상이 아니다.
+      // 전환 중에 착지하면 openRepository가 방금 null로 비운 lastFetchAt이 되살아나, 새 저장소가
+      // 한 번도 안 가져왔는데 "방금 가져옴"으로 보인다. 착지 시점에 같은 저장소일 때만 새긴다
+      if (get().repoPath !== repoPath) return
       set({ lastFetchAt: Date.now() })
     } catch {
       // 오프라인·인증 실패 등 — 배너 도배 금지
@@ -1292,7 +1339,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       // await 앞의 즉시 피드백 — "조회 중: <ref> ✕" 알약이 클릭 즉시 뜨게 한다 (E7g).
       // 조회 결과가 아니므로 isCurrent로 감싸지 않는다. fetchSnapshot이 이 값을 읽는다
       set({ historyRef: ref })
@@ -1307,7 +1354,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       // await 앞의 즉시 피드백 — 알약이 클릭 즉시 사라지게 한다 (E7g, viewHistory와 대칭)
       set({ historyRef: null })
       const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
@@ -1322,7 +1369,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath) return
     // 읽기 전용 조회(충돌 파일 내용만 읽는다) — 전역 busy도 억제 창도 건드리지 않는다
     // (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'center', async (isCurrent) => {
+    await runRepoRead(set, get, 'center', repoPath, async (isCurrent) => {
       const content = await git().files.readText(repoPath, path)
       // 그 사이 가운데에 다른 것을 띄웠다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
@@ -1340,12 +1387,17 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   async reloadConflict(path) {
     const { repoPath } = get()
     if (!repoPath) return null
-    // 읽기 전용 재조회 — 전역 잠금(busy)을 잡지 않아 확인 흐름을 막지 않는다
+    // 읽기 전용 재조회 — 전역 잠금(busy)을 잡지 않아 확인 흐름을 막지 않는다.
+    // E15a 리뷰 ① — 이것도 seq 밖이다. 전환 중 착지하면 옛 저장소의 겹침 파일이 새 저장소의
+    // 가운데 패널에 되살아나고(openRepository가 CLEAR_SELECTIONS로 막 닫은 것이다), 실패하면
+    // 남의 저장소 오류가 새 화면에 배너로 뜬다. 착지 시점에 같은 저장소일 때만 반영한다
     try {
       const content = await git().files.readText(repoPath, path)
+      if (get().repoPath !== repoPath) return null
       set({ conflictFile: { path, content } })
       return content
     } catch (cause) {
+      if (get().repoPath !== repoPath) return null
       set({ error: toErrorMessage(cause) })
       return null
     }
@@ -1435,7 +1487,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 끝까지 다 봤거나(뒤가 없음) 상한에 닿았으면 더 부르지 않는다
     if (!repoPath || history.length < historyLimit || historyLimit >= HISTORY_MAX) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       const next = Math.min(historyLimit + HISTORY_PAGE, HISTORY_MAX)
       const ref = get().historyRef ?? undefined
       try {
@@ -1469,11 +1521,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, headInfos } = get()
     const key = `${path}::${headHash ?? ''}`
     if (!repoPath || key in headInfos) return
-    // 조회성 — runWrite(busy 잠금·에러 배너)를 쓰지 않고 실패는 조용히 null로 캐시한다
+    // 조회성 — runWrite(busy 잠금·에러 배너)를 쓰지 않고 실패는 조용히 null로 캐시한다.
+    // E15a 리뷰 ① — 이것도 seq 밖이다. 전환 중 착지하면 openRepository가 비운 캐시에 옛 저장소의
+    // 워크트리 항목이 도로 들어간다(새 저장소는 그 키를 안 읽으니 화면엔 안 보이지만, 전환할수록
+    // 쌓이지 않게 하려고 비운 것이라 그 의도가 깨진다). 착지 시점에 같은 저장소일 때만 캐시한다
     try {
       const info = await git().worktrees.headInfo(repoPath, path)
+      if (get().repoPath !== repoPath) return
       set({ headInfos: { ...get().headInfos, [key]: info } })
     } catch {
+      if (get().repoPath !== repoPath) return
       set({ headInfos: { ...get().headInfos, [key]: null } })
     }
   },
@@ -1484,7 +1541,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const next = Math.min(Math.max(index + 1, historyLimit + HISTORY_PAGE), SEARCH_JUMP_MAX)
     if (next <= historyLimit) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       const ref = get().historyRef ?? undefined
       try {
         const history = await git().history.list(repoPath, next, ref)
@@ -1507,7 +1564,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const headHash = status?.headHash ?? null
     if (!repoPath || headHash === null) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       // 큰 저장소에서 HEAD가 한참 아래일 수 있다 — 찾을 때까지 상한을 넓힌다(상한 10회 × 2000)
       let limit = get().historyLimit
       for (let round = 0; round < 10; round += 1) {
@@ -1552,7 +1609,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       return
     }
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'reviews', async (isCurrent) => {
+    await runRepoRead(set, get, 'reviews', repoPath, async (isCurrent) => {
       try {
         const pulls = await hosting().pulls.list(repoPath)
         // 그 사이 더 최신 목록 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
@@ -1634,7 +1691,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 조회를 전역 잠금에서 빼면서 그 전제가 사라졌으므로 대기를 걷어낸다 — 남겨두면 진짜 쓰기가
     // 도는 동안 리뷰 열기만 멈춰, "쓰기 중에도 조회는 시작된다"는 결정(스펙 §2-4)을 어긴다
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
-    await runRead(set, get, 'right', async (isCurrent) => {
+    await runRepoRead(set, get, 'right', repoPath, async (isCurrent) => {
       const pullDetail = await hosting().pulls.detail(repoPath, number)
       // 그 사이 다른 리뷰를 열었다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
