@@ -299,32 +299,51 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: 스토어 — `openRepository(path?)` + `recentRepos`**
 
-지금 `openRepository()`(`:465`)는 `git().repo.select()`만 부른다. 인자를 받게 고친다:
+지금 `openRepository()`(**`:468`** — 실측 정정, 플랜 초안은 `:465`라고 적었다)는
+`git().repo.select()`만 부른다. 인자를 받게 고친다:
 
 ```ts
   async openRepository(path) {
-    await runWrite(set, get, async () => {
+    return runWrite(set, get, async () => {
       // 인자가 있으면 최근 목록에서 고른 것 — 다이얼로그를 건너뛴다. 검증은 main이 한다 (E15a)
-      const opened = path === undefined ? await git().repo.select() : await git().repo.open(path)
+      let opened: string | null
+      try {
+        opened = path === undefined ? await git().repo.select() : await git().repo.open(path)
+      } catch (cause) {
+        // 열기가 막힌 경로는 여기서 뺀다 — 호출부의 false 판정으로 지우면 안 된다(아래 참조)
+        if (path !== undefined) {
+          const recentRepos = removeRecentRepo(get().recentRepos, path)
+          set({ recentRepos })
+          saveRecentRepos(recentRepos)
+        }
+        throw cause
+      }
       if (!opened) return
       // …기존 본문 그대로…
-      // 최근 목록 갱신 — 성공한 뒤에만
+      // 최근 목록 갱신 — 성공한 뒤에만. 넘긴 path가 아니라 main이 정규화한 저장소 루트를 넣는다
+      // (하위 폴더를 골랐을 수 있고, 이후 IPC에서 유효한 값은 그쪽뿐이다 — 계약서 신뢰 규칙)
       const recentRepos = pushRecentRepo(get().recentRepos, opened)
       set({ recentRepos })
-      void window.settingsApi.set({ recentRepos })
+      saveRecentRepos(recentRepos)
     })
   },
 ```
 
-`recentRepos` 초기값은 `settingsApi.initial.recentRepos ?? []`. 스토어의 `pullMode`가
-`loadPullMode()`로 설정에서 읽어오는 관용구를 그대로 따른다.
+`recentRepos` 초기값은 설정에서 읽는다. 스토어의 `pullMode`가 `loadPullMode()`로 읽어오는
+관용구를 그대로 따라 `ui/settings/recent-repos-settings.ts`에
+`loadRecentRepos`/`saveRecentRepos`를 둔다.
 
-**실패 시 목록에서 제거**하는 경로도 필요하다 — `repo.open`이 throw하면 `runWrite`가 `error`를
-세우고 끝난다. 전환기가 그 실패를 알고 `removeRecentRepo`를 부를 수 있어야 하므로,
-`openRepository`가 **성공 여부를 반환**하게 한다 — `runWrite`가 이미 `Promise<boolean>`을 준다.
-**인터페이스 선언도 함께 바꾼다**: `openRepository(path?: string): Promise<boolean>`
+**실패 시 목록에서 제거는 스토어 안에서 한다** — 초안은 "`openRepository`가 성공 여부를 반환하고
+전환기가 `false`를 보고 `removeRecentRepo`를 부른다"였는데 **그건 틀렸다.** `runWrite`는
+`get().busy`일 때 `run`을 부르지도 않고 `false`를 돌려준다(`run-guard.ts`) — 호출부는 "저장소가
+없어졌다"와 "다른 쓰기가 진행 중이다"를 구분할 수 없어서, **바쁜 순간에 누른 멀쩡한 저장소를
+목록에서 날린다.** 그래서 제거는 `repo.open`을 감싼 `try/catch`에서만 하고 에러는 re-throw한다
+(문구는 `runWrite`가 세운다).
+
+**인터페이스 선언은 그래도 바꾼다**: `openRepository(path?: string): Promise<boolean>`
 (`repository-store.ts`의 `RepositoryStore` 인터페이스). 지금은 `openRepository(): Promise<void>`다.
-호출부는 App 하나(`RepoPicker`의 `onOpen`)뿐이라 `void`로 버리던 것이 그대로 통한다.
+호출부는 App 하나(`RepoPicker`의 `onOpen`)뿐이라 `void`로 버리던 것이 그대로 통한다 — 즉
+반환 boolean은 현재 정보성이다.
 
 - [ ] **Step 2: `RepoSwitcher.tsx`**
 
@@ -335,17 +354,25 @@ interface RepoSwitcherProps {
   /** 최신이 앞 (E15a) */
   recent: string[]
   busy: boolean
+  /** `~` 축약용 — shortenParent가 요구한다. App에 이미 있다(`repo.home()`) */
+  home: string
   /** 경로를 주면 그것을, 안 주면 폴더 선택 다이얼로그를 연다 */
   onOpen(path?: string): void
 }
 ```
 
+**표시 목록은 `pushRecentRepo(recent, currentPath)`로 만든다** — `init()`(시작 시 복원)은 최근
+목록에 넣지 않아서 시작 직후엔 현재 저장소가 목록에 없다. 이미 맨 앞이면 결과가 `recent`와
+같으므로 정상 경로에는 영향이 없다. 새 규칙을 만들지 말고 Task 1의 순수 함수를 그대로 쓴다.
+
 - 트리거: 지금의 `app__repo`(이름 굵게 + 경로 흐리게)를 그대로 감싸고 `ChevronDown`을 붙인다.
   `data-testid="repo-switcher"`.
 - 목록: `recent`를 그리되 **현재 저장소는 `Check`로 표시**(BranchSwitcher가 현재 브랜치에 쓰는 것과 같은 아이콘).
   각 항목 `data-testid={`repo-switcher-item-${path}`}`. 이름은 마지막 폴더명을 굵게, 그 위 경로를 흐리게 —
-  `worktree-label.ts`의 `shortenParent`/`shortenAbove`가 이미 같은 문제를 푼다. **재사용할 수 있는지
-  확인하고, 안 되면 왜인지 보고한다** (E7j가 워크트리용으로 만든 것이라 저장소에도 맞는지는 확인이 필요하다).
+  `worktree-label.ts`의 **`shortenParent(path, home)`를 그대로 쓴다** (실측 확인). `shortenAbove`는
+  `parts.slice(0, len - nameDepth)`를 축약하는데 저장소 행의 이름은 항상 마지막 폴더 하나(깊이 1)라
+  `nameDepth=1`이면 `shortenParent`와 같은 식이 된다 — 워크트리가 `shortenAbove`를 쓴 건 리프 이름이
+  충돌해 깊이가 가변이기 때문이고, 저장소엔 그 사정이 없다.
 - 맨 아래 구분선 + **"다른 폴더 열기…"** `data-testid="repo-switcher-browse"` → `onOpen()`.
 
 > **스펙 대비 의도적 편차 — "없어진 경로를 흐리게" 는 하지 않는다.** 스펙 §3이 그렇게 적었지만,
