@@ -220,18 +220,23 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   // 디렉터리에서 git을 돌리는 통로가 된다
   ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown) => {
     const path = assertString(repoPath)
-    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path })
+    // 폴더가 없으면 execGit은 exit code가 아니라 spawn ENOENT로 **reject**한다 —
+    // 없어진 폴더가 최근 목록의 가장 흔한 실패라, catch를 빼면 "spawn git ENOENT"가
+    // 그대로 렌더러로 샌다(git이 안 깔린 것처럼 읽힌다). 실측 정정: 아래 exitCode
+    // 분기만으로는 그 경로에 절대 도달하지 못한다
+    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
+      () => null,
+    )
     // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
-    if (check.exitCode !== 0 || check.stdout.trim() !== 'true') {
+    if (check === null || check.exitCode !== 0 || check.stdout.trim() !== 'true') {
       throw new Error('그 폴더는 이제 Git 저장소가 아니에요. 목록에서 지울게요.')
     }
     return registerRepoPath(path)
   })
 ```
 
-`assertString`이 그 파일에 이미 있는지 확인하고, 없으면 기존 방어 함수를 쓴다. **`cwd`가 존재하지
-않는 경로일 때 `execGit`이 어떻게 되는지 확인하고**(없어진 폴더가 정확히 이 경우다) throw가 되는지,
-아니면 별도 처리가 필요한지 보고한다.
+`assertString`이 그 파일에 이미 있는지 확인하고(실측: `git-handlers.ts:19`에 이미 있다), 없으면
+기존 방어 함수를 쓴다.
 
 - [ ] **Step 3: preload에 노출한다**
 
@@ -242,7 +247,16 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```bash
 cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
 ```
-Expected: lint 에러 0 · typecheck 6/6 · Tests **614** (606 + Task 1의 8건)
+Expected: lint 에러 0 · typecheck 6/6 · Tests **621** (606 + Task 1의 8건 + `sanitizeSettings`
+방어 7건 — 아래 Step 2a. 원래 이 플랜은 614를 못박았으나, `recentRepos` 방어를 새로 넣으면서
+그 방어를 무는 테스트를 함께 넣었다)
+
+- [ ] **Step 2a: `sanitizeSettings`의 `recentRepos` 방어를 테스트로 문다**
+
+`packages/ipc-contract/test/settings.test.ts`(이미 있다 — 9건)에 더한다. **빈 배열은 필드를
+남긴다**: `settings.ts:52`가 `save({ ...current(), ...sanitizeSettings(partial) })`로 얕은
+병합이라, 빈 배열에서 필드를 빼면 디스크의 옛 목록이 살아남아 "목록을 다 비웠다"를 영속할
+방법이 사라진다.
 
 - [ ] **Step 5: 보안 경계를 실측한다**
 
@@ -355,7 +369,7 @@ interface RepoSwitcherProps {
 cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 ```
-Expected: lint 에러 0 · 6/6 · **614** · e2e **128** (아직 새 E2E 없음 — 기존이 안 깨지는지만 본다)
+Expected: lint 에러 0 · 6/6 · **621** · e2e **128** (아직 새 E2E 없음 — 기존이 안 깨지는지만 본다)
 
 - [ ] **Step 5: 스크린샷 1장**
 
@@ -505,7 +519,7 @@ cd "/Users/sangyeop_kim/git gui" && pnpm test
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 ```
-Expected: lint **0 errors / 5 warnings** · 6/6 · **614** · 성공 · **133** (128 + Task 4의 1건 + 여기 4건)
+Expected: lint **0 errors / 5 warnings** · 6/6 · **621** · 성공 · **133** (128 + Task 4의 1건 + 여기 4건)
 
 - [ ] **Step 4: 실행 기록**
 
@@ -535,4 +549,6 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **E15b — 여러 창 + macOS 네이티브 탭.** `tabbingIdentifier`(Electron 35에 `addTabbedWindow`·`mergeAllWindows`·`selectNextTab` 확인)를 주면 탭바·드래그 분리·창 병합이 OS 기능으로 딸려온다. **선행 조건**: `git-handlers.ts:153`의 `stopWatching`이 모듈 전역 하나라 두 번째 창이 첫 창의 감시를 죽인다 · 창별 UI 설정(`leftCollapsed`·`rightWidth`·`terminalOpen`·`terminalHeight`·`rightCollapsed`)과 앱 공용 설정(`theme`·`pullMode`·`autoFetch`·`worktreeSelectAction`·`recentRepos`) 분리 · `MAX_SESSIONS = 8`이 창별인지 전체인지.
 - **뒤로가기 스택** — 만들지 않기로 했다(스펙 §8). 최근 목록을 써 보고도 부족하면 그때 다시 본다.
 - **터미널 상한 8을 여러 저장소가 나눠 쓴다** — 저장소를 바꿔도 pty를 죽이지 않기로 한 결정(사용자)의 대가. E15b에서 함께 정리한다.
+- **`packages/**`가 eslint 범위 밖이다** (Task 2b 실측). `eslint.config.mjs:10`이 `apps/desktop/src/renderer/src/**`만 잡아서, `packages/` 아래 파일은 `File ignored because no matching configuration was supplied`가 된다. E14b가 의도적으로 좁힌 범위가 맞지만 부작용이 있다 — 거기 적은 `eslint-disable` 지시자는 **죽은 주석**이 되고, `reportUnusedDisableDirectives: 'error'`도 렌더러 블록에만 걸려 있어 아무도 알려주지 않는다(규칙이 도는 것처럼 오해시킨다). `apps/desktop/test/**`가 tsconfig `include` 밖인 것과 같은 부류다.
 - E14b에서 넘어온 것들: E14c(참조 안정화로 `exhaustive-deps` 억제 12곳 해소) · `TerminalDock`의 `[]` 이펙트 두 개가 마운트 시점 `sessions`를 굳혀 **사이드 접기 refit이 실제로 안 돈다**(창 리사이즈는 `attach` 부수효과가 가려 준다) · `apps/desktop/test/**`가 tsconfig `include` 밖.
+- **`sanitizeSettings`의 `leftCollapsed`·`rightCollapsed`(E12)에 아직 그물이 없다** (Task 2b 실측). `packages/ipc-contract/test/settings.test.ts`는 있지만 나중에 추가된 필드가 테스트 없이 들어온 이력이 있다 — `recentRepos`는 이번에 막았고, 나머지 둘은 남아 있다.
