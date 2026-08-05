@@ -38,7 +38,10 @@ interface TooltipProps {
  * react-hooks/immutability가 "props를 수정한다"고 잡는다. 대입을 이 함수로 옮기면
  * 컴파일러가 children을 추적하지 못해 규칙이 풀린다(실측: 2 errors → 1).
  *
- * 주의 — 이 병합 경로는 **어떤 테스트도 덮지 않는다.** Tooltip 호출부 31곳을 전수로 봤을 때
+ * 주의 — 이 병합 경로는 **어떤 테스트도 덮지 않는다.** Tooltip 호출부 30곳(E14b 후속 재실측:
+ * `grep -rn '</Tooltip>' apps/desktop/src --include='*.tsx'` = 30. 예전에 적힌 31은
+ * `useState<TooltipPlacement`가 `<Tooltip` 패턴에 걸린 오탐 1건이 섞인 값이고, 19는 E7j Task 3의
+ * "title 19곳 교체" 시점 숫자가 그대로 남은 것이다)을 전수로 봤을 때
  * 트리거에 자기 ref를 넘기는 곳이 하나도 없어(E14b 실측) 지금은 항상 ref === undefined다.
  * E14b Task 6에서 임시로 ref를 심은 프로브로 두 분기(함수·객체)가 도는 것을 확인했고,
  * assignRef를 no-op으로 바꾸면 그 프로브만 빨개졌다 — 상시 그물은 없으니 여기를 고칠 땐
@@ -121,7 +124,7 @@ export function Tooltip({ content, summary, children, delay = 400, describedBy }
   const originalRef = (children.props as { ref?: unknown }).ref
   /* eslint-disable-next-line react-hooks/refs -- cloneElement에 넘기는 ref 콜백에 붙는
      경고다("Passing a ref to a function may read its value during render"). 트리거 요소를
-     추가 DOM 노드 없이 감싸려면 이 패턴 말고 방법이 없고, 호출부가 19곳이라 구조를 바꾸는
+     추가 DOM 노드 없이 감싸려면 이 패턴 말고 방법이 없고, 호출부가 30곳이라 구조를 바꾸는
      위험이 이득보다 크다. 시도한 것: ① 원본 ref를 콜백 밖으로 홉 아웃 → 둘 다 안 풀림
      ② 모듈 헬퍼(위 assignRef) → immutability만 풀리고 이건 남음 (E14b 실측: 2 → 1).
      억제 대상 줄은 `ref:`가 아니라 cloneElement 호출 줄이다 — 규칙이 인자 객체 전체를
