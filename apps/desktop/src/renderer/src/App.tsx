@@ -115,6 +115,15 @@ export function App() {
   const [leftTab, setLeftTab] = useState<'changes' | 'branches' | 'worktrees'>('changes')
   // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함)
   const [activeWorktree, setActiveWorktree] = useState<{ cwd: string; label: string } | null>(null)
+  // E15a — 저장소가 바뀌면 옛 저장소의 워크트리를 가리킨 채 남으면 안 된다(터미널 cwd·도크 라벨이 틀린다).
+  // activeWorktree는 스토어 밖이라 openRepository가 닿지 않는다. 이펙트가 아니라 렌더 중 파생으로
+  // 표현한다 — set-state-in-effect는 lint 에러다 (E14b). 아래 findScopeRepo(:392)와 같은 모양이고,
+  // 같은 이유로 setter를 감싸지 않는다(감싸면 클로저가 첫 렌더의 repoPath를 문다 — E14b 실측)
+  const [activeWorktreeRepo, setActiveWorktreeRepo] = useState(store.repoPath)
+  if (activeWorktreeRepo !== store.repoPath) {
+    setActiveWorktreeRepo(store.repoPath)
+    setActiveWorktree(null)
+  }
   // E7j — 워크트리 행 `~` 축약용 홈 경로. 못 구하면 빈 문자열(순수 함수가 축약 없이 처리)
   const [home, setHome] = useState('')
   const [addWorktreeOpen, setAddWorktreeOpen] = useState(false)

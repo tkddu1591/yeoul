@@ -504,6 +504,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         historyRef: null,
         hostingStatus: await hosting().status(opened),
         pulls: [],
+        // E15a — 다른 저장소다. 이 둘은 저장소에 매인 값이라 남으면 안 된다:
+        // lastFetchAt은 옛 저장소에서 가져온 시각을 새 저장소의 "n분 전 가져옴"으로 그리고,
+        // headInfos(경로::HEAD 캐시)는 전환할수록 옛 항목이 쌓인다
+        lastFetchAt: null,
+        headInfos: {},
         ...CLEAR_SELECTIONS,
         ...(await fetchSnapshot(opened, HISTORY_LIMIT)),
       })

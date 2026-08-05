@@ -4679,3 +4679,75 @@ test('E14b — 우측을 접은 채 보관함을 미리 보면 우측이 저절�
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15a — 저장소를 바꿔도 **옛 저장소의 상태가 화면에 남으면 안 된다.**
+ *
+ * 전환 기계(openRepository)는 처음부터 있었지만 부를 방법이 없어(E15a 전) 이 경로가 실제로
+ * 쓰인 적이 없었다. 스토어 필드를 openRepository가 덮는 것과 전수 대조해 유출 3건을 찾았고,
+ * 그중 화면에 드러나는 둘을 여기서 잡는다:
+ *
+ * - `lastFetchAt` — 브랜치 탭의 "n분 전 가져옴". 옛 저장소에서 가져온 시각이 새 저장소 것처럼 남는다
+ * - `activeWorktree` — 스토어 밖(App useState)이라 openRepository가 닿지 않는다. 도크 헤더의
+ *   워크트리 이름이 옛 저장소를 가리키고, 같은 값이 터미널 cwd(groupKey)라 셸이 옛 폴더에서 뜬다
+ *
+ * 세 번째 유출인 `headInfos`(경로::HEAD 캐시)는 스토어에만 남고 화면에 드러나지 않아 여기서
+ * 단언하지 않는다 — 스토어를 renderer 밖으로 노출하지 않는다.
+ */
+test('E15a — 저장소를 바꾸면 옛 저장소의 흔적(가져옴 시각·워크트리 대상)이 남지 않는다', async () => {
+  // 저장소 A: 원격이 있어야 「가져오기」가 lastFetchAt을 남긴다 + 워크트리 하나
+  const repoA = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repoA })
+  const remote = await addBareRemote(repoA)
+  await execGitOrThrow(['push', '-u', 'origin', 'main'], { cwd: repoA })
+  await execGitOrThrow(['branch', 'switch-side'], { cwd: repoA })
+  const wtPath = `${repoA}-side`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'switch-side'], {
+    cwd: repoA,
+  })
+  // 저장소 B: 전환 대상. 최근 목록에 미리 넣어 두면 다이얼로그 없이 전환기에서 고를 수 있다
+  const repoB = await createRepoWithChange()
+  const repoBPath = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 자동 가져오기를 끈다 — 켜져 있으면 전환 뒤 주기 작업이 lastFetchAt을 다시 채워 단언이 흔들린다
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ autoFetch: false, recentRepos: [repoBPath] }),
+  )
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  const sideName = basename(wtPath)
+  const repoBName = basename(repoBPath)
+  try {
+    const window = await app.firstWindow()
+
+    // ① 저장소 A에서 흔적을 만든다 — 터미널 대상을 워크트리로, 그리고 한 번 가져오기
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId(`worktree-row-${sideName}`).click()
+    await expect(window.locator('.terminal-dock__hint')).toContainText(sideName)
+    await window.getByTestId('left-tab-branches').click()
+    await window.getByTestId('fetch-remotes').click()
+    await expect(window.getByTestId('fetch-at')).toContainText('방금 전')
+
+    // ② 전환기로 저장소 B
+    await window.getByTestId('repo-switcher').click()
+    await window.getByTestId(`repo-switcher-item-${repoBPath}`).click()
+    await expect(window.getByTestId('repo-path')).toContainText(repoBName)
+
+    // ③ 흔적이 없다 — 유출이 서로 독립이라 soft로 둔다. 하나가 걸려도 나머지 결과까지 함께 나온다
+    // lastFetchAt — 새 저장소에서는 아직 가져온 적이 없으니 표시 자체가 없어야 한다
+    await expect.soft(window.getByTestId('fetch-at')).toHaveCount(0)
+    // activeWorktree — 도크 헤더가 옛 워크트리가 아니라 새 저장소를 가리켜야 한다
+    await expect.soft(window.locator('.terminal-dock__hint')).not.toContainText(sideName)
+    await expect.soft(window.locator('.terminal-dock__hint')).toContainText(repoBName)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
