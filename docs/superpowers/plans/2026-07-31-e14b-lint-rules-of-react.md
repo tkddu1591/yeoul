@@ -473,6 +473,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 > 아무도 못 잡는다. **테스트를 먼저 쓰고 현재 코드에서 초록임을 확인한 뒤** 구현을 바꿔야
 > "원래 되던 것"임을 증명할 수 있다.
 
+> **정정(Task 4 실측) — "테스트가 하나도 없다"는 틀렸다.** `apps/desktop/e2e/hosting.spec.ts:364`가
+> 같은 요구사항을 이미 단언하고 있었다(토큰 프롬프트가 401에서 입력을 보존). 반증 변이에서 그
+> 테스트도 함께 빨개져 드러났다 — 나는 `smoke.spec.ts`만 보고 단정했다. 그물은 0이 아니라 1이었다.
+> 다만 순서 규칙 자체는 유효하다: 새 테스트가 다른 경로(브랜치 프롬프트)를 덮어 2겹이 되고,
+> `hosting.spec.ts`는 mock GitHub 서버가 필요해 회귀 그물로는 무겁다.
+
 - [ ] **Step 1: 회귀 테스트 2건을 쓴다 (구현은 아직 그대로)**
 
 `smoke.spec.ts` 끝에 추가한다. `PromptDialog`가 실제로 쓰이는 흐름 하나를 골라야 한다 — 실패를
@@ -592,6 +598,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 > (react-aria `Modal`이 `isOpen`으로 표시만 제어하고, `PromptDialog` 함수 자신은 계속 렌더된다).
 > 그래서 `useState`가 살아남고, 이펙트가 그걸 비우고 있었다. 호출부는 `App.tsx`에 **6곳**이라
 > 거기마다 `key`를 다는 건 지저분하고 새 호출부에서 빠뜨리기 쉽다.
+>
+> **정정(Task 4 실측): 호출부는 6곳이 아니라 7곳**이고 하나는 `App.tsx`가 아니다 —
+> `components/ManageBranchesDialog.tsx:101`(이름 바꾸기 프롬프트). "호출부에 key를 단다"를
+> 택했다면 그 하나가 조용히 빠졌을 것이다. 파일 안 분리가 그걸 막는다.
+> 또한 언마운트되지 않는 근거는 react-aria의 동작이 아니라 **구조**다 — `useState`가
+> `ModalOverlay`보다 위(`PromptDialog` 함수 본문)에 있고 호출부 7곳 전부 조건 없이 렌더한다.
 >
 > 대신 **한 파일 안에서** 껍데기와 알맹이를 나눈다 — 호출부는 하나도 안 바뀐다.
 
