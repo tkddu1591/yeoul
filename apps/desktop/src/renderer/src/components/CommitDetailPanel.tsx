@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
+import { useNow } from '../ui/use-now'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import { buildFileTree, flattenFileTree } from './file-tree'
 import { FindBar } from './FindBar'
@@ -111,6 +112,9 @@ export function CommitDetailPanel({
 }: CommitDetailPanelProps) {
   // 우클릭 메뉴·확인창 상태는 패널이 관리한다 (HistoryPanel·다이얼로그 관례)
   const [menu, setMenu] = useState<{ x: number; y: number; file: CommitFileChange } | null>(null)
+  // E14b — 이 파일은 incompatible-library로 규칙이 통째로 건너뛰어져 린트가 렌더 중 Date.now()를
+  // 잡지 못했다. grep 전수로 찾아 함께 고친다 (커밋 상세 메타의 "3분 전")
+  const now = useNow()
   const [confirmingRestore, setConfirmingRestore] = useState<CommitFileChange | null>(null)
   // E7h ② — 파일 목록 depth 트리. 접기 상태는 로컬(커밋 전환 시 리셋 — 아래 effect)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -257,7 +261,7 @@ export function CommitDetailPanel({
           </pre>
         )}
         <p className="commit-detail__meta">
-          {detail.shortHash} · {formatRelativeTime(detail.committedAt, Date.now())} ·{' '}
+          {detail.shortHash} · {formatRelativeTime(detail.committedAt, now)} ·{' '}
           {detail.authorName}
           {!shelfPreview &&
             detail.parents.length >= 2 &&

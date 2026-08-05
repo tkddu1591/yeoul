@@ -56,7 +56,13 @@ export function TerminalDock({
     if (groupTabs.length === 0) void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
     else if (groupTabs.some((tab) => tab.sessionId === sessions.activeId)) sessions.refitActive()
     else void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
-    // open·groupKey 전이에만 반응한다 — sessions는 렌더마다 새 참조
+    // open·groupKey 전이에만 반응한다. 빠진 의존성은 `sessions`·`activeWorktree`.
+    // useTerminalSessions는 매 렌더 새 객체 리터럴을 반환하고(use-terminal-sessions.ts:239)
+    // activateGroup 등 액션도 매 렌더 새 클로저라, `sessions`를 넣으면 이 effect가 렌더마다
+    // 재실행된다 — activateGroup은 "그 그룹에 탭이 0개면 생성"인데 setTabs 반영 전 스냅숏을
+    // 거듭 보게 되므로 위 주석의 이중 생성 함정이 무한히 열린 판이 된다.
+    // activeWorktree는 create의 cwd·label로만 쓰이고 그 cwd가 곧 groupKey라 이미 추적된다.
+    // E14c: 훅 반환을 안정화하면(액션을 ref/모듈로 고정하고 값만 상태로) 그대로 넣고 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, groupKey])
 
@@ -65,12 +71,21 @@ export function TerminalDock({
     if (purgeGroup === null) return
     sessions.closeGroup(purgeGroup)
     onPurged?.()
+    // purgeGroup 전이에만. 빠진 의존성은 `sessions`·`onPurged` — 둘 다 렌더마다 새 참조다
+    // (훅 반환 객체 / App이 인라인 화살표로 내려주는 콜백). 넣으면 App이 1회성 상태를 비우기
+    // 전에 끼어드는 렌더에서 closeGroup·onPurged가 한 번 더 불린다 — 이 effect는 "1회 소비"가
+    // 계약이라 재실행 자체가 계약 위반이다.
+    // E14c: 훅 반환 + onPurged(App 쪽)를 함께 안정화해야 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purgeGroup])
 
   // 높이·활성 탭이 바뀌면 활성 세션을 다시 맞춘다
   useEffect(() => {
     sessions.refitActive()
+    // 빠진 의존성은 `sessions`(렌더마다 새 객체). 넣으면 크기가 그대로여도 렌더마다 fit이 돌고
+    // 그때마다 terminalApi.resize IPC가 나간다 — 이 세 effect 중 유일하게 매 렌더 값을 쓰므로
+    // (deps에 sessions.activeId가 있어) 클로저는 최신이다. 낭비만 문제다.
+    // E14c: 훅 반환이 안정 참조가 되면 넣어도 무해해져 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height, sessions.activeId])
 
@@ -81,6 +96,27 @@ export function TerminalDock({
     const onResize = () => sessions.refitActive()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
+    // 빠진 의존성은 `sessions`. 넣으면 렌더마다 리스너를 떼고 다시 단다.
+    // **E14b 실측 경고 — 이 억제는 낭비가 아니라 죽은 코드를 덮고 있다:** []로 굳은 클로저가
+    // 잡은 sessions는 마운트 시점 것이고, refitActive는 그 렌더의 activeId(= 항상 null)를
+    // 읽는다. 즉 이 리스너는 아무 일도 하지 않는다 — 계측 빌드 실측: 이 effect와 아래 옵저버를
+    // 합쳐 refitActive가 17회 불렸고 **17회 모두 activeId 인자가 null, 실제 fit은 0회**였다.
+    //
+    // 그런데도 **창 리사이즈는 눈에 멀쩡하다** — 이 리스너가 아니라 다른 것이 대신 하고 있다.
+    // 창 크기가 바뀌면 App이 리렌더되고, 그때 `ref={(element) => sessions.attach(...)}`
+    // (아래 .terminal-dock__view)의 인라인 콜백이 매 렌더 새 함수라 React가 떼었다 다시 단다.
+    // attach는 이미 붙은 뷰면 곧장 refit(sessionId)을 부르고(use-terminal-sessions.ts:224-233),
+    // 이쪽은 **올바른 id**를 받는다. 실측: 창 리사이즈 후 dock 920 / view 896 / screen 881로
+    // 폭을 따라갔다(refitActive 인자는 그 사이에도 null ×1, fit 0회 — 즉 이 effect의 공이 아니다).
+    //
+    // 반대로 **사이드 접기(⌘⌥1/⌘⌥2)는 실제로 깨져 있다.** 접기는 240ms 전환 시작 시점에 한 번
+    // 리렌더될 뿐이고 전환이 끝나 폭이 확정될 때는 리렌더가 없어 attach의 구제를 못 받는다.
+    // 실측: 좌측 접기 후 dock 1160 / view 1136인데 xterm screen은 737px 그대로 — **오른쪽
+    // 35%가 빈 공간**으로 남았다(옵저버 15회 발화, 전부 인자 null, fit 0회).
+    //
+    // E14c: 훅 반환을 안정화하고 의존성을 넣는 것이 곧 이 수정이다 — 억제를 지우는 작업과
+    // 기능을 되살리는 작업이 같다. **"창 리사이즈가 되니까 살아 있다"고 읽고 건너뛰지 말 것.**
+    // 검증은 창 리사이즈가 아니라 사이드 접기로 해야 한다(리사이즈는 attach가 가려 준다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -100,6 +136,16 @@ export function TerminalDock({
     const observer = new ResizeObserver(() => sessions.refitActive())
     observer.observe(el)
     return () => observer.disconnect()
+    // 빠진 의존성은 `sessions`. 넣으면 렌더마다 옵저버를 끊고 다시 만든다(observe 직후 콜백이
+    // 1회 발화하므로 렌더마다 resize IPC도 따라 나간다).
+    // 위 'resize' effect와 **같은 죽은 클로저 문제를 공유한다** — 마운트 시점 sessions를 잡아
+    // refitActive의 activeId가 null로 굳어 있다. 실측(계측 빌드): 좌측 접기 한 번에 이 옵저버가
+    // 15회 발화했고 15회 모두 인자가 null, fit은 0회였다.
+    // **그리고 여기가 실제로 눈에 보이는 고장이다** — 위 'resize' effect는 attach의 부수효과가
+    // 가려 주지만(그 주석 참조) 접기는 240ms 전환이 끝나는 시점에 리렌더가 없어 구제되지 않는다:
+    // dock 1160 / view 1136인데 xterm screen은 737px 그대로, 오른쪽 35%가 빈 공간이다.
+    // E14c: 훅 반환 안정화 + 의존성 채우기가 곧 수정이다. 지운 뒤 **접기로** refit이 도는지 볼 것
+    // (창 리사이즈로 확인하면 attach 덕분에 고치기 전에도 통과해 버려 아무것도 증명하지 못한다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

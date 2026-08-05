@@ -4,6 +4,7 @@ import { formatRelativeTime } from './relative-time'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
+import { useNow } from '../ui/use-now'
 import { shortenAbove, shortenBranch, sourceChip, uniqueNames } from './worktree-label'
 import { T } from '../terms'
 import './worktrees-panel.css'
@@ -46,6 +47,8 @@ export function WorktreesPanel({
   onAction,
 }: WorktreesPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; worktree: WorktreeInfo } | null>(null)
+  // E14b — 워크트리 행마다가 아니라 여기서 한 번만 구독한다 (행마다 부르면 워크트리 수만큼 구독자가 생긴다)
+  const now = useNow()
 
   const folderName = (path: string) => path.split('/').filter(Boolean).pop() ?? path
 
@@ -129,7 +132,7 @@ export function WorktreesPanel({
                       출처 {sourceChip(worktree.path, home)}
                       {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
                       {head !== null && ` · ${head.subject}`}
-                      {head !== null && ` · ${formatRelativeTime(head.committedAt, Date.now())}`}
+                      {head !== null && ` · ${formatRelativeTime(head.committedAt, now)}`}
                       {worktree.path === currentPath && ` · ${T.head}`}
                       {worktree.locked && ' · 잠김'}
                     </div>

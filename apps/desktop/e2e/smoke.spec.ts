@@ -3688,9 +3688,24 @@ test('E13 — 터미널 도크를 닫으면 그 공간이 가운데로 돌아온
  * (a) E13이 전환에 새로 얹은 대상(.app__main의 grid-template-columns/rows) 자체의
  *     transition-duration이 안전망(base.css)으로 0.01ms대까지 눌렸는지 — E11 테스트가 확인한
  *     .ui-button과는 다른 대상이라 별도로 확인한다.
- * (b) 클릭 뒤 --motion-slow(240ms)에 한참 못 미치는 시간 안에 최종값(폭 0 / 도크 보임)에
- *     도달하는지 — 실제로 애니메이션이 걸린다면 못 미칠 여유(150ms)를 poll 타임아웃으로 주어,
- *     고정 sleep 없이 "즉시"임을 검증한다.
+ * (b) 클릭 뒤 접기·도크 열기가 **중간값 프레임을 한 개도 지나지 않고** 최종값에 도달하는지 —
+ *     아래 「접기가 실제로 240ms 동안 중간값을 지난다」(중간값 ≥3개)의 정확한 대조군이다.
+ *
+ * E14b 후속 — (b)를 시간 재기에서 프레임 세기로 바꿨다. 이 테스트의 간헐 실패를 root-cause한
+ * 결과다. 두 가설을 실측으로 갈랐다:
+ * ① "GIT_GUI_USER_DATA를 안 넘겨 사용자의 실제 settings.json을 읽는다(leftCollapsed 누출)" —
+ *    **거짓이다.** harness.launch가 env에 그 키가 없으면 매 실행 새 mkdtemp를 주입한다
+ *    (harness.ts, 4b041c2). 프로브 실측: 이 테스트와 똑같은 형태로 띄운 앱의
+ *    `app.getPath('userData')`는 `/var/folders/.../gg-e2e-userdata-GZe75n`,
+ *    `window.settingsApi.initial`은 `{}`였다. 접힘 설정은 애초에 새어 들어오지 않는다.
+ * ② "150ms poll에 걸리는 타이밍"이 맞다. 예전 (b)는 `expect.poll(..., { timeout: 150 })`으로
+ *    **벽시계**를 쟀는데, 그 150ms 안에는 CSS 전환뿐 아니라 클릭 왕복·React 커밋·병렬 워커
+ *    부하가 전부 들어간다. 실측: 30회 반복 3라운드에서 2·0·2회 실패(전부 도크 poll), 도크
+ *    첫 열기의 node-pty spawn 비용을 워밍업으로 빼내자 60회 중 3회로 줄었지만 이번엔 좌측
+ *    poll에서도 터졌다 — 임계가 부하에 걸려 있는 한 어느 한 곳을 고쳐도 남는다.
+ * 프레임 세기는 부하에 면역이다: 전환이 없으면 366→0이 한 번의 스타일 커밋으로 끝나 그 사이
+ * 프레임이 **구조적으로 존재하지 않는다**(안전망이 누르는 0.01ms는 한 프레임 16.7ms의 1/1670).
+ * 느려질수록 표본이 성길 뿐 중간값이 생기지는 않는다.
  */
 test('E13 — reduced-motion에서는 접기·도크 전환이 즉시 반영된다', async () => {
   const repo = await createRepoWithChange()
@@ -3720,15 +3735,36 @@ test('E13 — reduced-motion에서는 접기·도크 전환이 즉시 반영된�
       expect(Number.parseFloat(part)).toBeLessThan(0.001)
     }
 
-    // 증거 (b) — 좌측 접기가 --motion-slow(240ms)에 한참 못 미치는 시간 안에 끝난다
-    await window.getByTestId('left-collapse-toggle').click()
-    await expect.poll(async () => (await left.boundingBox())!.width, { timeout: 150 }).toBe(0)
+    // 증거 (b)-1 — 좌측 접기가 중간 폭을 한 프레임도 지나지 않는다
+    const leftFrames = await sampleCollapseFrames(window, '.app__left', '.app__left-inner', () =>
+      window.getByTestId('left-collapse-toggle').click(),
+    )
+    const leftStart = Math.max(...leftFrames.map((sample) => sample.trackW))
+    expect(leftStart, '접기 전 좌측 트랙 폭').toBeGreaterThan(200)
+    expect(leftFrames.at(-1)!.trackW, '표본 끝에는 접기가 끝나 0이어야 한다').toBe(0)
+    const leftMiddles = leftFrames.filter(
+      (sample) => sample.trackW > 0.5 && sample.trackW < leftStart - 0.5,
+    )
+    expect(
+      leftMiddles.length,
+      `좌측 중간값 프레임 수 (표본 ${leftFrames.length}개, 추이 ` +
+        `${leftFrames.map((sample) => Math.round(sample.trackW)).join('→')})`,
+    ).toBe(0)
 
-    // 도크도 같은 안전망 — 열자마자(240ms를 기다리지 않고) 곧바로 보여야 한다
-    await window.getByTestId('terminal-toggle').click()
-    await expect
-      .poll(async () => window.getByTestId('terminal-dock').isVisible(), { timeout: 150 })
-      .toBe(true)
+    // 증거 (b)-2 — 도크 열기도 같다. 여는 방향이라 행 트랙이 0에서 펼친 높이로 한 번에 간다
+    const dockFrames = await sampleCollapseFrames(window, '.app__dock', '.terminal-dock', () =>
+      window.getByTestId('terminal-toggle').click(),
+    )
+    const dockEnd = dockFrames.at(-1)!.trackH
+    expect(dockEnd, '표본 끝에는 도크 행 트랙이 펼친 높이다').toBeCloseTo(DOCK_HEIGHT_DEFAULT, 0)
+    const dockMiddles = dockFrames.filter(
+      (sample) => sample.trackH > 0.5 && sample.trackH < dockEnd - 0.5,
+    )
+    expect(
+      dockMiddles.length,
+      `도크 중간 높이 프레임 수 (표본 ${dockFrames.length}개, 추이 ` +
+        `${dockFrames.map((sample) => Math.round(sample.trackH)).join('→')})`,
+    ).toBe(0)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -4464,6 +4500,181 @@ test('E14a — 느린 조회에서는 로딩 표시가 배어난다', async () =
       await app.close()
     }
   } finally {
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14b — 이름 짓기가 실패해도 입력한 값이 남아 있다 (E1a 요구사항 고정).
+ *
+ * PromptDialog는 "열릴 때 initialValue로 채우고 닫힐 때 비운다"를 useEffect + setState로 했는데,
+ * react-hooks/set-state-in-effect 위반이라 remount로 바꾼다. remount 조건이 잘못되면 실패로
+ * 열려 있는 동안 입력이 날아가는데(E1a가 명시한 요구사항), **그걸 고정하는 테스트가 저장소에
+ * 하나도 없었다.** 구현을 바꾸기 전에 현재 동작이 초록임을 확인해 둔다.
+ *
+ * 실패 유도: 이미 있는 브랜치 이름으로 만들기를 시도한다 (git이 거부한다).
+ */
+test('E14b — 이름 짓기가 실패해도 입력한 값이 남아 있다 (E1a 요구사항 고정)', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 먼저 브랜치 하나를 실제로 만든다 — 그 이름이 다음 시도의 충돌 대상이 된다
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-new').click()
+    await window.getByTestId('prompt-input').fill('dup-branch')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('header-branch')).toContainText('dup-branch')
+
+    // 같은 이름으로 다시 시도 → git이 거부하고 다이얼로그는 열린 채 남는다
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-new').click()
+    await window.getByTestId('prompt-input').fill('dup-branch')
+    await window.getByTestId('prompt-submit').click()
+
+    // 실패가 실제로 일어났는지 먼저 확인한다 — 안 그러면 아래 단언이 공허해진다
+    await expect(window.getByTestId('prompt-error')).toBeVisible()
+    // 핵심: 다시 칠 필요 없이 방금 친 값이 그대로 있어야 한다 (E1a)
+    await expect(window.getByTestId('prompt-input')).toHaveValue('dup-branch')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14b — 워크트리 만들기 폼은 닫았다 다시 열면 초기화된다.
+ * 같은 이유(useEffect + setState → remount)로 바꾸므로 먼저 고정한다.
+ * 이쪽은 반대 방향 요구사항이다 — 닫으면 버려야 한다.
+ */
+test('E14b — 워크트리 만들기를 닫았다 열면 폼이 초기화된다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId('worktree-add').click()
+    // 기본값을 벗어난 상태를 만든다 — 모드를 바꾸고 경로를 직접 고친다
+    await window.getByTestId('add-worktree-mode-new').click()
+    await window.getByTestId('add-worktree-path').fill('/tmp/e14b-should-be-discarded')
+    await window.getByTestId('add-worktree-cancel').click()
+
+    // 다시 열면 방금 친 것이 남아 있으면 안 된다
+    await window.getByTestId('worktree-add').click()
+    await expect(window.getByTestId('add-worktree-path')).not.toHaveValue(
+      '/tmp/e14b-should-be-discarded',
+    )
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14b 후속 (적대적 리뷰 IMPORTANT 1) — **`useNow()`가 실제로 시간을 흘려보내는지에 그물을 건다.**
+ *
+ * 리뷰어 실측: `use-now.ts`의 구독을 통째로 지워도(`useEffect(() => subscribeNow(...), [])`
+ * → `useEffect(() => {}, [])`) 단위 6건이 **전부 초록**이었다. 그 6건은 `subscribeNow`와
+ * `NOW_TICK_MS`만 import하고 `useNow`는 **아무도 부르지 않는다** — 즉 이 에픽이 고치겠다고
+ * 나선 버그(시간이 흘러도 상대 시각이 멈춰 있다)가 그대로 되살아나도 게이트가 초록이다.
+ * 유일하게 상대 시각을 스치는 E2E(:2019 `toContainText('방금 전')`)도 시계가 멈춘 채로 통과한다.
+ *
+ * 시계를 빠르게 만드는 방법 — **프로덕션 코드를 건드리지 않는다.** Playwright의 clock API로
+ * 이 창의 `Date`·`setInterval`을 통째로 가짜로 바꾼 뒤 3분을 앞으로 감는다.
+ * `clock.install()`은 그 시점 **이후에** 만들어지는 타이머만 가짜로 잡는데, `subscribeNow`의
+ * `setInterval`은 이미 마운트 때 진짜로 걸려 있다 — 그래서 install 직후 `reload()`로 앱을 다시
+ * 띄워 구독이 가짜 타이머 위에서 다시 걸리게 한다. 대안이었던 "테스트용 훅을 프로덕션에 심어
+ * NOW_TICK_MS를 줄인다"는 택하지 않았다: 제품 코드에 테스트 전용 분기가 생기는 데다, 그렇게
+ * 하면 정작 검증 대상인 60초 상수 자체가 테스트에서 빠져 그물이 헐거워진다.
+ *
+ * 이 단언이 그물인 근거 — 화면의 "n분 전"은 `formatRelativeTime(commit.committedAt, now)`이고
+ * `now`는 `useNow()`의 **state**다. 리렌더만으로는 절대 안 바뀌고 오직 구독 콜백의
+ * `setNow(Date.now())`로만 바뀐다. 구독을 지우면 fastForward로 시간을 감아도 화면은 "방금 전"에
+ * 멈춘다(실측: 아래 falsification).
+ */
+test('E14b — 시간이 흐르면 상대 시각이 스스로 갱신된다 (useNow 구독 회귀)', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    const row = window.locator('[data-testid^="history-item-"]').first()
+    // 방금 만든 픽스처 커밋이라 60초 미만 — 여기가 흔들리면 아래 "3분 전"의 전제가 깨지므로
+    // 먼저 못박는다(실패해도 원인이 분명하게 보이도록)
+    await expect(row).toContainText('방금 전')
+
+    // 가짜 시계를 심고 앱을 다시 띄운다 — 이 reload 뒤의 구독이 가짜 setInterval을 쓴다
+    await window.clock.install()
+    await window.reload()
+    const rowAfterReload = window.locator('[data-testid^="history-item-"]').first()
+    await expect(rowAfterReload).toContainText('방금 전')
+
+    // 3분 앞으로. NOW_TICK_MS(60초) 틱이 3번 발화하고 Date.now()도 함께 흐른다
+    await window.clock.fastForward(3 * 60_000)
+    await expect(rowAfterReload).toContainText('3분 전')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14b 후속 (적대적 리뷰 IMPORTANT 3) — **`expandRightIfCollapsed()` 호출부에 그물을 건다.**
+ *
+ * Task 5는 "우측이 접힌 채로 죽은 클릭을 만들지 않는다"를 호출부마다 부르는 방식으로 구현했고
+ * (App.tsx:635 보관함 미리보기 · :1152 타임라인 선택), 그때 "새 호출부가 잊을 수 있다"는 위험을
+ * 명시적으로 감수했다. 리뷰어 실측: 보관함 쪽 호출을 지워도 기존 「보관함」 E2E 5건이 **전부
+ * 초록**이었다 — 감수한 위험에 아무 그물이 없었다.
+ *
+ * 보관함 버튼은 헤더(우측 열 바깥)에 있어 우측이 접힌 상태에서도 누를 수 있는, 이 규칙의 유일한
+ * 실사용 경로다. 여기만 막으면 두 호출부 중 실제로 도달 가능한 쪽이 덮인다
+ * (타임라인 쪽은 우측 안이라 접힌 동안 inert라 애초에 닿지 않는다 — App.tsx:1150 주석).
+ */
+test('E14b — 우측을 접은 채 보관함을 미리 보면 우측이 저절로 펴진다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    const right = window.locator('.app__right')
+    await expect(right).toBeVisible()
+
+    // 우측을 접는다 — 240ms 전환이 끝나 폭 0이 될 때까지 기다린다
+    await window.getByTestId('right-collapse-toggle').click()
+    await expect.poll(async () => (await right.boundingBox())!.width, { timeout: 2000 }).toBe(0)
+
+    // 헤더의 보관함은 접힌 상태에서도 눌린다 — 여기서 미리 보면 결과는 우측에 뜬다
+    await window.getByTestId('shelf-open').click()
+    await window.getByTestId('shelf-save').click()
+    await expect(window.getByTestId('shelf-count')).toHaveText('1')
+    await window.getByTestId('shelf-preview-stash@{0}').click()
+
+    // 죽은 클릭이 아니어야 한다 — 우측이 다시 폭을 갖고, 그 안에 커밋 상세가 보인다
+    await expect
+      .poll(async () => (await right.boundingBox())!.width, { timeout: 2000 })
+      .toBeGreaterThan(0)
+    await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
+    await expect(window.getByTestId('commit-file-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
     await rm(repo, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
   }

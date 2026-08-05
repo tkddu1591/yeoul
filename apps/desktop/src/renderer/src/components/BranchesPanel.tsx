@@ -5,6 +5,7 @@ import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
+import { useNow } from '../ui/use-now'
 import { buildBranchTree, flatSearch, flattenBranchTree } from './branch-tree'
 import { formatRelativeTime } from './relative-time'
 import { T } from '../terms'
@@ -72,6 +73,9 @@ export function BranchesPanel({
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  // E14b — "n분 전 가져옴" 표시용. 렌더 중 Date.now()를 부르면 렌더가 순수하지 않고,
+  // 실제로도 다른 이유로 리렌더될 때까지 숫자가 멈춰 있었다
+  const now = useNow()
 
   // 불가 항목은 숨기지 않고 사유와 함께 비활성한다 (HistoryPanel undo/reword 관례)
   const buildLocalMenu = (branch: LocalBranchStatus): ContextMenuEntry[] => {
@@ -373,7 +377,7 @@ export function BranchesPanel({
           </Button>
           {lastFetchAt !== null && (
             <span className="branches-panel__fetch-at" data-testid="fetch-at">
-              {formatRelativeTime(Math.floor(lastFetchAt / 1000), Date.now())} {T.fetch}
+              {formatRelativeTime(Math.floor(lastFetchAt / 1000), now)} {T.fetch}
             </span>
           )}
         </div>

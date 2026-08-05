@@ -2,6 +2,7 @@ import { Check, ChevronDown, Folder, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { Header, Menu, MenuItem, MenuSection, MenuTrigger, Popover } from 'react-aria-components'
 import { useEscapeFallback } from '../ui/use-escape-fallback'
+import { useNow } from '../ui/use-now'
 import type { BranchSummary } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { Pictogram } from '../ui/Pictogram'
@@ -28,6 +29,8 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
   // ESC fallback을 걸기 위해 제어형으로 둔다 — 그 외 동작은 기존과 같다 (ShelfPopover 관례)
   const [open, setOpen] = useState(false)
   useEscapeFallback(open, () => setOpen(false))
+  // E14b — 목록이 길어도 구독은 하나다. renderItem이 이 값을 닫아 쓴다(행마다 부르면 브랜치 수만큼 구독자가 생긴다)
+  const now = useNow()
   const grouped = groupBranches(branches)
   const renderItem = (branch: BranchSummary, display: string) => (
     <MenuItem
@@ -44,7 +47,7 @@ export function BranchSwitcher({ branches, currentName, busy, onSwitch, onCreate
         <span className="branch-switcher__name">{display}</span>
       </Tooltip>
       <span className="branch-switcher__time">
-        {formatRelativeTime(branch.committedAt, Date.now())}
+        {formatRelativeTime(branch.committedAt, now)}
       </span>
     </MenuItem>
   )

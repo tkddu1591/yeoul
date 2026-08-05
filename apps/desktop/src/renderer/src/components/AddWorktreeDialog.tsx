@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
 import type { LocalBranchStatus } from '@git-gui/domain'
 import { Button } from '../ui/Button'
@@ -27,7 +27,16 @@ type AddMode = 'existing' | 'new'
  * 새 워크트리 만들기 (E7c) — 체크아웃 안 된 브랜치 선택 + 경로(자동 제안·수정 가능).
  * E7d ④: "새로 만들면서 펼치기" 모드 — 이름 입력 → 브랜치+워크트리 동시 생성(-b)
  */
-export function AddWorktreeDialog({
+export function AddWorktreeDialog(props: AddWorktreeDialogProps) {
+  // E14b — 예전엔 안쪽에서 useEffect로 열림 전이마다 다섯 상태를 되돌렸다
+  // (react-hooks/set-state-in-effect). 이 컴포넌트는 닫혀도 언마운트되지 않아
+  // (react-aria Modal은 표시만 제어하고 App.tsx:714는 조건 없이 렌더한다) 상태가 살아남기
+  // 때문이었다. 열림 여부를 key로 주면 열 때마다 알맹이가 새로 만들어져 useState 초기값
+  // 하나로 끝난다 (E2E 「워크트리 만들기를 닫았다 열면 폼이 초기화된다」가 고정한다)
+  return <AddWorktreeDialogBody key={props.isOpen ? 'open' : 'closed'} {...props} />
+}
+
+function AddWorktreeDialogBody({
   isOpen,
   mainPath,
   branches,
@@ -37,22 +46,13 @@ export function AddWorktreeDialog({
   onCancel,
 }: AddWorktreeDialogProps) {
   const available = branches.filter((branch) => !checkedOut.has(branch.name))
+  // 열릴 때 고른 첫 브랜치 — remount라 이 초기값이 곧 "열림 전이 초기화"다
+  const first = available[0]?.name ?? ''
   const [mode, setMode] = useState<AddMode>('existing')
-  const [branch, setBranch] = useState('')
+  const [branch, setBranch] = useState(first)
   const [newName, setNewName] = useState('')
-  const [path, setPath] = useState('')
+  const [path, setPath] = useState(first === '' ? '' : suggestWorktreePath(mainPath, first))
   const [pathEdited, setPathEdited] = useState(false)
-  useEffect(() => {
-    if (!isOpen) return
-    const first = available[0]?.name ?? ''
-    setMode('existing')
-    setBranch(first)
-    setNewName('')
-    setPath(first === '' ? '' : suggestWorktreePath(mainPath, first))
-    setPathEdited(false)
-    // 열림 전이에만 초기화 — available은 렌더마다 새 배열
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen])
 
   const suggestFor = (name: string) => {
     if (!pathEdited) setPath(name === '' ? '' : suggestWorktreePath(mainPath, name))

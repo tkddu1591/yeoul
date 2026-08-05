@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
+import { useNow } from '../ui/use-now'
 import { formatRelativeTime } from './relative-time'
 import { T } from '../terms'
 import './review-detail-panel.css'
@@ -34,12 +35,13 @@ function statusOf(view: PullDetailView): { label: string; raw: string } {
   return { label: '열림', raw: 'open' }
 }
 
-function CommentRow({ comment }: { comment: PullComment }) {
+/** `now`를 props로 받는다 — 코멘트 행마다 useNow()를 부르면 코멘트 수만큼 구독자가 생긴다 (E14b) */
+function CommentRow({ comment, now }: { comment: PullComment; now: number }) {
   return (
     <li className="review-detail__comment" data-testid={`review-comment-${comment.kind}-${comment.id}`}>
       <p className="review-detail__comment-meta">
         <strong>@{comment.author}</strong>
-        <span>{formatRelativeTime(comment.createdAt, Date.now())}</span>
+        <span>{formatRelativeTime(comment.createdAt, now)}</span>
         {comment.state === 'approved' && <Badge>{T.approve}했어요</Badge>}
       </p>
       {comment.body !== '' && <p className="review-detail__comment-body">{comment.body}</p>}
@@ -63,6 +65,8 @@ export function ReviewDetailPanel({
   pending,
 }: ReviewDetailPanelProps) {
   const [reply, setReply] = useState('')
+  // E14b — 코멘트 타임라인 전체가 이 하나를 나눠 쓴다 (CommentRow에 내려 준다)
+  const now = useNow()
   const timelineRef = useRef<HTMLDivElement | null>(null)
   // 열 때·답변이 늘었을 때 최신(맨 아래)으로 — "코멘트 확인"의 기본 시선이자,
   // 전송 후 내 답변이 화면 밖에 남아 재전송(중복)을 유도하는 것을 막는다 (품질 리뷰)
@@ -127,7 +131,7 @@ export function ReviewDetailPanel({
         ) : (
           <ul className="review-detail__comments">
             {view.comments.map((comment) => (
-              <CommentRow key={`${comment.kind}-${comment.id}`} comment={comment} />
+              <CommentRow key={`${comment.kind}-${comment.id}`} comment={comment} now={now} />
             ))}
           </ul>
         )}
