@@ -41,13 +41,15 @@ export function RepoSwitcher({ currentPath, home, recent, busy, onOpen }: RepoSw
   const paths = pushRecentRepo(recent, currentPath)
   return (
     <MenuTrigger isOpen={open} onOpenChange={setOpen}>
+      {/* aria-label을 달지 않는다 (E15a 리뷰 ⑤) — 달면 안쪽 텍스트를 **덮어써서** 스크린 리더
+          사용자는 지금 어느 저장소가 열려 있는지 못 듣는다. 예전 정적 <div>일 땐 그냥 읽혔고,
+          본보기인 BranchSwitcher도 aria-label 없이 브랜치 이름이 접근 가능한 이름이 된다 */}
       <Button
         variant="ghost"
         size="sm"
         isDisabled={busy}
         testId="repo-switcher"
         className="repo-switcher__trigger"
-        aria-label="저장소 바꾸기"
       >
         <span className="app__repo">
           <strong>{folderName(currentPath)}</strong>
