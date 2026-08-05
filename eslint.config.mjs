@@ -33,25 +33,15 @@ export default [
     ],
     rules: { 'react-hooks/incompatible-library': 'warn' },
   },
-  {
-    // ── E14b 부채 목록 (임시) ──────────────────────────────────────────────
-    // 게이트를 먼저 세우고 위반을 태스크별로 걷어내기 위한 ratchet이다.
-    // 태스크가 한 파일을 고칠 때마다 여기서 그 항목을 지운다. Task 8이 이 블록 전체가
-    // 사라졌음을 확인한다 — 남아 있으면 그 태스크가 안 끝난 것이다.
-    // Task 3이 purity 5건(BranchSwitcher·BranchesPanel·ReviewDetailPanel·ShelfPopover·
-    // WorktreesPanel)을 걷어냈다 — 이제 그 파일들에서 purity는 경고가 아니라 에러다.
-    // Task 4가 set-state-in-effect 2건(PromptDialog·AddWorktreeDialog)을 key remount로
-    // 걷어냈다. Task 5가 App.tsx의 나머지 2건(⌘F 스코프 리셋 → 렌더 중 파생, 우측 펼침 →
-    // 호출부 2곳)을 걷어냈다 — set-state-in-effect는 이제 저장소 전체에서 0건이고,
-    // 남는 것은 Tooltip의 refs·immutability(Task 6) 뿐이다.
-    files: ['apps/desktop/src/renderer/src/ui/Tooltip.tsx'],
-    rules: {
-      'react-hooks/purity': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/refs': 'warn',
-      'react-hooks/immutability': 'warn',
-    },
-  },
+  // ── E14b 규칙 부채 목록: 비었으므로 블록째 삭제했다 (Task 6) ──────────────────
+  // Task 3이 purity 5건(BranchSwitcher·BranchesPanel·ReviewDetailPanel·ShelfPopover·
+  // WorktreesPanel), Task 4가 set-state-in-effect 2건(PromptDialog·AddWorktreeDialog),
+  // Task 5가 App.tsx의 나머지 2건, Task 6이 Tooltip의 immutability를 걷어냈다.
+  // 마지막 항목을 빼면 `files: []`가 되는데 **eslint 10은 빈 files를 거부한다**
+  // (`Key "files": Expected value to be a non-empty array` — 설정 로드 자체가 실패해
+  // lint가 통째로 죽는다). 그래서 목록을 비우는 태스크가 곧 블록을 지우는 태스크다 —
+  // "Task 8이 빈 목록을 확인하고 지운다"는 도달할 수 없는 상태였다.
+  // 이제 렌더러 전역에서 purity·set-state-in-effect·refs·immutability는 전부 error다.
   {
     // ── E14b 부채 목록 (임시) — 죽은 억제 3건 · Task 7 몫 ────────────────────
     // 위 규칙 부채와 별개의 항목이라 블록을 나눈다. reportUnusedDisableDirectives는 규칙이

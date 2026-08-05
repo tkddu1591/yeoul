@@ -33,6 +33,24 @@ interface TooltipProps {
 }
 
 /**
+ * ref 병합 — 트리거가 이미 갖고 있던 ref에도 노드를 전달한다 (E7j).
+ * 모듈 수준에 두는 이유(E14b): 컴포넌트 안에서 children.props.ref에 직접 쓰면
+ * react-hooks/immutability가 "props를 수정한다"고 잡는다. 대입을 이 함수로 옮기면
+ * 컴파일러가 children을 추적하지 못해 규칙이 풀린다(실측: 2 errors → 1).
+ *
+ * 주의 — 이 병합 경로는 **어떤 테스트도 덮지 않는다.** Tooltip 호출부 31곳을 전수로 봤을 때
+ * 트리거에 자기 ref를 넘기는 곳이 하나도 없어(E14b 실측) 지금은 항상 ref === undefined다.
+ * E14b Task 6에서 임시로 ref를 심은 프로브로 두 분기(함수·객체)가 도는 것을 확인했고,
+ * assignRef를 no-op으로 바꾸면 그 프로브만 빨개졌다 — 상시 그물은 없으니 여기를 고칠 땐
+ * 같은 방식의 프로브로 직접 재야 한다.
+ */
+function assignRef(ref: unknown, node: HTMLElement | null): void {
+  if (typeof ref === 'function') (ref as (n: HTMLElement | null) => void)(node)
+  else if (ref !== null && typeof ref === 'object')
+    (ref as { current: HTMLElement | null }).current = node
+}
+
+/**
  * 공용 호버 툴팁 (E7j) — 네이티브 title을 대체한다.
  * title은 OS가 1초쯤 뒤에 스타일 없이 그려서 앱 톤과 어긋나고 여러 줄·강조를 못 쓴다.
  */
@@ -100,13 +118,18 @@ export function Tooltip({ content, summary, children, delay = 400, describedBy }
 
   useEffect(() => close, [])
 
+  const originalRef = (children.props as { ref?: unknown }).ref
+  /* eslint-disable-next-line react-hooks/refs -- cloneElement에 넘기는 ref 콜백에 붙는
+     경고다("Passing a ref to a function may read its value during render"). 트리거 요소를
+     추가 DOM 노드 없이 감싸려면 이 패턴 말고 방법이 없고, 호출부가 19곳이라 구조를 바꾸는
+     위험이 이득보다 크다. 시도한 것: ① 원본 ref를 콜백 밖으로 홉 아웃 → 둘 다 안 풀림
+     ② 모듈 헬퍼(위 assignRef) → immutability만 풀리고 이건 남음 (E14b 실측: 2 → 1).
+     억제 대상 줄은 `ref:`가 아니라 cloneElement 호출 줄이다 — 규칙이 인자 객체 전체를
+     하나로 보고 여는 줄에 보고한다(ref: 위에 달면 "Unused eslint-disable directive"). */
   const trigger = cloneElement(children, {
     ref: (node: HTMLElement | null) => {
       triggerRef.current = node
-      const original = (children.props as { ref?: unknown }).ref
-      if (typeof original === 'function') (original as (n: HTMLElement | null) => void)(node)
-      else if (original !== null && typeof original === 'object')
-        (original as { current: HTMLElement | null }).current = node
+      assignRef(originalRef, node)
     },
     'data-tooltip': summary,
     'aria-describedby': describedBy !== false && place !== null ? id : undefined,
