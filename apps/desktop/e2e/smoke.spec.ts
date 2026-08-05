@@ -17,18 +17,27 @@ test.afterEach(async ({}, testInfo) => {
   await cleanupScreens(testInfo)
 })
 
-async function createRepoWithChange(): Promise<string> {
+/**
+ * 저장소 하나 + 변경 파일 하나. 파일 이름을 인자로 받는 이유는 E15a뿐이다 — 저장소 두 개를
+ * 띄우고 전환하는 테스트에서 두 저장소의 파일 이름이 같으면 "화면이 정말 바뀌었나"를
+ * 경로 텍스트 말고 **내용**으로 확인할 방법이 없다.
+ */
+async function createRepoWithFile(name: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'git-gui-e2e-'))
   await execGitOrThrow(['init', '--initial-branch=main'], { cwd: dir })
   // 앱이 수행하는 commit도 저장소 로컬 identity를 쓰도록 설정한다 —
   // 머신 전역 gitconfig에 의존하지 않는 hermetic 픽스처 (클린 CI에서도 동작)
   await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: dir })
   await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: dir })
-  await writeFile(join(dir, 'app.txt'), 'v1\n')
+  await writeFile(join(dir, name), 'v1\n')
   await execGitOrThrow(['add', '-A'], { cwd: dir })
   await execGitOrThrow(['commit', '-m', 'init'], { cwd: dir })
-  await writeFile(join(dir, 'app.txt'), 'v2\n')
+  await writeFile(join(dir, name), 'v2\n')
   return dir
+}
+
+async function createRepoWithChange(): Promise<string> {
+  return createRepoWithFile('app.txt')
 }
 
 /** GIT_SCENARIOS fixture 원칙 — 로컬 bare remote로 백업(push)을 검증한다 */
@@ -4749,5 +4758,227 @@ test('E15a — 저장소를 바꾸면 옛 저장소의 흔적(가져옴 시각·
     await rm(remote, { recursive: true, force: true })
     await rm(repoB, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15a 전환 픽스처 (Task 4 실측 관용구) — 전환기 목록에 저장소를 넣는 유일한 방법은
+ * `userData/settings.json`에 `recentRepos`를 미리 심는 것이다(`repo-switcher-browse`는 네이티브
+ * 다이얼로그라 Playwright로 못 연다). `autoFetch: false`도 필수다 — 켜져 있으면 전환 뒤 주기
+ * 작업이 상태를 다시 채워 단언이 흔들린다.
+ */
+async function seedRecentRepos(recentRepos: string[]): Promise<string> {
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false, recentRepos }))
+  return userData
+}
+
+/** 팝오버에 그려진 항목의 testid를 위에서 아래 순서대로 — 마지막 하나는 늘 '다른 폴더 열기' */
+async function switcherItemIds(window: Page): Promise<(string | null)[]> {
+  return window
+    .locator('.repo-switcher__item')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+}
+
+/**
+ * E15a ① — 전환기로 다른 저장소를 열면 **화면이 그 저장소의 내용으로** 바뀐다.
+ *
+ * 경로 텍스트(`repo-path`)만 보면 헤더 한 줄만 갈아끼우고 아래는 옛 저장소를 그리는 회귀를
+ * 놓친다 — 그래서 두 저장소의 변경 파일 이름을 다르게 두고 목록까지 확인한다.
+ *
+ * ⌘F 스코프 단언을 여기 얹은 이유: E14b가 `findScopeRepo !== store.repoPath`일 때
+ * `setFindScope(null)`로 옛 스코프를 무효화하도록 고쳤는데(App.tsx:402), 그때는 저장소를 두 번
+ * 여는 E2E가 저장소에 **하나도 없어** 코드 리뷰로만 지켜지고 있었다. 이 에픽이 그 시나리오를
+ * 처음 만드므로 같은 창에서 함께 문다.
+ */
+test('E15a — 전환기로 다른 저장소를 열면 화면이 그 저장소의 내용으로 바뀐다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const repoBPath = realpathSync(repoB)
+  const userData = await seedRecentRepos([repoBPath])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 저장소 A — 자기 파일이 보이고, 히스토리에 찾기가 열려 있다
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await hoverAndCmdF(window, '[data-testid="history-panel"]')
+    await expect(window.getByTestId('find-bar')).toBeVisible()
+
+    // 전환
+    await window.getByTestId('repo-switcher').click()
+    await window.getByTestId(`repo-switcher-item-${repoBPath}`).click()
+
+    // 헤더도, 파일 목록도 저장소 B다 — A의 파일은 흔적도 없어야 한다
+    await expect(window.getByTestId('repo-path')).toHaveText(repoBPath)
+    await expect(window.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+    // E14b — 옛 저장소를 겨냥해 열린 찾기는 전환과 함께 닫힌다
+    await expect(window.getByTestId('find-bar')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15a ② — 최근 목록은 재시작을 넘어 남는다. **순서까지** 본다.
+ *
+ * 단순히 "B가 목록에 있다"로는 아무것도 증명하지 못한다 — B는 이 테스트가 직접 심은 값이라
+ * 앱이 한 줄도 저장하지 않아도 통과한다. 그래서 `[C, B]`로 심고 B로 전환한 뒤(최신이 앞이므로
+ * `[B, C]`가 되어야 한다) 재시작해 **뒤집힌 순서가 남았는지**를 본다. 저장이 빠지면 파일은
+ * 심어둔 `[C, B]` 그대로라 빨개진다.
+ *
+ * 같은 `GIT_GUI_USER_DATA`로 두 번 launch한다 — 호출자가 직접 넘긴 경우에만 harness가
+ * 매번 새 mkdtemp를 주입하지 않고 존중한다(harness.ts:32).
+ */
+test('E15a — 최근 목록은 재시작 후에도 남는다 (최신이 앞)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const [pathA, pathB, pathC] = [repoA, repoB, repoC].map((p) => realpathSync(p))
+  const userData = await seedRecentRepos([pathC, pathB])
+  const env = { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData }
+  const app = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('repo-switcher').click()
+    // 심어둔 순서 그대로 — 지금 저장소(A)만 맨 앞에 얹혀 있다
+    expect(await switcherItemIds(window)).toEqual([
+      `repo-switcher-item-${pathA}`,
+      `repo-switcher-item-${pathC}`,
+      `repo-switcher-item-${pathB}`,
+      'repo-switcher-browse',
+    ])
+    await window.getByTestId(`repo-switcher-item-${pathB}`).click()
+    await expect(window.getByTestId('repo-path')).toHaveText(pathB)
+  } finally {
+    await app.close()
+  }
+  // 재시작 — 방금 연 B가 C보다 앞에 있어야 한다 (심어둔 순서는 그 반대였다)
+  const second = await electron.launch({ args: [APP_ROOT], env })
+  try {
+    const window = await second.firstWindow()
+    await window.getByTestId('repo-switcher').click()
+    expect(await switcherItemIds(window)).toEqual([
+      `repo-switcher-item-${pathA}`,
+      `repo-switcher-item-${pathB}`,
+      `repo-switcher-item-${pathC}`,
+      'repo-switcher-browse',
+    ])
+  } finally {
+    await second.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15a ③ — 없어진 폴더를 누르면 열리지 않고, 그 자리에서 목록에서 빠진다.
+ *
+ * 최근 목록의 항목은 언제든 지워지거나 옮겨질 수 있다. 검증은 main이 한다 —
+ * 지워진 폴더에서 `execGit`은 exit code가 아니라 **spawn 단계에서 ENOENT로 reject**하므로
+ * (Task 2 실측: "spawn git ENOENT"), 그 문구가 그대로 화면에 뜨면 git이 안 깔린 것처럼 읽힌다.
+ * 그래서 handler가 검증 실패와 같은 문구로 모은다.
+ *
+ * 목록 제거는 스토어의 `try/catch` 안에서 일어난다(호출부가 아니라) — `runWrite`는 재진입
+ * 거부(busy)에도 `false`를 주므로 호출부에서 판정하면 멀쩡한 저장소를 목록에서 날린다.
+ */
+test('E15a — 없어진 저장소를 누르면 열리지 않고 최근 목록에서 빠진다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    // 목록에 남은 채 폴더만 사라진 상태를 만든다 — 사용자가 Finder에서 지운 그 경우다
+    await rm(repoB, { recursive: true, force: true })
+
+    await window.getByTestId('repo-switcher').click()
+    await window.getByTestId(`repo-switcher-item-${pathB}`).click()
+
+    // 열리지 않았다 — 화면은 그대로 A이고 이유가 문구로 뜬다
+    await expect(window.getByTestId('error')).toContainText('이제 Git 저장소가 아니에요')
+    await expect(window.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // 그리고 목록에서 빠졌다 — 다시 열어 보면 A(지금 저장소)와 '다른 폴더 열기'만 남는다
+    await window.getByTestId('repo-switcher').click()
+    expect(await switcherItemIds(window)).toEqual([
+      `repo-switcher-item-${pathA}`,
+      'repo-switcher-browse',
+    ])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true }).catch(() => {})
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15a ④ — ⌘O가 폴더 선택을 연다.
+ *
+ * OS 폴더 선택 다이얼로그는 Playwright로 열 수도 닫을 수도 없다. 대신 main에서 `repo:select`
+ * IPC 핸들러를 감싸 호출 수를 센다 — E14b가 `repo:status`에 이미 쓴 기법이다(:3235). 원본을
+ * 부르지 않고 `null`(사용자가 취소한 것과 같은 응답)을 돌려주므로 다이얼로그가 실제로 뜨지
+ * 않는다. `_invokeHandlers`는 Electron 내부 필드라 업그레이드하면 깨질 수 있지만, 그때
+ * `patched` 단언이 조용히 통과하는 대신 명시적으로 실패한다.
+ */
+test('E15a — ⌘O가 폴더 선택을 연다', async () => {
+  const repo = await createRepoWithChange()
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    const patched = await app.evaluate(({ ipcMain }) => {
+      const impl = ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
+      }
+      const original = impl._invokeHandlers.get('repo:select')
+      if (original === undefined) return false
+      const globals = globalThis as unknown as { __selectCalls: number }
+      globals.__selectCalls = 0
+      // 다이얼로그를 실제로 띄우지 않도록 원본을 부르지 않고 null(취소)로 답한다
+      impl._invokeHandlers.set('repo:select', () => {
+        globals.__selectCalls += 1
+        return null
+      })
+      return true
+    })
+    // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
+    expect(patched, 'repo:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
+      true,
+    )
+
+    await window.keyboard.press('Meta+o')
+    await expect
+      .poll(
+        () =>
+          app.evaluate(() => (globalThis as unknown as { __selectCalls: number }).__selectCalls),
+        { timeout: 5_000 },
+      )
+      .toBe(1)
+    // 취소로 답했으니 열려 있던 저장소는 그대로다
+    await expect(window.getByTestId('repo-path')).toHaveText(realpathSync(repo))
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
   }
 })

@@ -592,3 +592,67 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **`packages/**`가 eslint 범위 밖이다** (Task 2b 실측). `eslint.config.mjs:10`이 `apps/desktop/src/renderer/src/**`만 잡아서, `packages/` 아래 파일은 `File ignored because no matching configuration was supplied`가 된다. E14b가 의도적으로 좁힌 범위가 맞지만 부작용이 있다 — 거기 적은 `eslint-disable` 지시자는 **죽은 주석**이 되고, `reportUnusedDisableDirectives: 'error'`도 렌더러 블록에만 걸려 있어 아무도 알려주지 않는다(규칙이 도는 것처럼 오해시킨다). `apps/desktop/test/**`가 tsconfig `include` 밖인 것과 같은 부류다.
 - E14b에서 넘어온 것들: E14c(참조 안정화로 `exhaustive-deps` 억제 12곳 해소) · `TerminalDock`의 `[]` 이펙트 두 개가 마운트 시점 `sessions`를 굳혀 **사이드 접기 refit이 실제로 안 돈다**(창 리사이즈는 `attach` 부수효과가 가려 준다) · `apps/desktop/test/**`가 tsconfig `include` 밖.
 - **`sanitizeSettings`의 `leftCollapsed`·`rightCollapsed`(E12)에 아직 그물이 없다** (Task 2b 실측). `packages/ipc-contract/test/settings.test.ts`는 있지만 나중에 추가된 필드가 테스트 없이 들어온 이력이 있다 — `recentRepos`는 이번에 막았고, 나머지 둘은 남아 있다.
+
+---
+
+## 실행 기록
+
+여기 없는 항목은 위 「후속 노트」에 이미 적혀 있다 — 중복해 적지 않는다.
+
+### 플랜과 다르게 구현한 것
+
+| # | 플랜이 적은 것 | 실제 | 왜 |
+|---|---|---|---|
+| 1 | Task 2 스니펫이 `execGit`의 `exitCode !== 0`으로 없어진 폴더를 걸러낸다 | **spawn 단계 ENOENT로 reject**된다 — `exitCode` 분기에 도달하지 못한다. `.catch(() => null)`로 모으고 `check === null`도 실패로 본다 | 없어진 폴더는 정확히 최근 목록이 가장 흔히 겪는 경우다. 그대로 두면 `spawn git ENOENT`가 화면에 떠 "git이 안 깔렸다"로 읽힌다. bare repo·`.git` 디렉터리는 exit 0에 `false`를 출력하므로 stdout까지 본다 |
+| 2 | Task 3에서 `worktree-label.ts`의 `shortenAbove`를 재사용 | **`shortenParent`를 그대로 썼다** | `shortenAbove`는 리프 이름이 겹칠 때 구분되는 상위 폴더까지 붙이는 함수다. 저장소 이름은 항상 깊이 1이라 그 충돌 해소가 필요 없다. 두 함수 모두 `home`을 요구해 `RepoSwitcher`에 `home` prop이 늘었다 |
+| 3 | Task 3에서 전환기(호출부)가 `openRepository`의 `false`를 보고 `removeRecentRepo`를 부른다 | **스토어의 `repo.open` `try/catch` 안에서 지운다** (`repository-store.ts:488`) | `runWrite`는 `get().busy`면 `run`을 부르지도 않고 `false`를 준다. 호출부는 "저장소가 없어졌다"와 "다른 쓰기가 진행 중이다"를 구분할 수 없어, 바쁜 순간에 누른 **멀쩡한 저장소가 목록에서 날아간다** |
+| 4 | Task 3 표시 목록 = `store.recentRepos` | **`pushRecentRepo(recent, currentPath)`** | `init()`이 최근 목록에 넣지 않아 시작 직후 현재 저장소가 목록에 없다. 같은 순수 규칙을 재사용하면 이미 맨 앞인 경우 결과가 `recent`와 같아 분기가 필요 없다 |
+| 5 | 스펙 §3 "없어진 경로는 흐리게 표시" | **구현하지 않았다 (의도적)** | 누르기 전에 알려면 팝오버를 열 때마다 항목 10개를 존재 확인 IPC로 물어야 한다(YAGNI). 눌렀을 때 문구가 뜨고 그 자리에서 목록에서 빠지는 것으로 충분하다 — E2E ③이 그 흐름을 문다 |
+| 6 | Task 4가 E2E 세 단언으로 유출 3건을 전부 문다 | **`headInfos`만 스토어 단위 테스트로 옮겼다** (`dc3ac73`) | `headInfos`는 경로::HEAD 캐시라 화면에 드러나지 않는다 — 실측으로 `headInfos: {}`를 빼도 E2E는 초록이었다(그물 없는 수정). `repository-store-refresh.test.ts`의 가짜 IPC 브리지 하네스를 같은 방식으로 깔아 스토어를 직접 돌렸다 |
+| 7 | 기대 테스트 수 614 | **622** | Task 2b의 `sanitizeSettings` 방어 테스트 7건(→621)과 Task 4의 스토어 단위 1건(→622) |
+| 8 | E2E 5건 | **4건**(Task 5) + Task 4가 이미 넣은 유출 1건 = **총 5건**, e2e 129 → 133 | Task 4가 "유출이 남지 않는다"를 먼저 써서 빨간 것을 확인한 뒤 고쳤다(TDD) — 그 1건이 129번째로 이미 커밋에 들어가 있었다 |
+
+### Task 4 Step 2 — 어느 단언이 빨갛고 어느 것이 초록이었나
+
+**세 단언 전부 빨강**이었다. `lastFetchAt`·`activeWorktree`·`headInfos` 초기화를 각각 빼면 대응하는 단언이 실패한다. 다만 무는 층이 다르다:
+
+- `lastFetchAt` → E2E (브랜치 탭 `fetch-at`의 "n분 전 가져옴"이 새 저장소에 남는다)
+- `activeWorktree` → E2E (도크 헤더가 옛 워크트리를 가리키고, 같은 값이 터미널 cwd라 셸이 옛 폴더에서 뜬다)
+- `headInfos` → **스토어 단위 테스트만**. 화면에 드러나는 자리가 없어 E2E는 이 필드를 빼도 초록이었다. 스토어를 renderer 밖으로 노출하지 않으므로 E2E에서 볼 방법 자체가 없다
+
+### Task 5 — E2E 4건과 반증 대응표
+
+`⌘O` 단언은 **`repo:select` IPC 핸들러 호출 수 === 1**로 했다. 채널 이름은 `CHANNELS.repoSelect = 'repo:select'`로 플랜대로 맞았고(`packages/ipc-contract/src/index.ts:184`), `patched`는 `true`였다. 원본을 부르지 않고 `null`(사용자 취소)로 답하므로 OS 다이얼로그가 실제로 뜨지 않는다. 취소로 답한 뒤 `repo-path`가 그대로인 것까지 함께 본다.
+
+**보너스 — E14b의 "저장소가 바뀌면 옛 ⌘F 스코프가 무효"도 넣었다.** E2E ①에서 저장소 A의 히스토리에 ⌘F를 열어 둔 채 전환하고 `find-bar`가 사라졌는지 본다. 이 에픽 전까지 저장소를 두 번 여는 E2E가 하나도 없어 `App.tsx:402`의 렌더 중 파생이 코드 리뷰로만 지켜지고 있었다.
+
+각 무력화마다 **재빌드 후** 해당 테스트만 돌렸다(`npx playwright test`는 빌드하지 않는다).
+
+| 무력화 | 위치 | 빨개진 테스트 · 단언 |
+|---|---|---|
+| M1 `...(await fetchSnapshot(opened, HISTORY_LIMIT))` 제거 | `repository-store.ts:513` | ① `file-unstaged-beta.txt` `toBeVisible` (5000ms 타임아웃 — B의 파일이 안 뜬다) |
+| M2 `setFindScope(null)` 제거 | `App.tsx:404` | ① `find-bar` `toHaveCount(0)` (옛 저장소를 겨냥한 찾기가 열린 채 남는다) |
+| M3 성공 후 `saveRecentRepos(recentRepos)` 제거 | `repository-store.ts:521` | ② 재시작 후 목록 순서 — 심어둔 `[C, B]`가 그대로라 B가 C 앞에 오지 않는다 |
+| M4 catch의 `removeRecentRepo` 블록 제거 | `repository-store.ts:488-492` (catch 블록) | ③ 두 번째 팝오버 항목 목록 — 없어진 B가 여전히 남아 있다 |
+| M5 `repo:open`의 `rev-parse` 검증 제거 | `git-handlers.ts:143` | ③ `error`가 "이제 Git 저장소가 아니에요"를 담지 않는다 |
+| M6 `⌘O` keydown 분기를 `false`로 | `App.tsx:478` | ④ `__selectCalls` `toBe(1)` (5000ms 폴링 뒤 0) |
+
+**안 물린 것은 없다** — 6개 무력화가 각각 최소 한 단언을 물었다. 무력화는 전부 `git checkout`으로 원복했고 최종 트리는 E2E 파일 · README · 이 문서만 바뀌었다.
+
+E2E ②가 "B가 목록에 있다"가 아니라 **순서**를 보는 이유: B는 테스트가 직접 심은 값이라 앱이 한 줄도 저장하지 않아도 "있다"는 통과한다. `[C, B]`로 심고 B로 전환한 뒤(최신이 앞이므로 `[B, C]`가 되어야 한다) 재시작해 뒤집힌 순서가 남았는지 본다 — M3이 정확히 여기서 걸린다.
+
+픽스처는 Task 4의 관용구를 그대로 재사용했다(`seedRecentRepos` 헬퍼로 추출): `autoFetch: false` 필수 · `recentRepos`를 `userData/settings.json`에 미리 심기. `createRepoWithChange`는 `createRepoWithFile(name)`으로 일반화했다 — 저장소 두 개의 변경 파일 이름이 같으면 "화면이 정말 바뀌었나"를 경로 텍스트 말고 내용으로 확인할 방법이 없다.
+
+### 최종 게이트 다섯
+
+| 게이트 | 기대 | 실측 |
+|---|---|---|
+| `pnpm lint` | 0 errors / 5 warnings | **0 errors / 5 warnings** ✅ |
+| `pnpm typecheck` | 6/6 | **6/6 Done** ✅ |
+| `pnpm test` | 622 | **52 files / 622 passed** ✅ (이번 회차엔 `packages/git-adapter` 15000ms 플레이크 없음) |
+| `pnpm --filter @git-gui/desktop build` | 성공 | **✓ built in 1.58s** ✅ |
+| `pnpm --filter @git-gui/desktop e2e` | 133 | **133 passed (3.0m)** ✅ |
+
+### README
+
+`README.md` §현재 상태의 에픽 나열 문단 끝에 E15a 한 문장을 더했다 — 전환기·최근 목록 10개·재시작 유지·⌘O·없어진 폴더 자동 제거·전환 시 흔적 없음. §다음 단계는 이 에픽과 무관해 건드리지 않았다.
