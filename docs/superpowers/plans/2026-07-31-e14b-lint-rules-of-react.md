@@ -841,7 +841,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 | `App.tsx` ×3 | `store` | App이 스토어 **전체**를 구독해(`App.tsx:95` 셀렉터 없음) 넣으면 모든 스토어 변경마다 재실행된다 |
 | `TerminalDock.tsx` ×5 | `sessions` 등 | `useTerminalSessions`가 매 렌더 새 객체를 준다 |
 | `HistoryPanel.tsx:246` | `jumpTo`·`onSearch`·`findPos`·복합식 | E7i 리뷰가 플레이크를 잡으며 손본 이펙트 — 넣으면 그 회귀가 열린다 |
-| `HistoryPanel.tsx:277` · `ConflictPanel.tsx` ×2 | `virtualizer`·`items` | 가상화 인스턴스가 매 렌더 새 참조 |
+| `HistoryPanel.tsx:277` · `ConflictPanel.tsx` ×2 | ~~`virtualizer`~~·`items`·`headIndex` | **정정(Task 7 실측): `virtualizer`는 안정 참조다** — `@tanstack/react-virtual@3.14.6`의 `dist/esm/index.js:82`가 `useState(() => new Virtualizer(...))`로 1회만 만든다. 진짜 이유는 `items`(매 렌더 새 배열)와 `headIndex`(목록이 늘면 변함) |
 | `AddWorktreeDialog.tsx:55` | `available`·`mainPath` | 열릴 때 1회만 초기화하려고 (Task 4가 remount로 바꾸면 **이 억제 자체가 사라질 수 있다** — 확인한다) |
 
 **표를 그대로 베끼지 말고 각 자리의 실제 코드를 확인하고 쓴다.** 표와 다르면 실제를 따르고
@@ -968,3 +968,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **lint 범위 확대.** 지금은 렌더러 + `react-hooks`만이다. `packages/*`·`src/main`이나 `typescript-eslint` 규칙셋은 별도 판단.
 - `apps/desktop/test/**`가 `tsconfig.json`의 `include`(`["src"]`) 밖이라 타입 검사를 안 받는다. `packages/*/test/**`와 비대칭.
 - e2e 126건 중 40건만 `GIT_GUI_USER_DATA`를 설정한다(게이트 재현성).
+- **잠복 버그 (Task 7이 억제 근거를 쓰다 발견, E14b 범위 밖이라 안 고침):** `TerminalDock`의
+  `[]` 이펙트 둘(`:95` window resize · `:119` ResizeObserver)이 마운트 시점 `sessions`를 클로저에
+  굳힌다. `refitActive`는 그 렌더의 `activeId`를 읽는데(`use-terminal-sessions.ts:236`) 마운트
+  시점엔 항상 `null`이라 **refit이 한 번도 실행되지 않는다.** 즉 창 폭 변화 refit도 사이드 접기
+  refit도 실제로는 동작한 적이 없다(탭 전환·높이 변화는 `:83` 이펙트가 최신 클로저로 담당해
+  터미널이 멀쩡해 보일 뿐). **E14c에서 참조를 안정화하고 의존성을 채우는 것이 곧 이 버그의
+  수정이다** — 의존성만 채우지 말고 refit이 실제로 도는지 확인해야 한다.
