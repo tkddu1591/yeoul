@@ -714,3 +714,257 @@ const setFindScope = (scope: FindScope | null) => setFindScopeState({ scope, rep
 > **E2E에 저장소를 두 번 여는 시나리오가 하나도 없기 때문이다**(`repo-picker`/저장소 열기를 건드리는
 > 테스트 0건). E7i 보완 Step 4의 "저장소가 바뀌면 옛 ⌘F 스코프 무효"는 코드 리뷰로만 지켜진다.
 > (b)의 "우측이 접힌 채 미리보기 → 펴진다"도 마찬가지로 그물이 없다.
+
+---
+
+### Task 6: `Tooltip` — `immutability` 해소 + `refs` 근거 있는 억제
+
+**Files:**
+- Modify: `apps/desktop/src/renderer/src/ui/Tooltip.tsx:103-110`
+- Modify: `eslint.config.mjs` (부채 목록에서 `Tooltip.tsx` 제거)
+
+> **컨트롤러가 플랜 작성 중 두 안을 실제로 시험했다. 결과는 확정이다 — 다시 탐색하지 마라.**
+>
+> 1. **원본 ref를 콜백 밖으로 홉 아웃** → 둘 다 그대로 남는다(2 errors).
+> 2. **모듈 수준 헬퍼로 대입을 옮김** → **`immutability`가 사라진다(2 → 1 error).**
+>
+> 남는 `refs`(`cloneElement`에 넘기는 ref 콜백)는 이 패턴 자체에 붙는 것이라 안 풀린다.
+>
+> **정정(Task 6 실측) — 억제를 `ref:` 위에 달면 안 된다.** 규칙은 인자 객체 전체를 하나로 보고
+> **`cloneElement(children, {` 여는 줄**에 보고한다. `ref:` 위에 달면 `Unused eslint-disable
+> directive` + 원래 에러 = **2 errors**가 된다. `cloneElement` 호출 줄 위에 달고, 여러 줄 근거를
+>담으려면 **블록 주석**(`/* */`)을 쓴다 — `//` 연속 줄은 directive가 다음 주석 줄을 가리켜 무효가 된다.
+>
+> **호출부는 19곳이 아니라 31곳이다**(플랜의 19는 E7j 시점 숫자).
+
+- [ ] **Step 1: 모듈 수준 헬퍼로 `immutability`를 없앤다**
+
+`Tooltip.tsx`의 `export function Tooltip` 위에 추가:
+
+```tsx
+/**
+ * ref 병합 — 트리거가 이미 갖고 있던 ref에도 노드를 전달한다 (E7j).
+ * 모듈 수준에 두는 이유(E14b): 컴포넌트 안에서 children.props.ref에 직접 쓰면
+ * react-hooks/immutability가 "props를 수정한다"고 잡는다. 대입을 이 함수로 옮기면
+ * 컴파일러가 children을 추적하지 못해 규칙이 풀린다(실측: 2 errors → 1).
+ */
+function assignRef(ref: unknown, node: HTMLElement | null): void {
+  if (typeof ref === 'function') (ref as (n: HTMLElement | null) => void)(node)
+  else if (ref !== null && typeof ref === 'object')
+    (ref as { current: HTMLElement | null }).current = node
+}
+```
+
+`cloneElement` 쪽:
+
+```tsx
+  const originalRef = (children.props as { ref?: unknown }).ref
+  const trigger = cloneElement(children, {
+    // eslint-disable-next-line react-hooks/refs -- cloneElement에 넘기는 ref 콜백에 붙는
+    // 경고다. 트리거 요소를 추가 DOM 노드 없이 감싸려면 이 패턴 말고 방법이 없고, 호출부가
+    // 19곳이라 구조를 바꾸는 위험이 이득보다 크다. 시도한 것: ① 원본 ref 홉 아웃 → 안 풀림
+    // ② 모듈 헬퍼(위 assignRef) → immutability만 풀리고 이건 남음 (E14b 실측)
+    ref: (node: HTMLElement | null) => {
+      triggerRef.current = node
+      assignRef(originalRef, node)
+    },
+```
+
+- [ ] **Step 2: 정확히 한 건만 억제됐는지 확인한다**
+
+```bash
+cd "/Users/sangyeop_kim/git gui" && npx eslint apps/desktop/src/renderer/src/ui/Tooltip.tsx
+```
+Expected: **에러 0 · 경고 0**. `immutability`가 남아 있으면 헬퍼가 제대로 분리되지 않은 것이다.
+`reportUnusedDisableDirectives`가 켜져 있으므로 억제가 불필요해지면 그것도 에러로 잡힌다.
+
+- [ ] **Step 3: 부채 목록에서 `Tooltip.tsx`를 지운다**
+
+- [ ] **Step 4: 게이트 — 툴팁 19곳이 살아 있는지**
+
+```bash
+cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+```
+Expected: lint 에러 0 · 6/6 · 606 · **126 passed**
+
+E7j가 남긴 툴팁 E2E(중첩 겹침·`data-tooltip` 단언 등)가 이 변경의 그물이다.
+
+- [ ] **Step 5: ref 병합이 실제로 아직 도는지 확인한다**
+
+린트만 통과하고 기능이 죽는 것이 이 태스크의 최대 위험이다. `Tooltip`이 감싼 요소 중
+**자기 ref를 쓰는 곳**을 하나 찾아(없으면 그렇게 보고한다) 그 ref가 여전히 채워지는지
+E2E나 프로브로 확인한다. 확인 방법과 결과를 보고에 적는다.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+cd "/Users/sangyeop_kim/git gui"
+git add apps/desktop/src/renderer/src/ui/Tooltip.tsx eslint.config.mjs
+git commit -m "fix(desktop): E14b Tooltip immutability 해소 — ref 대입을 모듈 헬퍼로
+
+children.props.ref에 컴포넌트 안에서 직접 쓰면 react-hooks/immutability가 잡는다.
+대입을 모듈 수준 함수로 옮기면 풀린다(실측 2 errors → 1).
+
+남는 react-hooks/refs는 cloneElement ref 콜백 패턴 자체에 붙는 것이라 안 풀린다 —
+시도한 두 가지와 함께 근거를 주석에 남기고 억제한다. 호출부 19곳을 흔드는 위험이
+이득보다 크다.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: 억제 위생 — 죽은 3건 삭제 + 남는 13건에 이유
+
+**Files:**
+- Modify: `App.tsx:221` · `:355` · `:471` (죽은 억제 삭제)
+- Modify: `App.tsx` ×3 · `TerminalDock.tsx` ×5 · `HistoryPanel.tsx` ×2 · `ConflictPanel.tsx` ×2 · `AddWorktreeDialog.tsx` ×1 (이유 추가)
+
+> **이 태스크의 산출물은 E14c로 넘기는 인수인계다.** 지금 억제 13곳 중에는 근거가 없는 것도 있다.
+> E14c(참조 안정화)가 이 주석을 읽고 "이건 진짜 못 넣는 것인가, 그냥 귀찮아서인가"를 판단하게 된다.
+
+- [ ] **Step 1: 죽은 억제 3건을 지운다**
+
+`App.tsx:221` · `:355` · `:471`. `reportUnusedDisableDirectives: 'error'`가 켜져 있으므로
+남겨두면 게이트가 잡는다.
+
+> **주의:** Task 4·5가 `App.tsx`를 고치며 억제의 유효/무효가 바뀌었을 수 있다.
+> **지울 대상을 줄 번호가 아니라 `pnpm lint`가 지목하는 것으로 정한다.**
+
+- [ ] **Step 2: 남는 억제에 각각 이유를 단다**
+
+각 억제 바로 위에 **왜 그 의존성을 넣을 수 없는지** 한 줄. 조사한 사실은 다음과 같다:
+
+| 위치 | 빠진 의존성 | 사실 |
+| --- | --- | --- |
+| `App.tsx` ×3 | `store` | App이 스토어 **전체**를 구독해(`App.tsx:95` 셀렉터 없음) 넣으면 모든 스토어 변경마다 재실행된다 |
+| `TerminalDock.tsx` ×5 | `sessions` 등 | `useTerminalSessions`가 매 렌더 새 객체를 준다 |
+| `HistoryPanel.tsx:246` | `jumpTo`·`onSearch`·`findPos`·복합식 | E7i 리뷰가 플레이크를 잡으며 손본 이펙트 — 넣으면 그 회귀가 열린다 |
+| `HistoryPanel.tsx:277` · `ConflictPanel.tsx` ×2 | `virtualizer`·`items` | 가상화 인스턴스가 매 렌더 새 참조 |
+| `AddWorktreeDialog.tsx:55` | `available`·`mainPath` | 열릴 때 1회만 초기화하려고 (Task 4가 remount로 바꾸면 **이 억제 자체가 사라질 수 있다** — 확인한다) |
+
+**표를 그대로 베끼지 말고 각 자리의 실제 코드를 확인하고 쓴다.** 표와 다르면 실제를 따르고
+보고한다. 그리고 **"E14c가 안정화하면 풀 수 있다"** 는 취지를 함께 적어 다음 에픽이 이어받게 한다.
+
+- [ ] **Step 3: 게이트**
+
+```bash
+cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+```
+Expected: lint 에러 0 · 6/6 · 606
+
+- [ ] **Step 4: 커밋**
+
+```bash
+cd "/Users/sangyeop_kim/git gui"
+git add apps/desktop/src/renderer/src
+git commit -m "chore(desktop): E14b 억제 위생 — 죽은 3건 삭제, 남는 것에 이유
+
+reportUnusedDisableDirectives가 아무것도 안 막는 억제를 잡는다. 남기는
+exhaustive-deps 억제에는 왜 그 의존성을 못 넣는지 한 줄씩 붙였다 — E14c가 이 주석을
+읽고 참조 안정화 대상을 판단한다.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: 리렌더 측정 기준선 + 최종 게이트 + 실행 기록
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-07-31-e14b-lint-rules-of-react-design.md` (§6 표 채우기 — **이 태스크만 스펙을 만진다**)
+- Modify: `docs/superpowers/plans/2026-07-31-e14b-lint-rules-of-react.md` (이 파일 — 실행 기록)
+- Modify: `eslint.config.mjs` (부채 목록 블록 삭제)
+- Modify: `README.md` (해당하면)
+
+- [ ] **Step 1: 부채 목록이 비었음을 확인하고 블록을 지운다**
+
+**정정(Task 6 실측) — 「비면 지운다」는 도달 불가능한 상태였다.** eslint 10은 `files: []`를 거부하고
+**설정 로드 자체가 실패해 lint가 통째로 죽는다**(`Key "files": Expected value to be a non-empty array`).
+따라서 **마지막 항목을 빼는 태스크가 곧 블록을 지우는 태스크**다 — 규칙 부채 블록은 Task 6이 이미
+삭제했다. 여기서는 **이미 지워졌음을 확인**하고, 죽은 억제 블록(Task 7이 지운다)만 남았는지 본다. `incompatible-library` 영구 완화 블록은 남긴다.
+
+- [ ] **Step 2: 리렌더 기준선을 잰다 (스펙 §6)**
+
+네 조작에서 **컴포넌트별 렌더 횟수와 커밋 시간**:
+1. 파일 A→B 클릭 2. 에디터에서 외부 저장 3. 히스토리 스크롤로 더 불러오기 4. 터미널에 한 줄 입력
+
+`React.Profiler`의 `onRender`로 잰다. **계측 코드는 프로덕션에 남기지 않는다** — 임시로 넣고
+재고 되돌린다(E14a의 MutationObserver 프로브와 같은 방식). 되돌린 뒤 `git status`가 깨끗한지
+확인하고 보고에 적는다.
+
+계측 모양:
+
+```tsx
+// App.tsx — 임시. 재고 나면 지운다
+import { Profiler } from 'react'
+
+const marks = ((window as unknown as { __renders: Record<string, { count: number; ms: number }> }).__renders ??= {})
+const record = (id: string, _phase: string, actualDuration: number) => {
+  const m = (marks[id] ??= { count: 0, ms: 0 })
+  m.count += 1
+  m.ms += actualDuration
+}
+// 재려는 패널을 감싼다: <Profiler id="DiffPanel" onRender={record}>…</Profiler>
+```
+
+E2E 쪽에서 조작 전에 `window.__renders = {}`로 비우고, 조작 후 읽어 표로 만든다:
+
+```ts
+await window.evaluate(() => { (window as unknown as { __renders: unknown }).__renders = {} })
+// …조작…
+const marks = await window.evaluate(() => (window as unknown as { __renders: unknown }).__renders)
+```
+
+`useNow()`의 60초 틱 비용은 `NOW_TICK_MS`를 임시로 100ms로 낮춰 10초 동안 재고, 60초 기준으로
+환산해 적는다 — 60초를 실제로 기다리지 않는다.
+
+`useNow()`의 60초 틱이 더하는 비용도 같은 표에 넣는다 — 스펙이 "무시할 수준일 것으로 보지만
+재고 적는다"고 약속했다.
+
+결과를 스펙 §6에 표로 채우고 실행 기록에도 남긴다.
+
+- [ ] **Step 3: 다섯 게이트를 전부 실행한다**
+
+```bash
+cd "/Users/sangyeop_kim/git gui" && pnpm lint
+cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
+cd "/Users/sangyeop_kim/git gui" && pnpm test
+cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
+cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+```
+Expected: lint **에러 0 · 경고 5**(`incompatible-library`만) · 6/6 · **606** · 성공 · **126**
+
+- [ ] **Step 4: 실행 기록을 쓴다**
+
+이 플랜 말미에 「실행 기록」절을 추가한다. 반드시 담을 것:
+- 플랜과 다르게 구현한 모든 편차와 이유
+- Task 4의 회귀 테스트가 어떤 흐름·testid를 썼는지
+- Task 5에서 (가)/(나) 중 무엇을 골랐고 `selectCommit` 호출부가 몇 곳이었는지
+- Task 6에서 ref 병합이 아직 도는지 어떻게 확인했는지
+- Task 7에서 표와 다른 자리가 있었는지
+- 각 반증의 빨강/초록 출력
+- 최종 게이트 다섯
+- 리렌더 기준선 표
+
+- [ ] **Step 5: 커밋**
+
+```bash
+cd "/Users/sangyeop_kim/git gui"
+git add docs/superpowers eslint.config.mjs README.md
+git commit -m "docs: E14b 실행 기록 + 리렌더 기준선 — 부채 목록 비움
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+## 후속 노트 (이 에픽에서 하지 않음)
+
+- **E14c — 참조 안정화.** `exhaustive-deps` 14건. App의 스토어 전체 구독을 셀렉터로 쪼개고, `useTerminalSessions`의 반환을 안정화하고, 콜백을 안정 참조로 만든다. Task 7이 남긴 주석이 인수인계다.
+- **React Compiler.** Task 8의 기준선을 보고 판단한다. 컴파일러가 건너뛰는 5개가 하필 가장 무거운 가상 스크롤 목록들이라 기대 이득의 상당 부분이 실현되지 않는다.
+- **`@tanstack/react-virtual` 잎 컴포넌트 분리 또는 교체.** 최적화 이득뿐 아니라 **검사 범위 회복**이 근거다 — 지금 그 5개 컴포넌트는 어떤 React 규칙 검사도 못 받는다(실제로 `Date.now()` 버그 2건이 그 안에 숨어 있었다).
+- **lint 범위 확대.** 지금은 렌더러 + `react-hooks`만이다. `packages/*`·`src/main`이나 `typescript-eslint` 규칙셋은 별도 판단.
+- `apps/desktop/test/**`가 `tsconfig.json`의 `include`(`["src"]`) 밖이라 타입 검사를 안 받는다. `packages/*/test/**`와 비대칭.
+- e2e 126건 중 40건만 `GIT_GUI_USER_DATA`를 설정한다(게이트 재현성).
