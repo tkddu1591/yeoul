@@ -370,6 +370,22 @@ export function App() {
   const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
     null,
   )
+  // 저장소 전환 시 열려 있던 ⌘F 검색을 닫는다 — 옛 저장소 기준 검색 상태가 새 저장소 화면에
+  // 남지 않도록 (E7i 보완 Step 4). E14b — 예전엔 useEffect([store.repoPath])에서 setFindScope(null)을
+  // 불렀다(set-state-in-effect). 같은 규칙을 "직전에 본 저장소를 함께 기억했다가 렌더 중 비교"로
+  // 옮긴다 — 이펙트는 화면이 한 번 나간 뒤에 다시 렌더하지만, 이 쪽은 나가기 전에 끝난다
+  // (같은 컴포넌트를 향한 렌더 중 setState라 React가 공식으로 허용하는 패턴)
+  //
+  // 왜 플랜의 { scope, repo } 한 묶음 상태가 아니라 상태 둘인가 (E14b 실측 편차): setFindScope를
+  // repoPath를 클로저로 문 새 함수로 감싸면, 아래 ⌘F 키다운 리스너가 []로 마운트 시 1회만 등록되므로
+  // **첫 렌더의 repoPath**를 영영 붙든다. 앱은 repoPath가 null인 채(RepoPicker) 마운트되므로 저장소를
+  // 연 뒤 ⌘F를 누르면 repo가 null로 기록되고 비교가 매번 어긋나 찾기가 아예 안 열린다
+  // (실측: ⌘F E2E 7건 전부 빨강). useState가 준 안정된 setter를 그대로 두면 그 함정이 없다.
+  const [findScopeRepo, setFindScopeRepo] = useState(store.repoPath)
+  if (findScopeRepo !== store.repoPath) {
+    setFindScopeRepo(store.repoPath)
+    setFindScope(null)
+  }
   // E7h ⑥ 보완 — 같은 스코프로 재⌘F해도 findScope 값은 안 바뀌어(bail-out) FindBar가 재마운트도
   // 재렌더도 안 되니, 재⌘F마다 증가시켜 FindBar의 focusSignal로 흘려보내 재포커스를 강제한다
   const [findNonce, setFindNonce] = useState(0)
@@ -460,16 +476,11 @@ export function App() {
     prevConflictsRef.current = conflictCount
   }, [conflictCount])
 
-  // E12 — 우측이 접힌 채 커밋 상세가 뜨면 죽은 클릭이다. 히스토리 목록을 직접 클릭하는 경로는
-  // 우측 자체가 접혀 있어 애초에 불가능하지만, 헤더 보관함(ShelfPopover) "미리보기"처럼 우측
-  // 밖에서 store.selectCommit을 부르는 경로가 있다(ShelfPopover onPreview) — commitDetail이
-  // 채워지는 순간을 공통으로 잡아 우측을 편다
-  useEffect(() => {
-    if (store.commitDetail === null) return
-    expandRightIfCollapsed()
-    // commitDetail 값 자체(어느 커밋인지)에 반응할 필요는 없다 — null→값 전이만 신호
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.commitDetail])
+  // E12 — 우측이 접힌 채 커밋 상세가 뜨면 죽은 클릭이다. E14b 전까지는 commitDetail이 채워지는
+  // 순간을 이펙트로 공통으로 잡아 우측을 폈지만(set-state-in-effect), commitDetail을 null에서
+  // 값으로 바꾸는 경로는 store.selectCommit 하나뿐이고 그 호출부가 아래 2곳뿐이라(실측) 호출부에서
+  // 직접 편다 — 이펙트가 사라지고, 상세가 도착하기를 기다리지 않고 클릭 즉시 펴진다.
+  // 호출부가 늘면 여기서 다시 중앙집중을 검토한다(플랜 Task 5의 (나)안: 스토어가 신호를 남긴다).
 
   // E7e ① 자동 원격 새로고침 — 시작 직후 1회 + 10분 주기. fetch만 던지고 갱신은 감시가 담당.
   // 훅 순서 불변 — 이른 반환보다 앞 (E7d ① 교훈)
@@ -494,12 +505,6 @@ export function App() {
       document.body.classList.toggle('is-fullscreen', isFullScreen)
     })
   }, [])
-
-  // 저장소 전환 시 열려 있던 ⌘F 검색을 닫는다 — 옛 저장소 기준 검색 상태가 새 저장소 화면에
-  // 남지 않도록 (E7i 보완 Step 4). 훅 순서 불변 — 이른 반환보다 앞 (E7d ① 교훈)
-  useEffect(() => {
-    setFindScope(null)
-  }, [store.repoPath])
 
   if (!store.repoPath) {
     return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
@@ -613,7 +618,11 @@ export function App() {
             shelf={store.shelf}
             busy={store.busy}
             onSave={() => void store.shelfSave()}
-            onPreview={(hash) => void store.selectCommit(hash)}
+            onPreview={(hash) => {
+              void store.selectCommit(hash)
+              // 보관함은 헤더에 있어 우측이 접힌 채로도 누를 수 있다 — 상세는 우측에 뜨니 펴 준다 (E14b)
+              expandRightIfCollapsed()
+            }}
             onRestore={(ref) => void store.shelfRestore(ref)}
             onDrop={(ref) => void store.shelfDrop(ref)}
           />
@@ -1125,7 +1134,12 @@ export function App() {
                 findOpen={findScope === 'history'}
                 findNonce={findNonce}
                 onFindClose={() => setFindScope(null)}
-                onSelect={(hash) => void store.selectCommit(hash)}
+                onSelect={(hash) => {
+                  void store.selectCommit(hash)
+                  // 이 목록은 우측 안이라 접힌 동안은 inert — 닿을 수 없다. 그래도 같은 규칙을
+                  // 두 호출부에 나란히 두어, 우측 밖으로 옮겨져도 죽은 클릭이 안 되게 한다 (E14b)
+                  expandRightIfCollapsed()
+                }}
                 onLoadMore={() => void store.loadMoreHistory()}
                 onSearch={(query) => store.searchHistory(query)}
                 onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
