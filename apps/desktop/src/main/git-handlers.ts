@@ -127,6 +127,24 @@ export function registerGitHandlers(): void {
     return registerRepoPath(path)
   })
 
+  // 최근 목록에서 고른 경로로 연다 (E15a). 인자는 디스크 settings.json에서 온 렌더러 입력이라
+  // repoSelect와 **똑같이** 검증한다 — 그냥 registerRepoPath에 넘기면 렌더러가 임의
+  // 디렉터리에서 git을 돌리는 통로가 된다
+  ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown) => {
+    const path = assertString(repoPath)
+    // 폴더가 지워졌으면 execGit이 exit code가 아니라 spawn 단계에서 reject한다(실측: ENOENT,
+    // "spawn git ENOENT"). 그 문구가 그대로 화면에 뜨면 git이 안 깔린 것처럼 읽히고, 없어진
+    // 폴더는 정확히 최근 목록이 겪는 경우라 검증 실패와 같은 문구로 모은다
+    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
+      () => null,
+    )
+    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
+    if (check === null || check.exitCode !== 0 || check.stdout.trim() !== 'true') {
+      throw new Error('그 폴더는 이제 Git 저장소가 아니에요. 목록에서 지울게요.')
+    }
+    return registerRepoPath(path)
+  })
+
   ipcMain.handle(CHANNELS.repoInitialPath, async () => {
     const initial = process.env.GIT_GUI_E2E_REPO
     if (!initial) return null

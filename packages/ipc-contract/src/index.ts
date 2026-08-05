@@ -33,8 +33,9 @@ import type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 /**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
  *
- * 신뢰 규칙: `repoPath`는 repo.select() 또는 repo.initialPath()가 반환한 값만 유효하다 —
- * main은 자신이 돌려준 경로만 allowlist로 신뢰하고 그 외는 거부한다.
+ * 신뢰 규칙: `repoPath`는 repo.select()·repo.initialPath()·repo.open()이 반환한 값만 유효하다 —
+ * main은 자신이 돌려준 경로만 allowlist로 신뢰하고 그 외는 거부한다. 셋 다 같은 검증
+ * (rev-parse --is-inside-work-tree + 루트 정규화)을 거친 뒤에만 값을 돌려준다 (E15a).
  * 파일 `path`는 저장소 루트 상대 경로만 허용된다 (절대 경로·`..`·빈 문자열 거부).
  */
 export interface GitApi {
@@ -43,6 +44,13 @@ export interface GitApi {
     select(): Promise<string | null>
     /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
+    /**
+     * 다이얼로그 없이 경로로 연다 — 최근 목록에서 고를 때 (E15a).
+     * 반환 경로는 저장소 루트로 정규화된다. **select()와 동일한 검증을 거친다** —
+     * 이 인자는 디스크 설정에서 온 렌더러 입력이라 신뢰할 수 없다.
+     * 저장소가 아니면 throw (전환기가 그 신호로 목록에서 제거한다)
+     */
+    open(path: string): Promise<string>
     status(repoPath: string): Promise<RepositoryStatus>
     /** .git 감시 시작 — 이후 외부 변경이 repo:changed push로 온다. 새 경로로 부르면 이전 감시는 교체된다 (E7b) */
     watch(repoPath: string): Promise<void>
@@ -179,6 +187,7 @@ export const CHANNELS = {
   repoWatch: 'repo:watch',
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
+  repoOpen: 'repo:open',
   repoOpenPath: 'repo:open-path',
   repoHome: 'repo:home',
   remotesFetch: 'remotes:fetch',
@@ -323,6 +332,8 @@ export interface AppSettings {
   leftCollapsed?: boolean
   /** 우측 사이드(히스토리·상세) 접힘 (E12) */
   rightCollapsed?: boolean
+  /** 최근 연 저장소 — 최신이 앞 (E15a) */
+  recentRepos?: string[]
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -348,6 +359,14 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof candidate.leftCollapsed === 'boolean') settings.leftCollapsed = candidate.leftCollapsed
   if (typeof candidate.rightCollapsed === 'boolean') {
     settings.rightCollapsed = candidate.rightCollapsed
+  }
+  // 배열이 아니면 통째로 버리고, 문자열 아닌 원소만 골라낸다 — 이 목록은 디스크 파일에서 오고
+  // 그 값이 repo.open의 인자가 된다 (E15a). sparse array의 hole은 spread로 실체화한 뒤
+  // filter가 걷어낸다 (assertStringArray와 같은 이유)
+  if (Array.isArray(candidate.recentRepos)) {
+    settings.recentRepos = [...(candidate.recentRepos as unknown[])].filter(
+      (entry): entry is string => typeof entry === 'string',
+    )
   }
   return settings
 }

@@ -29,6 +29,7 @@ const api: GitApi = {
   repo: {
     select: () => ipcRenderer.invoke(CHANNELS.repoSelect),
     initialPath: () => ipcRenderer.invoke(CHANNELS.repoInitialPath),
+    open: (path) => ipcRenderer.invoke(CHANNELS.repoOpen, path),
     status: (repoPath) => ipcRenderer.invoke(CHANNELS.repoStatus, repoPath),
     watch: (repoPath) => ipcRenderer.invoke(CHANNELS.repoWatch, repoPath),
     // 이 앱 최초의 push 구독 브리지 — 콜백을 감싸 등록하고 해제 함수를 돌려준다 (E7b)
