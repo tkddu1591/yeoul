@@ -24,6 +24,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
+import { RepoSwitcher } from './components/RepoSwitcher'
 import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
@@ -408,6 +409,7 @@ export function App() {
   // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다.
   // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
   // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
+  // ⌘O/Ctrl+O — 다른 폴더 열기 (E15a). 헤더 전환기의 "다른 폴더 열기…"와 같은 동작이다
   // ⌘⌥1/⌘⌥2 — 좌·우 사이드 접기 토글 (E12). event.altKey를 반드시 같이 봐야 한다 — macOS는
   // Option을 누른 채면 event.key가 '1'이 아니라 특수문자(예: '¡')로 바뀐다(실측) — event.key만
   // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
@@ -464,6 +466,13 @@ export function App() {
         else if (scope === 'changes') expandLeftIfCollapsed()
         setFindScope(scope)
         setFindNonce((n) => n + 1)
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 'o' || event.key === 'O')) {
+        // ⌘O — 다른 폴더 열기 (E15a). Option 조합이 아니라 event.key로 충분하다(대문자는 ⇧⌘O)
+        event.preventDefault()
+        // 이 리스너는 []로 마운트 시 1회만 등록된다 — 렌더 시점의 `store`를 닫아 쓰면 **첫 렌더의**
+        // 스토어를 영영 붙든다(E14b 실측: 같은 함정에 ⌘F E2E 7건이 통째로 빨개졌다).
+        // getState()는 호출 시점의 스토어를 읽으므로 오래된 클로저가 생기지 않는다
+        void useRepositoryStore.getState().openRepository()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -526,7 +535,6 @@ export function App() {
     status?.state === 'merging' && stagedCount === 0
       ? `${T.branch} ${T.merge}`
       : suggestCommitMessage(status?.changes ?? [])
-  const repoName = store.repoPath.split('/').pop() ?? store.repoPath
   // 마지막 저장(HEAD)이 원격에 이미 백업됐는가 — 실행취소·메시지 고치기 확인창의 경고 병기 (판정 편차는 플랜 표)
   const headBackedUp = status !== null && isHeadBackedUp(status.branch)
   // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
@@ -559,15 +567,15 @@ export function App() {
             )}
           </Button>
         </Tooltip>
-        <div className="app__repo">
-          <strong>{repoName}</strong>
-          {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
-          <Tooltip content={store.repoPath} summary={store.repoPath}>
-            <span className="app__repo-path" data-testid="repo-path">
-              {store.repoPath}
-            </span>
-          </Tooltip>
-        </div>
+        {/* E15a — 저장소 이름 자리가 곧 전환기다. 저장소를 한 번 열면 다른 저장소로 바꿀 진입점이
+            앱에 아예 없었다(아래 RepoPicker는 repoPath가 없을 때만 그려진다) */}
+        <RepoSwitcher
+          currentPath={store.repoPath}
+          home={home}
+          recent={store.recentRepos}
+          busy={store.busy}
+          onOpen={(path) => void store.openRepository(path)}
+        />
         {status && (
           <div className="app__status">
             <BranchSwitcher

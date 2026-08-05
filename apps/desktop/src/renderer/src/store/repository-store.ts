@@ -28,8 +28,10 @@ import {
   type ReadTarget,
 } from './run-guard'
 import { findRevivableChange } from './selection-revive'
+import { pushRecentRepo, removeRecentRepo } from '../components/recent-repos'
 import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
+import { loadRecentRepos, saveRecentRepos } from '../ui/settings/recent-repos-settings'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
@@ -69,6 +71,8 @@ interface RepositoryStore {
   historyRef: string | null
   /** 받아오기 방식 — 설정 영속. syncAfterMerge 등 내부 호출자도 이 값을 읽는다 (E7e) */
   pullMode: PullMode
+  /** 최근 연 저장소 — 최신이 앞. 성공한 열기만 들어간다. 설정 영속 (E15a) */
+  recentRepos: string[]
   shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
@@ -97,7 +101,12 @@ interface RepositoryStore {
   reads: Record<ReadTarget, number>
 
   init(): Promise<void>
-  openRepository(): Promise<void>
+  /**
+   * 저장소를 연다 — path를 주면 최근 목록에서 고른 것(폴더 선택 다이얼로그를 건너뛴다),
+   * 안 주면 다이얼로그를 연다 (E15a). 성공 여부를 반환한다.
+   * 실패한 path는 최근 목록에서 빠진다(없어진 폴더가 계속 남지 않도록).
+   */
+  openRepository(path?: string): Promise<boolean>
   refresh(): Promise<void>
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
   /** 성공 여부를 반환한다 — 병합 후 이동 제안(syncAfterMerge)이 실패 시 받아오기를 잇지 않기 위해 */
@@ -437,6 +446,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   lastFetchAt: null,
   historyRef: null,
   pullMode: loadPullMode(),
+  recentRepos: loadRecentRepos(),
   pulls: [],
   pullDetail: null,
 
@@ -465,26 +475,45 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
-  async openRepository() {
-    await runWrite(set, get, async () => {
-      const path = await git().repo.select()
-      if (!path) return
+  async openRepository(path) {
+    return runWrite(set, get, async () => {
+      // 인자가 있으면 최근 목록에서 고른 것 — 다이얼로그를 건너뛴다. 검증은 main이 한다 (E15a)
+      let opened: string | null
+      try {
+        opened = path === undefined ? await git().repo.select() : await git().repo.open(path)
+      } catch (cause) {
+        // 열기가 막힌 경로는 최근 목록에서 뺀다 — main이 "이제 Git 저장소가 아니에요"로 거절한
+        // 그 경로다. 여기서만 지우는 이유: runWrite가 false를 주는 경우는 재진입 거부(busy)도
+        // 있어서, 호출부의 false 판정으로 지우면 멀쩡한 저장소를 목록에서 날린다 (E15a)
+        if (path !== undefined) {
+          const recentRepos = removeRecentRepo(get().recentRepos, path)
+          set({ recentRepos })
+          saveRecentRepos(recentRepos)
+        }
+        throw cause
+      }
+      if (!opened) return
       // runWrite가 재진입을 거부하므로 refresh()를 부르지 않고 직접 조회한다.
       // 다른 저장소다 — 히스토리 상한도 첫 페이지로 되돌린다
       // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
       // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
       set({ historyRef: null })
       set({
-        repoPath: path,
+        repoPath: opened,
         historyLimit: HISTORY_LIMIT,
         historyRef: null,
-        hostingStatus: await hosting().status(path),
+        hostingStatus: await hosting().status(opened),
         pulls: [],
         ...CLEAR_SELECTIONS,
-        ...(await fetchSnapshot(path, HISTORY_LIMIT)),
+        ...(await fetchSnapshot(opened, HISTORY_LIMIT)),
       })
       // 새 저장소로 감시 교체 (E7b) — 이전 저장소 감시는 main이 새 watch 호출에서 정리한다
-      void git().repo.watch(path)
+      void git().repo.watch(opened)
+      // 최근 목록 갱신 — 성공한 뒤에만. 넘긴 경로가 아니라 main이 정규화한 저장소 루트를 넣는다
+      // (하위 폴더를 골랐을 수 있다 — 이후 IPC에서 유효한 값은 이쪽뿐이다)
+      const recentRepos = pushRecentRepo(get().recentRepos, opened)
+      set({ recentRepos })
+      saveRecentRepos(recentRepos)
     })
   },
 

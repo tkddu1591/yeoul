@@ -1,0 +1,68 @@
+/* 헤더의 저장소 표기를 그대로 감싼 트리거 (E15a) — 이름·경로 2줄 블록은 .app__repo가 그린다.
+   ghost 버튼의 가운데 정렬을 왼쪽으로 되돌려야 헤더가 예전과 같은 자리에 선다 */
+.repo-switcher__trigger {
+  justify-content: flex-start;
+  text-align: left;
+  gap: var(--space-2);
+  /* 좌측 여백만 지운다 — 헤더 왼쪽 끝 기준선이 접기 버튼과 어긋나지 않게 */
+  padding-left: var(--space-2);
+  min-width: 0;
+  color: var(--color-text);
+}
+.repo-switcher__popover {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-2);
+  min-width: 260px;
+}
+.repo-switcher__menu {
+  padding: var(--space-1);
+  max-height: 360px;
+  overflow-y: auto;
+  outline: none;
+}
+.repo-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px 10px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  outline: none;
+}
+.repo-switcher__item[data-focused] {
+  background: var(--color-surface-sunken);
+}
+.repo-switcher__check {
+  width: 14px;
+  flex: none;
+  color: var(--color-accent);
+  display: inline-flex;
+}
+.repo-switcher__label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.repo-switcher__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 이름 위쪽 경로 — 같은 이름 폴더가 여럿일 때 어느 것인지 (워크트리 행과 같은 규칙) */
+.repo-switcher__path {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-switcher__item--browse {
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  color: var(--color-accent);
+}
