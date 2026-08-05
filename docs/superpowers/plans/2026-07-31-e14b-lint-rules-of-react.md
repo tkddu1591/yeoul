@@ -410,6 +410,11 @@ export function BranchSwitcher(/* … */) {
 
 **목록 안에서 반복 렌더되는 곳**(`HistoryPanel:520`의 커밋 행, `ShelfPopover:81`, `WorktreesPanel:132`)은 `useNow()`를 **행마다가 아니라 그 컴포넌트에서 한 번** 부르고 값을 내려 준다. 행 컴포넌트마다 부르면 구독자가 수천 개가 된다.
 
+> **정정(Task 3 실측) — 목록인 곳이 넷이다.** 초안은 셋만 꼽았지만 `ReviewDetailPanel:42`의 시각은
+> 컴포넌트 본문이 아니라 **코멘트마다 렌더되는 별도 컴포넌트 `CommentRow`(`:37`) 안**에 있다.
+> 거기서 `useNow()`를 부르면 코멘트 수만큼(`per_page=100` 상한) 구독자가 생긴다. 클로저로 닫을 수
+> 없는 구조라 **이 한 곳만 props로 `now: number`를 내려 준다** — "컴포넌트에서 한 번" 원칙은 같다.
+
 - [ ] **Step 3: 부채 목록에서 걷어낸다**
 
 `eslint.config.mjs`의 부채 목록 `files`에서 아래를 지운다 — 이 파일들은 이제 `purity` 위반이 없다:
