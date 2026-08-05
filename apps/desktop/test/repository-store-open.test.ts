@@ -50,6 +50,8 @@ function makeGitApi() {
           repoPath,
         }
       },
+      // 워크트리를 앱에서 연다 — 검증·정규화는 main이 하고 정규화 경로를 돌려준다 (E7c)
+      openPath: async (_repoPath: string, path: string) => path,
       watch: () => {},
       unwatch: () => {},
       onChanged: () => () => {},
@@ -110,6 +112,64 @@ describe('저장소를 바꾸면 옛 저장소에 매인 상태가 남지 않는
     expect(store.getState().repoPath).toBe('/other')
     expect(store.getState().headInfos).toEqual({})
     expect(store.getState().lastFetchAt).toBeNull()
+  })
+})
+
+/**
+ * 워크트리 전환(`openWorktree`)은 **저장소 경계가 아니다** (E15a 리뷰 후속).
+ *
+ * `openWorktree`도 `repoPath`를 갈아치우므로 "그럼 openRepository와 같은 초기화를 해야 하지
+ * 않나"가 자연스러운 질문이고, 코드 주석도 "저장소 전환과 같은 초기화 (openRepository 관례)"
+ * 라고 적혀 있었다. 하지만 **비워야 할 것과 비우면 안 되는 것이 갈린다.** 기준은 그 값이
+ * 워크트리에 매였는가, 저장소에 매였는가다 — 링크드 워크트리는 HEAD·인덱스·워킹트리만 자기
+ * 것이고 objects·refs·remotes는 공용 git dir을 함께 쓴다.
+ *
+ * 실측(git, macOS):
+ * - 워크트리 B의 `--git-common-dir`는 A의 `.git`이다 — 공유가 맞다
+ * - 워크트리 A에서**만** `git fetch`했는데 B가 보는 `origin/main`이 함께 바뀌었다
+ *   (`c5cc7e6` → `7449ff6`). **fetch는 저장소 전체에 적용된다** → `lastFetchAt`은 저장소에 매였다
+ * - `git worktree list`는 A에서 보든 B에서 보든 경로·HEAD가 **완전히 같다**
+ *   → `headInfos`의 캐시 키(`경로::HEAD`)는 전환 뒤에도 그대로 읽힌다
+ *
+ * 그래서 이 둘은 `openWorktree`에서 **살아남는 것이 옳다.** 비우면 방금 갱신한 원격 refs를
+ * 두고 "한 번도 안 가져왔어요"라고 말하게 되고(사용자는 불필요한 재fetch를 하게 된다), 아직
+ * 유효하고 화면에 그려지는 캐시를 버려 호버마다 다시 조회하게 된다.
+ *
+ * 반면 `status`·`history`·`changes`·선택 상태는 워크트리마다 다르므로(HEAD·인덱스가 자기 것이다)
+ * `openWorktree`가 지금도 CLEAR_SELECTIONS + 새 스냅샷으로 갈아엎는다. 지금의 갈림은 우연이
+ * 아니라 정확하다 — 이 테스트가 그걸 고정한다.
+ */
+describe('워크트리 전환은 저장소 경계가 아니다 (E15a 리뷰 후속)', () => {
+  it('openWorktree는 저장소에 매인 lastFetchAt·headInfos를 유지한다', async () => {
+    const store = mod.useRepositoryStore
+    store.setState({ repoPath: '/repo', headInfos: {}, lastFetchAt: null })
+
+    // 실제 액션으로 채운다 — 키 형식까지 같이 고정된다 (위 openRepository 테스트 관례)
+    await store.getState().loadHeadInfo('/repo', 'abc123')
+    await store.getState().autoFetchRemotes()
+    // 전제 확인 — 여기가 비어 있으면 아래 단언이 공허하게 통과한다
+    expect(Object.keys(store.getState().headInfos)).toEqual(['/repo::abc123'])
+    const fetchedAt = store.getState().lastFetchAt
+    expect(fetchedAt).not.toBeNull()
+
+    await store.getState().openWorktree('/repo-side')
+
+    // 전환이 실제로 일어났는가 — 이것도 공허한 통과 방지용이다
+    expect(store.getState().repoPath).toBe('/repo-side')
+    // 같은 공용 git dir이다 — 방금 가져온 원격 refs는 이 워크트리에도 그대로 적용돼 있다
+    expect(store.getState().lastFetchAt).toBe(fetchedAt)
+    // 목록이 같으니 이 키는 새 화면에서도 그대로 읽힌다 — 버리면 호버마다 재조회다
+    expect(Object.keys(store.getState().headInfos)).toEqual(['/repo::abc123'])
+  })
+
+  it('반면 워크트리에 매인 것은 갈아엎는다 — 새 워크트리의 스냅샷으로 바뀐다', async () => {
+    const store = mod.useRepositoryStore
+    store.setState({ repoPath: '/repo', status: null, historyRef: 'old-ref' })
+
+    await store.getState().openWorktree('/repo-side')
+
+    expect(store.getState().status?.repoPath).toBe('/repo-side')
+    expect(store.getState().historyRef).toBeNull()
   })
 })
 

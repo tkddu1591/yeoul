@@ -1274,7 +1274,25 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     return runWrite(set, get, async () => {
       // 검증·allowlist 등록은 main — 통과하면 정규화 경로가 돌아온다 (E7c 보안 가드)
       const opened = await git().repo.openPath(repoPath, path)
-      // 다른 워크트리다 — 저장소 전환과 같은 초기화 (openRepository 관례)
+      // 다른 워크트리다 — **저장소 전환과 "같은" 초기화가 아니다** (E15a 리뷰 후속에서 정정).
+      //
+      // 예전 주석은 "openRepository 관례"라고 적었지만 실제로 이 리터럴은 openRepository와
+      // 두 필드가 다르고, 그게 옳다. 링크드 워크트리는 HEAD·인덱스·워킹트리만 자기 것이고
+      // objects·refs·remotes는 공용 git dir을 함께 쓰기 때문이다 — 기준은 "저장소가 바뀌었나"가
+      // 아니라 **그 값이 워크트리에 매였나 저장소에 매였나**다.
+      //
+      // 그래서 여기서 비우지 않는 둘 (실측 근거 — repository-store-open.test.ts가 고정한다):
+      // - lastFetchAt: 워크트리 A에서만 `git fetch`해도 B가 보는 origin/main이 함께 바뀐다
+      //   (실측: c5cc7e6 → 7449ff6). fetch는 저장소 전체에 적용되므로 이 시각은 여기서도 참이다.
+      //   비우면 방금 갱신한 refs를 두고 "한 번도 안 가져왔어요"라고 말하며 재fetch를 유도한다
+      // - headInfos: 캐시 키가 `워크트리경로::HEAD`이고 `git worktree list`는 어느 워크트리에서
+      //   보든 경로·HEAD가 완전히 같다(실측). 전환 뒤에도 그대로 읽히는 유효한 캐시라, 비우면
+      //   호버마다 재조회만 는다. openRepository에서 비우는 이유(다른 저장소의 키는 다시 읽히지
+      //   않고 쌓이기만 한다)가 여기엔 성립하지 않는다
+      //
+      // 반대로 status·history·선택 상태는 워크트리마다 다르므로 아래에서 갈아엎는다.
+      // 진행 중이던 조회는 runRepoRead의 repoPath 결합이 알아서 버린다 (E15a 리뷰 ①) —
+      // 이 액션도 repoPath를 갈아치우므로 같은 기계가 그대로 적용된다
       // 조회는 저장소 경계를 넘지 않는다 — 스냅샷(내부 loadHistory)이 구 ref를 읽기 전에 선해제 (품질 리뷰:
       // 같은 리터럴의 historyRef:null은 await 뒤에 적용돼 같은 이름 브랜치에서 '알약 없는 필터 역사' 모순)
       // 선해제와 스냅샷 사이에 await를 두지 않는다 — openRepository와 같은 이유 (E15a 리뷰 ①)
