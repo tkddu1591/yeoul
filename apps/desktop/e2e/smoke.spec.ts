@@ -4468,3 +4468,79 @@ test('E14a — 느린 조회에서는 로딩 표시가 배어난다', async () =
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E14b — 이름 짓기가 실패해도 입력한 값이 남아 있다 (E1a 요구사항 고정).
+ *
+ * PromptDialog는 "열릴 때 initialValue로 채우고 닫힐 때 비운다"를 useEffect + setState로 했는데,
+ * react-hooks/set-state-in-effect 위반이라 remount로 바꾼다. remount 조건이 잘못되면 실패로
+ * 열려 있는 동안 입력이 날아가는데(E1a가 명시한 요구사항), **그걸 고정하는 테스트가 저장소에
+ * 하나도 없었다.** 구현을 바꾸기 전에 현재 동작이 초록임을 확인해 둔다.
+ *
+ * 실패 유도: 이미 있는 브랜치 이름으로 만들기를 시도한다 (git이 거부한다).
+ */
+test('E14b — 이름 짓기가 실패해도 입력한 값이 남아 있다 (E1a 요구사항 고정)', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    // 먼저 브랜치 하나를 실제로 만든다 — 그 이름이 다음 시도의 충돌 대상이 된다
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-new').click()
+    await window.getByTestId('prompt-input').fill('dup-branch')
+    await window.getByTestId('prompt-submit').click()
+    await expect(window.getByTestId('header-branch')).toContainText('dup-branch')
+
+    // 같은 이름으로 다시 시도 → git이 거부하고 다이얼로그는 열린 채 남는다
+    await window.getByTestId('header-branch').click()
+    await window.getByTestId('branch-new').click()
+    await window.getByTestId('prompt-input').fill('dup-branch')
+    await window.getByTestId('prompt-submit').click()
+
+    // 실패가 실제로 일어났는지 먼저 확인한다 — 안 그러면 아래 단언이 공허해진다
+    await expect(window.getByTestId('prompt-error')).toBeVisible()
+    // 핵심: 다시 칠 필요 없이 방금 친 값이 그대로 있어야 한다 (E1a)
+    await expect(window.getByTestId('prompt-input')).toHaveValue('dup-branch')
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E14b — 워크트리 만들기 폼은 닫았다 다시 열면 초기화된다.
+ * 같은 이유(useEffect + setState → remount)로 바꾸므로 먼저 고정한다.
+ * 이쪽은 반대 방향 요구사항이다 — 닫으면 버려야 한다.
+ */
+test('E14b — 워크트리 만들기를 닫았다 열면 폼이 초기화된다', async () => {
+  const repo = await createRepoWithChange()
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('left-tab-worktrees').click()
+    await window.getByTestId('worktree-add').click()
+    // 기본값을 벗어난 상태를 만든다 — 모드를 바꾸고 경로를 직접 고친다
+    await window.getByTestId('add-worktree-mode-new').click()
+    await window.getByTestId('add-worktree-path').fill('/tmp/e14b-should-be-discarded')
+    await window.getByTestId('add-worktree-cancel').click()
+
+    // 다시 열면 방금 친 것이 남아 있으면 안 된다
+    await window.getByTestId('worktree-add').click()
+    await expect(window.getByTestId('add-worktree-path')).not.toHaveValue(
+      '/tmp/e14b-should-be-discarded',
+    )
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
