@@ -217,8 +217,7 @@ export function App() {
       requestAnimationFrame(() => setBootSuppress(false))
     })
     return () => cancelAnimationFrame(raf1)
-    // 마운트 시 1회만 실행
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 마운트 시 1회만 실행 — 바깥 값을 하나도 안 읽어 억제가 필요 없다 (E14b Task 7: 죽은 억제 삭제)
   }, [])
   const resizeSuppressTimerRef = useRef<number | null>(null)
   useEffect(() => {
@@ -344,15 +343,19 @@ export function App() {
 
   useEffect(() => {
     void store.init()
-    // 마운트 시 1회만 실행
+    // 마운트 시 1회만 실행. 빠진 의존성은 `store`인데 넣을 수 없다 — App은 셀렉터 없이 스토어
+    // 전체를 구독하고(:95 `useRepositoryStore()`) zustand 상태 객체는 set마다 새 참조라,
+    // 넣으면 아무 스토어 변경에나 init()이 다시 돌아 무한 루프다.
+    // E14c: 이 자리를 `useRepositoryStore((s) => s.init)`로 바꾸면(액션은 create 초기화 때
+    // 1회만 정의돼 참조가 안정) 의존성에 그대로 넣고 이 억제를 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     // 실패해도 빈 문자열 유지 — 축약 없이 전체 경로가 보일 뿐 기능은 죽지 않는다 (E7j)
     void window.gitApi.repo.home().then(setHome).catch(() => {})
-    // 마운트 시 1회만 실행
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 마운트 시 1회만 실행 — window.gitApi는 전역, setHome은 안정이라 억제가 필요 없다
+    // (E14b Task 7: 죽은 억제 삭제)
   }, [])
 
   // notice만 10초 뒤 자동으로 사라진다 — 에러·머지 바는 남는다 (E1d 후속). 새 notice가 오면
@@ -362,7 +365,11 @@ export function App() {
     if (store.notice === null) return
     const timer = window.setTimeout(() => store.clearNotice(), NOTICE_TTL_MS)
     return () => window.clearTimeout(timer)
-    // store 객체는 렌더마다 새 참조 — notice 값 변화에만 반응해야 임의 갱신이 타이머를 연장하지 않는다
+    // 빠진 의존성은 `store`. 스토어 상태 객체는 set마다 새 참조라(App은 셀렉터 없이 전체 구독 — :95)
+    // 넣으면 스토어가 갱신될 때마다 정리 함수가 타이머를 지우고 다시 걸어 10초가 처음부터 다시
+    // 시작된다 — "notice 10초 자동 소멸"이 사실상 무한 연장된다.
+    // E14c: 여기서 실제로 쓰는 건 clearNotice 하나뿐이고 zustand 액션이라 이미 참조가 안정하다 —
+    // 셀렉터로 그것만 골라 받으면 의존성에 넣고 이 억제를 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.notice])
 
@@ -495,7 +502,11 @@ export function App() {
     void store.autoFetchRemotes()
     const timer = window.setInterval(() => void store.autoFetchRemotes(), 600_000)
     return () => window.clearInterval(timer)
-    // store 액션은 zustand에서 안정 참조 — repoPath·autoFetch 전이에만 재구독
+    // 빠진 의존성은 `store`. repoPath·autoFetch 전이에만 재구독해야 한다 — 스토어 상태 객체는
+    // set마다 새 참조라(전체 구독 — :95) 넣으면 스토어가 갱신될 때마다 정리 함수가 10분
+    // interval을 지우고 다시 걸어, 주기 새로고침이 영영 안 돈다(마운트 직후 1회 fetch만 반복).
+    // E14c: 정작 쓰는 store.autoFetchRemotes는 zustand 액션이라 이미 안정 참조다 — 셀렉터로
+    // 그 액션만 골라 받으면 의존성에 넣고 이 억제를 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFetch, repoPathForFetch])
 

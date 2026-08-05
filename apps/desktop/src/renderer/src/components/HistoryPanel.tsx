@@ -246,7 +246,16 @@ export function HistoryPanel({
       })
     }, 200)
     return () => clearTimeout(timer)
-    // findPos는 이동 핸들러가 직접 점프하므로 의존성에서 뺀다(재검색 유발 방지)
+    // 이 억제 한 줄이 보고 둘을 덮는다(넷 + 복합식):
+    // ① findPos·findHits.length — 이동 핸들러(moveFind)가 이미 직접 점프하므로, 넣으면 ↑↓
+    //    한 번마다 200ms 디바운스 검색이 git으로 다시 나간다.
+    // ② jumpTo·onSearch — 렌더마다 새 함수다(jumpTo는 이 컴포넌트 지역 화살표, onSearch는 App이
+    //    인라인으로 내려준다). 넣으면 렌더마다 재검색이라 E7i 리뷰가 잡았던 "타이핑 중 카운터
+    //    역전" 플레이크가 그대로 되살아난다(seq 폐기 장치가 있어도 요청 폭주는 남는다).
+    // ③ history[0]?.hash는 "복합식은 정적으로 검사할 수 없다"는 별개 보고 — 지역 변수로 빼면
+    //    그것만 사라지지만 ①②가 남아 억제는 어차피 유지된다.
+    // E14c: onSearch를 App에서 안정화하고 jumpTo를 안정 참조로 올리면 ②가 풀린다. ①은 참조
+    // 문제가 아니라 "값은 읽되 재실행 트리거로는 삼지 않겠다"는 의도라 findPos를 ref로 읽어야 없어진다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, findQuery, historyRef, history.length, history[0]?.hash])
 
@@ -278,6 +287,14 @@ export function HistoryPanel({
   const headFound = headIndex >= 0
   useEffect(() => {
     if (headIndex >= 0) virtualizer.scrollToIndex(headIndex, { align: 'center' })
+    // 빠진 의존성은 `headIndex`·`virtualizer`. 진짜 이유는 headIndex 하나다 — 더 불러오기로
+    // 목록이 늘 때마다 HEAD의 인덱스가 바뀌므로, 넣으면 사용자가 스크롤하는 도중에도 화면이
+    // HEAD 행으로 되감긴다(위 주석의 "불리언 전이만 본다"가 그 방어다).
+    // virtualizer는 **안정 참조다** — TanStack v3는 useState(() => new Virtualizer(...))로 만든
+    // 인스턴스를 계속 재사용하고 setOptions로 갱신할 뿐이다(react-virtual dist/esm/index.js:82).
+    // 플랜의 "가상화 인스턴스가 매 렌더 새 참조"는 사실이 아니다 — 넣어도 무해하다.
+    // E14c: headIndex를 ref로 읽거나 "전이 신호"를 상태로 승격하면 지울 수 있다 — 참조 안정화가
+    // 아니라 설계 변경이 필요한 자리다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headHash, headFound])
 

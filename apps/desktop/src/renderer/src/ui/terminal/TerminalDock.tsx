@@ -56,7 +56,13 @@ export function TerminalDock({
     if (groupTabs.length === 0) void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
     else if (groupTabs.some((tab) => tab.sessionId === sessions.activeId)) sessions.refitActive()
     else void sessions.activateGroup(groupKey, activeWorktree ?? undefined)
-    // open·groupKey 전이에만 반응한다 — sessions는 렌더마다 새 참조
+    // open·groupKey 전이에만 반응한다. 빠진 의존성은 `sessions`·`activeWorktree`.
+    // useTerminalSessions는 매 렌더 새 객체 리터럴을 반환하고(use-terminal-sessions.ts:239)
+    // activateGroup 등 액션도 매 렌더 새 클로저라, `sessions`를 넣으면 이 effect가 렌더마다
+    // 재실행된다 — activateGroup은 "그 그룹에 탭이 0개면 생성"인데 setTabs 반영 전 스냅숏을
+    // 거듭 보게 되므로 위 주석의 이중 생성 함정이 무한히 열린 판이 된다.
+    // activeWorktree는 create의 cwd·label로만 쓰이고 그 cwd가 곧 groupKey라 이미 추적된다.
+    // E14c: 훅 반환을 안정화하면(액션을 ref/모듈로 고정하고 값만 상태로) 그대로 넣고 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, groupKey])
 
@@ -65,12 +71,21 @@ export function TerminalDock({
     if (purgeGroup === null) return
     sessions.closeGroup(purgeGroup)
     onPurged?.()
+    // purgeGroup 전이에만. 빠진 의존성은 `sessions`·`onPurged` — 둘 다 렌더마다 새 참조다
+    // (훅 반환 객체 / App이 인라인 화살표로 내려주는 콜백). 넣으면 App이 1회성 상태를 비우기
+    // 전에 끼어드는 렌더에서 closeGroup·onPurged가 한 번 더 불린다 — 이 effect는 "1회 소비"가
+    // 계약이라 재실행 자체가 계약 위반이다.
+    // E14c: 훅 반환 + onPurged(App 쪽)를 함께 안정화해야 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purgeGroup])
 
   // 높이·활성 탭이 바뀌면 활성 세션을 다시 맞춘다
   useEffect(() => {
     sessions.refitActive()
+    // 빠진 의존성은 `sessions`(렌더마다 새 객체). 넣으면 크기가 그대로여도 렌더마다 fit이 돌고
+    // 그때마다 terminalApi.resize IPC가 나간다 — 이 세 effect 중 유일하게 매 렌더 값을 쓰므로
+    // (deps에 sessions.activeId가 있어) 클로저는 최신이다. 낭비만 문제다.
+    // E14c: 훅 반환이 안정 참조가 되면 넣어도 무해해져 지울 수 있다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height, sessions.activeId])
 
@@ -81,6 +96,13 @@ export function TerminalDock({
     const onResize = () => sessions.refitActive()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
+    // 빠진 의존성은 `sessions`. 넣으면 렌더마다 리스너를 떼고 다시 단다.
+    // **E14b 실측 경고 — 이 억제는 낭비가 아니라 버그를 덮고 있다:** []로 굳은 클로저가 잡은
+    // sessions는 마운트 시점 것이고, refitActive는 그 렌더의 activeId(= 항상 null)를 읽는다.
+    // 즉 지금 이 리스너는 아무 일도 하지 않는다 — 창 폭 변화 refit은 실제로는 동작하지 않는다
+    // (탭 전환·높이 변화는 위 effect가 최신 클로저로 담당해서 터미널이 멀쩡해 보일 뿐이다).
+    // E14c: 훅 반환을 안정화하고 의존성을 넣는 것이 곧 이 버그의 수정이다 — 억제를 지우는
+    // 작업과 기능을 되살리는 작업이 같다. 의존성만 몰래 채우지 말고 실제로 refit이 도는지 확인할 것
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -100,6 +122,12 @@ export function TerminalDock({
     const observer = new ResizeObserver(() => sessions.refitActive())
     observer.observe(el)
     return () => observer.disconnect()
+    // 빠진 의존성은 `sessions`. 넣으면 렌더마다 옵저버를 끊고 다시 만든다(observe 직후 콜백이
+    // 1회 발화하므로 렌더마다 resize IPC도 따라 나간다).
+    // 위 'resize' effect와 **같은 죽은 클로저 문제를 공유한다** — 마운트 시점 sessions를 잡아
+    // refitActive의 activeId가 null로 굳어 있어, 사이드 접기로 도크 폭이 바뀌어도 실제 refit은
+    // 일어나지 않는다(E14b 실측).
+    // E14c: 훅 반환 안정화 + 의존성 채우기가 곧 수정이다. 지운 뒤 접기로 refit이 도는지 볼 것
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

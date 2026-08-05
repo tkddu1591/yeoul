@@ -42,15 +42,10 @@ export default [
   // lint가 통째로 죽는다). 그래서 목록을 비우는 태스크가 곧 블록을 지우는 태스크다 —
   // "Task 8이 빈 목록을 확인하고 지운다"는 도달할 수 없는 상태였다.
   // 이제 렌더러 전역에서 purity·set-state-in-effect·refs·immutability는 전부 error다.
-  {
-    // ── E14b 부채 목록 (임시) — 죽은 억제 3건 · Task 7 몫 ────────────────────
-    // 위 규칙 부채와 별개의 항목이라 블록을 나눈다. reportUnusedDisableDirectives는 규칙이
-    // 아니라 linterOptions라서 위 블록의 rules로는 못 낮추고, 무엇보다 **걷어내는 태스크가
-    // 다르다** — App.tsx의 규칙 부채는 Task 5가, 죽은 억제 3건(:221·:355·:471)은 Task 7이
-    // 치운다. 한 블록에 묶으면 Task 5가 App.tsx를 빼는 순간 아직 남아 있는 억제 3건이
-    // 에러로 튀어 브랜치가 빨개진다.
-    // Task 7이 억제를 지우고 이 블록도 함께 지운다 → 그때부터 다시 error(스펙 §3).
-    files: ['apps/desktop/src/renderer/src/App.tsx'],
-    linterOptions: { reportUnusedDisableDirectives: 'warn' },
-  },
+  // ── E14b 죽은 억제 부채 목록: 비었으므로 블록째 삭제했다 (Task 7) ─────────────
+  // 예고된 3건 중 :471은 Task 5가 그 이펙트를 지우며 함께 사라졌고, 남은 :221·:355는 Task 7이
+  // 지웠다(App.tsx에서 바깥 값을 안 읽는 마운트 1회 이펙트 둘 — 억제할 것이 애초에 없었다).
+  // 여기도 `files: []`를 남기면 eslint 10이 설정 로드를 거부하므로 블록째 지운다(위 주석과 같은 함정).
+  // 이제 렌더러 전역에서 reportUnusedDisableDirectives는 다시 error다(스펙 §3) — 남은
+  // exhaustive-deps 억제 12곳은 전부 살아 있고 각각 이유가 주석으로 붙어 있다(E14c 인수인계).
 ]
