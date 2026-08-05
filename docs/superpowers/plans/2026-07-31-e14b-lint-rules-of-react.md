@@ -968,6 +968,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **lint 범위 확대.** 지금은 렌더러 + `react-hooks`만이다. `packages/*`·`src/main`이나 `typescript-eslint` 규칙셋은 별도 판단.
 - `apps/desktop/test/**`가 `tsconfig.json`의 `include`(`["src"]`) 밖이라 타입 검사를 안 받는다. `packages/*/test/**`와 비대칭.
 - e2e 126건 중 40건만 `GIT_GUI_USER_DATA`를 설정한다(게이트 재현성).
+- **`packages/git-adapter` 단위 테스트가 부하에서 간헐 타임아웃한다 (E14b와 무관, 기존 문제).**
+  루트 전체(`pnpm test`, 50파일 병렬)를 돌리면 3회 중 2회꼴로 1건이 빨개지는데, **매번 다른
+  테스트이고 항상 정확히 15000ms**(vitest 기본 타임아웃)다. 이 패키지는 실제 git 서브프로세스를
+  띄운다. 단독 실행(`--root packages/git-adapter`)은 242/242로 3회 전부 초록이고, E14b는
+  `packages/`를 한 줄도 건드리지 않았다(`git diff main...HEAD -- packages/` 빈 출력).
+  → 이 패키지만 `testTimeout`을 올리거나 직렬로 돌리는 설정이 필요하다.
 - **잠복 버그 (Task 7이 억제 근거를 쓰다 발견, E14b 범위 밖이라 안 고침):** `TerminalDock`의
   `[]` 이펙트 둘(`:95` window resize · `:119` ResizeObserver)이 마운트 시점 `sessions`를 클로저에
   굳힌다. `refitActive`는 그 렌더의 `activeId`를 읽는데(`use-terminal-sessions.ts:236`) 마운트
