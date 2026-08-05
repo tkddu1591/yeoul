@@ -444,8 +444,20 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 → 전환기로 저장소 B → 흔적이 없는지.
 
 `activeWorktree`는 화면에서 **도크 헤더의 워크트리 이름**으로 드러난다(E12가 거기로 옮겼다).
-`lastFetchAt`은 **브랜치 탭의 "n분 전 가져옴"**으로 드러난다. `headInfos`는 화면에 직접 안 드러나니
-스토어를 볼 수 없다면 **그 항목은 단언하지 않고 그렇게 보고한다** — 안 보이는 것을 본다고 하지 않는다.
+`lastFetchAt`은 **브랜치 탭의 "n분 전 가져옴"**(testid `fetch-at`)으로 드러난다.
+
+**`headInfos`는 E2E로 못 잡는다** — 스토어가 renderer 밖으로 노출되지 않아 `evaluate`로 읽을 수
+없고, 키가 `경로::HEAD`라 옛 항목이 새 저장소 행과 충돌하지도 않아 화면에도 안 드러난다.
+**대신 스토어 단위 테스트로 문다**: `apps/desktop/test/repository-store-refresh.test.ts`(E14a)가
+가짜 IPC 브리지로 스토어를 직접 도는 하네스를 이미 갖고 있다. 그 관용구로
+`repository-store-open.test.ts`를 만들어 `openRepository`가 경계에서 `headInfos`·`lastFetchAt`을
+비우는지 고정한다. 흔적은 `setState`로 심지 말고 **실제 액션**(`loadHeadInfo`→`autoFetchRemotes`)으로
+만든다 — 키 형식까지 함께 고정된다. 가짜 브리지에 **`repo.open`을 꼭 깔아야 한다**(Task 3이 추가).
+
+E2E 픽스처 주의(실측): **`autoFetch: false`가 필수**다 — 켜져 있으면 전환 뒤 주기 작업이
+`lastFetchAt`을 다시 채워 단언이 흔들린다. 저장소 B는 `userData/settings.json`에 `recentRepos`를
+미리 심어 목록에 넣는다(`repo-switcher-browse`는 네이티브 다이얼로그라 E2E에서 못 쓴다).
+세 단언은 `expect.soft`로 둔다 — 유출 3건은 서로 독립이라 하나가 걸려도 나머지가 보여야 한다.
 
 - [ ] **Step 2: 현재 코드에서 빨간 것을 확인한다**
 
@@ -546,7 +558,7 @@ cd "/Users/sangyeop_kim/git gui" && pnpm test
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
 cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
 ```
-Expected: lint **0 errors / 5 warnings** · 6/6 · **621** · 성공 · **133** (128 + Task 4의 1건 + 여기 4건)
+Expected: lint **0 errors / 5 warnings** · 6/6 · **622** · 성공 · **133** (129 + 여기 4건)
 
 - [ ] **Step 4: 실행 기록**
 
@@ -576,6 +588,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **E15b — 여러 창 + macOS 네이티브 탭.** `tabbingIdentifier`(Electron 35에 `addTabbedWindow`·`mergeAllWindows`·`selectNextTab` 확인)를 주면 탭바·드래그 분리·창 병합이 OS 기능으로 딸려온다. **선행 조건**: `git-handlers.ts:153`의 `stopWatching`이 모듈 전역 하나라 두 번째 창이 첫 창의 감시를 죽인다 · 창별 UI 설정(`leftCollapsed`·`rightWidth`·`terminalOpen`·`terminalHeight`·`rightCollapsed`)과 앱 공용 설정(`theme`·`pullMode`·`autoFetch`·`worktreeSelectAction`·`recentRepos`) 분리 · `MAX_SESSIONS = 8`이 창별인지 전체인지.
 - **뒤로가기 스택** — 만들지 않기로 했다(스펙 §8). 최근 목록을 써 보고도 부족하면 그때 다시 본다.
 - **터미널 상한 8을 여러 저장소가 나눠 쓴다** — 저장소를 바꿔도 pty를 죽이지 않기로 한 결정(사용자)의 대가. E15b에서 함께 정리한다.
+- **`headInfos` 캐시가 한 저장소 안에서 만료되지 않는다** (Task 4 실측 — E15a와 **별개의 선재 버그**). 키가 `경로::HEAD`인데 `worktrees.headInfo`의 반환 5개 중 둘은 해시가 결정하지 못한다: `containedIn`(브랜치를 만들거나 지우면 바뀐다)과 `fork`(`origin/main`이 움직이면 `behind`가 틀어진다). **가져오기를 해도 워크트리 툴팁의 분기점이 옛 값으로 남는다** — `refresh()`·`fetchSnapshot`은 `headInfos`를 안 건드린다. 게다가 `loadHeadInfo`의 catch가 실패를 `null`로 캐시하고 `key in headInfos` 조기 반환이 걸려 **그 실패는 영원히 재시도되지 않는다**(`repository-store.ts:1468`). E15a가 더한 것은 저장소를 다시 열 때가 유일한 해제 지점이 된 것뿐이다. 제대로 고치려면 `remotes.fetch` 성공 시 무효화가 필요하다.
 - **`packages/**`가 eslint 범위 밖이다** (Task 2b 실측). `eslint.config.mjs:10`이 `apps/desktop/src/renderer/src/**`만 잡아서, `packages/` 아래 파일은 `File ignored because no matching configuration was supplied`가 된다. E14b가 의도적으로 좁힌 범위가 맞지만 부작용이 있다 — 거기 적은 `eslint-disable` 지시자는 **죽은 주석**이 되고, `reportUnusedDisableDirectives: 'error'`도 렌더러 블록에만 걸려 있어 아무도 알려주지 않는다(규칙이 도는 것처럼 오해시킨다). `apps/desktop/test/**`가 tsconfig `include` 밖인 것과 같은 부류다.
 - E14b에서 넘어온 것들: E14c(참조 안정화로 `exhaustive-deps` 억제 12곳 해소) · `TerminalDock`의 `[]` 이펙트 두 개가 마운트 시점 `sessions`를 굳혀 **사이드 접기 refit이 실제로 안 돈다**(창 리사이즈는 `attach` 부수효과가 가려 준다) · `apps/desktop/test/**`가 tsconfig `include` 밖.
 - **`sanitizeSettings`의 `leftCollapsed`·`rightCollapsed`(E12)에 아직 그물이 없다** (Task 2b 실측). `packages/ipc-contract/test/settings.test.ts`는 있지만 나중에 추가된 필드가 테스트 없이 들어온 이력이 있다 — `recentRepos`는 이번에 막았고, 나머지 둘은 남아 있다.
