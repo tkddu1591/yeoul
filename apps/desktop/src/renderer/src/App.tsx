@@ -24,6 +24,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
+import { RepoSwitcher } from './components/RepoSwitcher'
 import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
@@ -112,7 +113,8 @@ export function App() {
 
   // E7a 좌측 탭 — [변경 | 실험 공간]. 기본은 변경(커밋 흐름 무변). 탭 상태는 렌더 로컬(store 오염 없음)
   const [leftTab, setLeftTab] = useState<'changes' | 'branches' | 'worktrees'>('changes')
-  // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함)
+  // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함).
+  // 저장소가 바뀌면 비운다 — 아래 "저장소에 매인 로컬 상태" 한 자리에서 함께 (:396)
   const [activeWorktree, setActiveWorktree] = useState<{ cwd: string; label: string } | null>(null)
   // E7j — 워크트리 행 `~` 축약용 홈 경로. 못 구하면 빈 문자열(순수 함수가 축약 없이 처리)
   const [home, setHome] = useState('')
@@ -377,21 +379,60 @@ export function App() {
   const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
     null,
   )
-  // 저장소 전환 시 열려 있던 ⌘F 검색을 닫는다 — 옛 저장소 기준 검색 상태가 새 저장소 화면에
-  // 남지 않도록 (E7i 보완 Step 4). E14b — 예전엔 useEffect([store.repoPath])에서 setFindScope(null)을
-  // 불렀다(set-state-in-effect). 같은 규칙을 "직전에 본 저장소를 함께 기억했다가 렌더 중 비교"로
-  // 옮긴다 — 이펙트는 화면이 한 번 나간 뒤에 다시 렌더하지만, 이 쪽은 나가기 전에 끝난다
-  // (같은 컴포넌트를 향한 렌더 중 setState라 React가 공식으로 허용하는 패턴)
+  // ── 저장소에 매인 로컬 상태를 저장소가 바뀔 때 비운다 (E7i 보완 Step 4 · E14b · E15a 리뷰 ②) ──
   //
-  // 왜 플랜의 { scope, repo } 한 묶음 상태가 아니라 상태 둘인가 (E14b 실측 편차): setFindScope를
+  // 왜 이펙트가 아닌가: set-state-in-effect는 lint 에러다 (E14b). "직전에 본 저장소를 함께
+  // 기억했다가 렌더 중 비교"로 옮긴다 — 이펙트는 틀린 화면이 한 번 나간 뒤에 고치지만, 이 쪽은
+  // 나가기 전에 끝난다(같은 컴포넌트를 향한 렌더 중 setState라 React가 공식으로 허용하는 패턴).
+  //
+  // 왜 { scope, repo } 한 묶음 상태가 아니라 상태 둘인가 (E14b 실측 편차): setFindScope를
   // repoPath를 클로저로 문 새 함수로 감싸면, 아래 ⌘F 키다운 리스너가 []로 마운트 시 1회만 등록되므로
   // **첫 렌더의 repoPath**를 영영 붙든다. 앱은 repoPath가 null인 채(RepoPicker) 마운트되므로 저장소를
   // 연 뒤 ⌘F를 누르면 repo가 null로 기록되고 비교가 매번 어긋나 찾기가 아예 안 열린다
   // (실측: ⌘F E2E 7건 전부 빨강). useState가 준 안정된 setter를 그대로 두면 그 함정이 없다.
-  const [findScopeRepo, setFindScopeRepo] = useState(store.repoPath)
-  if (findScopeRepo !== store.repoPath) {
-    setFindScopeRepo(store.repoPath)
+  //
+  // 왜 한 자리로 모았나 (E15a 리뷰 ②-b): E15a 전까지 이 규칙이 필요한 상태는 findScope와
+  // activeWorktree 둘뿐이라 각자 비교를 들고 있었다. 그런데 ⌘O는 **모달 위에서도 돈다** —
+  // 확인창은 `isOpen={x !== null}`로만 그려질 뿐 repoPath에 안 묶여 있어 전환 뒤에도 살아남고,
+  // 그 안의 이름·해시·경로는 옛 저장소 것인데 확정하면 **새 저장소를 대상으로 실행된다**
+  // (헤더 전환기는 모달 오버레이에 막히므로 이 경로는 ⌘O 전용이다). 대상이 17개로 늘어난 이상
+  // 비교를 상태마다 두면 새 다이얼로그가 늘 때 빠뜨린다 — 비교는 하나, 목록만 는다.
+  //
+  // 여기 없는 것들은 **저장소에 안 매였다고 판단한 것**이다(전수):
+  // - leftTab·leftCollapsed·rightCollapsed·rightWidth·dockOpen/dockHeight·theme — 뷰 선호.
+  //   저장소를 바꿨다고 보던 탭·접힘·폭이 리셋되면 그게 더 놀랍다
+  // - settingsOpen·worktreeSelectAction·autoFetch·home — 앱 전역 설정
+  // - tokenPrompt — GitHub 토큰은 **계정 인증**이라 저장소 무관하다(hosting().connect.token은
+  //   repoPath를 안 받는다). 전환했다고 붙여넣던 토큰을 날리면 안 된다
+  // - purgeTerminalGroup — 터미널 그룹 정리 신호(1회성). 도크는 전환해도 살아 있고(E12),
+  //   여기서 비우면 아직 도크가 소비하지 않은 정리가 유실된다
+  const [boundRepo, setBoundRepo] = useState(store.repoPath)
+  if (boundRepo !== store.repoPath) {
+    setBoundRepo(store.repoPath)
+    // 옛 저장소 기준 검색 상태 (E7i 보완 Step 4)
     setFindScope(null)
+    // 옛 저장소의 워크트리를 가리킨 채 남으면 터미널 cwd·도크 라벨이 틀린다 (E15a)
+    setActiveWorktree(null)
+    // 옛 저장소의 해시·이름·경로를 물고 있는 확인창·입력창 (E15a 리뷰 ②-b)
+    setBranchPrompt(null)
+    setTagPrompt(null)
+    setConfirmingUndo(null)
+    setRewordPrompt(null)
+    setConfirmingRebase(null)
+    setRenamePrompt(null)
+    setConfirmingRemove(null)
+    setConfirmingRemoveWithWorktree(null)
+    setConfirmingRemoveRemote(null)
+    setConfirmingRemoveWorktree(null)
+    setMergeFollowUp(null)
+    // 페이로드는 없지만 "이 저장소에 대한 질문"이라 남으면 안 되는 것들 — 확정하면 새 저장소를
+    // 대상으로 실행된다(confirmingAbort는 status?.state를 지금 스토어에서 읽어 abort*를 부른다)
+    setConfirmingAbort(false)
+    setMergePicker(false)
+    setManageOpen(false)
+    setAddWorktreeOpen(false)
+    setPullPrompt(false)
+    setConfirmingMerge(false)
   }
   // E7h ⑥ 보완 — 같은 스코프로 재⌘F해도 findScope 값은 안 바뀌어(bail-out) FindBar가 재마운트도
   // 재렌더도 안 되니, 재⌘F마다 증가시켜 FindBar의 focusSignal로 흘려보내 재포커스를 강제한다
@@ -408,6 +449,7 @@ export function App() {
   // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다.
   // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
   // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
+  // ⌘O/Ctrl+O — 다른 폴더 열기 (E15a). 헤더 전환기의 "다른 폴더 열기…"와 같은 동작이다
   // ⌘⌥1/⌘⌥2 — 좌·우 사이드 접기 토글 (E12). event.altKey를 반드시 같이 봐야 한다 — macOS는
   // Option을 누른 채면 event.key가 '1'이 아니라 특수문자(예: '¡')로 바뀐다(실측) — event.key만
   // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
@@ -464,6 +506,20 @@ export function App() {
         else if (scope === 'changes') expandLeftIfCollapsed()
         setFindScope(scope)
         setFindNonce((n) => n + 1)
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 'o' || event.key === 'O')) {
+        // ⌘O — 다른 폴더 열기 (E15a). Option 조합이 아니라 event.key로 충분하다(대문자는 ⇧⌘O)
+        //
+        // 터미널(xterm) 포커스면 가로채지 않는다 — 위 ⌘F와 **같은 줄, 같은 이유** (E15a 리뷰 ②).
+        // 조건이 metaKey || ctrlKey라 macOS에서도 Ctrl+O가 잡히는데, 그건 도크 터미널에서
+        // nano의 저장(Ctrl+O)이고 readline의 operate-and-get-next다. 이 가드가 없으면 그것들이
+        // preventDefault()로 삼켜지고 대신 폴더 선택창이 뜬다 — 터미널 도크는 이 앱의 간판
+        // 기능이다(E7b·E12)
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        // 이 리스너는 []로 마운트 시 1회만 등록된다 — 렌더 시점의 `store`를 닫아 쓰면 **첫 렌더의**
+        // 스토어를 영영 붙든다(E14b 실측: 같은 함정에 ⌘F E2E 7건이 통째로 빨개졌다).
+        // getState()는 호출 시점의 스토어를 읽으므로 오래된 클로저가 생기지 않는다
+        void useRepositoryStore.getState().openRepository()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -526,7 +582,6 @@ export function App() {
     status?.state === 'merging' && stagedCount === 0
       ? `${T.branch} ${T.merge}`
       : suggestCommitMessage(status?.changes ?? [])
-  const repoName = store.repoPath.split('/').pop() ?? store.repoPath
   // 마지막 저장(HEAD)이 원격에 이미 백업됐는가 — 실행취소·메시지 고치기 확인창의 경고 병기 (판정 편차는 플랜 표)
   const headBackedUp = status !== null && isHeadBackedUp(status.branch)
   // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
@@ -559,15 +614,15 @@ export function App() {
             )}
           </Button>
         </Tooltip>
-        <div className="app__repo">
-          <strong>{repoName}</strong>
-          {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid. 기존엔 없었다(실독 편차) */}
-          <Tooltip content={store.repoPath} summary={store.repoPath}>
-            <span className="app__repo-path" data-testid="repo-path">
-              {store.repoPath}
-            </span>
-          </Tooltip>
-        </div>
+        {/* E15a — 저장소 이름 자리가 곧 전환기다. 저장소를 한 번 열면 다른 저장소로 바꿀 진입점이
+            앱에 아예 없었다(아래 RepoPicker는 repoPath가 없을 때만 그려진다) */}
+        <RepoSwitcher
+          currentPath={store.repoPath}
+          home={home}
+          recent={store.recentRepos}
+          busy={store.busy}
+          onOpen={(path) => void store.openRepository(path)}
+        />
         {status && (
           <div className="app__status">
             <BranchSwitcher

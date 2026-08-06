@@ -31,10 +31,32 @@ export type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 import type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
 
 /**
+ * `repo.open`의 결과 — **실패가 throw가 아니라 값이다** (E15a 리뷰 ④).
+ *
+ * 왜 예외가 아닌가: 렌더러는 실패 원인에 따라 **최근 목록에서 그 항목을 지울지**를 정해야 하는데,
+ * 원인을 아는 쪽은 main이고 Electron IPC는 Error의 `message`만 실어 나른다(커스텀 속성은
+ * 사라진다). 문구 문자열 매칭은 취약하니, 판단 근거를 계약서에 명시적인 값으로 둔다.
+ * "최근 목록의 항목이 상해 있다"는 예상된 결과이므로 결과 객체로 표현하는 것이
+ * 이 계약서의 관례이기도 하다 (RemoveBranchResult·SwitchResult·MergeResult…).
+ *
+ * `reason`은 **사실**이고 제거 여부는 **정책**이라 렌더러가 정한다(목록을 소유한 쪽이다):
+ * - `missing` — 폴더가 정말 없다(fs가 ENOENT/ENOTDIR로 답했다). 확실하니 목록에서 빼도 된다
+ * - `not-a-repository` — 폴더는 있는데 Git 저장소가 아니다. 이것도 확실하다
+ * - `failed` — 확인 자체를 못 했다(권한, 마운트 안 된 외장 디스크, PATH에 git 없음).
+ *   **목록을 건드리면 안 된다** — 멀쩡한 저장소가 사라진다
+ *
+ * `message`는 사용자에게 그대로 보이는 문구다(main이 만든다 — 다른 열기 실패 문구와 같은 자리).
+ */
+export type RepoOpenResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: 'missing' | 'not-a-repository' | 'failed'; message: string }
+
+/**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
  *
- * 신뢰 규칙: `repoPath`는 repo.select() 또는 repo.initialPath()가 반환한 값만 유효하다 —
- * main은 자신이 돌려준 경로만 allowlist로 신뢰하고 그 외는 거부한다.
+ * 신뢰 규칙: `repoPath`는 repo.select()·repo.initialPath()·repo.open()이 반환한 값만 유효하다 —
+ * main은 자신이 돌려준 경로만 allowlist로 신뢰하고 그 외는 거부한다. 셋 다 같은 검증
+ * (rev-parse --is-inside-work-tree + 루트 정규화)을 거친 뒤에만 값을 돌려준다 (E15a).
  * 파일 `path`는 저장소 루트 상대 경로만 허용된다 (절대 경로·`..`·빈 문자열 거부).
  */
 export interface GitApi {
@@ -43,6 +65,17 @@ export interface GitApi {
     select(): Promise<string | null>
     /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
+    /**
+     * 다이얼로그 없이 경로로 연다 — 최근 목록에서 고를 때 (E15a).
+     * 성공하면 저장소 루트로 정규화된 경로가 `{ ok: true }`로 온다.
+     *
+     * 이 인자는 디스크 설정에서 온 렌더러 입력이라 신뢰할 수 없다 — **select()와 동일한 검증
+     * (rev-parse --is-inside-work-tree + 루트 정규화)에 더해 절대 경로일 것을 요구한다.**
+     * 절대 경로성은 select()가 OS 다이얼로그로 구조적으로 보장하던 것이라 여기만 따로 막는다
+     * (E15a 리뷰 ③ 실측: `cwd: ''`는 main의 process.cwd()로 해석돼 앱 자신의 소스 저장소가 열린다).
+     * 형식이 잘못된 인자만 throw하고, 열기 실패는 RepoOpenResult로 온다 (E15a 리뷰 ④)
+     */
+    open(path: string): Promise<RepoOpenResult>
     status(repoPath: string): Promise<RepositoryStatus>
     /** .git 감시 시작 — 이후 외부 변경이 repo:changed push로 온다. 새 경로로 부르면 이전 감시는 교체된다 (E7b) */
     watch(repoPath: string): Promise<void>
@@ -179,6 +212,7 @@ export const CHANNELS = {
   repoWatch: 'repo:watch',
   /** push(main→renderer) — invoke가 아니라 webContents.send 채널 (E7b) */
   repoChanged: 'repo:changed',
+  repoOpen: 'repo:open',
   repoOpenPath: 'repo:open-path',
   repoHome: 'repo:home',
   remotesFetch: 'remotes:fetch',
@@ -323,6 +357,8 @@ export interface AppSettings {
   leftCollapsed?: boolean
   /** 우측 사이드(히스토리·상세) 접힘 (E12) */
   rightCollapsed?: boolean
+  /** 최근 연 저장소 — 최신이 앞 (E15a) */
+  recentRepos?: string[]
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -348,6 +384,14 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof candidate.leftCollapsed === 'boolean') settings.leftCollapsed = candidate.leftCollapsed
   if (typeof candidate.rightCollapsed === 'boolean') {
     settings.rightCollapsed = candidate.rightCollapsed
+  }
+  // 배열이 아니면 통째로 버리고, 문자열 아닌 원소만 골라낸다 — 이 목록은 디스크 파일에서 오고
+  // 그 값이 repo.open의 인자가 된다 (E15a). sparse array의 hole은 spread로 실체화한 뒤
+  // filter가 걷어낸다 (assertStringArray와 같은 이유)
+  if (Array.isArray(candidate.recentRepos)) {
+    settings.recentRepos = [...(candidate.recentRepos as unknown[])].filter(
+      (entry): entry is string => typeof entry === 'string',
+    )
   }
   return settings
 }
