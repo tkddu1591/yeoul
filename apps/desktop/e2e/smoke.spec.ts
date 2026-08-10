@@ -5275,3 +5275,118 @@ test('E15b — 사이드 접힘은 창마다 따로 산다', async () => {
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b ④ — 전환기 항목 ⌥클릭은 **전환이 아니라 새 창**이다.
+ *
+ * 같은 항목의 평범한 클릭은 이 창을 갈아탄다(E15a ①). ⌥를 얹으면 이 창은 그대로 두고 새 창이
+ * 뜬다 — 그래서 "새 창이 B다"만으로는 모자라고 **원래 창이 여전히 A인지**까지 봐야 갈아타기와
+ * 구분된다. react-aria의 onAction은 수식 키를 안 주므로 구현은 항목의 onPointerDown에서 altKey를
+ * 기억한다 — 이 테스트가 그 경로(Playwright의 modifiers가 pointerdown까지 실리는가)를 문다.
+ */
+test('E15b — 전환기 ⌥클릭은 전환이 아니라 새 창을 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await first.getByTestId('repo-switcher').click()
+    // 팝오버가 다 그려질 때까지 — 항상 마지막에 있는 '다른 폴더 열기'로 기다린다 (E15a 관례)
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+
+    // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+    const pending = nextWindow(app)
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ modifiers: ['Alt'] })
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 원래 창은 갈아타지 않았다 — 헤더도, 파일 목록도 여전히 A다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑤ — 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다 (사용자 결정).
+ *
+ * **"창이 안 늘었다"만 보면 공허하다** — window:open이 통째로 throw해도, 아무것도 안 해도
+ * 통과한다. 그래서 셋을 함께 문다: (1) evaluate가 거부되지 않았다(=핸들러가 에러 없이 끝났다),
+ * (2) 창이 하나뿐이다, (3) 그 창이 여전히 멀쩡히 그 저장소를 보고 있다(포커스를 옮기는 과정에서
+ * 화면을 잃지 않았다). 창 수 단언 앞의 대기는 Playwright의 창 등록(Target.targetCreated)이
+ * invoke 응답보다 늦을 수 있어서다 — 없으면 새 창이 실제로 떠도 통과할 수 있다.
+ */
+test('E15b — 이미 연 저장소를 새 창으로 열려 하면 창이 안 늘어난다', async () => {
+  const repo = await createRepoWithChange()
+  const path = realpathSync(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // page.evaluate(fn, arg)는 인자를 **하나만** 넘긴다 — (_, path) 시그니처로 쓰면 undefined다
+    await first.evaluate((target: string) => window.gitApi.window.open(target), path)
+    await first.waitForTimeout(1_500)
+
+    expect(app.windows()).toHaveLength(1)
+    await expect(first.getByTestId('repo-path')).toHaveText(path)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑥ — ⌘N이 빈 창을 띄우고, 그 창의 최근 목록에서 저장소를 연다.
+ *
+ * ⌘N이 선재 결함을 드러낸다: E15b 전 RepoPicker는 "저장소 열기" 버튼 하나뿐이라 빈 창은 늘 OS
+ * 다이얼로그부터였고(Playwright로 못 연다) 최근 10개(E15a)가 무의미했다. 그래서 이 테스트는
+ * **다이얼로그를 한 번도 거치지 않고** 빈 창에서 저장소에 도달하는 길을 끝까지 돈다.
+ */
+test('E15b — ⌘N이 연 빈 창의 최근 목록에서 저장소를 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathA, pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.keyboard.press('Meta+n')
+    const second = await pending
+
+    // 빈 창은 RepoPicker다 — 그리고 이 에픽이 붙인 최근 목록이 거기 있다
+    await expect(second.getByTestId('open-repo')).toBeVisible()
+    await second.getByTestId(`repo-picker-recent-${pathB}`).click()
+
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

@@ -38,3 +38,62 @@
   font-size: var(--text-sm);
   color: var(--color-danger);
 }
+
+/* 최근 연 저장소 (E15b) — ⌘N이 만드는 빈 창이 "항상 OS 다이얼로그부터"가 되지 않게.
+   행 표기는 헤더 전환기와 같은 규칙(이름 굵게 + 경로 흐리게)이라 두 곳이 같은 것으로 읽힌다 */
+.repo-picker__recent {
+  align-self: stretch;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  text-align: left;
+}
+.repo-picker__recent-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.repo-picker__recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* 최근은 10개까지라(E15a) 카드가 화면을 넘길 수 있다 — 목록만 스크롤시킨다 */
+  max-height: 220px;
+  overflow-y: auto;
+}
+.repo-picker__recent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.repo-picker__recent-item:hover,
+.repo-picker__recent-item:focus-visible {
+  background: var(--color-surface-sunken);
+}
+.repo-picker__recent-name {
+  max-width: 100%;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-picker__recent-path {
+  max-width: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

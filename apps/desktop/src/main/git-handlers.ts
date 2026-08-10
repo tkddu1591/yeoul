@@ -191,11 +191,12 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   })
 
   ipcMain.handle(CHANNELS.repoInitialPath, async (event) => {
-    // 이 창에 씨앗 저장소가 있으면 그것부터 (E15b — 새 창·복원). 없으면 기존 E2E 주입 경로
+    // 이 창의 씨앗 저장소 (E15b — 새 창·복원·E2E 주입). 없으면 저장소 없는 빈 창이다.
+    // E2E 주입(GIT_GUI_E2E_REPO)도 index.ts가 **첫 창의 씨앗으로만** 넣는다 — 여기서 환경변수로
+    // 되돌아가면 ⌘N이 만든 빈 창까지 그 저장소를 열어 빈 창 경로가 검증 불가능해진다
     const seeded = registry.get(event.sender.id)?.repoPath
-    const initial = seeded ?? process.env.GIT_GUI_E2E_REPO
-    if (!initial) return null
-    return remember(event.sender.id, await registerRepoPath(initial))
+    if (!seeded) return null
+    return remember(event.sender.id, await registerRepoPath(seeded))
   })
 
   ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: unknown) =>
