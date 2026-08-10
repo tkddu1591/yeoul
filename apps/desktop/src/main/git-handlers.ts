@@ -202,36 +202,48 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     createGitClient(assertAllowedRepo(repoPath)).repo.status(),
   )
 
-  // 저장소 감시 (E7b) — 한 번에 하나만. 새 경로가 오면 이전 감시를 교체한다.
+  // 저장소 감시 (E7b) — **창마다 하나**다 (E15b). 예전엔 모듈 하나의 let이라 새 창이 watch를
+  // 부르는 순간 옛 창의 감시가 꺼지고, 창 B를 닫으면 그 시점 B를 가리키던 let이 null이 돼
+  // A는 되살아나지도 않았다. A는 조용히 E10(외부 변경 감지)을 잃고 사용자는 "왜 갱신이 안
+  // 되지"만 겪었다 — 여러 창 이전에도 이미 결함이다.
   // 응답 대상은 invoke의 sender — window 배선 없이 push한다 (실측 3)
-  let stopWatching: (() => void) | null = null
+  const stopWatching = new Map<number, () => void>()
   // destroyed 정리는 sender당 1회만 등록한다 — watch 재호출마다 쌓이면 MaxListeners 경고 (통합 리뷰, terminal-handlers 관례)
   const watchCleanupHooked = new WeakSet<Electron.WebContents>()
   ipcMain.handle(CHANNELS.repoWatch, async (event, repoPath: unknown) => {
     const path = assertAllowedRepo(repoPath)
+    const sender = event.sender
+    // destroyed 뒤에는 sender.id 접근이 안전하지 않다 — 콜백 밖에서 미리 잡아 둔다
+    const senderId = sender.id
+    // **해제를 먼저 한다** (E15a 리뷰 발견): 예전엔 --git-common-dir 해석이 앞이라, rev-parse가
+    // 실패하면 옛 저장소의 감시가 살아남은 채 새 저장소는 감시되지 않았다. Map으로 바꾼다고
+    // 이 순서가 저절로 고쳐지지는 않는다.
+    // 이 순서는 E2E로 못 문다(실측) — rev-parse 실패를 만들려면 allowlist에 든 저장소 폴더를
+    // 테스트 중에 지워야 하고, 판정도 "옛 감시가 더는 안 온다"는 부재 단언이라 15초 무대기가 된다
+    stopWatching.get(senderId)?.()
+    stopWatching.delete(senderId)
     // 링크드 워크트리의 .git은 파일이라 그대로 감시하면 죽는다(실측 H1) — 공용 git dir을 해석해 감시한다
     const gitDir = (
       await execGitOrThrow(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
         cwd: path,
       })
     ).stdout.trim()
-    stopWatching?.()
-    const sender = event.sender
     const notify = (): void => {
       if (!sender.isDestroyed()) sender.send(CHANNELS.repoChanged, path)
     }
     // .git 감시는 HEAD·refs·상태 마커를, 워킹트리 감시는 파일 내용을 본다 — 목적이 달라 둘 다 필요하다 (E10)
     const stopGit = watchRepository(gitDir, notify)
     const stopTree = watchWorkingTree(path, notify)
-    stopWatching = () => {
+    stopWatching.set(senderId, () => {
       stopGit()
       stopTree()
-    }
+    })
     if (!watchCleanupHooked.has(sender)) {
       watchCleanupHooked.add(sender)
       sender.once('destroyed', () => {
-        stopWatching?.()
-        stopWatching = null
+        // **이 창의 것만** 끈다 — 예전엔 다른 창을 가리키던 감시까지 껐다
+        stopWatching.get(senderId)?.()
+        stopWatching.delete(senderId)
       })
     }
   })

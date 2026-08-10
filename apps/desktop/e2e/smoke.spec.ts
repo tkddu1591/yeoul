@@ -5173,3 +5173,48 @@ test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async 
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b ② — 창 B를 열고 닫아도 창 A의 외부 변경 감지(E10)가 산다.
+ *
+ * 이건 여러 창이 생기면서 나는 결함이 아니라 **이미 있던 결함**이다. stopWatching이 모듈
+ * 하나의 `let`이라 (1) 새 창이 watch를 부르는 순간 옛 창의 감시가 꺼지고 (2) 창 B를 닫으면
+ * 그 시점 B를 가리키던 `let`이 null이 돼 A는 되살아나지도 않는다. A는 조용히 E10을 잃고
+ * 사용자는 "왜 갱신이 안 되지"만 겪는다.
+ *
+ * **대기가 창 포커스에 기대면 안 된다** — index.ts의 window.on('focus')가 재조회를 쏘므로
+ * 감시가 죽어 있어도 통과할 수 있다. E2E는 창을 숨긴 채 띄우고(GIT_GUI_E2E_SHOW 없음) 이
+ * 테스트는 창을 클릭·포커스하지 않는다. 실측: 수정 전 이 테스트는 15초 타임아웃으로 빨갛다
+ * (B를 닫아도 A에 포커스 재조회가 가지 않는다는 뜻이다).
+ */
+test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // 창 B를 닫는다 — 수정 전에는 여기서 (이미 꺼져 있던) A의 감시가 되살아날 길도 사라진다
+    await second.close()
+
+    // A의 저장소에 앱 밖에서 새 파일을 만든다. A의 감시가 살아 있으면 새로고침 없이 나타난다
+    await writeFile(join(repoA, 'watch-alive.txt'), '외부 변경\n')
+    await expect(first.getByTestId('file-unstaged-watch-alive.txt')).toBeVisible({
+      timeout: 15_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
