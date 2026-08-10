@@ -173,7 +173,7 @@ app
   .whenReady()
   .then(() => {
     registerGitHandlers(registry)
-    registerSettingsHandlers()
+    registerSettingsHandlers(registry)
     registerHostingHandlers()
     registerTerminalHandlers()
     registerWindowHandlers()

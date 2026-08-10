@@ -5218,3 +5218,60 @@ test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', asyn
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b ③ — 사이드 접힘은 창마다 따로 산다.
+ *
+ * 설정 열한 개 중 레이아웃 다섯(사이드 접힘·우측 폭·터미널 열림/높이)만 창별이고 나머지는 앱
+ * 공용이다. 렌더러는 이 구분을 모른다 — main이 settings:get-sync에서 event.sender로 창을 찾아
+ * 앱 공용과 그 창의 layout을 합쳐 평평하게 돌려주고, settings:set에서 성격에 따라 갈라 저장한다.
+ *
+ * **"두 창의 화면이 서로 다르다"만 보면 공허하다** — 렌더러 상태는 원래 창마다 따로다(수정 전
+ * 코드도 통과한다). 그래서 이 테스트는 **갈라 저장한 값이 다시 읽히는 길**을 문다:
+ * A를 접은 **뒤** A에서 새 창 B를 열면, B는 열어준 창의 layout을 씨앗으로 받으므로 접힌 채
+ * 떠야 한다. 그 씨앗은 registry.setLayout(설정 저장)과 get-sync의 layout 병합(설정 읽기)을
+ * 둘 다 지나야만 도착한다 — 어느 하나를 빼면 B가 펼쳐진 채 떠서 빨개진다(반증 실측).
+ *
+ * 접힘 확인은 E12의 관용구를 따른다 — 접힘은 언마운트가 아니라 폭 0이라(E13, 트랙 유지)
+ * `.app__left`는 count 1로 남고 not.toBeVisible + boundingBox 폭 0으로 본다. 클릭 뒤에는
+ * --motion-slow(240ms) 전환이 있어 여유를 두지만, 새로 뜬 창은 부팅 억제(noColumnTransition)라
+ * 전환 없이 즉시 0px로 시작한다.
+ */
+test('E15b — 사이드 접힘은 창마다 따로 산다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.locator('.app__left')).toBeVisible()
+
+    // A만 접는다 — 이 값은 앱 설정 파일이 아니라 A의 레지스트리 항목으로 간다
+    await first.getByTestId('left-collapse-toggle').click()
+    await first.waitForTimeout(320)
+    await expect(first.locator('.app__left')).not.toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // B는 열어준 창(접힌 A)을 닮아 접힌 채 뜬다 — 저장과 읽기가 둘 다 창별로 돌았다는 뜻이다
+    await expect(second.locator('.app__left')).toHaveCount(1)
+    await expect(second.locator('.app__left')).not.toBeVisible()
+    expect((await second.locator('.app__left').boundingBox())!.width).toBe(0)
+
+    // B만 펼친다 — A는 접힌 채 남는다(한쪽의 저장이 다른 쪽을 덮지 않는다)
+    await second.getByTestId('left-collapse-toggle').click()
+    await expect(second.locator('.app__left')).toBeVisible()
+    await expect(first.locator('.app__left')).not.toBeVisible()
+    expect((await first.locator('.app__left').boundingBox())!.width).toBe(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})

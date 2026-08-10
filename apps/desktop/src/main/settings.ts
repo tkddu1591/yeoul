@@ -5,8 +5,10 @@ import {
   sanitizePersistedSettings,
   sanitizeSettings,
   SETTINGS_CHANNELS,
+  splitSettings,
   type PersistedSettings,
 } from '@git-gui/ipc-contract'
+import type { WindowRegistry } from './window-registry'
 
 function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -42,14 +44,22 @@ export function readTheme(): 'light' | 'dark' | undefined {
   return current().theme
 }
 
-export function registerSettingsHandlers(): void {
+export function registerSettingsHandlers(registry: WindowRegistry): void {
   ipcMain.on(SETTINGS_CHANNELS.getSync, (event) => {
-    // renderer 표면 필드만 추린다 — hosting(토큰)은 renderer로 절대 보내지 않는다
-    event.returnValue = sanitizeSettings(current())
+    // renderer 표면 필드만 추린다 — hosting(토큰)은 renderer로 절대 보내지 않는다.
+    // 거기에 **이 창의** 레이아웃을 얹어 평평하게 돌려준다 (E15b) — 렌더러는 분리를 모른다.
+    // 레지스트리 등록이 new BrowserWindow 직후 동기적으로 일어나므로 여기서 이미 있다
+    const layout = registry.get(event.sender.id)?.layout ?? {}
+    event.returnValue = { ...sanitizeSettings(current()), ...layout }
   })
-  ipcMain.handle(SETTINGS_CHANNELS.set, (_event, partial: unknown) => {
+  ipcMain.handle(SETTINGS_CHANNELS.set, (event, partial: unknown) => {
+    // 성격에 따라 갈라 보낸다 — 앱 공용은 파일에, 창별은 그 창의 레지스트리 항목에 (E15b).
     // renderer 입력도 표면 sanitize만 병합한다 — renderer가 hosting(토큰)을 쓸 수 없다
-    save({ ...current(), ...sanitizeSettings(partial) })
+    const { app: appPart, layout } = splitSettings(partial)
+    // 빈 객체면 건너뛴다 — 창별 필드만 담긴 set이 앱 설정 파일을 매번 다시 쓰면 디스크 쓰기가
+    // 무의미하게 는다(도크 높이 드래그는 초당 여러 번 온다)
+    if (Object.keys(appPart).length > 0) save({ ...current(), ...appPart })
+    if (Object.keys(layout).length > 0) registry.setLayout(event.sender.id, layout)
   })
 }
 

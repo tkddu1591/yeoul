@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizePersistedSettings, sanitizeSettings } from '../src/index'
+import { sanitizePersistedSettings, sanitizeSettings, splitSettings } from '../src/index'
 
 describe('sanitizeSettings', () => {
   it('알려진 필드만, 올바른 타입만 통과시킨다', () => {
@@ -116,5 +116,58 @@ describe('sanitizePersistedSettings', () => {
     expect(sanitizeSettings({ theme: 'light', hosting: { github: { token: 'enc' } } })).toEqual({
       theme: 'light',
     })
+  })
+})
+
+describe('splitSettings — 창별/앱공용 분리 (E15b)', () => {
+  it('창별 다섯 필드는 layout으로 간다', () => {
+    const { app, layout } = splitSettings({
+      leftCollapsed: true,
+      rightCollapsed: false,
+      rightWidth: 420,
+      terminalOpen: true,
+      terminalHeight: 240,
+    })
+    expect(layout).toEqual({
+      leftCollapsed: true,
+      rightCollapsed: false,
+      rightWidth: 420,
+      terminalOpen: true,
+      terminalHeight: 240,
+    })
+    expect(app).toEqual({})
+  })
+
+  it('앱 공용 필드는 app으로 간다', () => {
+    const { app, layout } = splitSettings({ theme: 'dark', pullMode: 'rebase' })
+    expect(app).toEqual({ theme: 'dark', pullMode: 'rebase' })
+    expect(layout).toEqual({})
+  })
+
+  it('한 partial에 섞여 와도 각각 제 자리로 간다 — 렌더러가 갈라 보낼 의무가 없다', () => {
+    const { app, layout } = splitSettings({ theme: 'light', rightWidth: 300 })
+    expect(app).toEqual({ theme: 'light' })
+    expect(layout).toEqual({ rightWidth: 300 })
+  })
+
+  it('sanitize를 거친다 — 타입이 틀린 값은 양쪽 다 안 받는다', () => {
+    const { app, layout } = splitSettings({
+      theme: 'neon',
+      rightWidth: '넓게',
+      pullMode: 'rebase',
+    })
+    expect(app).toEqual({ pullMode: 'rebase' })
+    expect(layout).toEqual({})
+  })
+
+  it('hosting 토큰은 어느 쪽에도 안 간다 — renderer 표면이 아니다', () => {
+    const { app, layout } = splitSettings({ hosting: { github: { token: 'x', login: 'y' } } })
+    expect(app).not.toHaveProperty('hosting')
+    expect(layout).not.toHaveProperty('hosting')
+  })
+
+  it('빈 입력은 빈 둘', () => {
+    expect(splitSettings({})).toEqual({ app: {}, layout: {} })
+    expect(splitSettings(null)).toEqual({ app: {}, layout: {} })
   })
 })

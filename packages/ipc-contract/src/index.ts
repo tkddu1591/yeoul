@@ -416,6 +416,40 @@ export function sanitizeSettings(value: unknown): AppSettings {
   return settings
 }
 
+/** WindowLayout에 속하는 키 — splitSettings와 복원 sanitize가 함께 쓰는 정본 목록 (E15b) */
+const WINDOW_LAYOUT_KEYS = [
+  'leftCollapsed',
+  'rightCollapsed',
+  'rightWidth',
+  'terminalOpen',
+  'terminalHeight',
+] as const satisfies readonly (keyof WindowLayout)[]
+
+/**
+ * renderer가 보낸 평평한 설정을 앱 공용과 창별로 가른다 (E15b).
+ *
+ * 렌더러는 이 구분을 모른다 — 한 `partial`에 두 성격이 섞여 와도 각각 제 자리로 간다.
+ * sanitizeSettings를 먼저 거치므로 타입이 틀린 값과 hosting 토큰은 양쪽 다 못 들어온다
+ */
+export function splitSettings(value: unknown): { app: AppSettings; layout: WindowLayout } {
+  const clean = sanitizeSettings(value)
+  const layout: WindowLayout = {}
+  const app: AppSettings = { ...clean }
+  for (const key of WINDOW_LAYOUT_KEYS) {
+    if (key in clean) {
+      // 키마다 타입이 달라 좁히기 어렵다 — sanitizeSettings가 이미 타입을 보장하므로 통째로 옮긴다
+      ;(layout as Record<string, unknown>)[key] = clean[key]
+      delete (app as Record<string, unknown>)[key]
+    }
+  }
+  return { app, layout }
+}
+
+/** 디스크에서 온 창별 레이아웃 방어 (E15b 복원) — 알려진 키·올바른 타입만 남긴다 */
+export function sanitizeWindowLayout(value: unknown): WindowLayout {
+  return splitSettings(value).layout
+}
+
 /**
  * 디스크(settings.json)에만 존재하는 확장 설정 — main 전용.
  * hosting.github.token은 safeStorage 암호문(base64)이며, getSync 응답은 sanitizeSettings로
