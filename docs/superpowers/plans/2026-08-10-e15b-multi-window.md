@@ -520,7 +520,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 2: 창별 감시 — **테스트 먼저, 그다음 수정**
 
 **Files:**
-- Modify: `apps/desktop/src/main/git-handlers.ts:178-208` (`stopWatching`)
+- Modify: `apps/desktop/src/main/git-handlers.ts:205-237` (`stopWatching`)
 - Modify: `apps/desktop/e2e/smoke.spec.ts`
 
 **Interfaces:**
@@ -528,7 +528,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Produces: 없음(내부 수정).
 
 > **이건 이미 결함이다 — 여러 창을 만들면서 생기는 게 아니라 이미 있다.** 지금 코드
-> (`git-handlers.ts:179`):
+> (`git-handlers.ts:207`):
 >
 > ```ts
 > let stopWatching: (() => void) | null = null
@@ -581,7 +581,7 @@ test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', asyn
 
 `writeFile`·`join`이 이 스펙에 이미 import돼 있는지 먼저 확인하고, 없으면 더한다.
 
-**대기는 창 포커스에 기대면 안 된다** — `window.on('focus')`가 재조회를 쏘므로(`index.ts:102`) 감시가 죽어 있어도 통과할 수 있다. 위 테스트는 포커스를 건드리지 않는다(B를 닫으면 A가 포커스를 받을 수 있는데, **그러면 이 테스트가 공허해진다**). Step 2에서 반드시 빨간지 확인하고, **초록이면 포커스 재조회가 가린 것이니 그렇게 보고한다** — 그때는 `GIT_GUI_E2E_SHOW` 없이(숨김 창) 포커스가 안 가는지 확인하거나, A를 명시적으로 blur시킬 방법을 찾는다.
+**대기는 창 포커스에 기대면 안 된다** — `window.on('focus')`가 재조회를 쏘므로(`index.ts:121`) 감시가 죽어 있어도 통과할 수 있다. 위 테스트는 포커스를 건드리지 않는다(B를 닫으면 A가 포커스를 받을 수 있는데, **그러면 이 테스트가 공허해진다**). Step 2에서 반드시 빨간지 확인하고, **초록이면 포커스 재조회가 가린 것이니 그렇게 보고한다** — 그때는 `GIT_GUI_E2E_SHOW` 없이(숨김 창) 포커스가 안 가는지 확인하거나, A를 명시적으로 blur시킬 방법을 찾는다.
 
 - [ ] **Step 2: 현재 코드에서 빨간 것을 확인한다**
 
