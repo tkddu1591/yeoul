@@ -89,6 +89,15 @@ export interface GitApi {
     /** OS 홈 디렉터리 절대 경로 — 워크트리 행의 `~` 축약에 쓴다 (E7j) */
     home(): Promise<string>
   }
+  /** 창 (E15b) */
+  window: {
+    /**
+     * 새 창에서 연다. `null`이면 저장소 없는 빈 창.
+     * **경로 검증은 repo.open과 동일**하다 — 이 인자도 디스크 설정에서 온 렌더러 입력이다.
+     * 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다
+     */
+    open(repoPath: string | null): Promise<void>
+  }
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
     list(repoPath: string): Promise<WorktreeInfo[]>
@@ -337,26 +346,37 @@ export const HOSTING_CHANNELS = {
 } as const
 
 /**
- * 렌더러가 기억해야 하는 소량 설정. file:// origin의 localStorage는 앱 재시작 간
- * 유지되지 않아(실측) main이 userData/settings.json으로 영속화한다.
+ * 창별 레이아웃 (E15b) — 앱 공용 설정과 갈라진다.
+ * 렌더러는 이 구분을 모른다: main이 `settings:get-sync`에서 앱 공용과 합쳐 평평하게 돌려주고,
+ * `settings:set`에서 성격에 따라 갈라 저장한다. 소비처 코드는 그대로다
  */
-export interface AppSettings {
-  theme?: 'light' | 'dark'
+export interface WindowLayout {
+  /** 좌측 사이드(변경·브랜치·워크트리 탭) 접힘 (E12) */
+  leftCollapsed?: boolean
+  /** 우측 사이드(히스토리·상세) 접힘 (E12) */
+  rightCollapsed?: boolean
   rightWidth?: number
   /** 터미널 도크 열림 (E7b) */
   terminalOpen?: boolean
   /** 터미널 도크 높이(px) (E7b) */
   terminalHeight?: number
+}
+
+/**
+ * 렌더러가 기억해야 하는 소량 설정. file:// origin의 localStorage는 앱 재시작 간
+ * 유지되지 않아(실측) main이 userData/settings.json으로 영속화한다.
+ *
+ * 창별 필드(WindowLayout)와 앱 공용 필드가 여기서 평평하게 합쳐진다 (E15b) —
+ * 렌더러가 보는 표면은 분리 이전과 완전히 동일하다
+ */
+export interface AppSettings extends WindowLayout {
+  theme?: 'light' | 'dark'
   /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
   worktreeSelectAction?: 'terminal' | 'switch-app'
   /** 받아오기 방식 — merge(기본)/rebase (E7e) */
   pullMode?: 'merge' | 'rebase'
   /** 주기적 원격 새로고침(10분) — 기본 켬 (E7e) */
   autoFetch?: boolean
-  /** 좌측 사이드(변경·브랜치·워크트리 탭) 접힘 (E12) */
-  leftCollapsed?: boolean
-  /** 우측 사이드(히스토리·상세) 접힘 (E12) */
-  rightCollapsed?: boolean
   /** 최근 연 저장소 — 최신이 앞 (E15a) */
   recentRepos?: string[]
 }
@@ -476,4 +496,6 @@ export const WINDOW_CHANNELS = {
   fullScreen: 'window:full-screen',
   /** push(main→renderer) — 창이 포커스를 받을 때 (E10) */
   focused: 'window:focused',
+  /** 새 창에서 연다 — 경로가 null이면 빈 창 (E15b) */
+  open: 'window:open',
 } as const

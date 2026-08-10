@@ -13,6 +13,7 @@ import {
   repoOpenUnchecked,
 } from './repo-open-guard'
 import { assertOpenableWorktree } from './worktree-open-guard'
+import type { WindowRegistry } from './window-registry'
 
 /** `.catch((cause) => cause)`로 합쳐 받은 값이 결과인지 오류인지 가른다 (repoOpen) */
 function isGitResult(value: unknown): value is GitResult {
@@ -127,8 +128,48 @@ async function registerRepoPath(path: string): Promise<string> {
   return topLevel
 }
 
-export function registerGitHandlers(): void {
-  ipcMain.handle(CHANNELS.repoSelect, async () => {
+/**
+ * `repo:open`의 본문 (E15b) — 창 없이도 부를 수 있게 핸들러에서 뽑았다.
+ *
+ * `window:open`도 같은 검증을 거쳐야 하는데(그 인자도 디스크 설정에서 온 렌더러 입력이다),
+ * 검증 함수를 복제하면 둘이 갈라진다 — 그래서 본문을 함수로 만들어 둘이 함께 쓴다.
+ * `path`는 호출자가 이미 `assertAbsoluteRepoPath`를 통과시킨 절대 경로다
+ */
+export async function openRepoPath(path: string): Promise<RepoOpenResult> {
+  // 폴더가 있는지는 git이 아니라 fs에게 묻는다 (E15a 리뷰 ④) — spawn 실패로는 "없는 폴더"와
+  // "PATH에 git 없음"을 구별할 수 없기 때문이다(둘 다 "spawn git ENOENT"다 — repo-open-guard 참조).
+  // 여기서 갈라야 목록 자동 제거가 사인을 단정하지 않는다
+  try {
+    const info = await stat(path)
+    if (!info.isDirectory()) return repoGone()
+  } catch (cause) {
+    return isMissingDirectoryError(cause) ? repoGone() : repoOpenUnchecked(cause)
+  }
+  const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
+    (cause: unknown) => cause,
+  )
+  // 폴더는 실재하는데 git 실행이 실패했다 — 원인을 모르니 목록은 그대로 둔다
+  if (!isGitResult(check)) return repoOpenUnchecked(check)
+  // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
+  if (check.exitCode !== 0 || check.stdout.trim() !== 'true') return repoNotARepository()
+  return { ok: true, path: await registerRepoPath(path) }
+}
+
+export function registerGitHandlers(registry: WindowRegistry): void {
+  /**
+   * 이 창이 지금 무엇을 열었는지 레지스트리에 반영한다 (E15b).
+   *
+   * 창의 저장소를 바꾸는 핸들러는 전부 여기를 지난다(select·open·initial-path·open-path).
+   * 빠뜨리면 E15a 전환기로 저장소를 바꿨을 때 레지스트리가 옛 경로를 들고 있어
+   * **중복 차단이 틀리고**(A가 이미 B로 갈아탔는데 B를 열려 하면 새 창이 뜬다)
+   * **복원이 옛 저장소를 되살린다.**
+   */
+  const remember = (senderId: number, topLevel: string): string => {
+    registry.setRepoPath(senderId, topLevel)
+    return topLevel
+  }
+
+  ipcMain.handle(CHANNELS.repoSelect, async (event) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     if (result.canceled || result.filePaths.length === 0) return null
     const path = result.filePaths[0]!
@@ -137,37 +178,24 @@ export function registerGitHandlers(): void {
     if (check.exitCode !== 0 || check.stdout.trim() !== 'true') {
       throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
     }
-    return registerRepoPath(path)
+    return remember(event.sender.id, await registerRepoPath(path))
   })
 
   // 최근 목록에서 고른 경로로 연다 (E15a). 인자는 디스크 settings.json에서 온 렌더러 입력이라
   // repoSelect와 **똑같이** 검증하고, 거기에 절대 경로일 것을 더한다 (E15a 리뷰 ③) — 그냥
   // registerRepoPath에 넘기면 렌더러가 임의 디렉터리에서 git을 돌리는 통로가 된다
-  ipcMain.handle(CHANNELS.repoOpen, async (_event, repoPath: unknown): Promise<RepoOpenResult> => {
-    const path = assertAbsoluteRepoPath(repoPath)
-    // 폴더가 있는지는 git이 아니라 fs에게 묻는다 (E15a 리뷰 ④) — spawn 실패로는 "없는 폴더"와
-    // "PATH에 git 없음"을 구별할 수 없기 때문이다(둘 다 "spawn git ENOENT"다 — repo-open-guard 참조).
-    // 여기서 갈라야 목록 자동 제거가 사인을 단정하지 않는다
-    try {
-      const info = await stat(path)
-      if (!info.isDirectory()) return repoGone()
-    } catch (cause) {
-      return isMissingDirectoryError(cause) ? repoGone() : repoOpenUnchecked(cause)
-    }
-    const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path }).catch(
-      (cause: unknown) => cause,
-    )
-    // 폴더는 실재하는데 git 실행이 실패했다 — 원인을 모르니 목록은 그대로 둔다
-    if (!isGitResult(check)) return repoOpenUnchecked(check)
-    // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
-    if (check.exitCode !== 0 || check.stdout.trim() !== 'true') return repoNotARepository()
-    return { ok: true, path: await registerRepoPath(path) }
+  ipcMain.handle(CHANNELS.repoOpen, async (event, repoPath: unknown): Promise<RepoOpenResult> => {
+    const result = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+    if (result.ok) remember(event.sender.id, result.path)
+    return result
   })
 
-  ipcMain.handle(CHANNELS.repoInitialPath, async () => {
-    const initial = process.env.GIT_GUI_E2E_REPO
+  ipcMain.handle(CHANNELS.repoInitialPath, async (event) => {
+    // 이 창에 씨앗 저장소가 있으면 그것부터 (E15b — 새 창·복원). 없으면 기존 E2E 주입 경로
+    const seeded = registry.get(event.sender.id)?.repoPath
+    const initial = seeded ?? process.env.GIT_GUI_E2E_REPO
     if (!initial) return null
-    return registerRepoPath(initial)
+    return remember(event.sender.id, await registerRepoPath(initial))
   })
 
   ipcMain.handle(CHANNELS.repoStatus, (_event, repoPath: unknown) =>
@@ -208,13 +236,14 @@ export function registerGitHandlers(): void {
     }
   })
 
-  ipcMain.handle(CHANNELS.repoOpenPath, async (_event, repoPath: unknown, worktreePath: unknown) => {
+  ipcMain.handle(CHANNELS.repoOpenPath, async (event, repoPath: unknown, worktreePath: unknown) => {
     const root = assertAllowedRepo(repoPath)
     // 목록 대조 + prunable 친절 거부 (E7d ⑥) — reveal·terminal cwd는 기존 assertWorktreePath 유지
     const path = assertString(worktreePath)
     const list = await createGitClient(root).worktrees.list()
     assertOpenableWorktree(list, path)
-    return registerRepoPath(path)
+    // 워크트리 전환도 그 창이 보는 경로를 바꾼다 — 레지스트리도 따라가야 한다 (E15b)
+    return remember(event.sender.id, await registerRepoPath(path))
   })
 
   // 워크트리 행 `~` 축약용 — repoPath 신뢰 규칙과 무관한 OS 정보라 별도 검증이 필요 없다 (E7j)

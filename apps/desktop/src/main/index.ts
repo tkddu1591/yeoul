@@ -1,10 +1,15 @@
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { join } from 'node:path'
-import { WINDOW_CHANNELS } from '@git-gui/ipc-contract'
-import { registerGitHandlers } from './git-handlers'
+import { WINDOW_CHANNELS, type WindowLayout } from '@git-gui/ipc-contract'
+import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
+import { assertAbsoluteRepoPath } from './repo-open-guard'
 import { readTheme, registerSettingsHandlers } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
+import { createWindowRegistry } from './window-registry'
+
+// 창의 정본 (E15b) — 어느 창이 어느 저장소를 열었나·그 창의 레이아웃. main만 안다
+const registry = createWindowRegistry()
 
 /** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
  * 실측: 앱 최상위에서 실제로 페인트되는 배경은 --color-surface(카드·패널 전용)가 아니라
@@ -50,7 +55,13 @@ const isE2E = !app.isPackaged && process.env.GIT_GUI_E2E_REPO !== undefined
 // 스로틀 해제 등 나머지 E2E 동작은 유지. 프로덕션(isPackaged)·CI 기본 동작 무변
 const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'
 
-function createWindow(): void {
+/** 새 창이 무엇을 열고 어떤 모습으로 뜰지 (E15b) — 여는 쪽이 정해 넘긴다 */
+interface WindowSeed {
+  repoPath: string | null
+  layout: WindowLayout
+}
+
+function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): BrowserWindow {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -80,6 +91,14 @@ function createWindow(): void {
       backgroundThrottling: !isE2E,
     },
   })
+
+  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
+  // 늦게 돌고, 그때 이 창의 layout 씨앗을 읽어야 새 창이 열어준 창을 닮는다. loadFile 뒤로
+  // 미루면 늦는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다
+  registry.add(window.webContents.id, { repoPath: seed.repoPath, layout: seed.layout })
+  // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
+  const windowId = window.webContents.id
+  window.on('closed', () => registry.remove(windowId))
 
   // E13 — 흰 화면 제거 2단계: 페인트가 끝난 뒤에만 보여준다. E2E 숨김 규칙(E6a)과 합성한다 —
   // isE2E && !isE2EShow는 계속 숨긴 채로 둔다(이 분기를 안 타므로 창은 영원히 안 보인다).
@@ -114,6 +133,37 @@ function createWindow(): void {
   } else {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return window
+}
+
+/** 새 창은 열어준 창의 레이아웃을 씨앗으로 받는다 (사용자 결정). 그 창이 없으면 빈 레이아웃 —
+ * 렌더러가 기본값을 쓴다 */
+function seedLayoutFrom(openerId: number): WindowLayout {
+  return { ...(registry.get(openerId)?.layout ?? {}) }
+}
+
+/** 새 창에서 연다 (E15b). 창을 만드는 것은 index.ts 책임이라 이 핸들러만 여기 있다 */
+function registerWindowHandlers(): void {
+  ipcMain.handle(WINDOW_CHANNELS.open, async (event, repoPath: unknown) => {
+    if (repoPath === null) {
+      createWindow({ repoPath: null, layout: seedLayoutFrom(event.sender.id) })
+      return
+    }
+    // 인자는 디스크 설정에서 온 렌더러 입력이라 repo.open과 **같은 검증**을 거친다 — 검증 없이
+    // 씨앗으로 넣으면 그 창이 임의 디렉터리에서 git을 돌리는 통로가 된다
+    const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+    if (!opened.ok) throw new Error(opened.message)
+    // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
+    const existing = registry.findByRepoPath(opened.path)
+    if (existing !== undefined) {
+      const found = BrowserWindow.getAllWindows().find((w) => w.webContents.id === existing)
+      // 탭으로 묶여 있어도 focus()면 macOS가 그 탭을 앞으로 가져온다
+      found?.show()
+      found?.focus()
+      return
+    }
+    createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
+  })
 }
 
 // macOS에서는 앱 실행 자체가 활성화되며 포커스를 훔칠 수 있다 — E2E에서는 dock 아이콘째 숨긴다
@@ -122,10 +172,11 @@ if (isE2E && !isE2EShow) app.dock?.hide()
 app
   .whenReady()
   .then(() => {
-    registerGitHandlers()
+    registerGitHandlers(registry)
     registerSettingsHandlers()
     registerHostingHandlers()
     registerTerminalHandlers()
+    registerWindowHandlers()
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { cleanupScreens, electron } from './harness'
+import { cleanupScreens, electron, nextWindow } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 import { T } from '../src/renderer/src/terms'
 import { MAIN_GAP } from '../src/renderer/src/ui/grid-tracks'
@@ -5016,11 +5016,13 @@ async function stubRepoSelect(app: ElectronApplication, picked: string | null): 
     if (impl._invokeHandlers.get('repo:select') === undefined || open === undefined) return false
     const globals = globalThis as unknown as { __selectCalls: number }
     globals.__selectCalls = 0
-    impl._invokeHandlers.set('repo:select', async () => {
+    impl._invokeHandlers.set('repo:select', async (event, ..._rest) => {
       globals.__selectCalls += 1
       if (result === null) return null
-      // 핸들러는 첫 인자(event)를 안 쓴다 — 실제 검증·등록 경로를 그대로 탄다
-      const opened = (await open(null, result)) as { ok: boolean; path?: string }
+      // 받은 event를 그대로 넘긴다 — 실제 검증·등록 경로를 그대로 탄다.
+      // E15b 전에는 `open(null, result)`였다("핸들러는 event를 안 쓴다"). 그 가정은 E15b에서
+      // 거짓이 됐다 — repo:open이 event.sender.id로 이 창의 저장소를 창 레지스트리에 반영한다
+      const opened = (await open(event, result)) as { ok: boolean; path?: string }
       return opened.ok ? (opened.path ?? null) : null
     })
     return true
@@ -5123,5 +5125,51 @@ test('E15a — ⌘O 전환은 옛 저장소에 매인 확인창을 남기지 않
     await rm(repoA, { recursive: true, force: true })
     await rm(repoB, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ① — 창을 새로 띄우고 두 창을 각각 조작할 수 있다.
+ *
+ * **이 에픽의 관문이다.** E15b 전까지 이 저장소의 E2E 135건은 전부 창 하나(firstWindow)를
+ * 전제로 짜여 있었고, E2E는 창을 숨긴 채 띄운다(GIT_GUI_E2E_SHOW가 없으면 show()를 안 부른다 —
+ * main/index.ts의 ready-to-show 분기). "숨긴 두 번째 창이 Playwright의 window 이벤트에 잡히고
+ * 렌더까지 되는가"가 미지수였고, 나머지 태스크가 전부 이 위에 선다.
+ *
+ * 경로 텍스트만 보면 헤더 한 줄만 갈아끼우는 회귀를 놓치므로(E15a ①과 같은 이유) 두 저장소의
+ * 변경 파일 이름을 다르게 두고 두 번째 창의 **내용**까지 확인한다.
+ */
+test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+    const pending = nextWindow(app)
+    // page.evaluate는 인자를 **하나**만 넘긴다(첫 파라미터가 그 값이다) — locator.evaluate의
+    // (element, arg) 시그니처와 헷갈리면 undefined가 main으로 가 검증에서 튕긴다
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await second.locator('.app__header').waitFor()
+
+    // 두 창이 서로 다른 저장소를 보고, 각각 조작이 닿는다
+    expect(app.windows()).toHaveLength(2)
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
   }
 })
