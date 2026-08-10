@@ -1675,6 +1675,15 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **플랜의 Step 5 E2E는 공허했다.** "A를 접고 B는 그대로"만 보면 **수정 전 코드도 통과한다** — 렌더러 상태는 원래 창마다 메모리에 따로 있고, `settings:set`이 파일을 갈아도 이미 뜬 B는 다시 안 읽는다. 순서를 바꿔 **A를 먼저 접고 그 다음 A에서 B를 열어야** 갈라 저장한 값이 다시 읽히는 길(`seedLayoutFrom(A)` → `registry.get(B).layout` → `getSync` 병합)을 문다. 원안 순서였으면 두 변이 모두 초록이었다.
 - `AppSettings extends WindowLayout`은 Task 1이 이미 했다(`ipc-contract/src/index.ts:353,372`). `index.ts:126` → 실제 **`:176`**(호출이 한 곳이라 무해).
 
+### Task 5 실측 정정
+
+- **`GIT_GUI_E2E_REPO` 되돌림 때문에 "빈 창" E2E가 불가능했다** — 플랜의 Step 5 셋째 테스트(`window.open(null)` + `GIT_GUI_E2E_REPO`)는 **원안 그대로는 통과할 수 없다.** Task 1이 `repo:initial-path`에 `seeded ?? process.env.GIT_GUI_E2E_REPO`를 뒀는데, ⌘N이 만든 창의 씨앗은 `null`이라 그 되돌림에 걸려 **빈 창이 조용히 그 저장소를 열었다**(실측: `repo-path`가 B가 아니라 A로 나왔다). 고침은 `index.ts`가 **첫 창의 씨앗으로만** 환경변수를 넣고 핸들러에서 되돌림을 지우는 것 — 의미상으로도 "시작할 때 이 저장소"가 맞다. Task 7의 복원은 씨앗을 직접 주므로 영향받지 않는다.
+- **`click({ modifiers: ['Alt'] })`는 `onPointerDown`의 `event.altKey`에 그대로 실린다** (실측 — 통과). 플랜이 대비해 둔 `keyboard.down('Alt')` 우회는 필요 없었다.
+- **`ContextMenu`를 `MenuTrigger` 바깥(프래그먼트 형제)에 두고 우클릭 때 팝오버를 먼저 닫는다.** 팝오버 안쪽에 두면 RAC Popover의 바깥 클릭 처리와 `ariaHideOutside`가 body 포털 메뉴를 물어 간다. RAC `MenuItem`은 `filterDOMProps(props, { global: true })`라 `onPointerDown`·`onContextMenu`가 그대로 통과한다(실측 — `react-aria-components@1.19.0`).
+- **`window.gitApi`를 렌더러 컴포넌트에서 직접 부르지 않는다** (플랜 코드와의 편차). 이 저장소에서 `window.gitApi`를 아는 렌더러 파일은 `App.tsx`뿐이라 전환기·워크트리 패널은 콜백(`onOpenInNewWindow` · `WorktreeAction { kind: 'new-window' }`)으로 올린다. ⌘N만 `App.tsx`에 있어 직접 부른다.
+- **우클릭 두 곳은 영구 E2E가 없다** — 플랜이 E2E 3건만 요구해서다. 대신 임시 스펙으로 두 경로(전환기 항목 우클릭 → `context-new-window` → 새 창 · 워크트리 행 우클릭 → 새 창이 그 워크트리 경로)를 실제로 돌려 초록을 확인하고 지웠다. 회귀 그물은 없다.
+- **반증 3종이 1:1로 물었다**: ⌥ 분기 제거 → ⌥클릭 테스트만 · `findByRepoPath` → `undefined` 고정 → 중복 차단 테스트만 · `RepoPicker`의 `recent` 렌더 제거 → 최근 목록 테스트만. 각각 나머지 5건은 초록.
+
 ### ⚠️ Task 7이 반드시 복구해야 하는 것 (Task 4가 깨뜨렸다 — 진짜 회귀가 아니다)
 
 ```
