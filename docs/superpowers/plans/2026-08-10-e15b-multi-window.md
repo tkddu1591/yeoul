@@ -1668,3 +1668,18 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **vitest에서 electron은 import가 아니라 호출이 막는다** (Task 3 프로브). 플랜·브리핑이 "`git-handlers.ts`가 최상단에서 electron을 import해 단위 테스트가 불가능하다"고 적었는데 틀렸다 — 모듈 로드는 정상이고(`registerTerminalHandlers`가 함수로 잡힌다), 네임드 export가 전부 `undefined`라 **핸들러를 실행할 수 없는** 것이다. 순수부 추출이 유일한 경로라는 결론은 그대로 옳지만 이유가 다르다.
 - **검증 대상 상수를 픽스처에 기호로 쓰면 그 상수를 못 잡는다** (Task 3 반증 실측 — E15a Task 1에서도 같은 게 나왔다). `MAX_SESSIONS_PER_WINDOW`를 16으로 바꾸는 변이가 4건 중 **1건만** 물었다: 나머지가 `Array.from({ length: MAX_SESSIONS_PER_WINDOW })`로 그 상수를 써서 16이어도 자기모순이 없다. 숫자를 실제로 고정하는 것은 `toBe(8)` 하나뿐이다. **앞으로 상수를 무는 테스트는 리터럴로 쓴다.**
 - **남은 간극(Task 3)**: 단위 테스트는 `countSessionsFor`라는 순수 함수만 물고, **핸들러가 그것을 부르는지는 `typecheck`가 타입으로만 고정한다.** 상한 검사가 `assertAllowedRepo`·`assertWorktreePath` 뒤에 있고 allowlist는 실제 git으로만 채워지므로, 값싼 자동 검증이 없다(검사를 검증 앞으로 당기면 테스트는 쉬워지지만 보안 가드 순서를 테스트 편의로 바꾸는 것이다). 미검증분은 `>=` 부등호와 throw 문구 두 줄이다.
+
+### Task 4 실측 정정
+
+- **testid가 셋 다 틀렸다** (컨트롤러가 확인 없이 적었다): `left-collapse` → **`left-collapse-toggle`**(`smoke.spec.ts:3448`) · `changes-panel`은 **testid가 없다** — E12 관용구는 `locator('.app__left')` + `not.toBeVisible()` + `boundingBox().width === 0`이다(E13이 접힘을 언마운트가 아니라 폭 0으로 바꿔 count는 1로 남는다).
+- **플랜의 Step 5 E2E는 공허했다.** "A를 접고 B는 그대로"만 보면 **수정 전 코드도 통과한다** — 렌더러 상태는 원래 창마다 메모리에 따로 있고, `settings:set`이 파일을 갈아도 이미 뜬 B는 다시 안 읽는다. 순서를 바꿔 **A를 먼저 접고 그 다음 A에서 B를 열어야** 갈라 저장한 값이 다시 읽히는 길(`seedLayoutFrom(A)` → `registry.get(B).layout` → `getSync` 병합)을 문다. 원안 순서였으면 두 변이 모두 초록이었다.
+- `AppSettings extends WindowLayout`은 Task 1이 이미 했다(`ipc-contract/src/index.ts:353,372`). `index.ts:126` → 실제 **`:176`**(호출이 한 곳이라 무해).
+
+### ⚠️ Task 7이 반드시 복구해야 하는 것 (Task 4가 깨뜨렸다 — 진짜 회귀가 아니다)
+
+```
+e2e/smoke.spec.ts:373:5  › 우측 열 폭을 드래그로 조절하고 재시작해도 기억한다
+e2e/smoke.spec.ts:3500:5 › E12 — 좌측을 접은 채 재시작해도 접힘이 유지된다
+```
+
+`rightWidth`·`leftCollapsed`가 이제 레지스트리에만 살고 `settings.json`에 안 남는다. **Task 7이 `windows` 배열을 디스크에 영속하면 둘 다 초록으로 돌아와야 한다.** Task 7은 이 두 건이 실제로 돌아왔는지 **명시적으로 확인하고 보고한다** — 안 돌아오면 복원 설계에 구멍이 있다는 뜻이다(창 하나짜리 재시작도 복원 경로를 타야 한다).
