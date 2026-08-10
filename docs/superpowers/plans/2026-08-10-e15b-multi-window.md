@@ -345,8 +345,16 @@ E15a의 전환기·⌘O는 `repo:select`/`repo:open`을 거쳐 저장소를 바�
 않으므로 `createWindow`의 씨앗은 그대로다. 갱신하지 않으면 **중복 차단이 옛 경로를 보고**(A가
 이미 B로 갈아탔는데 B를 열려 하면 새 창이 뜬다) **복원이 옛 저장소를 되살린다.**
 
-`registerRepoPath`(`git-handlers.ts:109`)는 세 진입점(`repo:select`·`repo:open`·`repo:initial-path`)이
-전부 거치는 길목이다. `event`를 받게 해서 거기서 한 번에 갱신한다:
+**진입점은 셋이 아니라 넷이다** (실측 정정 — 초안이 `repo:open-path`를 빠뜨렸다):
+`repo:select` · `repo:open` · `repo:initial-path` · **`repo:open-path`(워크트리 열기)**. 넷째도
+`registerRepoPath`를 지나고 렌더러 스토어의 `repoPath`를 실제로 바꾼다(`repository-store.ts:1276`
+`openWorktree`). 빠뜨리면 **워크트리로 전환한 창이 레지스트리에 옛 경로로 남는다.**
+
+`registerRepoPath`(실제 위치 **`git-handlers.ts:121`** — 초안의 `:109`는 틀렸다)가 그 길목이다.
+다만 **`registerRepoPath`에 `senderId`를 얹지 않는다**: `openRepoPath`가 모듈 레벨 export인데
+그 함수를 쓰므로, 그러면 `git-handlers`에 모듈 전역 registry가 필요해진다(이 플랜이 금지한
+것이다). 대신 `registerGitHandlers(registry)` **클로저 안**에 갱신 지점을 하나 두고 네 핸들러가
+그것을 지나게 한다 — 계약("창의 저장소를 바꾸는 핸들러는 전부 한 함수를 지난다")은 동일하다:
 
 ```ts
 /** 하위 폴더를 선택해도 저장소 루트로 정규화해 allowlist에 기록한다.
@@ -436,14 +444,14 @@ export function nextWindow(app: ElectronApplication): Promise<Page> {
 test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async () => {
   const repo = await createRepoWithFile('a')
   const other = await createRepoWithFile('b')
-  const app = await electron.launch({ args: [appEntry], env: e2eEnv(repo) })
+  const app = await electron.launch({ args: [APP_ROOT], env: { ...process.env, GIT_GUI_E2E_REPO: repo } })
   try {
     const first = await app.firstWindow()
     await first.locator('.app__header').waitFor()
 
     // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
     const pending = nextWindow(app)
-    await first.evaluate((_, path) => window.gitApi.window.open(path), other)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), other)
     const second = await pending
     await second.locator('.app__header').waitFor()
 
@@ -458,7 +466,17 @@ test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async 
 })
 ```
 
-`createRepoWithFile(name)`·`e2eEnv(repo)`·`appEntry`는 **이 스펙 파일에 이미 있는 헬퍼다**(E15a Task 5가 `createRepoWithChange`를 `createRepoWithFile(name)`으로 일반화했다). 먼저 읽고 실제 이름·시그니처에 맞춘다 — 다르면 실제 것을 쓰고 보고한다.
+**E2E 헬퍼 실측 정정** (플랜 초안이 지어낸 이름을 썼다 — 아래가 실제다):
+
+| 플랜 초안 | 실제 (`smoke.spec.ts`) |
+| --- | --- |
+| `appEntry` | `APP_ROOT` (`:13` `const APP_ROOT = join(__dirname, '..')`) |
+| `e2eEnv(repo)` | **없다.** 호출부마다 인라인 `env: { ...process.env, GIT_GUI_E2E_REPO: repo }` |
+| `createRepoWithFile('a')` → `a.txt` | **`name`은 파일 이름 전체다** (`:25`). `createRepoWithFile('beta.txt')`로 쓴다. 변경 파일이 `app.txt`인 저장소는 `createRepoWithChange()`(`:39`) |
+
+**`repo-path`는 realpath다** — `--show-toplevel`이 심링크를 풀어 macOS의 `/var`가 `/private/var`가 된다. 단언은 `realpathSync(repo)`와 비교한다.
+
+**`page.evaluate(fn, arg)`는 인자를 하나만 넘긴다.** `locator.evaluate(el, arg)`의 2인자 시그니처와 헷갈리기 쉽다 — 초안이 `(_, path) => …`로 써서 `path`가 `undefined`가 됐고, `finally`의 `app.close()`가 먼저 돌아 대기 중이던 `pending`이 `Target page… has been closed`로 reject되며 **진짜 오류가 가려졌다**(실측). 반드시 `(path: string) => …` 한 인자로 쓴다.
 
 `app.windows()`는 동기 배열이라 `expect(...).toHaveLength`가 **재시도하지 않는다.** 위처럼 `second`를 await한 뒤에 세면 경합이 없다.
 
@@ -537,13 +555,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', async () => {
   const repo = await createRepoWithFile('a')
   const other = await createRepoWithFile('b')
-  const app = await electron.launch({ args: [appEntry], env: e2eEnv(repo) })
+  const app = await electron.launch({ args: [APP_ROOT], env: { ...process.env, GIT_GUI_E2E_REPO: repo } })
   try {
     const first = await app.firstWindow()
     await first.getByTestId('file-unstaged-a.txt').waitFor()
 
     const pending = nextWindow(app)
-    await first.evaluate((_, path) => window.gitApi.window.open(path), other)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), other)
     const second = await pending
     await second.getByTestId('file-unstaged-b.txt').waitFor()
 
@@ -951,13 +969,13 @@ export function registerSettingsHandlers(registry: WindowRegistry): void {
 test('E15b — 사이드 접힘은 창마다 따로 산다', async () => {
   const repo = await createRepoWithFile('a')
   const other = await createRepoWithFile('b')
-  const app = await electron.launch({ args: [appEntry], env: e2eEnv(repo) })
+  const app = await electron.launch({ args: [APP_ROOT], env: { ...process.env, GIT_GUI_E2E_REPO: repo } })
   try {
     const first = await app.firstWindow()
     await first.locator('.app__header').waitFor()
 
     const pending = nextWindow(app)
-    await first.evaluate((_, path) => window.gitApi.window.open(path), other)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), other)
     const second = await pending
     await second.locator('.app__header').waitFor()
 
@@ -1140,8 +1158,8 @@ test('E15b — 전환기 ⌥클릭이 새 창을 연다', async () => {
       JSON.stringify({ recentRepos: [repo, other], autoFetch: false }),
     )
     const app = await electron.launch({
-      args: [appEntry],
-      env: { ...e2eEnv(repo), GIT_GUI_USER_DATA: userData },
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
     })
     try {
       const first = await app.firstWindow()
@@ -1165,7 +1183,7 @@ test('E15b — 전환기 ⌥클릭이 새 창을 연다', async () => {
 
 test('E15b — 이미 연 저장소를 새 창으로 열려 하면 창이 안 늘어난다', async () => {
   const repo = await createRepoWithFile('a')
-  const app = await electron.launch({ args: [appEntry], env: e2eEnv(repo) })
+  const app = await electron.launch({ args: [APP_ROOT], env: { ...process.env, GIT_GUI_E2E_REPO: repo } })
   try {
     const first = await app.firstWindow()
     await first.getByTestId('file-unstaged-a.txt').waitFor()
@@ -1173,7 +1191,7 @@ test('E15b — 이미 연 저장소를 새 창으로 열려 하면 창이 안 �
     // 지금 창이 연 그 저장소를 새 창으로 열어 달라고 한다.
     // **에러 없이 끝나는 것까지 단언한다** — throw했다면 evaluate가 거부되고 이 줄이 실패한다.
     // "창이 안 늘었다"만 보면 아무것도 안 해도 통과하는 공허한 테스트가 된다
-    await first.evaluate((_, path) => window.gitApi.window.open(path), repo)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), repo)
 
     // 창이 늘지 않았고, 그 창은 여전히 멀쩡히 그 저장소를 보고 있다
     expect(app.windows()).toHaveLength(1)
@@ -1194,8 +1212,8 @@ test('E15b — 빈 창의 최근 목록에서 저장소를 연다', async () => 
       JSON.stringify({ recentRepos: [repo, other], autoFetch: false }),
     )
     const app = await electron.launch({
-      args: [appEntry],
-      env: { ...e2eEnv(repo), GIT_GUI_USER_DATA: userData },
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
     })
     try {
       const first = await app.firstWindow()
@@ -1504,13 +1522,13 @@ test('E15b — 껐다 켜면 열려 있던 창들이 돌아온다', async () => 
   try {
     // ── 1회차: 창 둘을 열고 종료한다 ──
     const first = await electron.launch({
-      args: [appEntry],
-      env: { ...e2eEnv(repo), GIT_GUI_USER_DATA: userData },
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
     })
     const windowA = await first.firstWindow()
     await windowA.getByTestId('file-unstaged-a.txt').waitFor()
     const pending = nextWindow(first)
-    await windowA.evaluate((_, path) => window.gitApi.window.open(path), other)
+    await windowA.evaluate((path: string) => window.gitApi.window.open(path), other)
     await (await pending).getByTestId('file-unstaged-b.txt').waitFor()
     await first.close()
 
@@ -1518,7 +1536,7 @@ test('E15b — 껐다 켜면 열려 있던 창들이 돌아온다', async () => 
     // (Step 3의 가드: 그 변수가 있으면 복원하지 않는다. 기존 E2E 135건이 저장소 하나로
     //  시작하는 것을 전제로 짜여 있기 때문이다)
     const second = await electron.launch({
-      args: [appEntry],
+      args: [APP_ROOT],
       env: { ...process.env, GIT_GUI_USER_DATA: userData, GIT_GUI_E2E_SHOW: '1' },
     })
     try {
@@ -1640,4 +1658,5 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **창 위치·크기 복원** — Electron 기본 동작에 맡긴다. 레이아웃(사이드 접힘)과 다른 문제다.
 - **저장소별 레이아웃 기억** — 사용자가 "열어준 창을 따라간다"를 골랐다.
 - **두 인스턴스의 `recentRepos` lost update** — 한 프로세스의 두 창은 `settings` 모듈 싱글턴이라 안전하다(E15a 리뷰 실측). 앱을 두 번 띄우는 경우만 남는데 그건 별개 문제다.
+- **`registry.add`의 방어적 복사에 그물이 없다** (Task 1 반증 실측). 변이 ①(`add`의 `{ ...state.layout }` → `state.layout`)이 **10건 중 하나도 안 물었다.** 지금 유일한 호출부(`createWindow`)는 `seedLayoutFrom`이 갓 만든 객체를 넘겨서 문제가 안 되지만, **Task 7이 디스크에서 읽은 layout을 여러 창에 나눠 넣으면 여기가 물리는 자리가 된다** — Task 7에서 "같은 layout 객체로 두 창을 만들어도 서로 안 흔들린다"를 무는 테스트를 더할지 판단한다.
 - E15a에서 넘어온 것: **`headInfos` 캐시가 한 저장소 안에서 만료 안 됨**(fetch 후에도 분기점이 옛 값이고, 실패로 캐시된 `null`은 `key in headInfos` 조기 반환에 걸려 영원히 재시도 안 됨 — `remotes.fetch` 성공 시 무효화가 필요) · **`packages/**`가 eslint 밖** · **`apps/desktop/test/**`가 tsconfig `include` 밖** · **`sanitizeSettings`의 `leftCollapsed`/`rightCollapsed`에 그물 없음**(이 에픽의 Task 4가 `splitSettings`로 일부 덮는다) · E14c(참조 안정화, `TerminalDock`의 `[]` 이펙트가 마운트 시점 `sessions`를 굳혀 사이드 접기 refit이 실제로 안 돎).
