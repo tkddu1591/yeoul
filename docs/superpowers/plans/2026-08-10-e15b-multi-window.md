@@ -1660,3 +1660,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **두 인스턴스의 `recentRepos` lost update** — 한 프로세스의 두 창은 `settings` 모듈 싱글턴이라 안전하다(E15a 리뷰 실측). 앱을 두 번 띄우는 경우만 남는데 그건 별개 문제다.
 - **`registry.add`의 방어적 복사에 그물이 없다** (Task 1 반증 실측). 변이 ①(`add`의 `{ ...state.layout }` → `state.layout`)이 **10건 중 하나도 안 물었다.** 지금 유일한 호출부(`createWindow`)는 `seedLayoutFrom`이 갓 만든 객체를 넘겨서 문제가 안 되지만, **Task 7이 디스크에서 읽은 layout을 여러 창에 나눠 넣으면 여기가 물리는 자리가 된다** — Task 7에서 "같은 layout 객체로 두 창을 만들어도 서로 안 흔들린다"를 무는 테스트를 더할지 판단한다.
 - E15a에서 넘어온 것: **`headInfos` 캐시가 한 저장소 안에서 만료 안 됨**(fetch 후에도 분기점이 옛 값이고, 실패로 캐시된 `null`은 `key in headInfos` 조기 반환에 걸려 영원히 재시도 안 됨 — `remotes.fetch` 성공 시 무효화가 필요) · **`packages/**`가 eslint 밖** · **`apps/desktop/test/**`가 tsconfig `include` 밖** · **`sanitizeSettings`의 `leftCollapsed`/`rightCollapsed`에 그물 없음**(이 에픽의 Task 4가 `splitSettings`로 일부 덮는다) · E14c(참조 안정화, `TerminalDock`의 `[]` 이펙트가 마운트 시점 `sessions`를 굳혀 사이드 접기 refit이 실제로 안 돎).
+
+---
+
+## 실행 중 실측 정정 (컨트롤러)
+
+- **vitest에서 electron은 import가 아니라 호출이 막는다** (Task 3 프로브). 플랜·브리핑이 "`git-handlers.ts`가 최상단에서 electron을 import해 단위 테스트가 불가능하다"고 적었는데 틀렸다 — 모듈 로드는 정상이고(`registerTerminalHandlers`가 함수로 잡힌다), 네임드 export가 전부 `undefined`라 **핸들러를 실행할 수 없는** 것이다. 순수부 추출이 유일한 경로라는 결론은 그대로 옳지만 이유가 다르다.
+- **검증 대상 상수를 픽스처에 기호로 쓰면 그 상수를 못 잡는다** (Task 3 반증 실측 — E15a Task 1에서도 같은 게 나왔다). `MAX_SESSIONS_PER_WINDOW`를 16으로 바꾸는 변이가 4건 중 **1건만** 물었다: 나머지가 `Array.from({ length: MAX_SESSIONS_PER_WINDOW })`로 그 상수를 써서 16이어도 자기모순이 없다. 숫자를 실제로 고정하는 것은 `toBe(8)` 하나뿐이다. **앞으로 상수를 무는 테스트는 리터럴로 쓴다.**
+- **남은 간극(Task 3)**: 단위 테스트는 `countSessionsFor`라는 순수 함수만 물고, **핸들러가 그것을 부르는지는 `typecheck`가 타입으로만 고정한다.** 상한 검사가 `assertAllowedRepo`·`assertWorktreePath` 뒤에 있고 allowlist는 실제 git으로만 채워지므로, 값싼 자동 검증이 없다(검사를 검증 앞으로 당기면 테스트는 쉬워지지만 보안 가드 순서를 테스트 편의로 바꾸는 것이다). 미검증분은 `>=` 부등호와 throw 문구 두 줄이다.
