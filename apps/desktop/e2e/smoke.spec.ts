@@ -5390,3 +5390,100 @@ test('E15b — ⌘N이 연 빈 창의 최근 목록에서 저장소를 연다', 
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b ⑦ — 전환기 항목 우클릭 "새 창에서 열기".
+ *
+ * ⌥클릭의 **발견 가능한 짝**이다. 둘이 같은 `window:open`을 부르므로 위 ⌥클릭 테스트가 이걸
+ * 덮는다고 착각하기 쉽지만, **메뉴 항목이 사라지거나 배선이 끊기는 것은 이 껍데기에서만**
+ * 일어나고 ⌥클릭 경로는 그걸 못 본다. 우클릭 메뉴는 팝오버 바깥(body 포털)에 뜬다 — 팝오버
+ * 안에 두면 RAC Popover의 바깥 클릭 처리와 ariaHideOutside가 그 메뉴를 물어 간다(실측).
+ */
+test('E15b — 전환기 우클릭 "새 창에서 열기"가 새 창을 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ button: 'right' })
+    await expect(first.getByTestId('context-new-window')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.getByTestId('context-new-window').click()
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // ⌥클릭과 같다 — 원래 창은 갈아타지 않는다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑧ — 워크트리 행 우클릭 "새 창에서 열기" (진입점 넷째).
+ *
+ * 옆 항목 "앱에서 열기"가 이 창을 통째로 갈아타는 것이라면 이쪽은 이 창을 그대로 둔다.
+ *
+ * **공허해지기 쉬운 자리 둘을 막는다**: (1) 워크트리를 실제로 만들지 않으면 행이 없어
+ * 우클릭이 타임아웃으로 실패하므로 fixture가 살아 있음이 증명된다 — 그래도 눈에 보이게
+ * 행 가시성을 먼저 단언한다. (2) 새 창의 repo-path가 **본체가 아니라 그 워크트리**여야
+ * 의미가 있다 — 둘이 같으면 아무것도 검증하지 못하므로 두 경로가 다르다는 것부터 못박는다.
+ *
+ * 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 window:open이 repo.open과 같은
+ * 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
+ */
+test('E15b — 워크트리 우클릭 "새 창에서 열기"가 그 워크트리로 새 창을 연다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-side'], { cwd: repo })
+  const wtPath = `${repo}-side`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'wt-side'], { cwd: repo })
+  const pathMain = realpathSync(repo)
+  const pathWt = realpathSync(wtPath)
+  // 두 경로가 같으면 아래 단언이 통째로 공허해진다 — fixture부터 못박는다
+  expect(pathWt, '워크트리 경로가 본체와 같다 — 이 테스트는 아무것도 재지 못한다').not.toBe(
+    pathMain,
+  )
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+    await first.getByTestId('left-tab-worktrees').click()
+    await expect(first.getByTestId(`worktree-row-${sideName}`)).toBeVisible()
+
+    await first.getByTestId(`worktree-row-${sideName}`).click({ button: 'right' })
+    await expect(first.getByTestId('context-new-window')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.getByTestId('context-new-window').click()
+    const second = await pending
+    // 새 창이 연 것은 본체가 아니라 그 워크트리다
+    await expect(second.getByTestId('repo-path')).toHaveText(pathWt)
+    // "앱에서 열기"와 다르다 — 원래 창은 여전히 본체를 본다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathMain)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+  }
+})
