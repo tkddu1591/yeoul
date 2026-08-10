@@ -1,9 +1,6 @@
 import { spawn, type IPty } from 'node-pty'
 import { randomUUID } from 'node:crypto'
 
-/** 세션 상한 — 무한 스폰 방어. 초과는 읽히는 메시지로 거부한다 */
-const MAX_SESSIONS = 8
-
 /** $SHELL 우선, 없으면 zsh→bash — 로그인 쉘(-l)로 사용자 rc·PATH를 살린다 (스펙) */
 export function resolveShell(env: Record<string, string | undefined>): string {
   const shell = env.SHELL
@@ -30,11 +27,9 @@ export class TerminalManager {
 
   constructor(private events: TerminalEvents) {}
 
-  /** 세션 생성 — cwd는 호출자(핸들러)가 allowlist 검증을 마친 저장소 루트다 (E7c에서 워크트리 경로 확장점) */
+  /** 세션 생성 — cwd는 호출자(핸들러)가 allowlist 검증을 마친 저장소 루트다 (E7c에서 워크트리 경로 확장점).
+   * 상한은 여기서 안 본다 — 창별 상한이라 창을 아는 terminal-handlers가 센다 (E15b) */
   create(cwd: string): { sessionId: string } {
-    if (this.sessions.size >= MAX_SESSIONS) {
-      throw new Error(`터미널은 ${MAX_SESSIONS}개까지 열 수 있어요. 안 쓰는 탭을 닫아 주세요.`)
-    }
     const sessionId = randomUUID()
     const shell = resolveShell(process.env)
     let pty: IPty
