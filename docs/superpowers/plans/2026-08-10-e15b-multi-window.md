@@ -1692,3 +1692,11 @@ e2e/smoke.spec.ts:3500:5 › E12 — 좌측을 접은 채 재시작해도 접힘
 ```
 
 `rightWidth`·`leftCollapsed`가 이제 레지스트리에만 살고 `settings.json`에 안 남는다. **Task 7이 `windows` 배열을 디스크에 영속하면 둘 다 초록으로 돌아와야 한다.** Task 7은 이 두 건이 실제로 돌아왔는지 **명시적으로 확인하고 보고한다** — 안 돌아오면 복원 설계에 구멍이 있다는 뜻이다(창 하나짜리 재시작도 복원 경로를 타야 한다).
+
+### Task 5 실측 정정
+
+- **Task 1의 `seeded ?? process.env.GIT_GUI_E2E_REPO` 되돌림이 결함이었다.** ⌘N이 만든 창은 씨앗이 `null`이라 그 되돌림에 걸려 **조용히 `GIT_GUI_E2E_REPO`를 열었다**(실측: 빈 창의 `repo-path`가 B가 아니라 A). 고침은 환경변수를 **첫 창의 씨앗으로만** 넣고 핸들러의 되돌림을 지우는 것 — 의미상으로도 "시작할 때 이 저장소"가 맞고, Task 7의 복원은 씨앗을 직접 주므로 영향받지 않는다.
+- **컴포넌트가 `window.gitApi`를 직접 부르면 안 된다** (플랜이 그렇게 지시했으나 틀렸다). 이 저장소에서 `window.gitApi`를 아는 렌더러 파일은 **`App.tsx` 하나뿐**이다(실측: `components/` 전체에 0건). 사용자 전역 지침의 프레젠테이션/로직 분리와도 어긋난다 — 콜백으로 올린다(`RepoSwitcher`에 `onOpenInNewWindow(path)`, `WorktreesPanel`에 `WorktreeAction { kind: 'new-window' }`). ⌘N만 `App.tsx`에 있어 직접 부른다.
+- **`ContextMenu`는 `MenuTrigger` 바깥(프래그먼트 형제)에 두고 우클릭 때 팝오버를 먼저 닫는다** — 팝오버 안에 두면 RAC Popover의 바깥 클릭 처리와 `ariaHideOutside`가 body 포털 메뉴를 물어 간다.
+- **`click({ modifiers: ['Alt'] })`는 `onPointerDown`의 `altKey`에 실린다** (실측 — 우회 불필요). RAC `MenuItem`이 `filterDOMProps(props, { global: true })`를 쓰고 `globalEvents`에 `onPointerDown`·`onContextMenu`가 둘 다 있다(`react-aria-components@1.19.0`).
+- **E2E 기대치 정정: 141 → 143.** 플랜은 진입점 넷 중 ⌥클릭만 물고 우클릭 둘을 그물 밖에 뒀는데, 그건 과하다 — 우클릭 메뉴가 얇은 껍데기인 건 맞지만 **메뉴 항목이 사라지거나 배선이 끊기는 것은 그 껍데기에서만 일어나고** ⌥클릭 테스트는 그걸 못 본다. 두 건을 더해 진입점 넷이 전부 그물 안에 있다. 이후 태스크의 기대치는 **143 기준**이다.
