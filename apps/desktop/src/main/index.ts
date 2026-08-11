@@ -23,7 +23,21 @@ const LAYOUT_PERSIST_MS = 250
 const persistLayout = createTrailingDebounce(LAYOUT_PERSIST_MS, () =>
   saveWindows(registry.snapshot()),
 )
+/**
+ * `before-quit`이 지나갔는가 — 지나갔으면 **목록은 얼어붙는다** (E15b 리뷰 I-1 실측).
+ *
+ * ⌘Q는 `before-quit` → 창들을 **하나씩** 닫는 순서다. 그 각각의 `closed`도 레지스트리 변경이라,
+ * 얼리지 않으면 마지막 창 하나만 남은 중간 스냅샷이 방금 저장한 올바른 목록을 덮어쓴다
+ * (실측: 창 둘을 열고 종료했더니 복원이 1개만 됐다 — 전체 E2E에서 «껐다 켜면 …» 1건이 빨갰다.
+ * 닫히는 속도에 달린 경합이라 단독 실행에서는 초록이었다).
+ *
+ * 종료 중의 `closed`는 "사용자가 창을 닫았다"가 아니라 "앱이 내려간다"다 — 둘을 가르는
+ * 신호가 정확히 이 순서다. 창을 먼저 닫고 종료하는 경로(Windows/Linux의 X)는 `closed`가
+ * `before-quit`보다 **앞**이라 영향받지 않는다
+ */
+let quitting = false
 const registry = createWindowRegistry((kind) => {
+  if (quitting) return
   if (kind === 'layout') persistLayout.hit()
   else saveWindows(registry.snapshot())
 })
@@ -251,7 +265,10 @@ app
     // 아직 안 터진 레이아웃까지 확실히 담기게 한다. 창을 하나씩 다 닫고 종료해 목록이 비면
     // saveWindows가 무시하므로 디스크의 마지막 목록이 그대로 남는다(그 함수의 주석 참조)
     app.on('before-quit', () => {
+      persistLayout.dispose()
       saveWindows(registry.snapshot())
+      // 여기서부터 목록을 얼린다 — 뒤이어 창들이 하나씩 닫히는 것은 사용자의 조작이 아니다
+      quitting = true
     })
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
