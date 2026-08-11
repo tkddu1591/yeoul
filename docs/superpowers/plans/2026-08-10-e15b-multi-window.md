@@ -1700,3 +1700,38 @@ e2e/smoke.spec.ts:3500:5 › E12 — 좌측을 접은 채 재시작해도 접힘
 - **`ContextMenu`는 `MenuTrigger` 바깥(프래그먼트 형제)에 두고 우클릭 때 팝오버를 먼저 닫는다** — 팝오버 안에 두면 RAC Popover의 바깥 클릭 처리와 `ariaHideOutside`가 body 포털 메뉴를 물어 간다.
 - **`click({ modifiers: ['Alt'] })`는 `onPointerDown`의 `altKey`에 실린다** (실측 — 우회 불필요). RAC `MenuItem`이 `filterDOMProps(props, { global: true })`를 쓰고 `globalEvents`에 `onPointerDown`·`onContextMenu`가 둘 다 있다(`react-aria-components@1.19.0`).
 - **E2E 기대치 정정: 141 → 143.** 플랜은 진입점 넷 중 ⌥클릭만 물고 우클릭 둘을 그물 밖에 뒀는데, 그건 과하다 — 우클릭 메뉴가 얇은 껍데기인 건 맞지만 **메뉴 항목이 사라지거나 배선이 끊기는 것은 그 껍데기에서만 일어나고** ⌥클릭 테스트는 그걸 못 본다. 두 건을 더해 진입점 넷이 전부 그물 안에 있다. 이후 태스크의 기대치는 **143 기준**이다.
+
+### Task 6 — **구현 불가로 닫는다** (실측)
+
+**`tabbingIdentifier` 한 줄이면 된다는 스펙 §6과 플랜 Task 6은 이 앱에서 거짓이다.**
+
+Electron 35.7.5의 `native_window_mac.mm`이 이렇게 잇는다:
+
+```objc
+// ① 표준 타이틀바가 아니면 프레임 없는 창으로 취급한다
+if (title_bar_style_ != TitleBarStyle::kNormal) set_has_frame(false);
+// ② 그래서 이 분기로 간다
+if (tabbingIdentifier.empty() || transparent() || !has_frame())
+  [window_ setTabbingMode:NSWindowTabbingModeDisallowed];
+// ③ 게터는 Disallowed면 nullopt를 준다 → JS에서 undefined
+```
+
+이 앱은 E7f/E7h가 `titleBarStyle: 'hidden'`을 골랐다(신호등을 헤더 세로 중앙에 맞추려고). 따라서 **AppKit 수준에서 탭이 금지된다.**
+
+실측 매트릭스 (같은 프로세스, 옵션만 바꿔 나란히 — 컨트롤러가 독립 재현):
+
+| 창 옵션 | `tabbingIdentifier` 읽기 |
+| --- | --- |
+| 기본 타이틀바 | `"probe.plain"` ✅ |
+| `hidden` | `(undefined)` ❌ |
+| `hidden` + `trafficLightPosition` | `(undefined)` ❌ |
+| `hiddenInset` | `(undefined)` ❌ |
+| `frame: false` | `(undefined)` ❌ |
+
+**컨트롤러의 실측이 틀렸던 지점**: `electron.d.ts:3735`에 `tabbingIdentifier`가 있다는 것은 확인했지만, **타입에 심볼이 있다는 것이 그 창에서 동작한다는 뜻이 아니다.** 스펙 §6이 그걸 혼동했다.
+
+`defaults read -g AppleWindowTabbingMode`는 **키 자체가 없다**(시스템 기본값) — 즉 스펙이 예상한 실패 사유("사용자가 탭 선호를 '안 함'으로 뒀다")와 무관하다. 막은 것은 **앱 자신의 타이틀바 선택**이다.
+
+**창 메뉴는 반대로 플랜 초안이 전부 맞았다** — `Menu.getApplicationMenu()`는 `whenReady()`에 `null`이 아니고, `role === 'windowmenu'`로 찾히며, `append` 뒤 `setApplicationMenu(menu)` 재설치가 필요하다. 다만 **넣지 않는다**: `mergeAllWindows()`가 할 일이 없어 죽은 메뉴 항목이 된다.
+
+**사용자 결정(2026-08-11): 앱이 탭바를 직접 그린다 → E15c로 분리.** 실질은 "한 창 안에 저장소 여러 개"이고, 그러면 Task 1~5가 창별로 만든 감시·터미널·설정을 탭별로 다시 쪼개야 한다. **탭마다 `WebContentsView`를 두면 각 탭이 자기 `webContents.id`를 가지므로 이 에픽의 산출물이 그대로 살아난다**(전부 `sender` 기준으로 키를 잡았다) — E15c 브레인스토밍의 출발점으로 삼는다. 신호등·드래그 영역·헤더가 탭바와 어떻게 공존하는지는 설계가 필요하다.
