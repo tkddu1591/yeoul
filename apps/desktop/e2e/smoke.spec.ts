@@ -5810,3 +5810,109 @@ test('E15b — 없어진 저장소를 ⌥클릭해도 안내가 뜨고 최근 �
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b 리뷰 I-3 대조 실험 — 전환기를 **키보드로** 활성화하는 동작 하나.
+ *
+ * 아래 두 테스트가 **이 함수를 그대로 공유한다**: 키 입력이 "완전히 같다"를 복붙이 아니라
+ * 구조로 보장하기 위해서다. 다른 것은 이 앞에 ⌥ 취소가 있었느냐뿐이다.
+ *
+ * 항목 순서는 `pushRecentRepo(recent, currentPath)`라 [지금 저장소, 최근 …, 다른 폴더 열기]다 —
+ * ArrowDown 두 번이면 둘째 항목(최근 목록의 그 저장소)이다.
+ */
+async function switchToSecondItemByKeyboard(page: Page): Promise<void> {
+  await page.getByTestId('repo-switcher').click()
+  await expect(page.getByTestId('repo-switcher-browse')).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+}
+
+/**
+ * E15b 리뷰 I-3 대조군 — ⌥ 없이 키보드로 고르면 **이 창이 갈아탄다**.
+ *
+ * 아래 실험군과 짝이다. 이것 없이는 실험군이 "원래 그렇게 동작한다"와 구분되지 않는다.
+ */
+test('E15b — 전환기를 키보드로 고르면 이 창이 갈아탄다 (대조군)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    await switchToSecondItemByKeyboard(first)
+
+    await expect(first.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(first.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    expect(app.windows()).toHaveLength(1)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-3 실험군 — **취소된 ⌥ 누름이 다음 활성화까지 따라오지 않는다.**
+ *
+ * `altRef`는 `onPointerDown`에서만 켜지고 `onAction`에서만 꺼졌다. 그래서 `onAction`이 안
+ * 일어나는 취소(항목 밖으로 끌고 나가 떼기)면 `true`가 남고, 다음 활성화에 pointerdown이
+ * 없으면(=키보드) 그대로 실렸다. 마우스로 다시 누르면 `onPointerDown`이 덮어써서 안 드러나므로
+ * **키보드 사용자에게만** 나타나는 결함이다.
+ *
+ * 리뷰어 실측(위 대조군과 키 입력 완전히 동일): 대조군 `windows=1 repo=pathB` /
+ * ⌥ 취소 후 `windows=2 repo=pathA` — 전환 대신 새 창이 열렸다.
+ */
+test('E15b — 취소된 ⌥ 누름이 다음 키보드 활성화에 실리지 않는다 (실험군)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // ── 실험군에만 있는 것: ⌥를 누른 채 항목을 눌렀다가 **밖에서** 뗀다(취소) ──
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+    const box = (await first.getByTestId(`repo-switcher-item-${pathB}`).boundingBox())!
+    await first.keyboard.down('Alt')
+    await first.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await first.mouse.down()
+    // 항목 밖에서 뗀다 — onAction이 안 일어난다(취소). 실측: 이때 팝오버는 **닫히지 않는다**
+    // (RAC의 바깥 클릭 해제는 pointerdown 위치로 판정하는데 그건 팝오버 안이었다) — 그래서
+    // ESC로 닫는다. 리뷰가 지적한 두 취소 경로(끌고 나가 떼기·ESC)를 한 번에 지난다
+    await first.mouse.move(5, 500)
+    await first.mouse.up()
+    await first.keyboard.up('Alt')
+    await first.keyboard.press('Escape')
+    await expect(first.getByTestId('repo-switcher-browse')).toHaveCount(0)
+    // 아직 아무 일도 안 일어났다 — 취소니까
+    expect(app.windows()).toHaveLength(1)
+
+    // ── 여기부터는 대조군과 한 글자도 다르지 않다 ──
+    await switchToSecondItemByKeyboard(first)
+
+    await expect(first.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(first.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    // 새 창이 열리지 않았다 — 창 등록이 invoke 응답보다 늦을 수 있어 여유를 준다
+    await first.waitForTimeout(1_500)
+    expect(app.windows()).toHaveLength(1)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
