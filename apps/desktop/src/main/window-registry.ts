@@ -78,7 +78,11 @@ export function createWindowRegistry(
     },
     findByRepoPath(repoPath) {
       for (const [id, state] of windows) {
-        if (state.repoPath === repoPath) return id
+        // 빈 창(repoPath === null)은 **어떤 인자로도** 걸리지 않는다 (E15b 리뷰 N-7).
+        // 시그니처가 string이라 정상 경로에선 null이 못 오지만, 유일한 호출부(window:open)의
+        // 인자는 IPC 경계 너머에서 오는 값이라 캐스팅 하나로 타입이 무너진다. 걸리면 중복
+        // 차단이 "이미 그 저장소를 연 창"으로 오인해 엉뚱한 빈 창을 앞으로 가져온다
+        if (state.repoPath !== null && state.repoPath === repoPath) return id
       }
       return undefined
     },

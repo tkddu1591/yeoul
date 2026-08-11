@@ -20,12 +20,25 @@ describe('창 레지스트리 (E15b)', () => {
     expect(registry.findByRepoPath('/zzz')).toBeUndefined()
   })
 
+  /**
+   * E15b 리뷰 N-7 — 예전 이 테스트는 본문에서 `findByRepoPath`를 **한 번도 부르지 않고**
+   * `snapshot()).toHaveLength(2)`만 봤다. 구현이 통째로 사라져도 통과했다.
+   * 이름이 약속한 것을 실제로 물린다: 빈 창은 어떤 인자로도 안 걸리고, 빈 창이 앞에 있어도
+   * 뒤의 진짜 저장소는 찾힌다(순회가 빈 창에서 멈추거나 잘못 걸리지 않는다)
+   */
   it('저장소 없는 창(⌘N 빈 창)은 findByRepoPath에 안 걸린다', () => {
     const registry = createWindowRegistry()
     registry.add(1, { repoPath: null, layout: {} })
-    // null을 찾아 달라고 할 수 없다 — 시그니처가 string만 받는다. 빈 창 둘이 서로를 덮지 않는지만 본다
     registry.add(2, { repoPath: null, layout: {} })
-    expect(registry.snapshot()).toHaveLength(2)
+    registry.add(3, { repoPath: '/a', layout: {} })
+    // 빈 창 둘을 지나 진짜 저장소를 찾는다
+    expect(registry.findByRepoPath('/a')).toBe(3)
+    // 빈 창을 가리킬 법한 값 어느 것으로도 안 걸린다. 특히 null은 시그니처 밖이라 타입이
+    // 막지만, 느슨한 비교(== 나 falsy 판정)로 구현하면 여기서 1이 나온다
+    expect(registry.findByRepoPath('')).toBeUndefined()
+    expect(registry.findByRepoPath('null')).toBeUndefined()
+    expect(registry.findByRepoPath(null as unknown as string)).toBeUndefined()
+    expect(registry.findByRepoPath(undefined as unknown as string)).toBeUndefined()
   })
 
   it('창 안에서 저장소를 바꾸면 갱신된다 — E15a 전환기로 바꿔도 main이 안다', () => {

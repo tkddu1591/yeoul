@@ -135,10 +135,28 @@ describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
     expect(sanitizePersistedSettings({ windows: ['/a', null, 3, []] }).windows).toEqual([])
   })
 
-  it('repoPath가 문자열이 아니면 빈 창으로 만든다 — 창을 만드는 인자라 통과시키지 않는다', () => {
-    expect(sanitizePersistedSettings({ windows: [{ repoPath: 42 }] }).windows).toEqual([
-      { repoPath: null, layout: {} },
-    ])
+  /**
+   * E15b 리뷰 N-1 — 예전엔 `null`로 **낮췄다.** 그런데 `null`은 ⌘N 빈 창의 정당한 값이라,
+   * 손상된 한 줄이 유령 빈 창을 띄우고 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼
+   * **매 실행 반복**됐다(고착). 낮추기 대신 버린다 — Task 7이 배열 원소를 버린 것과 같은 판단이다
+   */
+  it('repoPath의 타입이 틀리면 그 항목째 버린다 — 낮추면 유령 빈 창이 고착된다', () => {
+    const value = {
+      windows: [{ repoPath: 42 }, { repoPath: '/a', layout: {} }, { repoPath: ['/b'] }],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([{ repoPath: '/a', layout: {} }])
+  })
+
+  it('repoPath 키가 아예 없어도 버린다 — 우리가 쓴 파일은 빈 창도 null을 명시한다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ layout: { rightWidth: 300 } }] }).windows).toEqual(
+      [],
+    )
+  })
+
+  it('명시적 null은 남긴다 — ⌘N 빈 창의 정당한 값이다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ repoPath: null, layout: {} }] }).windows).toEqual(
+      [{ repoPath: null, layout: {} }],
+    )
   })
 
   it('layout의 알 수 없는 키·틀린 타입은 걷어낸다', () => {

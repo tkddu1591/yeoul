@@ -436,14 +436,27 @@ export function sanitizeSettings(value: unknown): AppSettings {
   return settings
 }
 
-/** WindowLayout에 속하는 키 — splitSettings와 복원 sanitize가 함께 쓰는 정본 목록 (E15b) */
-const WINDOW_LAYOUT_KEYS = [
-  'leftCollapsed',
-  'rightCollapsed',
-  'rightWidth',
-  'terminalOpen',
-  'terminalHeight',
-] as const satisfies readonly (keyof WindowLayout)[]
+/**
+ * WindowLayout에 속하는 키 — splitSettings와 복원 sanitize가 함께 쓰는 정본 목록 (E15b).
+ *
+ * **배열이 아니라 객체로 적는다** (E15b 리뷰 N-3). 예전엔
+ * `[...] as const satisfies readonly (keyof WindowLayout)[]`였는데 그건 **부분집합만** 본다 —
+ * 실측: `'terminalHeight'`를 빼도 typecheck 6/6이 그대로 통과했다. 그래서 `WindowLayout`에
+ * 새 필드를 더하고 이 목록을 잊으면 그 값이 **조용히 앱 공용**이 되어, 창마다 달라야 할 값이
+ * 창끼리 서로를 덮는다(디버깅이 매우 어려운 종류다 — 화면은 멀쩡하고 값만 샌다).
+ *
+ * `Record<keyof WindowLayout, true>`는 키를 **전부** 요구하므로 빠뜨리면 여기서 빨개지고,
+ * 없는 키를 더해도 객체 리터럴 초과 속성으로 빨개진다 — 양방향이다 (실측으로 둘 다 확인)
+ */
+const WINDOW_LAYOUT_KEY_SET = {
+  leftCollapsed: true,
+  rightCollapsed: true,
+  rightWidth: true,
+  terminalOpen: true,
+  terminalHeight: true,
+} satisfies Record<keyof WindowLayout, true>
+
+const WINDOW_LAYOUT_KEYS = Object.keys(WINDOW_LAYOUT_KEY_SET) as (keyof WindowLayout)[]
 
 /**
  * renderer가 보낸 평평한 설정을 앱 공용과 창별로 가른다 (E15b).
@@ -495,16 +508,28 @@ export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   const settings: PersistedSettings = sanitizeSettings(value)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
   // 창 목록 (E15b) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수 있는
-  // 디스크 파일에서 오고 repoPath가 **창을 만드는 인자**가 된다. 원소가 객체가 아니면
-  // 버리고(배열도 객체지만 창일 수 없다), repoPath가 문자열이 아니면 빈 창으로 낮춘다 —
-  // 통과시키면 그 값이 그대로 저장소 열기로 흘러간다. sparse array의 hole은 spread로
-  // 실체화한 뒤 filter가 걷어낸다 (sanitizeSettings의 recentRepos와 같은 관례)
+  // 디스크 파일에서 오고 repoPath가 **창을 만드는 인자**가 된다. sparse array의 hole은
+  // spread로 실체화한 뒤 filter가 걷어낸다 (sanitizeSettings의 recentRepos와 같은 관례).
+  //
+  // **낮추지 않고 버린다** (E15b 리뷰 N-1). 예전엔 `repoPath`가 문자열이 아니면 `null`로
+  // 낮췄는데, `null`은 ⌘N 빈 창의 **정당한 값**이라 손상된 항목 한 줄이 빈 창을 하나 띄우고
+  // 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼 **매 실행 반복**됐다(리뷰 실측).
+  // Task 7이 배열 원소를 `!Array.isArray`로 막은 것과 같은 판단이다 — 낮추기는 손상을 정상값의
+  // 탈을 씌워 통과시킨다.
+  //
+  // 그래서 "명시적 null"과 "타입이 틀림"을 가른다: **키가 있고 값이 string이거나 null일 때만**
+  // 통과한다. 키가 아예 없는 것도 버린다 — 이 파일을 쓰는 쪽(saveWindows)은 빈 창도 항상
+  // `repoPath: null`을 명시하므로, 없다는 것은 우리가 쓴 파일이 아니라는 뜻이다
   const candidate = value as { windows?: unknown; hosting?: unknown }
   if (Array.isArray(candidate.windows)) {
     settings.windows = [...(candidate.windows as unknown[])]
       .filter(
         (entry): entry is Record<string, unknown> =>
           typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+      )
+      .filter(
+        (entry) =>
+          'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
       )
       .map((entry) => ({
         repoPath: typeof entry.repoPath === 'string' ? entry.repoPath : null,
