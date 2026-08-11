@@ -450,6 +450,7 @@ export function App() {
   // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
   // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
   // ⌘O/Ctrl+O — 다른 폴더 열기 (E15a). 헤더 전환기의 "다른 폴더 열기…"와 같은 동작이다
+  // ⌘N/Ctrl+N — 저장소 없는 빈 새 창 (E15b)
   // ⌘⌥1/⌘⌥2 — 좌·우 사이드 접기 토글 (E12). event.altKey를 반드시 같이 봐야 한다 — macOS는
   // Option을 누른 채면 event.key가 '1'이 아니라 특수문자(예: '¡')로 바뀐다(실측) — event.key만
   // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
@@ -520,6 +521,14 @@ export function App() {
         // 스토어를 영영 붙든다(E14b 실측: 같은 함정에 ⌘F E2E 7건이 통째로 빨개졌다).
         // getState()는 호출 시점의 스토어를 읽으므로 오래된 클로저가 생기지 않는다
         void useRepositoryStore.getState().openRepository()
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 'n' || event.key === 'N')) {
+        // ⌘N — 빈 새 창 (E15b). 터미널 가드는 위 ⌘O·⌘F와 **같은 줄, 같은 이유**다.
+        // 조건이 metaKey || ctrlKey라 macOS에서도 Ctrl+N이 잡히는데, 그건 도크 터미널에서
+        // readline의 next-history(아래 화살표와 같은 것)다 — 삼키면 히스토리 이동이 죽는다
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        // 위 ⌘O가 getState()로 피한 오래된 클로저 문제가 여기엔 없다 — window.gitApi는 전역이다
+        void window.gitApi.window.open(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -574,7 +583,15 @@ export function App() {
   }, [])
 
   if (!store.repoPath) {
-    return <RepoPicker onOpen={() => void store.openRepository()} error={store.error} />
+    return (
+      <RepoPicker
+        onOpen={() => void store.openRepository()}
+        recent={store.recentRepos}
+        home={home}
+        onOpenRecent={(path) => void store.openRepository(path)}
+        error={store.error}
+      />
+    )
   }
 
   // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
@@ -622,6 +639,7 @@ export function App() {
           recent={store.recentRepos}
           busy={store.busy}
           onOpen={(path) => void store.openRepository(path)}
+          onOpenInNewWindow={(path) => void store.openInNewWindow(path)}
         />
         {status && (
           <div className="app__status">
@@ -1074,6 +1092,12 @@ export function App() {
                     break
                   case 'open':
                     void store.openWorktree(action.path)
+                    break
+                  case 'new-window':
+                    // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은
+                    // 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
+                    // 실패(워크트리 폴더가 사라진 경우 등)도 스토어가 배너로 옮긴다 (E15b 리뷰 I-2)
+                    void store.openInNewWindow(action.path)
                     break
                   case 'reveal':
                     void store.revealWorktree(action.path)

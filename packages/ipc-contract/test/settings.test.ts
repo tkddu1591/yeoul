@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizePersistedSettings, sanitizeSettings } from '../src/index'
+import { sanitizePersistedSettings, sanitizeSettings, splitSettings } from '../src/index'
 
 describe('sanitizeSettings', () => {
   it('알려진 필드만, 올바른 타입만 통과시킨다', () => {
@@ -116,5 +116,114 @@ describe('sanitizePersistedSettings', () => {
     expect(sanitizeSettings({ theme: 'light', hosting: { github: { token: 'enc' } } })).toEqual({
       theme: 'light',
     })
+  })
+})
+
+describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
+  it('정상 목록은 그대로 통과한다', () => {
+    const value = { windows: [{ repoPath: '/a', layout: { rightWidth: 300 } }] }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { repoPath: '/a', layout: { rightWidth: 300 } },
+    ])
+  })
+
+  it('배열이 아니면 필드째 버린다', () => {
+    expect(sanitizePersistedSettings({ windows: '창' })).not.toHaveProperty('windows')
+  })
+
+  it('원소가 객체가 아니면 버린다', () => {
+    expect(sanitizePersistedSettings({ windows: ['/a', null, 3, []] }).windows).toEqual([])
+  })
+
+  /**
+   * E15b 리뷰 N-1 — 예전엔 `null`로 **낮췄다.** 그런데 `null`은 ⌘N 빈 창의 정당한 값이라,
+   * 손상된 한 줄이 유령 빈 창을 띄우고 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼
+   * **매 실행 반복**됐다(고착). 낮추기 대신 버린다 — Task 7이 배열 원소를 버린 것과 같은 판단이다
+   */
+  it('repoPath의 타입이 틀리면 그 항목째 버린다 — 낮추면 유령 빈 창이 고착된다', () => {
+    const value = {
+      windows: [{ repoPath: 42 }, { repoPath: '/a', layout: {} }, { repoPath: ['/b'] }],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([{ repoPath: '/a', layout: {} }])
+  })
+
+  it('repoPath 키가 아예 없어도 버린다 — 우리가 쓴 파일은 빈 창도 null을 명시한다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ layout: { rightWidth: 300 } }] }).windows).toEqual(
+      [],
+    )
+  })
+
+  it('명시적 null은 남긴다 — ⌘N 빈 창의 정당한 값이다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ repoPath: null, layout: {} }] }).windows).toEqual(
+      [{ repoPath: null, layout: {} }],
+    )
+  })
+
+  it('layout의 알 수 없는 키·틀린 타입은 걷어낸다', () => {
+    const value = {
+      windows: [{ repoPath: '/a', layout: { rightWidth: '넓게', 몰래: 1, terminalOpen: true } }],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { repoPath: '/a', layout: { terminalOpen: true } },
+    ])
+  })
+
+  it('windows는 renderer 표면이 아니다 — sanitizeSettings가 걷어낸다', () => {
+    expect(sanitizeSettings({ theme: 'dark', windows: [{ repoPath: '/a', layout: {} }] })).toEqual({
+      theme: 'dark',
+    })
+  })
+})
+
+describe('splitSettings — 창별/앱공용 분리 (E15b)', () => {
+  it('창별 다섯 필드는 layout으로 간다', () => {
+    const { app, layout } = splitSettings({
+      leftCollapsed: true,
+      rightCollapsed: false,
+      rightWidth: 420,
+      terminalOpen: true,
+      terminalHeight: 240,
+    })
+    expect(layout).toEqual({
+      leftCollapsed: true,
+      rightCollapsed: false,
+      rightWidth: 420,
+      terminalOpen: true,
+      terminalHeight: 240,
+    })
+    expect(app).toEqual({})
+  })
+
+  it('앱 공용 필드는 app으로 간다', () => {
+    const { app, layout } = splitSettings({ theme: 'dark', pullMode: 'rebase' })
+    expect(app).toEqual({ theme: 'dark', pullMode: 'rebase' })
+    expect(layout).toEqual({})
+  })
+
+  it('한 partial에 섞여 와도 각각 제 자리로 간다 — 렌더러가 갈라 보낼 의무가 없다', () => {
+    const { app, layout } = splitSettings({ theme: 'light', rightWidth: 300 })
+    expect(app).toEqual({ theme: 'light' })
+    expect(layout).toEqual({ rightWidth: 300 })
+  })
+
+  it('sanitize를 거친다 — 타입이 틀린 값은 양쪽 다 안 받는다', () => {
+    const { app, layout } = splitSettings({
+      theme: 'neon',
+      rightWidth: '넓게',
+      pullMode: 'rebase',
+    })
+    expect(app).toEqual({ pullMode: 'rebase' })
+    expect(layout).toEqual({})
+  })
+
+  it('hosting 토큰은 어느 쪽에도 안 간다 — renderer 표면이 아니다', () => {
+    const { app, layout } = splitSettings({ hosting: { github: { token: 'x', login: 'y' } } })
+    expect(app).not.toHaveProperty('hosting')
+    expect(layout).not.toHaveProperty('hosting')
+  })
+
+  it('빈 입력은 빈 둘', () => {
+    expect(splitSettings({})).toEqual({ app: {}, layout: {} })
+    expect(splitSettings(null)).toEqual({ app: {}, layout: {} })
   })
 })

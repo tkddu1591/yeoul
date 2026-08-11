@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { cleanupScreens, electron } from './harness'
+import { cleanupScreens, electron, nextWindow } from './harness'
 import { execGitOrThrow } from '@git-gui/git-process'
 import { T } from '../src/renderer/src/terms'
 import { MAIN_GAP } from '../src/renderer/src/ui/grid-tracks'
@@ -5016,11 +5016,13 @@ async function stubRepoSelect(app: ElectronApplication, picked: string | null): 
     if (impl._invokeHandlers.get('repo:select') === undefined || open === undefined) return false
     const globals = globalThis as unknown as { __selectCalls: number }
     globals.__selectCalls = 0
-    impl._invokeHandlers.set('repo:select', async () => {
+    impl._invokeHandlers.set('repo:select', async (event, ..._rest) => {
       globals.__selectCalls += 1
       if (result === null) return null
-      // 핸들러는 첫 인자(event)를 안 쓴다 — 실제 검증·등록 경로를 그대로 탄다
-      const opened = (await open(null, result)) as { ok: boolean; path?: string }
+      // 받은 event를 그대로 넘긴다 — 실제 검증·등록 경로를 그대로 탄다.
+      // E15b 전에는 `open(null, result)`였다("핸들러는 event를 안 쓴다"). 그 가정은 E15b에서
+      // 거짓이 됐다 — repo:open이 event.sender.id로 이 창의 저장소를 창 레지스트리에 반영한다
+      const opened = (await open(event, result)) as { ok: boolean; path?: string }
       return opened.ok ? (opened.path ?? null) : null
     })
     return true
@@ -5118,6 +5120,795 @@ test('E15a — ⌘O 전환은 옛 저장소에 매인 확인창을 남기지 않
     await expect(window.getByTestId('file-unstaged-beta.txt')).toBeVisible()
     // 그리고 A의 해시를 문 입력창은 남지 않았다
     await expect(window.getByTestId('prompt-input')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ① — 창을 새로 띄우고 두 창을 각각 조작할 수 있다.
+ *
+ * **이 에픽의 관문이다.** E15b 전까지 이 저장소의 E2E 135건은 전부 창 하나(firstWindow)를
+ * 전제로 짜여 있었고, E2E는 창을 숨긴 채 띄운다(GIT_GUI_E2E_SHOW가 없으면 show()를 안 부른다 —
+ * main/index.ts의 ready-to-show 분기). "숨긴 두 번째 창이 Playwright의 window 이벤트에 잡히고
+ * 렌더까지 되는가"가 미지수였고, 나머지 태스크가 전부 이 위에 선다.
+ *
+ * 경로 텍스트만 보면 헤더 한 줄만 갈아끼우는 회귀를 놓치므로(E15a ①과 같은 이유) 두 저장소의
+ * 변경 파일 이름을 다르게 두고 두 번째 창의 **내용**까지 확인한다.
+ */
+test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+    const pending = nextWindow(app)
+    // page.evaluate는 인자를 **하나**만 넘긴다(첫 파라미터가 그 값이다) — locator.evaluate의
+    // (element, arg) 시그니처와 헷갈리면 undefined가 main으로 가 검증에서 튕긴다
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await second.locator('.app__header').waitFor()
+
+    // 두 창이 서로 다른 저장소를 보고, 각각 조작이 닿는다
+    expect(app.windows()).toHaveLength(2)
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ② — 창 B를 열고 닫아도 창 A의 외부 변경 감지(E10)가 산다.
+ *
+ * 이건 여러 창이 생기면서 나는 결함이 아니라 **이미 있던 결함**이다. stopWatching이 모듈
+ * 하나의 `let`이라 (1) 새 창이 watch를 부르는 순간 옛 창의 감시가 꺼지고 (2) 창 B를 닫으면
+ * 그 시점 B를 가리키던 `let`이 null이 돼 A는 되살아나지도 않는다. A는 조용히 E10을 잃고
+ * 사용자는 "왜 갱신이 안 되지"만 겪는다.
+ *
+ * **대기가 창 포커스에 기대면 안 된다** — index.ts의 window.on('focus')가 재조회를 쏘므로
+ * 감시가 죽어 있어도 통과할 수 있다. E2E는 창을 숨긴 채 띄우고(GIT_GUI_E2E_SHOW 없음) 이
+ * 테스트는 창을 클릭·포커스하지 않는다. 실측: 수정 전 이 테스트는 15초 타임아웃으로 빨갛다
+ * (B를 닫아도 A에 포커스 재조회가 가지 않는다는 뜻이다).
+ */
+test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // 창 B를 닫는다 — 수정 전에는 여기서 (이미 꺼져 있던) A의 감시가 되살아날 길도 사라진다
+    await second.close()
+
+    // A의 저장소에 앱 밖에서 새 파일을 만든다. A의 감시가 살아 있으면 새로고침 없이 나타난다
+    await writeFile(join(repoA, 'watch-alive.txt'), '외부 변경\n')
+    await expect(first.getByTestId('file-unstaged-watch-alive.txt')).toBeVisible({
+      timeout: 15_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ③ — 사이드 접힘은 창마다 따로 산다.
+ *
+ * 설정 열한 개 중 레이아웃 다섯(사이드 접힘·우측 폭·터미널 열림/높이)만 창별이고 나머지는 앱
+ * 공용이다. 렌더러는 이 구분을 모른다 — main이 settings:get-sync에서 event.sender로 창을 찾아
+ * 앱 공용과 그 창의 layout을 합쳐 평평하게 돌려주고, settings:set에서 성격에 따라 갈라 저장한다.
+ *
+ * **"두 창의 화면이 서로 다르다"만 보면 공허하다** — 렌더러 상태는 원래 창마다 따로다(수정 전
+ * 코드도 통과한다). 그래서 이 테스트는 **갈라 저장한 값이 다시 읽히는 길**을 문다:
+ * A를 접은 **뒤** A에서 새 창 B를 열면, B는 열어준 창의 layout을 씨앗으로 받으므로 접힌 채
+ * 떠야 한다. 그 씨앗은 registry.setLayout(설정 저장)과 get-sync의 layout 병합(설정 읽기)을
+ * 둘 다 지나야만 도착한다 — 어느 하나를 빼면 B가 펼쳐진 채 떠서 빨개진다(반증 실측).
+ *
+ * 접힘 확인은 E12의 관용구를 따른다 — 접힘은 언마운트가 아니라 폭 0이라(E13, 트랙 유지)
+ * `.app__left`는 count 1로 남고 not.toBeVisible + boundingBox 폭 0으로 본다. 클릭 뒤에는
+ * --motion-slow(240ms) 전환이 있어 여유를 두지만, 새로 뜬 창은 부팅 억제(noColumnTransition)라
+ * 전환 없이 즉시 0px로 시작한다.
+ */
+test('E15b — 사이드 접힘은 창마다 따로 산다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.locator('.app__left')).toBeVisible()
+
+    // A만 접는다 — 이 값은 앱 설정 파일이 아니라 A의 레지스트리 항목으로 간다
+    await first.getByTestId('left-collapse-toggle').click()
+    await first.waitForTimeout(320)
+    await expect(first.locator('.app__left')).not.toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // B는 열어준 창(접힌 A)을 닮아 접힌 채 뜬다 — 저장과 읽기가 둘 다 창별로 돌았다는 뜻이다
+    await expect(second.locator('.app__left')).toHaveCount(1)
+    await expect(second.locator('.app__left')).not.toBeVisible()
+    expect((await second.locator('.app__left').boundingBox())!.width).toBe(0)
+
+    // B만 펼친다 — A는 접힌 채 남는다(한쪽의 저장이 다른 쪽을 덮지 않는다)
+    await second.getByTestId('left-collapse-toggle').click()
+    await expect(second.locator('.app__left')).toBeVisible()
+    await expect(first.locator('.app__left')).not.toBeVisible()
+    expect((await first.locator('.app__left').boundingBox())!.width).toBe(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ④ — 전환기 항목 ⌥클릭은 **전환이 아니라 새 창**이다.
+ *
+ * 같은 항목의 평범한 클릭은 이 창을 갈아탄다(E15a ①). ⌥를 얹으면 이 창은 그대로 두고 새 창이
+ * 뜬다 — 그래서 "새 창이 B다"만으로는 모자라고 **원래 창이 여전히 A인지**까지 봐야 갈아타기와
+ * 구분된다. react-aria의 onAction은 수식 키를 안 주므로 구현은 항목의 onPointerDown에서 altKey를
+ * 기억한다 — 이 테스트가 그 경로(Playwright의 modifiers가 pointerdown까지 실리는가)를 문다.
+ */
+test('E15b — 전환기 ⌥클릭은 전환이 아니라 새 창을 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await first.getByTestId('repo-switcher').click()
+    // 팝오버가 다 그려질 때까지 — 항상 마지막에 있는 '다른 폴더 열기'로 기다린다 (E15a 관례)
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+
+    // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+    const pending = nextWindow(app)
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ modifiers: ['Alt'] })
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 원래 창은 갈아타지 않았다 — 헤더도, 파일 목록도 여전히 A다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑤ — 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다 (사용자 결정).
+ *
+ * **"창이 안 늘었다"만 보면 공허하다** — window:open이 통째로 throw해도, 아무것도 안 해도
+ * 통과한다. 그래서 셋을 함께 문다: (1) evaluate가 거부되지 않았다(=핸들러가 에러 없이 끝났다),
+ * (2) 창이 하나뿐이다, (3) 그 창이 여전히 멀쩡히 그 저장소를 보고 있다(포커스를 옮기는 과정에서
+ * 화면을 잃지 않았다). 창 수 단언 앞의 대기는 Playwright의 창 등록(Target.targetCreated)이
+ * invoke 응답보다 늦을 수 있어서다 — 없으면 새 창이 실제로 떠도 통과할 수 있다.
+ */
+test('E15b — 이미 연 저장소를 새 창으로 열려 하면 창이 안 늘어난다', async () => {
+  const repo = await createRepoWithChange()
+  const path = realpathSync(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // page.evaluate(fn, arg)는 인자를 **하나만** 넘긴다 — (_, path) 시그니처로 쓰면 undefined다
+    await first.evaluate((target: string) => window.gitApi.window.open(target), path)
+    await first.waitForTimeout(1_500)
+
+    expect(app.windows()).toHaveLength(1)
+    await expect(first.getByTestId('repo-path')).toHaveText(path)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑥ — ⌘N이 빈 창을 띄우고, 그 창의 최근 목록에서 저장소를 연다.
+ *
+ * ⌘N이 선재 결함을 드러낸다: E15b 전 RepoPicker는 "저장소 열기" 버튼 하나뿐이라 빈 창은 늘 OS
+ * 다이얼로그부터였고(Playwright로 못 연다) 최근 10개(E15a)가 무의미했다. 그래서 이 테스트는
+ * **다이얼로그를 한 번도 거치지 않고** 빈 창에서 저장소에 도달하는 길을 끝까지 돈다.
+ */
+test('E15b — ⌘N이 연 빈 창의 최근 목록에서 저장소를 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathA, pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.keyboard.press('Meta+n')
+    const second = await pending
+
+    // 빈 창은 RepoPicker다 — 그리고 이 에픽이 붙인 최근 목록이 거기 있다
+    await expect(second.getByTestId('open-repo')).toBeVisible()
+    await second.getByTestId(`repo-picker-recent-${pathB}`).click()
+
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑦ — 전환기 항목 우클릭 "새 창에서 열기".
+ *
+ * ⌥클릭의 **발견 가능한 짝**이다. 둘이 같은 `window:open`을 부르므로 위 ⌥클릭 테스트가 이걸
+ * 덮는다고 착각하기 쉽지만, **메뉴 항목이 사라지거나 배선이 끊기는 것은 이 껍데기에서만**
+ * 일어나고 ⌥클릭 경로는 그걸 못 본다. 우클릭 메뉴는 팝오버 바깥(body 포털)에 뜬다 — 팝오버
+ * 안에 두면 RAC Popover의 바깥 클릭 처리와 ariaHideOutside가 그 메뉴를 물어 간다(실측).
+ */
+test('E15b — 전환기 우클릭 "새 창에서 열기"가 새 창을 연다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ button: 'right' })
+    await expect(first.getByTestId('context-new-window')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.getByTestId('context-new-window').click()
+    const second = await pending
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // ⌥클릭과 같다 — 원래 창은 갈아타지 않는다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑧ — 워크트리 행 우클릭 "새 창에서 열기" (진입점 넷째).
+ *
+ * 옆 항목 "앱에서 열기"가 이 창을 통째로 갈아타는 것이라면 이쪽은 이 창을 그대로 둔다.
+ *
+ * **공허해지기 쉬운 자리 둘을 막는다**: (1) 워크트리를 실제로 만들지 않으면 행이 없어
+ * 우클릭이 타임아웃으로 실패하므로 fixture가 살아 있음이 증명된다 — 그래도 눈에 보이게
+ * 행 가시성을 먼저 단언한다. (2) 새 창의 repo-path가 **본체가 아니라 그 워크트리**여야
+ * 의미가 있다 — 둘이 같으면 아무것도 검증하지 못하므로 두 경로가 다르다는 것부터 못박는다.
+ *
+ * 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 window:open이 repo.open과 같은
+ * 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
+ */
+test('E15b — 워크트리 우클릭 "새 창에서 열기"가 그 워크트리로 새 창을 연다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  await execGitOrThrow(['branch', 'wt-side'], { cwd: repo })
+  const wtPath = `${repo}-side`
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'wt-side'], { cwd: repo })
+  const pathMain = realpathSync(repo)
+  const pathWt = realpathSync(wtPath)
+  // 두 경로가 같으면 아래 단언이 통째로 공허해진다 — fixture부터 못박는다
+  expect(pathWt, '워크트리 경로가 본체와 같다 — 이 테스트는 아무것도 재지 못한다').not.toBe(
+    pathMain,
+  )
+  const sideName = wtPath.split('/').filter(Boolean).pop()!
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toHaveCount(0)
+    await first.getByTestId('left-tab-worktrees').click()
+    await expect(first.getByTestId(`worktree-row-${sideName}`)).toBeVisible()
+
+    await first.getByTestId(`worktree-row-${sideName}`).click({ button: 'right' })
+    await expect(first.getByTestId('context-new-window')).toBeVisible()
+
+    const pending = nextWindow(app)
+    await first.getByTestId('context-new-window').click()
+    const second = await pending
+    // 새 창이 연 것은 본체가 아니라 그 워크트리다
+    await expect(second.getByTestId('repo-path')).toHaveText(pathWt)
+    // "앱에서 열기"와 다르다 — 원래 창은 여전히 본체를 본다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathMain)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(wtPath, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b ⑨ — 껐다 켜면 열려 있던 창들이 돌아온다.
+ *
+ * **2회차는 `GIT_GUI_E2E_REPO` 없이 띄운다.** 그 변수가 있으면 main이 창 목록 복원을 건너뛰기
+ * 때문이다(기존 E2E가 전부 "창 하나, 그 저장소"를 전제한다 — index.ts createStartupWindows).
+ * 그래서 이 테스트 하나만 복원 경로 전체를 탄다.
+ *
+ * **공허해지지 않게 셋을 함께 문다** — "저장했다가 읽었다"는 저장·복원이 둘 다 없어도 통과할
+ * 길이 많다: (1) 창 **개수**가 2, (2) 각 창의 **저장소**가 저장 순서대로, (3) 각 창의
+ * **레이아웃**이 그 창의 것. (3)을 위해 1회차에서 **A만** 좌측을 접는다 — 레이아웃을 창별로
+ * 안 실으면(전부 첫 창 것을 쓰거나 전부 빈 값이면) 빨갛다.
+ *
+ * `app.close()`가 `before-quit`를 실제로 발화시키는지는 실측으로 확인했다 — Playwright의
+ * close는 main에서 `app.quit()`을 부른다(playwright-core coreBundle: `app.quit()`), 그래서
+ * 그 시점 레지스트리에 창들이 아직 다 있다. 별도 우회가 필요 없었다.
+ */
+test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 그대로 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 창 둘을 열고 A만 좌측을 접은 채 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const windowA = await first.firstWindow()
+      await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+      // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+      const pending = nextWindow(first)
+      // page.evaluate는 인자를 **하나**만 넘긴다(첫 파라미터가 그 값이다)
+      await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+      const windowB = await pending
+      await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+      // 접기는 **B를 연 뒤에** 한다 — 새 창은 열어준 창의 레이아웃을 씨앗으로 받으므로(E15b
+      // seedLayoutFrom), 먼저 접었으면 B도 접힌 채로 열려 (3)이 아무것도 재지 못한다
+      await windowA.getByTestId('left-collapse-toggle').click()
+      await windowA.waitForTimeout(320)
+      await expect(windowA.locator('.app__left')).not.toBeVisible()
+      await expect(windowB.locator('.app__left')).toBeVisible()
+    } finally {
+      await first.close()
+    }
+
+    // ── 2회차: GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(2)
+      const pages = second.windows()
+      await Promise.all(pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })))
+      // (2) 순서는 등록 순서 = 저장 순서다
+      const paths = await Promise.all(
+        pages.map((page) => page.getByTestId('repo-path').textContent()),
+      )
+      expect(paths).toEqual([pathA, pathB])
+      // (3) 레이아웃은 창마다 제 것이다 — A만 접혀 있다.
+      // 재시작 직후는 부팅 억제(App.tsx bootSuppress)라 전환 없이 즉시 0px로 시작한다
+      await expect(pages[0]!.locator('.app__left')).not.toBeVisible()
+      expect((await pages[0]!.locator('.app__left').boundingBox())!.width).toBe(0)
+      await expect(pages[1]!.locator('.app__left')).toBeVisible()
+      expect((await pages[1]!.locator('.app__left').boundingBox())!.width).toBeGreaterThan(0)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-1 ① — **창을 닫고 나서 종료해도** 그 창의 저장소와 레이아웃이 돌아온다.
+ *
+ * 이건 `main` 대비 회귀였다. `main`은 `settings:set`마다 파일에 썼으므로 "레이아웃 변경은 곧
+ * 영속"이 불변식이었는데, E15b가 레이아웃을 레지스트리로 옮기면서 영속 지점이 `before-quit`
+ * 하나만 남았다 — 그 시점에 창이 없으면 전부 증발한다(리뷰어 실측:
+ * `settings-after-close-then-quit={"windows":[]}` · `left-visible-after-restart=true`).
+ *
+ * **범위가 macOS ⌘W→⌘Q에 그치지 않는다.** Windows/Linux는 `window-all-closed → app.quit()`
+ * (index.ts) 때문에 **마지막 창의 X를 누르는 정상 종료가 항상** `closed`(→`registry.remove`) →
+ * `before-quit`(→빈 목록) 순서다. 즉 그 플랫폼에서는 복원도 레이아웃 기억도 통째로 죽는다.
+ * 여기서 창을 먼저 닫고 `app.quit()`을 직접 부르는 것이 **그 경로를 macOS에서 그대로 흉내 내는
+ * 형태**다 — 실제 Windows 없이 같은 순서를 재현한다.
+ *
+ * 2회차는 `GIT_GUI_E2E_REPO` 없이 띄운다 — 그래야 저장소까지 복원 경로를 탄다(E15b ⑨와 같은 이유).
+ */
+test('E15b — 창을 닫고 종료해도 그 창의 저장소와 레이아웃이 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const pathA = realpathSync(repoA)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 좌측을 접고 → 창을 닫고 → 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    const windowA = await first.firstWindow()
+    await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+    await windowA.getByTestId('left-collapse-toggle').click()
+    await windowA.waitForTimeout(320)
+    await expect(windowA.locator('.app__left')).not.toBeVisible()
+    // 레이아웃 영속은 디바운스다(LAYOUT_PERSIST_MS=250) — 창을 닫기 전에 한 번 터지게 둔다
+    await windowA.waitForTimeout(600)
+
+    // 여기가 이 테스트의 핵심 — 종료 시점에 창이 하나도 없다.
+    // harness의 app.close()를 쓰지 않는다: 그건 닫기 직전 firstWindow()로 화면을 찍는데
+    // 창이 이미 없어 30초를 기다린다. 대신 main에서 직접 quit하고 종료를 기다린다
+    await windowA.close()
+    await first.evaluate(({ app }) => {
+      app.quit()
+    })
+    await first.waitForEvent('close')
+
+    // ── 2회차: GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      // (1) 저장소가 돌아왔다 — 빈 창(RepoPicker)이 아니다
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      // (2) 접힘도 돌아왔다 — 재시작 직후는 부팅 억제라 전환 없이 즉시 0px다
+      await expect(restored.locator('.app__left')).not.toBeVisible()
+      expect((await restored.locator('.app__left').boundingBox())!.width).toBe(0)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-1 ② — **여럿 중 하나**를 닫으면 그 창은 다음에 안 뜬다.
+ *
+ * I-1의 고침("빈 목록으로 덮어쓰지 않는다")이 기존 결정을 삼키지 않는지 못박는다. 둘은 충돌하지
+ * 않는다: 창 둘 중 하나를 닫으면 레지스트리가 **안 비므로** 그 창은 그대로 목록에서 빠진다.
+ * 충돌은 "전부 닫고 종료"에서만 생기는데 그건 위 ①의 경우다(정상 종료와 구분 불가).
+ *
+ * 이 테스트를 빨갛게 만드는 것은 "빈 목록 무시"를 "줄어든 목록도 무시"로 넓히는 변이다 —
+ * 그렇게 하면 닫은 B가 되살아난다.
+ */
+test('E15b — 창 둘 중 하나만 닫고 종료하면 남은 창만 복원된다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 창 둘을 열고 B만 닫은 채 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const windowA = await first.firstWindow()
+      await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+      const pending = nextWindow(first)
+      await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+      const windowB = await pending
+      await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+      await windowB.close()
+      // 창 목록 영속은 즉시다(디바운스가 아니다) — 그래도 IPC 왕복 여유를 준다
+      await windowA.waitForTimeout(500)
+    } finally {
+      // A가 아직 열려 있다 — 평범한 ⌘Q 경로다
+      await first.close()
+    }
+
+    // ── 2회차: A만 돌아온다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      // 창이 늦게 더 뜨지 않는지까지 본다 — 복원은 순차라 두 번째가 뒤늦게 올 수 있다
+      await restored.waitForTimeout(1_500)
+      expect(second.windows()).toHaveLength(1)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-1 ③ — 창을 **둘 다** 닫고 종료해도, 닫은 순서와 무관하게 A만 돌아온다.
+ *
+ * ②가 못 무는 것을 문다. ②는 ⌘Q 경로라 `before-quit` 시점에 A가 살아 있어, **레지스트리
+ * 변경을 즉시 영속하지 않아도** 초록이다. 여기서는 종료 시점에 창이 하나도 없으므로
+ * `before-quit`이 아무것도 못 남긴다 — 디스크에 남은 것은 **B를 닫는 순간 쓴 목록**뿐이다.
+ * 레이아웃을 한 번도 안 건드리는 것도 의도다: 디바운스 영속이 대신 저장해 주는 길을 막아
+ * "창 목록 변경도 곧 영속"만 남긴다.
+ *
+ * Windows/Linux에서 창 둘을 X로 닫는 정상 종료가 정확히 이 순서다.
+ */
+test('E15b — 창을 둘 다 닫고 종료해도 닫지 않은 쪽만 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    const windowA = await first.firstWindow()
+    await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+    const pending = nextWindow(first)
+    await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const windowB = await pending
+    await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // B를 먼저 닫는다 — 이때 남은 목록 [A]가 디스크로 간다. 그 다음 A를 닫으면 목록이 비는데,
+    // 빈 목록은 저장하지 않으므로 방금 쓴 [A]가 그대로 남는다
+    await windowB.close()
+    await windowA.waitForTimeout(500)
+    await windowA.close()
+    await first.evaluate(({ app }) => {
+      app.quit()
+    })
+    await first.waitForEvent('close')
+
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      await restored.waitForTimeout(1_500)
+      expect(second.windows()).toHaveLength(1)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-2 — 없어진 저장소를 **⌥클릭**해도 안내가 뜨고 목록에서 빠진다.
+ *
+ * 같은 항목의 두 조작이 실패 처리에서 갈라져 있었다. 평범한 클릭은 E15a ③처럼 문구가 뜨고
+ * 자동으로 목록에서 빠지는데, ⌥클릭은 `void window.gitApi.window.open(path)`로 실패를 버려서
+ * **배너도 없고 목록도 그대로이고** 콘솔에 uncaught rejection만 남았다(리뷰어 실측:
+ * `bannerText=["main 병합"]` · `switcherVisible=true` · `pageerror:Error invoking remote
+ * method 'window:open'`). E15a가 공들여 가른 사인(`missing`/`not-a-repository`/`failed`)이
+ * 이 진입점에서만 버려진 것이다.
+ *
+ * **콘솔 오류까지 함께 문다** — 배너와 목록만 보면 "실패를 잡아 배너만 띄우고 rejection은
+ * 그대로 두는" 절반짜리 고침이 통과한다. 계약을 결과 객체로 바꿨다는 것이 여기서 드러난다.
+ */
+test('E15b — 없어진 저장소를 ⌥클릭해도 안내가 뜨고 최근 목록에서 빠진다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    const pageErrors: string[] = []
+    first.on('pageerror', (error) => pageErrors.push(error.message))
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    // 목록에 남은 채 폴더만 사라진 상태 — 사용자가 Finder에서 지운 그 경우다 (E15a ③와 같은 픽스처)
+    await rm(repoB, { recursive: true, force: true })
+
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ modifiers: ['Alt'] })
+
+    // (a) 안내가 뜬다 — 평범한 클릭과 **한 글자도 다르지 않은** 문구다(main이 만든 것을 그대로 쓴다)
+    await expect(first.getByTestId('error')).toContainText('그 폴더가 없어요')
+    // 이 창은 그대로 A다 — ⌥클릭은 전환이 아니다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    // 창도 안 늘었다 — 열리지 않았으니 당연하지만, "열렸는데 배너만 떴다"를 배제한다
+    expect(app.windows()).toHaveLength(1)
+
+    // (b) 목록에서 빠졌다 — A(지금 저장소)와 '다른 폴더 열기'만 남는다
+    await first.getByTestId('repo-switcher').click()
+    expect(await switcherItemIds(first)).toEqual([
+      `repo-switcher-item-${pathA}`,
+      'repo-switcher-browse',
+    ])
+
+    // (c) 콘솔에 uncaught rejection이 없다 — 실패가 예외가 아니라 결과로 온다
+    expect(pageErrors).toEqual([])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true }).catch(() => {})
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-3 대조 실험 — 전환기를 **키보드로** 활성화하는 동작 하나.
+ *
+ * 아래 두 테스트가 **이 함수를 그대로 공유한다**: 키 입력이 "완전히 같다"를 복붙이 아니라
+ * 구조로 보장하기 위해서다. 다른 것은 이 앞에 ⌥ 취소가 있었느냐뿐이다.
+ *
+ * 항목 순서는 `pushRecentRepo(recent, currentPath)`라 [지금 저장소, 최근 …, 다른 폴더 열기]다 —
+ * ArrowDown 두 번이면 둘째 항목(최근 목록의 그 저장소)이다.
+ */
+async function switchToSecondItemByKeyboard(page: Page): Promise<void> {
+  await page.getByTestId('repo-switcher').click()
+  await expect(page.getByTestId('repo-switcher-browse')).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+}
+
+/**
+ * E15b 리뷰 I-3 대조군 — ⌥ 없이 키보드로 고르면 **이 창이 갈아탄다**.
+ *
+ * 아래 실험군과 짝이다. 이것 없이는 실험군이 "원래 그렇게 동작한다"와 구분되지 않는다.
+ */
+test('E15b — 전환기를 키보드로 고르면 이 창이 갈아탄다 (대조군)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    await switchToSecondItemByKeyboard(first)
+
+    await expect(first.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(first.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    expect(app.windows()).toHaveLength(1)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-3 실험군 — **취소된 ⌥ 누름이 다음 활성화까지 따라오지 않는다.**
+ *
+ * `altRef`는 `onPointerDown`에서만 켜지고 `onAction`에서만 꺼졌다. 그래서 `onAction`이 안
+ * 일어나는 취소(항목 밖으로 끌고 나가 떼기)면 `true`가 남고, 다음 활성화에 pointerdown이
+ * 없으면(=키보드) 그대로 실렸다. 마우스로 다시 누르면 `onPointerDown`이 덮어써서 안 드러나므로
+ * **키보드 사용자에게만** 나타나는 결함이다.
+ *
+ * 리뷰어 실측(위 대조군과 키 입력 완전히 동일): 대조군 `windows=1 repo=pathB` /
+ * ⌥ 취소 후 `windows=2 repo=pathA` — 전환 대신 새 창이 열렸다.
+ */
+test('E15b — 취소된 ⌥ 누름이 다음 키보드 활성화에 실리지 않는다 (실험군)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // ── 실험군에만 있는 것: ⌥를 누른 채 항목을 눌렀다가 **밖에서** 뗀다(취소) ──
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+    const box = (await first.getByTestId(`repo-switcher-item-${pathB}`).boundingBox())!
+    await first.keyboard.down('Alt')
+    await first.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await first.mouse.down()
+    // 항목 밖에서 뗀다 — onAction이 안 일어난다(취소). 실측: 이때 팝오버는 **닫히지 않는다**
+    // (RAC의 바깥 클릭 해제는 pointerdown 위치로 판정하는데 그건 팝오버 안이었다) — 그래서
+    // ESC로 닫는다. 리뷰가 지적한 두 취소 경로(끌고 나가 떼기·ESC)를 한 번에 지난다
+    await first.mouse.move(5, 500)
+    await first.mouse.up()
+    await first.keyboard.up('Alt')
+    await first.keyboard.press('Escape')
+    await expect(first.getByTestId('repo-switcher-browse')).toHaveCount(0)
+    // 아직 아무 일도 안 일어났다 — 취소니까
+    expect(app.windows()).toHaveLength(1)
+
+    // ── 여기부터는 대조군과 한 글자도 다르지 않다 ──
+    await switchToSecondItemByKeyboard(first)
+
+    await expect(first.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(first.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    // 새 창이 열리지 않았다 — 창 등록이 invoke 응답보다 늦을 수 있어 여유를 준다
+    await first.waitForTimeout(1_500)
+    expect(app.windows()).toHaveLength(1)
   } finally {
     await app.close()
     await rm(repoA, { recursive: true, force: true })

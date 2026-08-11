@@ -15,6 +15,8 @@ export type WorktreeAction =
   // 우클릭 "여기서 터미널 열기" = 설정 무관 항상 터미널
   | { kind: 'terminal'; path: string; label: string }
   | { kind: 'open'; path: string }
+  // 우클릭 "새 창에서 열기" — 이 창은 그대로 두고 새 창에서 그 워크트리를 연다 (E15b)
+  | { kind: 'new-window'; path: string }
   | { kind: 'reveal'; path: string }
   | { kind: 'remove'; path: string }
   | { kind: 'add' }
@@ -70,6 +72,14 @@ export function WorktreesPanel({
         label: isCurrent ? `앱에서 열기 — ${T.head}예요` : '앱에서 열기 (전체 전환)',
         disabled: busy || isCurrent || worktree.prunable,
         onSelect: () => onAction({ kind: 'open', path: worktree.path }),
+      },
+      {
+        // E15b — "앱에서 열기"가 이 창을 통째로 갈아타는 것이라면 이쪽은 이 창을 그대로 둔다.
+        // 지금 열고 있는 워크트리여도 막지 않는다 — main이 중복을 막아 그 창을 앞으로 가져온다
+        key: 'new-window',
+        label: '새 창에서 열기',
+        disabled: busy || worktree.prunable,
+        onSelect: () => onAction({ kind: 'new-window', path: worktree.path }),
       },
       { key: 'sep-1', separator: true },
       {

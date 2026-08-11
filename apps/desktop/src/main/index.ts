@@ -1,10 +1,46 @@
-import { app, BrowserWindow, nativeTheme } from 'electron'
-import { join } from 'node:path'
-import { WINDOW_CHANNELS } from '@git-gui/ipc-contract'
-import { registerGitHandlers } from './git-handlers'
+import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { isAbsolute, join } from 'node:path'
+import { WINDOW_CHANNELS, type WindowLayout, type WindowOpenResult } from '@git-gui/ipc-contract'
+import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
-import { readTheme, registerSettingsHandlers } from './settings'
+import { assertAbsoluteRepoPath } from './repo-open-guard'
+import { readTheme, readWindows, registerSettingsHandlers, saveWindows } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
+import { createTrailingDebounce } from './watch-filter'
+import { createWindowRegistry } from './window-registry'
+
+/**
+ * 레이아웃 변경을 디스크에 묶어 쓰는 간격 (E15b 리뷰 I-1) — 도크 높이·우측 폭 드래그는 초당
+ * 여러 번 온다. E10의 감시 디바운스를 그대로 재사용한다(트레일링 1회)
+ */
+const LAYOUT_PERSIST_MS = 250
+
+// 창의 정본 (E15b) — 어느 창이 어느 저장소를 열었나·그 창의 레이아웃. main만 안다.
+//
+// 바뀔 때마다 디스크에 남긴다 (E15b 리뷰 I-1): 예전엔 `before-quit` 한 번이 유일한 영속
+// 지점이라, 창을 닫고 종료하면 그 창의 레이아웃이 통째로 증발했다(main 대비 회귀 — main은
+// `settings:set`마다 파일에 썼다). 레이아웃은 묶어서, 창 목록은 즉시 쓴다
+const persistLayout = createTrailingDebounce(LAYOUT_PERSIST_MS, () =>
+  saveWindows(registry.snapshot()),
+)
+/**
+ * `before-quit`이 지나갔는가 — 지나갔으면 **목록은 얼어붙는다** (E15b 리뷰 I-1 실측).
+ *
+ * ⌘Q는 `before-quit` → 창들을 **하나씩** 닫는 순서다. 그 각각의 `closed`도 레지스트리 변경이라,
+ * 얼리지 않으면 마지막 창 하나만 남은 중간 스냅샷이 방금 저장한 올바른 목록을 덮어쓴다
+ * (실측: 창 둘을 열고 종료했더니 복원이 1개만 됐다 — 전체 E2E에서 «껐다 켜면 …» 1건이 빨갰다.
+ * 닫히는 속도에 달린 경합이라 단독 실행에서는 초록이었다).
+ *
+ * 종료 중의 `closed`는 "사용자가 창을 닫았다"가 아니라 "앱이 내려간다"다 — 둘을 가르는
+ * 신호가 정확히 이 순서다. 창을 먼저 닫고 종료하는 경로(Windows/Linux의 X)는 `closed`가
+ * `before-quit`보다 **앞**이라 영향받지 않는다
+ */
+let quitting = false
+const registry = createWindowRegistry((kind) => {
+  if (quitting) return
+  if (kind === 'layout') persistLayout.hit()
+  else saveWindows(registry.snapshot())
+})
 
 /** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
  * 실측: 앱 최상위에서 실제로 페인트되는 배경은 --color-surface(카드·패널 전용)가 아니라
@@ -50,7 +86,13 @@ const isE2E = !app.isPackaged && process.env.GIT_GUI_E2E_REPO !== undefined
 // 스로틀 해제 등 나머지 E2E 동작은 유지. 프로덕션(isPackaged)·CI 기본 동작 무변
 const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'
 
-function createWindow(): void {
+/** 새 창이 무엇을 열고 어떤 모습으로 뜰지 (E15b) — 여는 쪽이 정해 넘긴다 */
+interface WindowSeed {
+  repoPath: string | null
+  layout: WindowLayout
+}
+
+function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): BrowserWindow {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -80,6 +122,14 @@ function createWindow(): void {
       backgroundThrottling: !isE2E,
     },
   })
+
+  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
+  // 늦게 돌고, 그때 이 창의 layout 씨앗을 읽어야 새 창이 열어준 창을 닮는다. loadFile 뒤로
+  // 미루면 늦는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다
+  registry.add(window.webContents.id, { repoPath: seed.repoPath, layout: seed.layout })
+  // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
+  const windowId = window.webContents.id
+  window.on('closed', () => registry.remove(windowId))
 
   // E13 — 흰 화면 제거 2단계: 페인트가 끝난 뒤에만 보여준다. E2E 숨김 규칙(E6a)과 합성한다 —
   // isE2E && !isE2EShow는 계속 숨긴 채로 둔다(이 분기를 안 타므로 창은 영원히 안 보인다).
@@ -114,6 +164,86 @@ function createWindow(): void {
   } else {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return window
+}
+
+/** 새 창은 열어준 창의 레이아웃을 씨앗으로 받는다 (사용자 결정). 그 창이 없으면 빈 레이아웃 —
+ * 렌더러가 기본값을 쓴다 */
+function seedLayoutFrom(openerId: number): WindowLayout {
+  return { ...(registry.get(openerId)?.layout ?? {}) }
+}
+
+/** 새 창에서 연다 (E15b). 창을 만드는 것은 index.ts 책임이라 이 핸들러만 여기 있다 */
+function registerWindowHandlers(): void {
+  ipcMain.handle(
+    WINDOW_CHANNELS.open,
+    async (event, repoPath: unknown): Promise<WindowOpenResult> => {
+      if (repoPath === null) {
+        createWindow({ repoPath: null, layout: seedLayoutFrom(event.sender.id) })
+        return { ok: true }
+      }
+      // 인자는 디스크 설정에서 온 렌더러 입력이라 repo.open과 **같은 검증**을 거친다 — 검증 없이
+      // 씨앗으로 넣으면 그 창이 임의 디렉터리에서 git을 돌리는 통로가 된다
+      const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+      // 열기 실패는 예외가 아니다 (E15b 리뷰 I-2) — reason을 그대로 흘려보내야 렌더러가
+      // E15a의 목록 제거 정책(reason !== 'failed')을 이 진입점에서도 쓸 수 있다.
+      // 예전엔 여기서 throw했고 렌더러가 void로 버려 배너도 목록 정리도 없었다
+      if (!opened.ok) return opened
+      // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
+      const existing = registry.findByRepoPath(opened.path)
+      if (existing !== undefined) {
+        const found = BrowserWindow.getAllWindows().find((w) => w.webContents.id === existing)
+        // 탭으로 묶여 있어도 focus()면 macOS가 그 탭을 앞으로 가져온다
+        found?.show()
+        found?.focus()
+        return { ok: true }
+      }
+      createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
+      return { ok: true }
+    },
+  )
+}
+
+/**
+ * 시작할 때 창을 만든다 — 껐을 때 그대로 (E15b).
+ *
+ * 저장된 목록이 없으면(첫 실행) 빈 창 하나 — 예전 동작과 같다.
+ */
+async function createStartupWindows(): Promise<void> {
+  const restored = readWindows()
+  // GIT_GUI_E2E_REPO가 있으면 **저장된 목록으로 창을 여럿 만들지 않는다** — 기존 E2E 143건이
+  // 전부 "창 하나, 그 저장소" 하나를 전제로 짜여 있어 복원이 창을 더 만들면 대량으로 깨진다.
+  //
+  // 다만 레이아웃 기억은 저장소 목록과 **다른 문제라** 첫 창의 레이아웃은 그대로 복원한다.
+  // E15b가 rightWidth·leftCollapsed를 settings.json에서 이 목록으로 옮겼으므로, 여기서
+  // 씨앗으로 주지 않으면 재시작 지속성 E2E 2건(:373 우측 폭 · :3500 좌측 접힘)이 영영 빨갛다 —
+  // 창 하나짜리 재시작도 복원 경로를 타야 한다. (플랜은 이 블록 전체를 환경변수로 감싸라고
+  // 했는데, 그러면 그 2건이 돌아올 길이 없다 — 실측으로 갈랐다)
+  const seededRepo = process.env.GIT_GUI_E2E_REPO
+  if (seededRepo !== undefined) {
+    createWindow({ repoPath: seededRepo, layout: restored[0]?.layout ?? {} })
+    return
+  }
+  let created = 0
+  for (const saved of restored) {
+    if (saved.repoPath !== null) {
+      // 이 경로는 사람이 편집할 수 있는 디스크 파일에서 왔고 그대로 git의 cwd가 된다 —
+      // repo.open·window.open과 **같은 검증**을 거친다. 다만 여기서는 던지지 않고 건너뛴다:
+      // 손으로 망가뜨린 항목 하나가 앱 시작을 통째로 막으면 안 된다
+      if (!isAbsolute(saved.repoPath)) continue
+      const opened = await openRepoPath(saved.repoPath)
+      // 없어진 저장소는 그 창을 만들지 않고 넘어간다. 알림은 띄우지 않는다 — 시작하자마자
+      // 배너를 보는 건 성가시고, 그 경로는 최근 목록에서도 곧 빠진다
+      if (!opened.ok) continue
+      createWindow({ repoPath: opened.path, layout: saved.layout })
+    } else {
+      createWindow({ repoPath: null, layout: saved.layout })
+    }
+    created += 1
+  }
+  // 저장된 창이 없거나 전부 사라졌으면 빈 창 하나 — 창 없이 시작하면 macOS에서 되살릴 길이
+  // 독 아이콘 클릭(activate)뿐이다
+  if (created === 0) createWindow()
 }
 
 // macOS에서는 앱 실행 자체가 활성화되며 포커스를 훔칠 수 있다 — E2E에서는 dock 아이콘째 숨긴다
@@ -121,15 +251,33 @@ if (isE2E && !isE2EShow) app.dock?.hide()
 
 app
   .whenReady()
-  .then(() => {
-    registerGitHandlers()
-    registerSettingsHandlers()
+  .then(async () => {
+    registerGitHandlers(registry)
+    registerSettingsHandlers(registry)
     registerHostingHandlers()
     registerTerminalHandlers()
-    createWindow()
+    registerWindowHandlers()
+    // 종료 직전의 스냅샷을 남긴다 (E15b). ⌘Q(app.quit)는 before-quit → 창 닫기 순서라 이
+    // 시점의 레지스트리에 창들이 아직 다 있다 (실측: Playwright의 app.close()도 main에서
+    // app.quit()을 부르므로 그대로 발화한다).
+    //
+    // 이제 여기는 **유일한 영속 지점이 아니라 마지막 한 번**이다 (E15b 리뷰 I-1) — 디바운스가
+    // 아직 안 터진 레이아웃까지 확실히 담기게 한다. 창을 하나씩 다 닫고 종료해 목록이 비면
+    // saveWindows가 무시하므로 디스크의 마지막 목록이 그대로 남는다(그 함수의 주석 참조)
+    app.on('before-quit', () => {
+      persistLayout.dispose()
+      saveWindows(registry.snapshot())
+      // 여기서부터 목록을 얼린다 — 뒤이어 창들이 하나씩 닫히는 것은 사용자의 조작이 아니다
+      quitting = true
+    })
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+    // GIT_GUI_E2E_REPO는 "**시작할 때** 이 저장소를 열어라"지 "새 창마다 열어라"가 아니다.
+    // 예전엔 repo:initial-path가 씨앗이 없을 때마다 이 환경변수로 되돌아가, ⌘N이 만든 빈 창이
+    // E2E에서만 조용히 그 저장소를 열었다 — 빈 창(RepoPicker) 경로가 E2E로 검증 불가능해진다
+    // (E15b Task 5 실측: 최근 목록 테스트가 여기서 빨갛게 났다). 씨앗은 첫 창에만 준다
+    await createStartupWindows()
   })
   .catch((error) => {
     console.error('앱 초기화 실패:', error)

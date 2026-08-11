@@ -42,6 +42,9 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.repoOpenPath, repoPath, worktreePath),
     home: () => ipcRenderer.invoke(CHANNELS.repoHome),
   },
+  window: {
+    open: (repoPath) => ipcRenderer.invoke(WINDOW_CHANNELS.open, repoPath),
+  },
   worktrees: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.worktreesList, repoPath),
     add: (repoPath, path, branch, createBranch) =>

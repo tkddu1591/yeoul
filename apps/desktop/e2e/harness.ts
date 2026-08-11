@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _electron, test, type ElectronApplication, type TestInfo } from '@playwright/test'
+import { _electron, test, type ElectronApplication, type Page, type TestInfo } from '@playwright/test'
 
 /**
  * 실패 시각 단서 (E6a 후속) — 숨김 창 E2E는 실패해도 화면 단서가 없다(electron.launch에는
@@ -55,6 +55,17 @@ export const electron = {
     }
     return app
   },
+}
+
+/**
+ * 다음에 열리는 창을 기다린다 (E15b).
+ *
+ * 이 저장소의 E2E는 E15b 전까지 전부 창 하나(firstWindow)만 다뤘다. Playwright의
+ * `waitForEvent('window')`는 **호출 시점 이후에 열리는** 창만 준다 — 이미 열린 창은 못 잡으니
+ * 창을 여는 동작보다 **먼저** 이 함수를 부르고 나중에 await한다.
+ */
+export function nextWindow(app: ElectronApplication): Promise<Page> {
+  return app.waitForEvent('window')
 }
 
 /** 각 스펙의 test.afterEach에서 호출 — 성공(기대 일치) 테스트의 화면 파일을 지운다. timeout 실패도 남는다 */

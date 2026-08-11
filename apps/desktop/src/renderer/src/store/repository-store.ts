@@ -15,7 +15,12 @@ import type {
   WorktreeHeadInfo,
   WorktreeInfo,
 } from '@git-gui/domain'
-import type { HostingStatus, PullDetailView, PullSummary } from '@git-gui/ipc-contract'
+import type {
+  HostingStatus,
+  PullDetailView,
+  PullSummary,
+  RepoOpenFailureReason,
+} from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 import {
   createEmptyReads,
@@ -108,6 +113,11 @@ interface RepositoryStore {
    * 실패한 path는 최근 목록에서 빠진다(없어진 폴더가 계속 남지 않도록).
    */
   openRepository(path?: string): Promise<boolean>
+  /**
+   * 저장소를 **새 창**에서 연다 — 이 창은 그대로 둔다 (E15b: 전환기 ⌥클릭·우클릭·워크트리 행).
+   * 실패는 `openRepository`와 같은 자리(배너)에 같은 문구로 뜨고, 원인이 확실하면 최근 목록에서도 빠진다
+   */
+  openInNewWindow(path: string): Promise<void>
   refresh(): Promise<void>
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
   /** 성공 여부를 반환한다 — 병합 후 이동 제안(syncAfterMerge)이 실패 시 받아오기를 잇지 않기 위해 */
@@ -415,6 +425,28 @@ type StoreSet = (partial: Partial<RepositoryStore>) => void
 type StoreGet = () => RepositoryStore
 
 /**
+ * 열기 실패 하나에 대한 최근 목록 정책 (E15a 리뷰 ④) — **원인이 확실할 때만** 뺀다.
+ *
+ * 저장소 열기(`openRepository`)와 새 창에서 열기(`openInNewWindow`)가 같은 사인을 받으므로
+ * 함께 쓴다 (E15b 리뷰 I-2). 정책을 두 번 적으면 갈라진다 — 실제로 갈라져 있었다:
+ * 한 항목을 클릭하면 안내가 뜨고 목록에서 빠지는데, ⌥클릭하면 둘 다 안 일어났다.
+ *
+ * 배너 문구는 부르는 쪽이 정한다 — `openRepository`는 던져서 `runWrite`의 catch로 옮기고,
+ * 새 창은 이 창의 상태를 안 바꾸므로 직접 `error`에 넣는다
+ */
+function forgetRepoIfCertain(
+  set: StoreSet,
+  get: StoreGet,
+  path: string,
+  reason: RepoOpenFailureReason,
+): void {
+  if (reason === 'failed') return
+  const recentRepos = removeRecentRepo(get().recentRepos, path)
+  set({ recentRepos })
+  saveRecentRepos(recentRepos)
+}
+
+/**
  * **저장소에 매인 조회** — `runRead`에 "착지 시점에도 아직 그 저장소인가"를 얹는다 (E15a 리뷰 ①).
  *
  * 이 스토어의 조회는 예외 없이 진입 시 `repoPath`를 캡처해 그 저장소에 질문을 던진다. 그러니
@@ -525,11 +557,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           // 판정은 계약서의 reason으로만 한다 — 예외(형식 오류 등)로는 절대 지우지 않는다.
           // 여기서만 지우는 이유는 그대로다: runWrite가 false를 주는 경우엔 재진입 거부(busy)도
           // 있어서, 호출부의 false 판정으로 지우면 멀쩡한 저장소를 목록에서 날린다 (E15a)
-          if (result.reason !== 'failed') {
-            const recentRepos = removeRecentRepo(get().recentRepos, path)
-            set({ recentRepos })
-            saveRecentRepos(recentRepos)
-          }
+          forgetRepoIfCertain(set, get, path, result.reason)
           // 배너 문구는 main이 만든 것을 그대로 쓴다 — runWrite의 catch가 error로 옮긴다
           throw new Error(result.message)
         }
@@ -570,6 +598,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({ recentRepos })
       saveRecentRepos(recentRepos)
     })
+  },
+
+  async openInNewWindow(path) {
+    // `runWrite`를 쓰지 않는다 — 이 저장소를 아무것도 바꾸지 않는다(전역 busy로 이 창을 잠그거나
+    // 진행 중인 조회를 무효화할 이유가 없다). 대신 실패 처리만 openRepository와 합류시킨다
+    const result = await git().window.open(path)
+    if (result.ok) return
+    forgetRepoIfCertain(set, get, path, result.reason)
+    // 문구는 main이 만든 것을 그대로 쓴다 — 평범한 클릭으로 열었을 때와 한 글자도 다르지 않다
+    set({ error: result.message })
   },
 
   async refresh() {
