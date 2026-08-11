@@ -6,10 +6,27 @@ import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
 import { readTheme, readWindows, registerSettingsHandlers, saveWindows } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
+import { createTrailingDebounce } from './watch-filter'
 import { createWindowRegistry } from './window-registry'
 
-// 창의 정본 (E15b) — 어느 창이 어느 저장소를 열었나·그 창의 레이아웃. main만 안다
-const registry = createWindowRegistry()
+/**
+ * 레이아웃 변경을 디스크에 묶어 쓰는 간격 (E15b 리뷰 I-1) — 도크 높이·우측 폭 드래그는 초당
+ * 여러 번 온다. E10의 감시 디바운스를 그대로 재사용한다(트레일링 1회)
+ */
+const LAYOUT_PERSIST_MS = 250
+
+// 창의 정본 (E15b) — 어느 창이 어느 저장소를 열었나·그 창의 레이아웃. main만 안다.
+//
+// 바뀔 때마다 디스크에 남긴다 (E15b 리뷰 I-1): 예전엔 `before-quit` 한 번이 유일한 영속
+// 지점이라, 창을 닫고 종료하면 그 창의 레이아웃이 통째로 증발했다(main 대비 회귀 — main은
+// `settings:set`마다 파일에 썼다). 레이아웃은 묶어서, 창 목록은 즉시 쓴다
+const persistLayout = createTrailingDebounce(LAYOUT_PERSIST_MS, () =>
+  saveWindows(registry.snapshot()),
+)
+const registry = createWindowRegistry((kind) => {
+  if (kind === 'layout') persistLayout.hit()
+  else saveWindows(registry.snapshot())
+})
 
 /** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
  * 실측: 앱 최상위에서 실제로 페인트되는 배경은 --color-surface(카드·패널 전용)가 아니라
@@ -219,11 +236,13 @@ app
     registerHostingHandlers()
     registerTerminalHandlers()
     registerWindowHandlers()
-    // 종료 직전의 스냅샷을 남긴다 (E15b) — 창이 닫히는 'closed'가 아니라 여기서 한 번 찍는다.
-    // ⌘Q(app.quit)는 before-quit → 창 닫기 순서라 이 시점의 레지스트리에 창들이 아직 다 있다
-    // (실측: Playwright의 app.close()도 main에서 app.quit()을 부르므로 그대로 발화한다).
-    // 반대로 사용자가 창을 하나씩 다 닫고 나서 종료하면 목록은 비어 저장된다 — 그건 의도다.
-    // "닫은 창은 다음에 안 뜬다"가 맞는 동작이라 되살리지 않는다
+    // 종료 직전의 스냅샷을 남긴다 (E15b). ⌘Q(app.quit)는 before-quit → 창 닫기 순서라 이
+    // 시점의 레지스트리에 창들이 아직 다 있다 (실측: Playwright의 app.close()도 main에서
+    // app.quit()을 부르므로 그대로 발화한다).
+    //
+    // 이제 여기는 **유일한 영속 지점이 아니라 마지막 한 번**이다 (E15b 리뷰 I-1) — 디바운스가
+    // 아직 안 터진 레이아웃까지 확실히 담기게 한다. 창을 하나씩 다 닫고 종료해 목록이 비면
+    // saveWindows가 무시하므로 디스크의 마지막 목록이 그대로 남는다(그 함수의 주석 참조)
     app.on('before-quit', () => {
       saveWindows(registry.snapshot())
     })

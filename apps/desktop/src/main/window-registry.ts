@@ -14,6 +14,17 @@ export interface WindowState {
   layout: WindowLayout
 }
 
+/**
+ * 레지스트리가 바뀐 이유 (E15b 리뷰 I-1) — 영속 정책이 둘로 갈린다.
+ *
+ * - `windows` — 창이 늘거나 줄거나 다른 저장소로 갈아탔다. 사람의 조작이라 드물다: **즉시** 쓴다.
+ * - `layout` — 도크 높이 드래그처럼 초당 여러 번 온다: **디바운스**한다.
+ *
+ * 둘을 안 가르고 전부 디바운스하면, 창 둘을 연달아 닫는 동안(디바운스 창 안) 종료가 겹칠 때
+ * 닫은 창이 목록에 남는다. 반대로 전부 즉시 쓰면 드래그 한 번에 writeFileSync가 수십 번이다
+ */
+export type WindowChangeKind = 'windows' | 'layout'
+
 export interface WindowRegistry {
   add(id: number, state: WindowState): void
   remove(id: number): void
@@ -27,28 +38,43 @@ export interface WindowRegistry {
   snapshot(): WindowState[]
 }
 
-export function createWindowRegistry(): WindowRegistry {
+/**
+ * `onChange`는 이 레지스트리가 바뀔 때마다 불린다 (E15b 리뷰 I-1).
+ *
+ * 왜 콜백인가: 예전엔 영속 지점이 `before-quit` 한 번뿐이라, 그 시점에 창이 없으면
+ * 창별 레이아웃이 통째로 증발했다(실측: `settings-after-close-then-quit={"windows":[]}`).
+ * 영속을 호출부 네 곳에 손으로 흩으면 새 변경 경로가 생길 때마다 빠뜨린다 — 정본이 스스로 알린다
+ */
+export function createWindowRegistry(
+  onChange: (kind: WindowChangeKind) => void = () => {},
+): WindowRegistry {
   // Map은 삽입 순서를 보존한다 — snapshot()의 순서 보장이 여기서 온다
   const windows = new Map<number, WindowState>()
   return {
     add(id, state) {
       // layout을 복사해 담는다 — 호출자가 넘긴 객체(씨앗)를 나중에 고쳐도 이 창이 안 흔들린다
       windows.set(id, { repoPath: state.repoPath, layout: { ...state.layout } })
+      onChange('windows')
     },
     remove(id) {
-      windows.delete(id)
+      // 실제로 지웠을 때만 알린다 — 없는 id를 지우는 것은 변화가 아니다
+      if (windows.delete(id)) onChange('windows')
     },
     get(id) {
       return windows.get(id)
     },
     setRepoPath(id, repoPath) {
       const state = windows.get(id)
-      // 창이 닫히는 중에 늦은 IPC가 올 수 있다 — 조용히 무시한다
-      if (state !== undefined) state.repoPath = repoPath
+      // 창이 닫히는 중에 늦은 IPC가 올 수 있다 — 조용히 무시한다(알리지도 않는다)
+      if (state === undefined) return
+      state.repoPath = repoPath
+      onChange('windows')
     },
     setLayout(id, patch) {
       const state = windows.get(id)
-      if (state !== undefined) state.layout = { ...state.layout, ...patch }
+      if (state === undefined) return
+      state.layout = { ...state.layout, ...patch }
+      onChange('layout')
     },
     findByRepoPath(repoPath) {
       for (const [id, state] of windows) {

@@ -53,7 +53,22 @@ export function readWindows(): PersistedWindow[] {
   return current().windows ?? []
 }
 
+/**
+ * 창 목록을 디스크에 남긴다 — **빈 목록은 무시한다** (E15b 리뷰 I-1).
+ *
+ * 왜 무시하나: 종료 경로가 플랫폼마다 다른데 **빈 목록은 그 차이의 산물일 뿐 사용자의 뜻이
+ * 아니다.** macOS ⌘Q는 `before-quit` → 창 닫기 순서라 그 시점 레지스트리에 창들이 남아 있지만,
+ * Windows/Linux는 마지막 창의 X가 `closed`(→`remove`) → `window-all-closed` → `app.quit()` →
+ * `before-quit` 순서라 **정상 종료가 항상 빈 목록**이다(index.ts:244). 그대로 저장하면 그
+ * 플랫폼에서는 복원도 레이아웃 기억도 영영 죽는다(실측: `settings-after-close-then-quit={"windows":[]}` ·
+ * `left-visible-after-restart=true`).
+ *
+ * "닫은 창은 다음에 안 뜬다"와 충돌하지 않는다 — **여럿 중 하나**를 닫으면 목록이 안 비므로
+ * 그 창은 그대로 빠진다. 충돌은 "전부 닫고 종료"에서만 생기는데, 그건 위 순서 때문에 정상
+ * 종료와 구분할 방법이 없다
+ */
 export function saveWindows(list: PersistedWindow[]): void {
+  if (list.length === 0) return
   save({ ...current(), windows: list })
 }
 

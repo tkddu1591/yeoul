@@ -87,3 +87,47 @@ describe('창 레지스트리 (E15b)', () => {
     expect(registry.get(1)?.layout.rightWidth).toBe(300)
   })
 })
+
+/**
+ * 영속 신호 (E15b 리뷰 I-1). 예전엔 영속 지점이 `before-quit` 하나뿐이라 창을 닫고 종료하면
+ * 그 창의 레이아웃이 통째로 증발했다 — 이제 레지스트리가 바뀔 때마다 알린다.
+ *
+ * 종류를 가르는 이유는 영속 정책이 다르기 때문이다: 창 목록은 즉시, 레이아웃은 디바운스.
+ * 그래서 "알렸다"만으로는 부족하고 **어느 종류로 알렸는지**까지 문다
+ */
+describe('레지스트리 변경 알림 (E15b 리뷰 I-1)', () => {
+  const record = () => {
+    const kinds: string[] = []
+    return { kinds, registry: createWindowRegistry((kind) => kinds.push(kind)) }
+  }
+
+  it('창이 늘고 줄고 갈아타면 windows로 알린다 — 사람의 조작이라 즉시 쓴다', () => {
+    const { kinds, registry } = record()
+    registry.add(1, { repoPath: '/a', layout: {} })
+    registry.setRepoPath(1, '/b')
+    registry.remove(1)
+    expect(kinds).toEqual(['windows', 'windows', 'windows'])
+  })
+
+  it('레이아웃 변경은 layout으로 알린다 — 드래그가 초당 여러 번이라 묶어 쓴다', () => {
+    const { kinds, registry } = record()
+    registry.add(1, { repoPath: '/a', layout: {} })
+    registry.setLayout(1, { terminalHeight: 240 })
+    registry.setLayout(1, { terminalHeight: 260 })
+    expect(kinds).toEqual(['windows', 'layout', 'layout'])
+  })
+
+  it('아무것도 안 바뀌면 알리지 않는다 — 없는 창에 온 늦은 IPC로 디스크를 쓰지 않는다', () => {
+    const { kinds, registry } = record()
+    registry.remove(99)
+    registry.setLayout(99, { rightWidth: 1 })
+    registry.setRepoPath(99, '/a')
+    expect(kinds).toEqual([])
+  })
+
+  it('콜백을 안 줘도 동작한다 — 단위 테스트와 옛 호출부가 그대로 산다', () => {
+    const registry = createWindowRegistry()
+    expect(() => registry.add(1, { repoPath: '/a', layout: {} })).not.toThrow()
+    expect(registry.snapshot()).toHaveLength(1)
+  })
+})

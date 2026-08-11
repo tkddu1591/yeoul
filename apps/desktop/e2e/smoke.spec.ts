@@ -5565,3 +5565,189 @@ test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 �
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b 리뷰 I-1 ① — **창을 닫고 나서 종료해도** 그 창의 저장소와 레이아웃이 돌아온다.
+ *
+ * 이건 `main` 대비 회귀였다. `main`은 `settings:set`마다 파일에 썼으므로 "레이아웃 변경은 곧
+ * 영속"이 불변식이었는데, E15b가 레이아웃을 레지스트리로 옮기면서 영속 지점이 `before-quit`
+ * 하나만 남았다 — 그 시점에 창이 없으면 전부 증발한다(리뷰어 실측:
+ * `settings-after-close-then-quit={"windows":[]}` · `left-visible-after-restart=true`).
+ *
+ * **범위가 macOS ⌘W→⌘Q에 그치지 않는다.** Windows/Linux는 `window-all-closed → app.quit()`
+ * (index.ts) 때문에 **마지막 창의 X를 누르는 정상 종료가 항상** `closed`(→`registry.remove`) →
+ * `before-quit`(→빈 목록) 순서다. 즉 그 플랫폼에서는 복원도 레이아웃 기억도 통째로 죽는다.
+ * 여기서 창을 먼저 닫고 `app.quit()`을 직접 부르는 것이 **그 경로를 macOS에서 그대로 흉내 내는
+ * 형태**다 — 실제 Windows 없이 같은 순서를 재현한다.
+ *
+ * 2회차는 `GIT_GUI_E2E_REPO` 없이 띄운다 — 그래야 저장소까지 복원 경로를 탄다(E15b ⑨와 같은 이유).
+ */
+test('E15b — 창을 닫고 종료해도 그 창의 저장소와 레이아웃이 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const pathA = realpathSync(repoA)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 좌측을 접고 → 창을 닫고 → 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    const windowA = await first.firstWindow()
+    await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+    await windowA.getByTestId('left-collapse-toggle').click()
+    await windowA.waitForTimeout(320)
+    await expect(windowA.locator('.app__left')).not.toBeVisible()
+    // 레이아웃 영속은 디바운스다(LAYOUT_PERSIST_MS=250) — 창을 닫기 전에 한 번 터지게 둔다
+    await windowA.waitForTimeout(600)
+
+    // 여기가 이 테스트의 핵심 — 종료 시점에 창이 하나도 없다.
+    // harness의 app.close()를 쓰지 않는다: 그건 닫기 직전 firstWindow()로 화면을 찍는데
+    // 창이 이미 없어 30초를 기다린다. 대신 main에서 직접 quit하고 종료를 기다린다
+    await windowA.close()
+    await first.evaluate(({ app }) => {
+      app.quit()
+    })
+    await first.waitForEvent('close')
+
+    // ── 2회차: GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      // (1) 저장소가 돌아왔다 — 빈 창(RepoPicker)이 아니다
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      // (2) 접힘도 돌아왔다 — 재시작 직후는 부팅 억제라 전환 없이 즉시 0px다
+      await expect(restored.locator('.app__left')).not.toBeVisible()
+      expect((await restored.locator('.app__left').boundingBox())!.width).toBe(0)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-1 ② — **여럿 중 하나**를 닫으면 그 창은 다음에 안 뜬다.
+ *
+ * I-1의 고침("빈 목록으로 덮어쓰지 않는다")이 기존 결정을 삼키지 않는지 못박는다. 둘은 충돌하지
+ * 않는다: 창 둘 중 하나를 닫으면 레지스트리가 **안 비므로** 그 창은 그대로 목록에서 빠진다.
+ * 충돌은 "전부 닫고 종료"에서만 생기는데 그건 위 ①의 경우다(정상 종료와 구분 불가).
+ *
+ * 이 테스트를 빨갛게 만드는 것은 "빈 목록 무시"를 "줄어든 목록도 무시"로 넓히는 변이다 —
+ * 그렇게 하면 닫은 B가 되살아난다.
+ */
+test('E15b — 창 둘 중 하나만 닫고 종료하면 남은 창만 복원된다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 창 둘을 열고 B만 닫은 채 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const windowA = await first.firstWindow()
+      await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+      const pending = nextWindow(first)
+      await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+      const windowB = await pending
+      await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+      await windowB.close()
+      // 창 목록 영속은 즉시다(디바운스가 아니다) — 그래도 IPC 왕복 여유를 준다
+      await windowA.waitForTimeout(500)
+    } finally {
+      // A가 아직 열려 있다 — 평범한 ⌘Q 경로다
+      await first.close()
+    }
+
+    // ── 2회차: A만 돌아온다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      // 창이 늦게 더 뜨지 않는지까지 본다 — 복원은 순차라 두 번째가 뒤늦게 올 수 있다
+      await restored.waitForTimeout(1_500)
+      expect(second.windows()).toHaveLength(1)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15b 리뷰 I-1 ③ — 창을 **둘 다** 닫고 종료해도, 닫은 순서와 무관하게 A만 돌아온다.
+ *
+ * ②가 못 무는 것을 문다. ②는 ⌘Q 경로라 `before-quit` 시점에 A가 살아 있어, **레지스트리
+ * 변경을 즉시 영속하지 않아도** 초록이다. 여기서는 종료 시점에 창이 하나도 없으므로
+ * `before-quit`이 아무것도 못 남긴다 — 디스크에 남은 것은 **B를 닫는 순간 쓴 목록**뿐이다.
+ * 레이아웃을 한 번도 안 건드리는 것도 의도다: 디바운스 영속이 대신 저장해 주는 길을 막아
+ * "창 목록 변경도 곧 영속"만 남긴다.
+ *
+ * Windows/Linux에서 창 둘을 X로 닫는 정상 종료가 정확히 이 순서다.
+ */
+test('E15b — 창을 둘 다 닫고 종료해도 닫지 않은 쪽만 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    const windowA = await first.firstWindow()
+    await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+    const pending = nextWindow(first)
+    await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+    const windowB = await pending
+    await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+
+    // B를 먼저 닫는다 — 이때 남은 목록 [A]가 디스크로 간다. 그 다음 A를 닫으면 목록이 비는데,
+    // 빈 목록은 저장하지 않으므로 방금 쓴 [A]가 그대로 남는다
+    await windowB.close()
+    await windowA.waitForTimeout(500)
+    await windowA.close()
+    await first.evaluate(({ app }) => {
+      app.quit()
+    })
+    await first.waitForEvent('close')
+
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(1)
+      const restored = second.windows()[0]!
+      await restored.locator('.app__header').waitFor({ timeout: 30_000 })
+      await expect(restored.getByTestId('repo-path')).toHaveText(pathA)
+      await restored.waitForTimeout(1_500)
+      expect(second.windows()).toHaveLength(1)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
