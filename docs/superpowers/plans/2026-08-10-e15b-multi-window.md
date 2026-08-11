@@ -1735,3 +1735,16 @@ if (tabbingIdentifier.empty() || transparent() || !has_frame())
 **창 메뉴는 반대로 플랜 초안이 전부 맞았다** — `Menu.getApplicationMenu()`는 `whenReady()`에 `null`이 아니고, `role === 'windowmenu'`로 찾히며, `append` 뒤 `setApplicationMenu(menu)` 재설치가 필요하다. 다만 **넣지 않는다**: `mergeAllWindows()`가 할 일이 없어 죽은 메뉴 항목이 된다.
 
 **사용자 결정(2026-08-11): 앱이 탭바를 직접 그린다 → E15c로 분리.** 실질은 "한 창 안에 저장소 여러 개"이고, 그러면 Task 1~5가 창별로 만든 감시·터미널·설정을 탭별로 다시 쪼개야 한다. **탭마다 `WebContentsView`를 두면 각 탭이 자기 `webContents.id`를 가지므로 이 에픽의 산출물이 그대로 살아난다**(전부 `sender` 기준으로 키를 잡았다) — E15c 브레인스토밍의 출발점으로 삼는다. 신호등·드래그 영역·헤더가 탭바와 어떻게 공존하는지는 설계가 필요하다.
+
+### Task 7 실측 정정
+
+- **플랜 Step 3의 가드 범위가 자기모순이었다.** "복원 블록 **전체**를 `if (!process.env.GIT_GUI_E2E_REPO)`로 감싸라"고 적었는데, 복구 대상인 두 테스트(`:373`·`:3500`)는 **두 번의 launch 모두 그 변수를 넘긴다**(`:376`·`:3503`). 원안대로면 2회차가 복원 경로를 안 타서 **영영 복구 불가능**이다. 플랜의 두 요구(가드 vs 2건 복구)가 서로 모순이었다.
+  **가른 결론**: 가드는 **"창 목록"에만** 걸고 **"첫 창의 레이아웃"은 통과**시킨다. 환경변수의 의미는 "시작할 때 이 저장소"이지 "레이아웃을 잊어라"가 아니고, 창 하나짜리 재시작도 복원 경로를 타야 한다.
+- **`app.close()`는 `before-quit`를 발화시킨다** (실측 — 우회 불필요). `playwright-core@1.61.1`의 `coreBundle.js:43376`이 커스텀 close 핸들러에서 `electronHandle.evaluate(({ app }) => app.quit())`를 부른다. 즉 main에서 진짜 `app.quit()`이라 `before-quit → 창 닫기` 순서가 그대로고, 그 시점 레지스트리에 창들이 아직 다 있다.
+- **플랜 Step 4의 복원 E2E가 반쯤 공허했다.** 창 개수와 경로만 봐서 "레이아웃을 창별로 실어 나르는" 부분이 그물 밖이었다 — 변이 ③(첫 창 layout 씨앗 제거)이 원안 테스트를 **못 물었다.** 레이아웃 단언을 더해 셋(개수·저장소 순서·창별 레이아웃)을 함께 물게 한다. **순서 함정**: 1회차에서 A를 **B를 연 뒤에** 접어야 한다 — 먼저 접으면 `seedLayoutFrom`이 B에도 접힘을 심어 단언이 공허해진다.
+- **Step 1 sanitize 스니펫에 구멍**: 원소 필터가 `typeof === 'object' && !== null`뿐이라 **배열 원소가 통과**해 `{ repoPath: null, layout: {} }`이 되고, 손상된 파일 한 줄이 유령 빈 창을 띄운다. `!Array.isArray(entry)`가 필요하다.
+- **`sanitizePersistedSettings`의 삽입 위치**: hosting 파싱이 early-return 셋을 쓰므로 `windows` 블록을 그 **앞**에 놓아야 한다. 뒤에 놓으면 `hosting` 없는 파일에서 `windows`가 통째로 사라진다.
+- **Step 4 주의 2번(`GIT_GUI_E2E_SHOW`)은 불필요했다** — 2회차는 `GIT_GUI_E2E_REPO`가 없어 `isE2E`가 false이므로 영향이 없다. `backgroundThrottling`이 켜진 채로도 창 둘이 3초 안에 복원됐다.
+- **`registry.add` 그물이 Task 1에서 안 물린 진짜 이유**: `setLayout`이 `state.layout = { ... }`로 **재대입**하므로 "같은 객체로 두 창을 만들어도 안 흔들린다" 류로는 못 잡는다. 그럼에도 Task 7에서 넣은 이유는 **상황이 바뀌어서**다 — 이제 `readWindows()`가 돌려주는 **설정 모듈 캐시에 살아 있는 객체**가 `add`로 들어간다. 복사를 빼면 레지스트리가 디스크 캐시를 붙들고, 누가 `setLayout`을 `Object.assign`으로 "최적화"하는 순간 창 하나의 변경이 디스크 캐시로 샌다. **그 붙듦 자체를 무는 형태**로 써야 걸린다.
+- **알고 남긴 것**: 사용자가 창을 하나씩 다 닫은 뒤 종료하면 `closed` → `registry.remove`가 이미 비워서 빈 목록이 저장된다. 되살리지 않는다 — **"닫은 창은 다음에 안 뜬다"가 맞는 동작**이다.
+- **자기 신고된 공허한 단언 2건**: sanitize 테스트의 `배열이 아니면 필드째 버린다`(`not.toHaveProperty`)와 `windows는 renderer 표면이 아니다`는 구현 전에도 초록이었다(6건 중 4건만 빨감). 부정 단언이라 구조적으로 그렇고, 미래의 누출을 막는 그물로 남긴다.
