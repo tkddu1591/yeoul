@@ -7,6 +7,7 @@ import {
   SETTINGS_CHANNELS,
   splitSettings,
   type PersistedSettings,
+  type PersistedWindow,
 } from '@git-gui/ipc-contract'
 import type { WindowRegistry } from './window-registry'
 
@@ -42,6 +43,18 @@ function save(next: PersistedSettings): void {
  * 돌려주는 가장 좁은 형태로 export한다 */
 export function readTheme(): 'light' | 'dark' | undefined {
   return current().theme
+}
+
+/**
+ * 마지막 종료 시점의 창들 (E15b 복원) — renderer 표면이 아니라 별도 export다.
+ * `settings:get-sync`가 쓰는 sanitizeSettings는 이 필드를 걷어내므로 렌더러로 새지 않는다
+ */
+export function readWindows(): PersistedWindow[] {
+  return current().windows ?? []
+}
+
+export function saveWindows(list: PersistedWindow[]): void {
+  save({ ...current(), windows: list })
 }
 
 export function registerSettingsHandlers(registry: WindowRegistry): void {

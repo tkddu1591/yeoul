@@ -1,10 +1,10 @@
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { WINDOW_CHANNELS, type WindowLayout } from '@git-gui/ipc-contract'
 import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
-import { readTheme, registerSettingsHandlers } from './settings'
+import { readTheme, readWindows, registerSettingsHandlers, saveWindows } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
 import { createWindowRegistry } from './window-registry'
 
@@ -166,25 +166,75 @@ function registerWindowHandlers(): void {
   })
 }
 
+/**
+ * 시작할 때 창을 만든다 — 껐을 때 그대로 (E15b).
+ *
+ * 저장된 목록이 없으면(첫 실행) 빈 창 하나 — 예전 동작과 같다.
+ */
+async function createStartupWindows(): Promise<void> {
+  const restored = readWindows()
+  // GIT_GUI_E2E_REPO가 있으면 **저장된 목록으로 창을 여럿 만들지 않는다** — 기존 E2E 143건이
+  // 전부 "창 하나, 그 저장소" 하나를 전제로 짜여 있어 복원이 창을 더 만들면 대량으로 깨진다.
+  //
+  // 다만 레이아웃 기억은 저장소 목록과 **다른 문제라** 첫 창의 레이아웃은 그대로 복원한다.
+  // E15b가 rightWidth·leftCollapsed를 settings.json에서 이 목록으로 옮겼으므로, 여기서
+  // 씨앗으로 주지 않으면 재시작 지속성 E2E 2건(:373 우측 폭 · :3500 좌측 접힘)이 영영 빨갛다 —
+  // 창 하나짜리 재시작도 복원 경로를 타야 한다. (플랜은 이 블록 전체를 환경변수로 감싸라고
+  // 했는데, 그러면 그 2건이 돌아올 길이 없다 — 실측으로 갈랐다)
+  const seededRepo = process.env.GIT_GUI_E2E_REPO
+  if (seededRepo !== undefined) {
+    createWindow({ repoPath: seededRepo, layout: restored[0]?.layout ?? {} })
+    return
+  }
+  let created = 0
+  for (const saved of restored) {
+    if (saved.repoPath !== null) {
+      // 이 경로는 사람이 편집할 수 있는 디스크 파일에서 왔고 그대로 git의 cwd가 된다 —
+      // repo.open·window.open과 **같은 검증**을 거친다. 다만 여기서는 던지지 않고 건너뛴다:
+      // 손으로 망가뜨린 항목 하나가 앱 시작을 통째로 막으면 안 된다
+      if (!isAbsolute(saved.repoPath)) continue
+      const opened = await openRepoPath(saved.repoPath)
+      // 없어진 저장소는 그 창을 만들지 않고 넘어간다. 알림은 띄우지 않는다 — 시작하자마자
+      // 배너를 보는 건 성가시고, 그 경로는 최근 목록에서도 곧 빠진다
+      if (!opened.ok) continue
+      createWindow({ repoPath: opened.path, layout: saved.layout })
+    } else {
+      createWindow({ repoPath: null, layout: saved.layout })
+    }
+    created += 1
+  }
+  // 저장된 창이 없거나 전부 사라졌으면 빈 창 하나 — 창 없이 시작하면 macOS에서 되살릴 길이
+  // 독 아이콘 클릭(activate)뿐이다
+  if (created === 0) createWindow()
+}
+
 // macOS에서는 앱 실행 자체가 활성화되며 포커스를 훔칠 수 있다 — E2E에서는 dock 아이콘째 숨긴다
 if (isE2E && !isE2EShow) app.dock?.hide()
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     registerGitHandlers(registry)
     registerSettingsHandlers(registry)
     registerHostingHandlers()
     registerTerminalHandlers()
     registerWindowHandlers()
+    // 종료 직전의 스냅샷을 남긴다 (E15b) — 창이 닫히는 'closed'가 아니라 여기서 한 번 찍는다.
+    // ⌘Q(app.quit)는 before-quit → 창 닫기 순서라 이 시점의 레지스트리에 창들이 아직 다 있다
+    // (실측: Playwright의 app.close()도 main에서 app.quit()을 부르므로 그대로 발화한다).
+    // 반대로 사용자가 창을 하나씩 다 닫고 나서 종료하면 목록은 비어 저장된다 — 그건 의도다.
+    // "닫은 창은 다음에 안 뜬다"가 맞는 동작이라 되살리지 않는다
+    app.on('before-quit', () => {
+      saveWindows(registry.snapshot())
+    })
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
     // GIT_GUI_E2E_REPO는 "**시작할 때** 이 저장소를 열어라"지 "새 창마다 열어라"가 아니다.
     // 예전엔 repo:initial-path가 씨앗이 없을 때마다 이 환경변수로 되돌아가, ⌘N이 만든 빈 창이
     // E2E에서만 조용히 그 저장소를 열었다 — 빈 창(RepoPicker) 경로가 E2E로 검증 불가능해진다
     // (E15b Task 5 실측: 최근 목록 테스트가 여기서 빨갛게 났다). 씨앗은 첫 창에만 준다
-    createWindow({ repoPath: process.env.GIT_GUI_E2E_REPO ?? null, layout: {} })
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    })
+    await createStartupWindows()
   })
   .catch((error) => {
     console.error('앱 초기화 실패:', error)

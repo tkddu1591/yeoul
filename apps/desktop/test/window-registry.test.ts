@@ -64,6 +64,21 @@ describe('창 레지스트리 (E15b)', () => {
     expect(registry.snapshot().map((w) => w.repoPath)).toEqual(['/first', '/second'])
   })
 
+  /**
+   * add의 방어적 복사에 그물이 없었다 (Task 1 반증 실측: `{ ...state.layout }` → `state.layout`
+   * 변이가 10건 중 0건을 물었다). 그때는 유일한 호출자가 갓 만든 객체를 넘겨 버려서 무해했지만,
+   * E15b 복원부터는 **설정 모듈 캐시에 살아 있는 객체**(`readWindows()`가 돌려주는
+   * `settings.windows[i].layout`)가 그대로 들어온다 — 붙들면 창 하나의 레이아웃 변경이
+   * 디스크 캐시를 건드리는 통로가 생긴다. 값을 넣은 뒤 원본을 고쳐서 그 붙듦을 문다
+   */
+  it('넘겨받은 layout을 붙들지 않는다 — 복원이 디스크 캐시의 객체를 넘긴다', () => {
+    const registry = createWindowRegistry()
+    const fromDisk = { rightWidth: 300 }
+    registry.add(1, { repoPath: '/a', layout: fromDisk })
+    fromDisk.rightWidth = 999
+    expect(registry.get(1)?.layout).toEqual({ rightWidth: 300 })
+  })
+
   it('스냅샷은 복사본이다 — 받은 쪽이 고쳐도 레지스트리가 안 바뀐다', () => {
     const registry = createWindowRegistry()
     registry.add(1, { repoPath: '/a', layout: { rightWidth: 300 } })

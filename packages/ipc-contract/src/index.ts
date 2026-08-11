@@ -451,26 +451,54 @@ export function sanitizeWindowLayout(value: unknown): WindowLayout {
 }
 
 /**
+ * 마지막 종료 시점의 창 하나 (E15b) — 무엇을 열고 있었나 · 어떤 모습이었나.
+ * 창을 만드는 것은 main뿐이라 renderer 표면(AppSettings)에는 넣지 않는다
+ */
+export interface PersistedWindow {
+  repoPath: string | null
+  layout: WindowLayout
+}
+
+/**
  * 디스크(settings.json)에만 존재하는 확장 설정 — main 전용.
  * hosting.github.token은 safeStorage 암호문(base64)이며, getSync 응답은 sanitizeSettings로
  * renderer 표면 필드만 추리므로 renderer에는 토큰이 절대 전달되지 않는다.
  */
 export interface PersistedSettings extends AppSettings {
   hosting?: { github?: { token?: string; login?: string } }
+  /** 마지막 종료 시점의 창들 — 등록 순서대로 (E15b 복원) */
+  windows?: PersistedWindow[]
 }
 
-/** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)을 더한다 */
+/** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)과 windows를 더한다 */
 export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   const settings: PersistedSettings = sanitizeSettings(value)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
-  const hosting = (value as { hosting?: unknown }).hosting
+  // 창 목록 (E15b) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수 있는
+  // 디스크 파일에서 오고 repoPath가 **창을 만드는 인자**가 된다. 원소가 객체가 아니면
+  // 버리고(배열도 객체지만 창일 수 없다), repoPath가 문자열이 아니면 빈 창으로 낮춘다 —
+  // 통과시키면 그 값이 그대로 저장소 열기로 흘러간다. sparse array의 hole은 spread로
+  // 실체화한 뒤 filter가 걷어낸다 (sanitizeSettings의 recentRepos와 같은 관례)
+  const candidate = value as { windows?: unknown; hosting?: unknown }
+  if (Array.isArray(candidate.windows)) {
+    settings.windows = [...(candidate.windows as unknown[])]
+      .filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+      )
+      .map((entry) => ({
+        repoPath: typeof entry.repoPath === 'string' ? entry.repoPath : null,
+        layout: sanitizeWindowLayout(entry.layout),
+      }))
+  }
+  const hosting = candidate.hosting
   if (typeof hosting !== 'object' || hosting === null || Array.isArray(hosting)) return settings
   const github = (hosting as { github?: unknown }).github
   if (typeof github !== 'object' || github === null || Array.isArray(github)) return settings
-  const candidate = github as { token?: unknown; login?: unknown }
+  const githubFields = github as { token?: unknown; login?: unknown }
   const clean: { token?: string; login?: string } = {}
-  if (typeof candidate.token === 'string') clean.token = candidate.token
-  if (typeof candidate.login === 'string') clean.login = candidate.login
+  if (typeof githubFields.token === 'string') clean.token = githubFields.token
+  if (typeof githubFields.login === 'string') clean.login = githubFields.login
   if (clean.token !== undefined || clean.login !== undefined) settings.hosting = { github: clean }
   return settings
 }

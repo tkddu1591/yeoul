@@ -5487,3 +5487,81 @@ test('E15b — 워크트리 우클릭 "새 창에서 열기"가 그 워크트리
     await rm(wtPath, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b ⑨ — 껐다 켜면 열려 있던 창들이 돌아온다.
+ *
+ * **2회차는 `GIT_GUI_E2E_REPO` 없이 띄운다.** 그 변수가 있으면 main이 창 목록 복원을 건너뛰기
+ * 때문이다(기존 E2E가 전부 "창 하나, 그 저장소"를 전제한다 — index.ts createStartupWindows).
+ * 그래서 이 테스트 하나만 복원 경로 전체를 탄다.
+ *
+ * **공허해지지 않게 셋을 함께 문다** — "저장했다가 읽었다"는 저장·복원이 둘 다 없어도 통과할
+ * 길이 많다: (1) 창 **개수**가 2, (2) 각 창의 **저장소**가 저장 순서대로, (3) 각 창의
+ * **레이아웃**이 그 창의 것. (3)을 위해 1회차에서 **A만** 좌측을 접는다 — 레이아웃을 창별로
+ * 안 실으면(전부 첫 창 것을 쓰거나 전부 빈 값이면) 빨갛다.
+ *
+ * `app.close()`가 `before-quit`를 실제로 발화시키는지는 실측으로 확인했다 — Playwright의
+ * close는 main에서 `app.quit()`을 부른다(playwright-core coreBundle: `app.quit()`), 그래서
+ * 그 시점 레지스트리에 창들이 아직 다 있다. 별도 우회가 필요 없었다.
+ */
+test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 그대로 돌아온다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 창 둘을 열고 A만 좌측을 접은 채 종료한다 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const windowA = await first.firstWindow()
+      await expect(windowA.getByTestId('file-unstaged-alpha.txt')).toBeVisible()
+      // 창을 여는 동작보다 **먼저** 대기를 걸어 둔다 — waitForEvent는 이후에 열리는 창만 준다
+      const pending = nextWindow(first)
+      // page.evaluate는 인자를 **하나**만 넘긴다(첫 파라미터가 그 값이다)
+      await windowA.evaluate((path: string) => window.gitApi.window.open(path), pathB)
+      const windowB = await pending
+      await expect(windowB.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+      // 접기는 **B를 연 뒤에** 한다 — 새 창은 열어준 창의 레이아웃을 씨앗으로 받으므로(E15b
+      // seedLayoutFrom), 먼저 접었으면 B도 접힌 채로 열려 (3)이 아무것도 재지 못한다
+      await windowA.getByTestId('left-collapse-toggle').click()
+      await windowA.waitForTimeout(320)
+      await expect(windowA.locator('.app__left')).not.toBeVisible()
+      await expect(windowB.locator('.app__left')).toBeVisible()
+    } finally {
+      await first.close()
+    }
+
+    // ── 2회차: GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(2)
+      const pages = second.windows()
+      await Promise.all(pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })))
+      // (2) 순서는 등록 순서 = 저장 순서다
+      const paths = await Promise.all(
+        pages.map((page) => page.getByTestId('repo-path').textContent()),
+      )
+      expect(paths).toEqual([pathA, pathB])
+      // (3) 레이아웃은 창마다 제 것이다 — A만 접혀 있다.
+      // 재시작 직후는 부팅 억제(App.tsx bootSuppress)라 전환 없이 즉시 0px로 시작한다
+      await expect(pages[0]!.locator('.app__left')).not.toBeVisible()
+      expect((await pages[0]!.locator('.app__left').boundingBox())!.width).toBe(0)
+      await expect(pages[1]!.locator('.app__left')).toBeVisible()
+      expect((await pages[1]!.locator('.app__left').boundingBox())!.width).toBeGreaterThan(0)
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

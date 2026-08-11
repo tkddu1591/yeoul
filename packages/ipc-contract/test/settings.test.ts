@@ -119,6 +119,44 @@ describe('sanitizePersistedSettings', () => {
   })
 })
 
+describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
+  it('정상 목록은 그대로 통과한다', () => {
+    const value = { windows: [{ repoPath: '/a', layout: { rightWidth: 300 } }] }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { repoPath: '/a', layout: { rightWidth: 300 } },
+    ])
+  })
+
+  it('배열이 아니면 필드째 버린다', () => {
+    expect(sanitizePersistedSettings({ windows: '창' })).not.toHaveProperty('windows')
+  })
+
+  it('원소가 객체가 아니면 버린다', () => {
+    expect(sanitizePersistedSettings({ windows: ['/a', null, 3, []] }).windows).toEqual([])
+  })
+
+  it('repoPath가 문자열이 아니면 빈 창으로 만든다 — 창을 만드는 인자라 통과시키지 않는다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ repoPath: 42 }] }).windows).toEqual([
+      { repoPath: null, layout: {} },
+    ])
+  })
+
+  it('layout의 알 수 없는 키·틀린 타입은 걷어낸다', () => {
+    const value = {
+      windows: [{ repoPath: '/a', layout: { rightWidth: '넓게', 몰래: 1, terminalOpen: true } }],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { repoPath: '/a', layout: { terminalOpen: true } },
+    ])
+  })
+
+  it('windows는 renderer 표면이 아니다 — sanitizeSettings가 걷어낸다', () => {
+    expect(sanitizeSettings({ theme: 'dark', windows: [{ repoPath: '/a', layout: {} }] })).toEqual({
+      theme: 'dark',
+    })
+  })
+})
+
 describe('splitSettings — 창별/앱공용 분리 (E15b)', () => {
   it('창별 다섯 필드는 layout으로 간다', () => {
     const { app, layout } = splitSettings({
