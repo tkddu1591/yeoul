@@ -47,9 +47,27 @@ import type { PullComment, PullDetail, PullSummary } from '@git-gui/hosting'
  *
  * `message`는 사용자에게 그대로 보이는 문구다(main이 만든다 — 다른 열기 실패 문구와 같은 자리).
  */
+export type RepoOpenFailureReason = 'missing' | 'not-a-repository' | 'failed'
+
 export type RepoOpenResult =
   | { ok: true; path: string }
-  | { ok: false; reason: 'missing' | 'not-a-repository' | 'failed'; message: string }
+  | { ok: false; reason: RepoOpenFailureReason; message: string }
+
+/**
+ * 새 창에서 열기의 결과 (E15b 리뷰 I-2) — `repo.open`과 **같은 사인**을 돌려준다.
+ *
+ * 예전엔 `window:open`이 실패를 throw했고 렌더러가 `void`로 버려, 같은 최근 목록 항목이
+ * 클릭이냐 ⌥클릭이냐에 따라 갈렸다: 평범한 클릭은 안내가 뜨고 목록에서 빠지는데 ⌥클릭은
+ * **배너도 없고 목록도 그대로이고 콘솔에 uncaught rejection만** 남았다(실측:
+ * `pageerror:Error invoking remote method 'window:open'`). E15a가 만든 사인 분리
+ * (`missing`/`not-a-repository`/`failed`)가 이 진입점에서만 버려졌다.
+ *
+ * 성공에 경로를 싣지 않는 이유: 이 창은 아무것도 안 바뀐다 — 저장소는 **새 창**이 연다.
+ * 형식이 잘못된 인자만 throw하는 것은 `repo.open`과 같다("예상된 실패는 예외가 아니다")
+ */
+export type WindowOpenResult =
+  | { ok: true }
+  | { ok: false; reason: RepoOpenFailureReason; message: string }
 
 /**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
@@ -94,9 +112,11 @@ export interface GitApi {
     /**
      * 새 창에서 연다. `null`이면 저장소 없는 빈 창.
      * **경로 검증은 repo.open과 동일**하다 — 이 인자도 디스크 설정에서 온 렌더러 입력이다.
-     * 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다
+     * 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다.
+     *
+     * 열기 실패는 `WindowOpenResult`로 온다 — 던지지 않는다 (E15b 리뷰 I-2)
      */
-    open(repoPath: string | null): Promise<void>
+    open(repoPath: string | null): Promise<WindowOpenResult>
   }
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */

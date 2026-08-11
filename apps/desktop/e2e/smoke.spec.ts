@@ -5751,3 +5751,62 @@ test('E15b — 창을 둘 다 닫고 종료해도 닫지 않은 쪽만 돌아온
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15b 리뷰 I-2 — 없어진 저장소를 **⌥클릭**해도 안내가 뜨고 목록에서 빠진다.
+ *
+ * 같은 항목의 두 조작이 실패 처리에서 갈라져 있었다. 평범한 클릭은 E15a ③처럼 문구가 뜨고
+ * 자동으로 목록에서 빠지는데, ⌥클릭은 `void window.gitApi.window.open(path)`로 실패를 버려서
+ * **배너도 없고 목록도 그대로이고** 콘솔에 uncaught rejection만 남았다(리뷰어 실측:
+ * `bannerText=["main 병합"]` · `switcherVisible=true` · `pageerror:Error invoking remote
+ * method 'window:open'`). E15a가 공들여 가른 사인(`missing`/`not-a-repository`/`failed`)이
+ * 이 진입점에서만 버려진 것이다.
+ *
+ * **콘솔 오류까지 함께 문다** — 배너와 목록만 보면 "실패를 잡아 배너만 띄우고 rejection은
+ * 그대로 두는" 절반짜리 고침이 통과한다. 계약을 결과 객체로 바꿨다는 것이 여기서 드러난다.
+ */
+test('E15b — 없어진 저장소를 ⌥클릭해도 안내가 뜨고 최근 목록에서 빠진다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    const pageErrors: string[] = []
+    first.on('pageerror', (error) => pageErrors.push(error.message))
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+    // 목록에 남은 채 폴더만 사라진 상태 — 사용자가 Finder에서 지운 그 경우다 (E15a ③와 같은 픽스처)
+    await rm(repoB, { recursive: true, force: true })
+
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ modifiers: ['Alt'] })
+
+    // (a) 안내가 뜬다 — 평범한 클릭과 **한 글자도 다르지 않은** 문구다(main이 만든 것을 그대로 쓴다)
+    await expect(first.getByTestId('error')).toContainText('그 폴더가 없어요')
+    // 이 창은 그대로 A다 — ⌥클릭은 전환이 아니다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    // 창도 안 늘었다 — 열리지 않았으니 당연하지만, "열렸는데 배너만 떴다"를 배제한다
+    expect(app.windows()).toHaveLength(1)
+
+    // (b) 목록에서 빠졌다 — A(지금 저장소)와 '다른 폴더 열기'만 남는다
+    await first.getByTestId('repo-switcher').click()
+    expect(await switcherItemIds(first)).toEqual([
+      `repo-switcher-item-${pathA}`,
+      'repo-switcher-browse',
+    ])
+
+    // (c) 콘솔에 uncaught rejection이 없다 — 실패가 예외가 아니라 결과로 온다
+    expect(pageErrors).toEqual([])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true }).catch(() => {})
+    await rm(userData, { recursive: true, force: true })
+  }
+})

@@ -639,7 +639,7 @@ export function App() {
           recent={store.recentRepos}
           busy={store.busy}
           onOpen={(path) => void store.openRepository(path)}
-          onOpenInNewWindow={(path) => void window.gitApi.window.open(path)}
+          onOpenInNewWindow={(path) => void store.openInNewWindow(path)}
         />
         {status && (
           <div className="app__status">
@@ -1095,8 +1095,9 @@ export function App() {
                     break
                   case 'new-window':
                     // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은
-                    // 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스)
-                    void window.gitApi.window.open(action.path)
+                    // 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
+                    // 실패(워크트리 폴더가 사라진 경우 등)도 스토어가 배너로 옮긴다 (E15b 리뷰 I-2)
+                    void store.openInNewWindow(action.path)
                     break
                   case 'reveal':
                     void store.revealWorktree(action.path)

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { isAbsolute, join } from 'node:path'
-import { WINDOW_CHANNELS, type WindowLayout } from '@git-gui/ipc-contract'
+import { WINDOW_CHANNELS, type WindowLayout, type WindowOpenResult } from '@git-gui/ipc-contract'
 import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
@@ -161,26 +161,33 @@ function seedLayoutFrom(openerId: number): WindowLayout {
 
 /** 새 창에서 연다 (E15b). 창을 만드는 것은 index.ts 책임이라 이 핸들러만 여기 있다 */
 function registerWindowHandlers(): void {
-  ipcMain.handle(WINDOW_CHANNELS.open, async (event, repoPath: unknown) => {
-    if (repoPath === null) {
-      createWindow({ repoPath: null, layout: seedLayoutFrom(event.sender.id) })
-      return
-    }
-    // 인자는 디스크 설정에서 온 렌더러 입력이라 repo.open과 **같은 검증**을 거친다 — 검증 없이
-    // 씨앗으로 넣으면 그 창이 임의 디렉터리에서 git을 돌리는 통로가 된다
-    const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
-    if (!opened.ok) throw new Error(opened.message)
-    // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
-    const existing = registry.findByRepoPath(opened.path)
-    if (existing !== undefined) {
-      const found = BrowserWindow.getAllWindows().find((w) => w.webContents.id === existing)
-      // 탭으로 묶여 있어도 focus()면 macOS가 그 탭을 앞으로 가져온다
-      found?.show()
-      found?.focus()
-      return
-    }
-    createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
-  })
+  ipcMain.handle(
+    WINDOW_CHANNELS.open,
+    async (event, repoPath: unknown): Promise<WindowOpenResult> => {
+      if (repoPath === null) {
+        createWindow({ repoPath: null, layout: seedLayoutFrom(event.sender.id) })
+        return { ok: true }
+      }
+      // 인자는 디스크 설정에서 온 렌더러 입력이라 repo.open과 **같은 검증**을 거친다 — 검증 없이
+      // 씨앗으로 넣으면 그 창이 임의 디렉터리에서 git을 돌리는 통로가 된다
+      const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+      // 열기 실패는 예외가 아니다 (E15b 리뷰 I-2) — reason을 그대로 흘려보내야 렌더러가
+      // E15a의 목록 제거 정책(reason !== 'failed')을 이 진입점에서도 쓸 수 있다.
+      // 예전엔 여기서 throw했고 렌더러가 void로 버려 배너도 목록 정리도 없었다
+      if (!opened.ok) return opened
+      // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
+      const existing = registry.findByRepoPath(opened.path)
+      if (existing !== undefined) {
+        const found = BrowserWindow.getAllWindows().find((w) => w.webContents.id === existing)
+        // 탭으로 묶여 있어도 focus()면 macOS가 그 탭을 앞으로 가져온다
+        found?.show()
+        found?.focus()
+        return { ok: true }
+      }
+      createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
+      return { ok: true }
+    },
+  )
 }
 
 /**
