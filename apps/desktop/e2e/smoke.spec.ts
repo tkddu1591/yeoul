@@ -6855,3 +6855,79 @@ test('E15c 리뷰 I-1 — tabs:open의 await 틈에 창이 닫혀도 고아 webC
   }
 })
 
+/**
+ * E15c 리뷰 N-3 — 복원 중 탭이 버려져도 저장된 활성 탭이 활성으로 돌아온다.
+ *
+ * createStartupWindows의 savedIndex 재탐색(탭이 버려지면 살아남은 탭의 **원래 인덱스**로
+ * 활성을 다시 찾는다)을 무는 유일한 테스트다 — Task 8의 커밋된 테스트들은 탭이 전부
+ * 살아남는 시나리오만 물어서, 재탐색이 사라져도(저장 인덱스를 그대로 쓰면) 잡지 못했다.
+ *
+ * 저장 파일을 직접 심는다: [정상 A, 없는 경로 B, 정상 C] + activeTab: 2. 복원은 B를 버리고
+ * [A, C]만 만드는데, 저장 인덱스 2를 그대로 쓰면 두 탭뿐인 목록의 범위 밖이라 활성 지정이
+ * 무시돼 첫 탭 A가 활성으로 남는다 — 재탐색이 있어야 C(원래 2번)가 활성이다.
+ * 가시성 단언은 main의 getVisible()로만 한다 (Task 3 실측 — 숨은 뷰도 렌더러 단언은 통과한다).
+ */
+test('E15c 리뷰 N-3 — 복원에서 버려진 탭이 있어도 저장된 활성 탭이 그대로 활성이다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const pathA = realpathSync(repoA)
+  const pathC = realpathSync(repoC)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  // 없는 경로 — **절대 경로**여야 복원의 isAbsolute 가드를 지나 openRepoPath 실패로 버려진다
+  // (상대 경로는 그보다 앞에서 걸러져 "버려진 탭" 시나리오가 안 된다)
+  const missing = join(tmpdir(), 'git-gui-e2e-missing-이런-저장소-없다')
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({
+      autoFetch: false,
+      windows: [
+        {
+          tabs: [{ repoPath: pathA }, { repoPath: missing }, { repoPath: pathC }],
+          activeTab: 2,
+          layout: {},
+        },
+      ],
+    }),
+  )
+  // GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 (E15b ⑨와 같은 이유)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    // 살아남은 탭 둘(webContents 둘)이 오기를 기다린다 — 복원은 순차(openRepoPath 검증)라 늦다
+    await expect.poll(() => app.windows().length, { timeout: 30_000 }).toBe(2)
+    // 창은 하나다 — 버려진 탭이 창 수를 바꾸면 안 된다
+    expect(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length)).toBe(1)
+    const pages = app.windows()
+    await Promise.all(
+      pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })),
+    )
+
+    // 장부 — B가 빠진 [A, C] 순서 그대로, 활성은 C(원래 2번이었던 탭)다
+    const tabs = await pages[0]!.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(tabs.map((tab) => tab.repoPath)).toEqual([pathA, pathC])
+    expect(tabs.map((tab) => tab.active)).toEqual([false, true])
+
+    // 실물 — 보이는 뷰는 C 탭 하나뿐이다
+    const visible = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.contentView.children
+        .filter((child) => child.getVisible())
+        .map((child) => (child as Electron.WebContentsView).webContents.id),
+    )
+    expect(visible).toEqual([tabs[1]!.id])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
