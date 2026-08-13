@@ -513,12 +513,22 @@ export function sanitizeWindowLayout(value: unknown): WindowLayout {
   return splitSettings(value).layout
 }
 
+/** 마지막 종료 시점의 탭 하나 (E15c) — 빈 탭(RepoPicker)은 명시적 null이다 */
+export interface PersistedTab {
+  repoPath: string | null
+}
+
 /**
- * 마지막 종료 시점의 창 하나 (E15b) — 무엇을 열고 있었나 · 어떤 모습이었나.
- * 창을 만드는 것은 main뿐이라 renderer 표면(AppSettings)에는 넣지 않는다
+ * 마지막 종료 시점의 창 하나 (E15b → E15c: 창이 저장소 하나가 아니라 탭들을 갖는다 — 스펙 §6).
+ * 창을 만드는 것은 main뿐이라 renderer 표면(AppSettings)에는 넣지 않는다.
+ *
+ * `activeTab`은 **tabs의 인덱스**다 — 탭 id(webContents.id)는 재시작하면 무의미해서
+ * 영속 경계에서 변환한다(window-registry snapshot 주석과 켤레)
  */
 export interface PersistedWindow {
-  repoPath: string | null
+  /** 배열 순서가 곧 탭 순서 */
+  tabs: PersistedTab[]
+  activeTab: number
   layout: WindowLayout
 }
 
@@ -533,38 +543,82 @@ export interface PersistedSettings extends AppSettings {
   windows?: PersistedWindow[]
 }
 
+/**
+ * 탭 목록 방어 (E15c) — 배열이 아니면 undefined(호출자가 그 창째 버린다).
+ *
+ * E15b가 배운 것 그대로다:
+ * - 배열 원소는 `typeof === 'object'`를 통과하므로 `!Array.isArray(entry)`가 따로 필요하다.
+ * - **낮추지 않고 버린다** (E15b 리뷰 N-1): `repoPath`가 문자열이 아니면 `null`로 낮추는 대신
+ *   그 탭을 버린다 — `null`은 빈 탭(RepoPicker)의 **정당한 값**이라, 낮추면 손상된 한 줄이
+ *   유령 빈 탭을 띄우고 종료 때 `{"repoPath":null}`로 다시 저장돼 매 실행 고착된다.
+ * - 키가 아예 없는 것도 버린다 — 이 파일을 쓰는 쪽(saveWindows ← registry.snapshot)은 빈 탭도
+ *   항상 `repoPath: null`을 명시하므로, 없다는 것은 우리가 쓴 파일이 아니라는 뜻이다.
+ * - sparse array의 hole은 spread로 실체화한 뒤 filter가 걷어낸다 (recentRepos와 같은 관례)
+ */
+function sanitizePersistedTabs(value: unknown): PersistedTab[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return [...(value as unknown[])]
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+    )
+    .filter(
+      (entry) =>
+        'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
+    )
+    .map((entry) => ({ repoPath: entry.repoPath as string | null }))
+}
+
 /** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)과 windows를 더한다 */
 export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   const settings: PersistedSettings = sanitizeSettings(value)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
-  // 창 목록 (E15b) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수 있는
-  // 디스크 파일에서 오고 repoPath가 **창을 만드는 인자**가 된다. sparse array의 hole은
-  // spread로 실체화한 뒤 filter가 걷어낸다 (sanitizeSettings의 recentRepos와 같은 관례).
+  // 창 목록 (E15b → E15c) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수
+  // 있는 디스크 파일에서 오고 각 탭의 repoPath가 **뷰를 만드는 인자**가 된다.
   //
-  // **낮추지 않고 버린다** (E15b 리뷰 N-1). 예전엔 `repoPath`가 문자열이 아니면 `null`로
-  // 낮췄는데, `null`은 ⌘N 빈 창의 **정당한 값**이라 손상된 항목 한 줄이 빈 창을 하나 띄우고
-  // 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼 **매 실행 반복**됐다(리뷰 실측).
-  // Task 7이 배열 원소를 `!Array.isArray`로 막은 것과 같은 판단이다 — 낮추기는 손상을 정상값의
-  // 탈을 씌워 통과시킨다.
-  //
-  // 그래서 "명시적 null"과 "타입이 틀림"을 가른다: **키가 있고 값이 string이거나 null일 때만**
-  // 통과한다. 키가 아예 없는 것도 버린다 — 이 파일을 쓰는 쪽(saveWindows)은 빈 창도 항상
-  // `repoPath: null`을 명시하므로, 없다는 것은 우리가 쓴 파일이 아니라는 뜻이다
+  // 형식이 둘이다 (E15c Task 8): `tabs` 키가 있으면 E15c 형식, 없고 `repoPath` 키가 있으면
+  // E15b 옛 형식(`{ repoPath, layout }`)이라 **탭 하나짜리 창으로 마이그레이션한다** — 옛
+  // 형식을 버리면 E15b 사용자의 복원이 첫 실행에서 조용히 사라진다. 종료 때 새 형식으로
+  // 다시 저장되므로 마이그레이션은 한 번만 일어난다
   const candidate = value as { windows?: unknown; hosting?: unknown }
   if (Array.isArray(candidate.windows)) {
-    settings.windows = [...(candidate.windows as unknown[])]
-      .filter(
-        (entry): entry is Record<string, unknown> =>
-          typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-      )
-      .filter(
-        (entry) =>
-          'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
-      )
-      .map((entry) => ({
-        repoPath: typeof entry.repoPath === 'string' ? entry.repoPath : null,
-        layout: sanitizeWindowLayout(entry.layout),
-      }))
+    const windows: PersistedWindow[] = []
+    for (const entry of [...(candidate.windows as unknown[])]) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+      const record = entry as Record<string, unknown>
+      if ('tabs' in record) {
+        // E15c 형식. 탭이 전부 버려진(또는 원래 빈) 창도 버린다 — 탭 없는 창은 없다
+        // (registry removeTab의 "마지막 탭이면 창 항목도 지움"과 같은 판단. 남기면 복원이
+        // 껍데기 창을 만들거나, 복원 쪽 가드에 걸려 어차피 안 만들어질 죽은 항목만 남는다)
+        const tabs = sanitizePersistedTabs(record.tabs)
+        if (tabs === undefined || tabs.length === 0) continue
+        // activeTab은 tabs의 **인덱스**다 — 정수가 아니거나 범위 밖이면 0으로 접는다
+        // (registry snapshot이 과도기 -1을 0으로 접는 것과 같은 정책). 낮추기가 아니라 접기인
+        // 이유: 활성 탭은 어차피 tabs 중 하나여야 하고, 첫 탭은 항상 존재한다(위 가드)
+        const activeTab =
+          typeof record.activeTab === 'number' &&
+          Number.isInteger(record.activeTab) &&
+          record.activeTab >= 0 &&
+          record.activeTab < tabs.length
+            ? record.activeTab
+            : 0
+        windows.push({ tabs, activeTab, layout: sanitizeWindowLayout(record.layout) })
+        continue
+      }
+      // E15b 옛 형식 마이그레이션 — repoPath 검증 규칙은 E15b 그대로(명시적 null만 통과,
+      // 타입이 틀리거나 키가 없으면 그 항목째 버린다 — 낮추면 유령 빈 창이 고착된다, 리뷰 N-1)
+      if (
+        'repoPath' in record &&
+        (typeof record.repoPath === 'string' || record.repoPath === null)
+      ) {
+        windows.push({
+          tabs: [{ repoPath: record.repoPath as string | null }],
+          activeTab: 0,
+          layout: sanitizeWindowLayout(record.layout),
+        })
+      }
+    }
+    settings.windows = windows
   }
   const hosting = candidate.hosting
   if (typeof hosting !== 'object' || hosting === null || Array.isArray(hosting)) return settings

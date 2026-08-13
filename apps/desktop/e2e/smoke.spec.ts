@@ -6616,3 +6616,164 @@ test('E15c — 한 탭에서 접어도 다른 창은 안 접힌다', async () =>
     await rm(repoC, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c Task 8 — 껐다 켜면 창과 그 안의 탭들이 순서·활성 탭·레이아웃까지 돌아온다 (스펙 §6).
+ *
+ * 2회차는 `GIT_GUI_E2E_REPO` 없이 띄운다 — 그 변수가 있으면 main이 창 목록 복원을 건너뛴다
+ * (E15b ⑨와 같은 이유 — 이 계열만 복원 경로 전체를 탄다).
+ *
+ * **공허 방지 — "저장했다가 읽었다"는 저장·복원이 둘 다 없어도 통과할 길이 많다** (E15b ⑨
+ * 실측): 넷을 함께 문다. (1) 탭 **순서**가 저장 순서 그대로 [A, B, 빈 탭] — 장부(tabs 목록)로
+ * 잰다. (2) **활성**이 가운데 B다 — 끝 탭이 아니라 **가운데**를 활성으로 저장해, activeTab을
+ * 안 싣고 "첫 탭 활성"으로 굳거나 "마지막에 만든 탭 활성"으로 굳는 우연 통과를 양쪽 다 막는다.
+ * 활성의 실물은 main의 getVisible()로만 잰다(Task 3 실측 — 숨은 뷰도 렌더러 단언은 전부
+ * 통과한다). (3) 빈 탭은 RepoPicker로 돌아온다 — repoPath null이 영속·복원을 관통했다는
+ * 증거다. (4) 레이아웃(좌측 접힘)이 창 단위로 돌아온다 — snapshot 형식이 바뀌면서 layout
+ * 배선이 끊기지 않았는지(E15b :373·:3500은 창 하나·GIT_GUI_E2E_REPO 경로만 문다).
+ */
+test('E15c — 껐다 켜면 탭들이 순서·활성·레이아웃 그대로 돌아온다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  try {
+    // ── 1회차: 탭 셋 [A, B, 빈 탭]을 만들고 가운데 B를 활성으로, 좌측을 접은 채 종료 ──
+    const first = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      const tabPageA = await first.firstWindow()
+      await expect(tabPageA.getByTestId('repo-path')).toHaveText(pathA)
+
+      // 탭을 여는 동작보다 **먼저** 대기를 걸어 둔다 (nextWindow 관례)
+      const pendingB = nextWindow(first)
+      await tabPageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+      const tabPageB = await pendingB
+      await expect(tabPageB.getByTestId('repo-path')).toHaveText(pathB)
+
+      // 빈 탭 — 저장은 repoPath null로 남는다
+      const pendingEmpty = nextWindow(first)
+      await tabPageB.evaluate(() => window.gitApi.tabs.open(null))
+      const tabPageEmpty = await pendingEmpty
+      await expect(tabPageEmpty.getByTestId('open-repo')).toBeVisible()
+
+      // 활성을 **가운데** B로 옮긴다 — 탭 id는 구독 스냅샷에서 (Task 3 관용구)
+      const tabsBefore = await tabPageA.evaluate(
+        () =>
+          new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+            const off = window.gitApi.tabs.onChanged((list) => {
+              off()
+              resolve(list)
+            })
+          }),
+      )
+      const tabB = tabsBefore.find((tab) => tab.repoPath === pathB)!
+      await tabPageEmpty.getByTestId(`tab-${tabB.id}`).click()
+      await expect(async () => {
+        const visible = await first.evaluate(({ BaseWindow }) =>
+          BaseWindow.getAllWindows()[0]!.contentView.children
+            .filter((child) => child.getVisible())
+            .map((child) => (child as Electron.WebContentsView).webContents.id),
+        )
+        expect(visible).toEqual([tabB.id])
+      }).toPass({ timeout: 5000 })
+
+      // 좌측을 접는다 — 창 단위 레이아웃이 새 영속 형식(snapshot)을 타고 돌아오는지의 재료
+      await tabPageB.getByTestId('left-collapse-toggle').click()
+      await tabPageB.waitForTimeout(320)
+      await expect(tabPageB.locator('.app__left')).not.toBeVisible()
+    } finally {
+      // app.close()는 main의 app.quit() — before-quit이 마지막 스냅샷을 남긴다 (E15b ⑨ 실측)
+      await first.close()
+    }
+
+    // ── 2회차: GIT_GUI_E2E_REPO 없이 띄운다 — 그래야 복원 경로를 탄다 ──
+    const second = await electron.launch({
+      args: [APP_ROOT],
+      env: { ...process.env, GIT_GUI_USER_DATA: userData },
+    })
+    try {
+      // webContents 셋(탭 셋)이 전부 오기를 기다린다 — 복원은 순차(openRepoPath 검증)라 늦다
+      await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(3)
+      // 창은 **하나**다 — 탭 셋이 창 셋으로 갈라져 돌아오면 안 된다 (E15b 형식으로의 퇴행 감지)
+      expect(await second.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length)).toBe(1)
+      const pages = second.windows()
+      // 각 뷰의 로드를 기다린다 — 저장소 탭은 헤더, 빈 탭은 RepoPicker가 뜬다
+      await Promise.all(
+        pages.map((page) =>
+          page
+            .locator('.app__header, [data-testid="open-repo"]')
+            .first()
+            .waitFor({ timeout: 30_000 }),
+        ),
+      )
+
+      // (1) 순서 — 장부의 탭 목록이 저장 순서 그대로다. 어느 뷰에서 물어도 같은 답이다
+      const tabs = await pages[0]!.evaluate(
+        () =>
+          new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+            const off = window.gitApi.tabs.onChanged((list) => {
+              off()
+              resolve(list)
+            })
+          }),
+      )
+      expect(tabs.map((tab) => tab.repoPath)).toEqual([pathA, pathB, null])
+
+      // (2) 활성 — 가운데 B. 장부와 실물(getVisible) 둘 다 문다
+      expect(tabs.map((tab) => tab.active)).toEqual([false, true, false])
+      const visible = await second.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabs[1]!.id])
+
+      // (3) 빈 탭은 RepoPicker다 — 페이지를 내용으로 가른다. **open-repo 유무로는 못 가른다**
+      // (실측): 저장소 탭도 repo:initial-path 로드가 끝나기 전엔 RepoPicker를 그리므로, 복원
+      // 직후엔 셋 다 open-repo가 있다. 저장소 탭은 repo-path가 제 경로로 뜰 때까지 기다린다
+      const findPageByRepoPath = async (path: string): Promise<Page> => {
+        let found: Page | undefined
+        await expect
+          .poll(
+            async () => {
+              for (const page of pages) {
+                const locator = page.getByTestId('repo-path')
+                if ((await locator.count()) > 0 && (await locator.textContent()) === path) {
+                  found = page
+                  return path
+                }
+              }
+              return null
+            },
+            { timeout: 30_000 },
+          )
+          .toBe(path)
+        return found!
+      }
+      const pageA = await findPageByRepoPath(pathA)
+      const pageB = await findPageByRepoPath(pathB)
+      const emptyPage = pages.find((page) => page !== pageA && page !== pageB)!
+      await expect(emptyPage.getByTestId('open-repo')).toBeVisible()
+      // 빈 탭이 조용히 저장소 탭이 되지 않았다 — null 복원이 다른 탭의 경로를 물려받으면 안 된다
+      await expect(emptyPage.getByTestId('repo-path')).toHaveCount(0)
+
+      // (4) 레이아웃 — 창 단위라 저장소 탭 둘 다 접힌 채 돌아온다 (재시작 직후는 부팅 억제라
+      // 전환 없이 즉시 0px — E13). 빈 탭은 RepoPicker라 .app__left가 없어 대상이 아니다
+      for (const page of [pageA, pageB]) {
+        await expect(page.locator('.app__left')).not.toBeVisible()
+        expect((await page.locator('.app__left').boundingBox())!.width).toBe(0)
+      }
+    } finally {
+      await second.close()
+    }
+  } finally {
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

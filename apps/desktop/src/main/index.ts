@@ -4,7 +4,6 @@ import {
   SETTINGS_CHANNELS,
   TAB_CHANNELS,
   WINDOW_CHANNELS,
-  type PersistedWindow,
   type TabInfo,
   type WindowLayout,
   type WindowOpenResult,
@@ -28,22 +27,11 @@ const LAYOUT_PERSIST_MS = 250
 // 바뀔 때마다 디스크에 남긴다 (E15b 리뷰 I-1): 예전엔 `before-quit` 한 번이 유일한 영속
 // 지점이라, 창을 닫고 종료하면 그 창의 레이아웃이 통째로 증발했다(main 대비 회귀 — main은
 // `settings:set`마다 파일에 썼다). 레이아웃은 묶어서, 창 목록은 즉시 쓴다
+// snapshot()이 곧 영속 형식이다 (E15c Task 8) — Task 2의 과도기 브리지 persistedWindows(활성
+// 탭의 저장소를 창의 저장소로 접기)는 PersistedWindow가 탭 목록을 갖게 되면서 지웠다
 const persistLayout = createTrailingDebounce(LAYOUT_PERSIST_MS, () =>
-  saveWindows(persistedWindows()),
+  saveWindows(registry.snapshot()),
 )
-
-/**
- * E15c Task 2 과도기 — 레지스트리는 이미 탭 목록(snapshot의 tabs·activeTab)인데 디스크 영속
- * 형식은 아직 E15b(창=저장소 하나, `{ repoPath, layout }`)다. sanitize와 복원이 옛 형식을
- * 전제하므로(Task 8이 형식 확장·마이그레이션을 맡는다) 여기서 활성 탭의 저장소를 창의
- * 저장소로 접어 저장한다 — 탭이 아직 창마다 하나뿐이라(Task 3 전) 정보 손실이 없다
- */
-function persistedWindows(): PersistedWindow[] {
-  return registry.snapshot().map((w) => ({
-    repoPath: w.tabs[w.activeTab]?.repoPath ?? null,
-    layout: w.layout,
-  }))
-}
 /**
  * `before-quit`이 지나갔는가 — 지나갔으면 **목록은 얼어붙는다** (E15b 리뷰 I-1 실측).
  *
@@ -63,7 +51,7 @@ const registry = createWindowRegistry((kind) => {
     persistLayout.hit()
     return
   }
-  saveWindows(persistedWindows())
+  saveWindows(registry.snapshot())
   // 탭 목록 push (E15c) — 탭 증감·활성 전환·저장소 갈아타기(git-handlers의 remember)가 전부
   // 'windows' 변경이라, 정본이 알리는 여기 한 곳이면 어느 경로도 탭바에 빠짐없이 닿는다.
   // 핸들러마다 push를 흩으면 setTabRepoPath(전환기로 저장소를 갈아탄 탭의 라벨)를 빠뜨린다
@@ -120,10 +108,12 @@ interface WindowSeed {
   layout: WindowLayout
 }
 
-/** createWindow의 산출물 (E15c) — Task 2~7이 창과 뷰를 각각 쓴다 */
+/** createWindow의 산출물 (E15c) — 창·첫 탭 뷰에 더해, 복원이 createTab으로 탭을 더 달 수 있게
+ * 창 id도 준다(창 id는 createWindow가 발급하는 내부 값이라 여기 말고는 알 길이 없다) */
 interface CreatedWindow {
   window: BaseWindow
   view: WebContentsView
+  windowId: number
 }
 
 /** 뷰 id → 그 뷰가 사는 창 (E15c). registry는 electron을 모르므로 실물 연결은 여기(index.ts) 몫이다.
@@ -228,7 +218,7 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
     sendToWindowTabs(windowId, WINDOW_CHANNELS.focused)
   })
 
-  return { window, view }
+  return { window, view, windowId }
 }
 
 /**
@@ -569,7 +559,7 @@ function registerTabHandlers(): void {
 }
 
 /**
- * 시작할 때 창을 만든다 — 껐을 때 그대로 (E15b).
+ * 시작할 때 창과 그 안의 탭들을 만든다 — 껐을 때 그대로, 순서·활성 탭까지 (E15b → E15c 스펙 §6).
  *
  * 저장된 목록이 없으면(첫 실행) 빈 창 하나 — 예전 동작과 같다.
  */
@@ -590,19 +580,41 @@ async function createStartupWindows(): Promise<void> {
   }
   let created = 0
   for (const saved of restored) {
-    if (saved.repoPath !== null) {
-      // 이 경로는 사람이 편집할 수 있는 디스크 파일에서 왔고 그대로 git의 cwd가 된다 —
-      // repo.open·window.open과 **같은 검증**을 거친다. 다만 여기서는 던지지 않고 건너뛴다:
-      // 손으로 망가뜨린 항목 하나가 앱 시작을 통째로 막으면 안 된다
-      if (!isAbsolute(saved.repoPath)) continue
-      const opened = await openRepoPath(saved.repoPath)
-      // 없어진 저장소는 그 창을 만들지 않고 넘어간다. 알림은 띄우지 않는다 — 시작하자마자
+    // 탭마다 경로를 먼저 검증한다 — 각 repoPath는 사람이 편집할 수 있는 디스크 파일에서 왔고
+    // 그대로 git의 cwd가 된다: repo.open·window.open과 **같은 검증**을 거치되, 여기서는 던지지
+    // 않고 그 탭만 건너뛴다(손상 항목 하나가 앱 시작을 통째로 막으면 안 된다 — E15b 관례).
+    // savedIndex를 들고 가는 이유: 탭이 버려지면 저장된 activeTab 인덱스가 어긋난다 — 살아남은
+    // 탭이 원래 몇 번이었는지로 활성을 다시 찾는다
+    const tabs: Array<{ repoPath: string | null; savedIndex: number }> = []
+    for (const [savedIndex, tab] of saved.tabs.entries()) {
+      if (tab.repoPath === null) {
+        // 빈 탭(RepoPicker)은 검증할 경로가 없다 — 그대로 돌아온다
+        tabs.push({ repoPath: null, savedIndex })
+        continue
+      }
+      if (!isAbsolute(tab.repoPath)) continue
+      const opened = await openRepoPath(tab.repoPath)
+      // 없어진 저장소는 그 탭을 만들지 않고 넘어간다. 알림은 띄우지 않는다 — 시작하자마자
       // 배너를 보는 건 성가시고, 그 경로는 최근 목록에서도 곧 빠진다
       if (!opened.ok) continue
-      createWindow({ repoPath: opened.path, layout: saved.layout })
-    } else {
-      createWindow({ repoPath: null, layout: saved.layout })
+      tabs.push({ repoPath: opened.path, savedIndex })
     }
+    // 탭이 전부 사라진 창은 만들지 않는다 — 탭 없는 창은 없다(sanitize·registry와 같은 판단)
+    if (tabs.length === 0) continue
+    const { window, windowId, view } = createWindow({
+      repoPath: tabs[0]!.repoPath,
+      layout: saved.layout,
+    })
+    const tabIds = [view.webContents.id]
+    for (const tab of tabs.slice(1)) {
+      tabIds.push(createTab(window, windowId, tab.repoPath).webContents.id)
+    }
+    // 활성 탭 복원 — 저장된 인덱스의 탭이 살아남았으면 그 탭, 사라졌으면 첫 탭(sanitize가 범위
+    // 밖을 0으로 접는 것과 같은 정책). showActiveTab은 활성이 첫 탭이어도 부른다 — 뷰는 만들어질
+    // 때 전부 보이는 상태라(createTab은 가시성을 손대지 않는다) 비활성 뷰를 숨기는 일이 남아 있다
+    const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.savedIndex === saved.activeTab))
+    registry.setActiveTab(windowId, tabIds[activeIndex]!)
+    showActiveTab(windowId)
     created += 1
   }
   // 저장된 창이 없거나 전부 사라졌으면 빈 창 하나 — 창 없이 시작하면 macOS에서 되살릴 길이
@@ -631,7 +643,7 @@ app
     // saveWindows가 무시하므로 디스크의 마지막 목록이 그대로 남는다(그 함수의 주석 참조)
     app.on('before-quit', () => {
       persistLayout.dispose()
-      saveWindows(persistedWindows())
+      saveWindows(registry.snapshot())
       // 여기서부터 목록을 얼린다 — 뒤이어 창들이 하나씩 닫히는 것은 사용자의 조작이 아니다
       quitting = true
     })
