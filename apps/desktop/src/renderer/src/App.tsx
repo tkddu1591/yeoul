@@ -307,6 +307,32 @@ export function App() {
     rightCollapsedRef.current = rightCollapsed
   }, [rightCollapsed])
 
+  // 같은 창 **다른** 탭의 레이아웃 조작을 받아 화면을 맞춘다 (E15c Task 7, 스펙 §4 — 접힘·폭·
+  // 터미널은 창 단위다. 탭이 각자 webContents라 아무것도 안 하면 자연히 탭별이 된다).
+  //
+  // **적용은 저장 없는 raw setter만 부른다** — 메아리 차단의 렌더러 쪽 절반이다. 이 파일의
+  // 사용자 조작 경로(toggleDock·toggleLeftCollapsed·키다운·드래그 onUp)는 전부 "setState + 명시적
+  // save*" 짝 관용구라 저장이 setter에 붙어 있지 않다 — 그래서 적용 전용 경로를 따로 가르지 않고
+  // setter만 부르면 이미 저장이 없다. 여기서 settingsApi.set(save*)을 부르면 main이 그 set을 또
+  // 이웃에 push해(sender만 빠진다) 두 탭이 무한히 서로를 갱신한다(반증 실측 — 커밋 메시지).
+  // 값은 발신 탭이 이미 클램프해 보냈지만 수신 창의 뷰포트로 한 번 더 클램프한다 — 같은 창이라
+  // 같은 크기여야 맞지만, 클램프는 로드 경로(loadDockHeight 등)와 같은 방어다.
+  // 구독은 이펙트, set은 콜백 안 — set-state-in-effect는 렌더 직후 동기 set만 잡는다(E14b,
+  // tabs.onChanged와 같은 관용구)
+  useEffect(() => {
+    return window.settingsApi.onLayoutChanged((layout) => {
+      if (layout.leftCollapsed !== undefined) setLeftCollapsed(layout.leftCollapsed)
+      if (layout.rightCollapsed !== undefined) setRightCollapsed(layout.rightCollapsed)
+      if (layout.rightWidth !== undefined) {
+        setRightWidth(clampRightWidth(layout.rightWidth, window.innerWidth))
+      }
+      if (layout.terminalOpen !== undefined) setDockOpen(layout.terminalOpen)
+      if (layout.terminalHeight !== undefined) {
+        setDockHeight(clampDockHeight(layout.terminalHeight, window.innerHeight))
+      }
+    })
+  }, [])
+
   // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
   // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
   const columns = computeColumns(viewportWidth, rightWidth, {

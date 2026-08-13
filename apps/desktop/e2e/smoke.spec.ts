@@ -6475,3 +6475,144 @@ test('E15c — ⌥클릭 중복은 그 창을 앞으로 가져오고 그 탭을 
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c Task 7 ① — 레이아웃은 창 단위다: 한 탭에서 좌측을 접으면 같은 창의 다른 탭도 접힌다
+ * (스펙 §4, 사용자 결정 "창 안에서 같다").
+ *
+ * **순서가 곧 단언이다** (E15b 실측 — 순서가 단언을 공허하게 만든 사례 둘): 탭 B를 **먼저**
+ * 만들어 펼쳐진 채임을 못박은 **뒤** A에서 접는다. 반대로 접고 나서 B를 만들면 B가 씨앗
+ * (settings:get-sync의 창 layout 병합)으로 접힘을 받아 push 없이도 통과한다 — 그 씨앗 경로는
+ * E15b 「사이드 접힘은 창마다 따로 산다」가 이미 문다. 여기가 무는 것은 **이미 떠 있는** 탭에
+ * 닿는 유일한 길인 push(settings:layout-changed)다.
+ *
+ * A에서의 접기는 A가 **활성일 때** 한다(사용자 흐름 그대로). 그 순간 B는 숨은 뷰다 — 숨은
+ * 탭도 push를 받아 둔다(스펙 §4)를 "B로 전환하면 이미 접혀 있다"로 확인한다. 접힘 확인은
+ * E12 관용구(count 1 + not.toBeVisible + boundingBox 폭 0 — 접힘은 언마운트가 아니라 폭 0이다)
+ */
+test('E15c — 한 탭에서 좌측을 접으면 같은 창의 다른 탭도 접힌다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(first.locator('.app__left')).toBeVisible()
+
+    // 탭 B를 **먼저** 만든다 — 이 시점 창 layout이 펼침이라 B는 펼쳐진 채 태어난다(사전 조건).
+    // 이후의 접힘이 B에 닿는 길은 push뿐이다
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.locator('.app__left')).toBeVisible()
+
+    // A 탭으로 돌아간다 — 접기는 사용자 흐름대로 활성 탭에서 한다
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+    await second.getByTestId(`tab-${tabA.id}`).click()
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // A(활성)에서 접는다 → A 자신이 접힌다
+    await first.getByTestId('left-collapse-toggle').click()
+    await expect(first.locator('.app__left')).not.toBeVisible()
+    expect((await first.locator('.app__left').boundingBox())!.width).toBe(0)
+
+    // B로 전환한다 — 숨어 있던 B가 push를 받아 둔 덕에 켜지는 순간 이미 접혀 있다
+    await first.getByTestId(`tab-${tabB.id}`).click()
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabB.id])
+    }).toPass({ timeout: 5000 })
+    await expect(second.locator('.app__left')).toHaveCount(1)
+    await expect(second.locator('.app__left')).not.toBeVisible()
+    expect((await second.locator('.app__left').boundingBox())!.width).toBe(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15c Task 7 ② — push의 범위는 "같은 창의 다른 탭"이지 모든 탭이 아니다: 다른 **창**은 안
+ * 접힌다 (스펙 §4 성공 기준의 후반부 — E15b 「창마다 따로 산다」의 탭 세계 계승).
+ *
+ * 구성이 곧 단언이다: 창 둘 + 한 창(W1)에 탭 둘. W1에서 접었을 때 (a) 같은 창 형제 탭이
+ * 접힌다(양성 — push가 실제로 돌았다는 동기화 지점. 이것 없이 W2만 보면 push가 통째로
+ * 죽어도 통과하는 공허한 테스트다)와 (b) 다른 창 W2는 그대로다(음성)를 **같은 조작**에서 문다.
+ */
+test('E15c — 한 탭에서 접어도 다른 창은 안 접힌다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const pathB = realpathSync(repoB)
+  const pathC = realpathSync(repoC)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.locator('.app__left')).toBeVisible()
+
+    // W1에 탭 B를 더한다 → [A, B], B 활성. 접기 전에 만들어야 push 검증이다 (①과 같은 이유)
+    const pendingTab = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pendingTab
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.locator('.app__left')).toBeVisible()
+
+    // 딴 창 W2 (C) — 역시 접기 전에. 씨앗(열어준 창의 layout)도 펼침이다
+    const pendingWindow = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathC)
+    const third = await pendingWindow
+    await expect(third.getByTestId('repo-path')).toHaveText(pathC)
+    await expect(third.locator('.app__left')).toBeVisible()
+
+    // W1의 활성 탭 B에서 접는다
+    await second.getByTestId('left-collapse-toggle').click()
+    await expect(second.locator('.app__left')).not.toBeVisible()
+
+    // (a) 양성 — 같은 창의 형제 탭 A가 접혔다. push fan-out이 이미 돌았다는 동기화 지점이기도
+    // 하다: 이 단언이 통과한 시점이면 W2로 갈 push도(있었다면) 같은 루프에서 이미 나갔다
+    await expect(first.locator('.app__left')).toHaveCount(1)
+    await expect(first.locator('.app__left')).not.toBeVisible()
+    expect((await first.locator('.app__left').boundingBox())!.width).toBe(0)
+
+    // (b) 음성 — 다른 창 W2는 그대로 펼쳐져 있다. 위 동기화에 늦은 IPC 여유를 조금 더 얹는다
+    await third.waitForTimeout(500)
+    await expect(third.locator('.app__left')).toBeVisible()
+    expect((await third.locator('.app__left').boundingBox())!.width).toBeGreaterThan(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+  }
+})

@@ -582,6 +582,12 @@ export function sanitizePersistedSettings(value: unknown): PersistedSettings {
 export interface SettingsApi {
   initial: AppSettings
   set(partial: AppSettings): Promise<void>
+  /**
+   * 같은 창 **다른** 탭의 레이아웃 조작 push 구독 (E15c, 스펙 §4 — 레이아웃은 창 단위).
+   * 받은 patch는 저장 없이 화면에만 적용해야 한다 — 다시 set을 부르면 main이 그 변경을 또
+   * 이웃에 push해 두 탭이 무한히 서로를 갱신한다(메아리). 해제 함수를 반환한다
+   */
+  onLayoutChanged(listener: (layout: WindowLayout) => void): () => void
 }
 
 export const SETTINGS_API_KEY = 'settingsApi' as const
@@ -590,6 +596,8 @@ export const SETTINGS_CHANNELS = {
   /** preload 전용 동기 채널 — 첫 렌더 전에 테마를 결정해야 깜빡임이 없다 */
   getSync: 'settings:get-sync',
   set: 'settings:set',
+  /** push(main→renderer) — 같은 창 다른 탭이 창별 레이아웃을 바꿨다 (E15c, 스펙 §4) */
+  layoutChanged: 'settings:layout-changed',
 } as const
 
 /** 터미널 표면 (E7b) — pty는 main 전용. renderer는 세션 id와 바이트 스트림만 다룬다 */

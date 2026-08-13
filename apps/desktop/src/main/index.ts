@@ -1,6 +1,7 @@
 import { app, BaseWindow, ipcMain, nativeTheme, WebContentsView } from 'electron'
 import { isAbsolute, join } from 'node:path'
 import {
+  SETTINGS_CHANNELS,
   TAB_CHANNELS,
   WINDOW_CHANNELS,
   type PersistedWindow,
@@ -280,6 +281,26 @@ function sendToWindowTabs(windowId: number, channel: string, ...args: unknown[])
     const view = viewOfTab.get(tabId)
     if (view !== undefined && !view.webContents.isDestroyed()) {
       view.webContents.send(channel, ...args)
+    }
+  }
+}
+
+/**
+ * 창별 레이아웃 변경을 같은 창의 **다른** 탭들에 알린다 (E15c Task 7, 스펙 §4 — 레이아웃은 창
+ * 단위). settings.ts의 settings:set이 부른다 — 뷰 실물은 여기만 알므로 콜백으로 넘긴다.
+ *
+ * 보낸 탭 자신을 **반드시** 뺀다 — 메아리 차단의 main 쪽 절반이다(나머지 절반은 렌더러의
+ * "push 적용은 저장 없는 setter만" — App.tsx). sendToWindowTabs를 안 쓰는 이유가 이 제외다.
+ * 숨은 탭에도 보낸다 — 나중에 켜도 이미 맞아 있어야 한다(스펙 §4, sendToWindowTabs와 같은 이유)
+ */
+function pushLayoutToSiblings(senderTabId: number, layout: WindowLayout): void {
+  const windowId = registry.windowOfTab(senderTabId)
+  if (windowId === undefined) return
+  for (const tabId of registry.getWindow(windowId)?.tabs ?? []) {
+    if (tabId === senderTabId) continue
+    const view = viewOfTab.get(tabId)
+    if (view !== undefined && !view.webContents.isDestroyed()) {
+      view.webContents.send(SETTINGS_CHANNELS.layoutChanged, layout)
     }
   }
 }
@@ -596,7 +617,7 @@ app
   .whenReady()
   .then(async () => {
     registerGitHandlers(registry)
-    registerSettingsHandlers(registry)
+    registerSettingsHandlers(registry, pushLayoutToSiblings)
     registerHostingHandlers()
     registerTerminalHandlers()
     registerWindowHandlers()

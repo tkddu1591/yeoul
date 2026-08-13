@@ -8,6 +8,7 @@ import type {
   TabInfo,
   TerminalApi,
   WindowApi,
+  WindowLayout,
 } from '@git-gui/ipc-contract'
 import {
   CHANNELS,
@@ -221,6 +222,13 @@ if (document.readyState === 'loading') {
 const settingsApi: SettingsApi = {
   initial: initialSettings,
   set: (partial) => ipcRenderer.invoke(SETTINGS_CHANNELS.set, partial),
+  // 같은 창 다른 탭의 레이아웃 조작 push (E15c, 스펙 §4) — repo.onChanged와 같은 순수 브리지.
+  // pull 짝이 없는 이유: 초기값은 이미 initial(get-sync가 창 layout을 병합해 준다)이 담당한다
+  onLayoutChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, layout: WindowLayout) => listener(layout)
+    ipcRenderer.on(SETTINGS_CHANNELS.layoutChanged, wrapped)
+    return () => ipcRenderer.removeListener(SETTINGS_CHANNELS.layoutChanged, wrapped)
+  },
 }
 
 contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)
