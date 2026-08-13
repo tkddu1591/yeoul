@@ -49,6 +49,7 @@ const api: GitApi = {
   },
   tabs: {
     open: (repoPath) => ipcRenderer.invoke(TAB_CHANNELS.open, repoPath),
+    showExisting: (repoPath) => ipcRenderer.invoke(TAB_CHANNELS.showExisting, repoPath),
     activate: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.activate, tabId),
     close: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.close, tabId),
     onChanged: (listener) => {

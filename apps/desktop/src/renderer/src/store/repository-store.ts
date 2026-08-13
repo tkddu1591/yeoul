@@ -111,6 +111,9 @@ interface RepositoryStore {
    * 저장소를 연다 — path를 주면 최근 목록에서 고른 것(폴더 선택 다이얼로그를 건너뛴다),
    * 안 주면 다이얼로그를 연다 (E15a). 성공 여부를 반환한다.
    * 실패한 path는 최근 목록에서 빠진다(없어진 폴더가 계속 남지 않도록).
+   *
+   * E15c Task 6 — path를 준 경우는 중복 차단을 먼저 지난다(스펙 §3 첫 행): 어느 창의 탭에든
+   * 이미 열려 있으면 이 탭이 갈아타지 않고 main이 그 탭으로 데려간다
    */
   openRepository(path?: string): Promise<boolean>
   /**
@@ -118,6 +121,12 @@ interface RepositoryStore {
    * 실패는 `openRepository`와 같은 자리(배너)에 같은 문구로 뜨고, 원인이 확실하면 최근 목록에서도 빠진다
    */
   openInNewWindow(path: string): Promise<void>
+  /**
+   * 저장소를 **새 탭**에서 연다 — 이 탭은 그대로 둔다 (E15c: 전환기·워크트리 우클릭 "새 탭에서
+   * 열기"). 이미 어느 창에든 열려 있으면 main이 새 탭 대신 그 탭을 활성화한다 (스펙 §3 둘째 행).
+   * 실패 처리(배너·최근 목록)는 openInNewWindow와 같은 정책이다
+   */
+  openInNewTab(path: string): Promise<void>
   refresh(): Promise<void>
   /** 실험 공간 전환 — 막히면 엔진이 자동 보관한다. autoShelved면 notice로 안내 */
   /** 성공 여부를 반환한다 — 병합 후 이동 제안(syncAfterMerge)이 실패 시 받아오기를 잇지 않기 위해 */
@@ -547,6 +556,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       if (path === undefined) {
         opened = await git().repo.select()
       } else {
+        // E15c Task 6 — 규칙 하나 (스펙 §3 첫 행): 어느 창의 탭에든 이미 열려 있으면 이 탭이
+        // 갈아타지 않고 main이 그 탭으로 데려간다(창 앞으로 + 활성화). 판정만 main(정본
+        // 레지스트리)에 묻고, false면 아래 기존 갈아타기 경로 그대로다 — E15a가 쌓은 상태 유출
+        // 정리·최근 목록 갱신·실패 시 목록 제거가 전부 아래에 있어 main이 갈아타기를 대신할 수
+        // 없다. path는 최근 목록(main이 정규화한 루트)에서 온 값이라 문자열 비교로 충분하다.
+        // 다이얼로그 경로(path === undefined)는 고르기 전엔 물을 수 없어 이 판정 밖이다(E15b
+        // 후속 목록의 "중복 차단 무반응"과 같은 층의 알려진 경계)
+        if (await git().tabs.showExisting(path)) return
         const result = await git().repo.open(path)
         if (!result.ok) {
           // E15a 리뷰 ④ — **원인이 확실할 때만** 목록에서 뺀다. 예전엔 catch 하나가 모든 실패를
@@ -604,6 +621,18 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // `runWrite`를 쓰지 않는다 — 이 저장소를 아무것도 바꾸지 않는다(전역 busy로 이 창을 잠그거나
     // 진행 중인 조회를 무효화할 이유가 없다). 대신 실패 처리만 openRepository와 합류시킨다
     const result = await git().window.open(path)
+    if (result.ok) return
+    forgetRepoIfCertain(set, get, path, result.reason)
+    // 문구는 main이 만든 것을 그대로 쓴다 — 평범한 클릭으로 열었을 때와 한 글자도 다르지 않다
+    set({ error: result.message })
+  },
+
+  async openInNewTab(path) {
+    // openInNewWindow와 같은 결 — 이 탭의 상태를 아무것도 바꾸지 않으므로 runWrite를 안 쓴다.
+    // 중복이면 main이 새 탭 대신 그 탭을 활성화하고 ok를 준다 (스펙 §3 둘째 행 — tabs:open이
+    // 자체로 규칙 하나를 지난다). 실패 처리도 openInNewWindow와 같은 코드 모양이어야 한다 —
+    // WindowOpenResult를 재사용하는 이유가 정확히 이것이다 (계약서 tabs.open 주석)
+    const result = await git().tabs.open(path)
     if (result.ok) return
     forgetRepoIfCertain(set, get, path, result.reason)
     // 문구는 main이 만든 것을 그대로 쓴다 — 평범한 클릭으로 열었을 때와 한 글자도 다르지 않다

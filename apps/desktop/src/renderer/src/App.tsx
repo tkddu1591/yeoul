@@ -725,6 +725,7 @@ export function App() {
           busy={store.busy}
           onOpen={(path) => void store.openRepository(path)}
           onOpenInNewWindow={(path) => void store.openInNewWindow(path)}
+          onOpenInNewTab={(path) => void store.openInNewTab(path)}
         />
         {status && (
           <div className="app__status">
@@ -1177,6 +1178,11 @@ export function App() {
                     break
                   case 'open':
                     void store.openWorktree(action.path)
+                    break
+                  case 'new-tab':
+                    // "새 창에서 열기"의 탭 짝 (E15c) — 검증·실패 처리 경로는 아래 new-window와
+                    // 같은 결이다(WindowOpenResult 재사용 — 계약서 tabs.open 주석)
+                    void store.openInNewTab(action.path)
                     break
                   case 'new-window':
                     // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은

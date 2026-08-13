@@ -366,6 +366,24 @@ function closeTab(tabId: number): void {
   showActiveTab(windowId)
 }
 
+/**
+ * 이미 열린 탭으로 데려간다 (E15c Task 6 — 스펙 §3 "이미 있으면 거기로 데려간다"의 실행부).
+ * 그 창을 앞으로(show+focus) + 그 탭 활성화 + 가시성 전환까지가 한 동작이다.
+ *
+ * 세 진입점(tabs:open·window:open·tabs:show-existing)이 **이 한 함수**를 공유한다 — 규칙
+ * 하나(스펙 §3)의 "데려간다"가 진입점마다 다르게 굳는 것을 막는다. E15b는 window:open에서
+ * show+focus만 하고 탭 활성화가 없었는데, 탭이 창마다 하나라 동작이 같았을 뿐이었다
+ */
+function revealExistingTab(existing: { windowId: number; tabId: number }): void {
+  registry.setActiveTab(existing.windowId, existing.tabId)
+  showActiveTab(existing.windowId)
+  // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
+  // 뷰(탭) id → 창 역방향 맵으로 찾는다 (E15c)
+  const window = windowOfView.get(existing.tabId)
+  window?.show()
+  window?.focus()
+}
+
 /** 뷰 하나가 창 콘텐츠 전체를 덮는다 — 탭이 늘어도 이 함수는 그대로다(전부 전체 크기,
  * 보이는 것 하나) */
 function fitViewToWindow(window: BaseWindow, view: WebContentsView): void {
@@ -427,16 +445,12 @@ function registerWindowHandlers(): void {
       // E15a의 목록 제거 정책(reason !== 'failed')을 이 진입점에서도 쓸 수 있다.
       // 예전엔 여기서 throw했고 렌더러가 void로 버려 배너도 목록 정리도 없었다
       if (!opened.ok) return opened
-      // 이미 그 저장소를 연 탭이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다 (사용자 결정).
-      // 판정이 창 단위(findByRepoPath)에서 탭 단위(findTabByRepoPath)로 바뀌었다 — 탭이 아직
-      // 창마다 하나라 동작은 같고, 그 탭의 활성화까지는 Task 6(규칙 하나)이 맡는다
+      // 이미 그 저장소를 연 탭이 있으면 새로 만들지 않고 데려간다 (스펙 §3 셋째 행) —
+      // 그 창을 앞으로 + **그 탭 활성화**까지 (E15c Task 6이 완성. Task 2는 판정만 탭
+      // 단위(findTabByRepoPath)로 바꿨고 활성화가 없었다 — 탭이 창마다 하나라 티가 안 났다)
       const existing = registry.findTabByRepoPath(opened.path)
       if (existing !== undefined) {
-        // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
-        // 뷰(탭) id → 창 역방향 맵으로 찾는다 (E15c)
-        const found = windowOfView.get(existing.tabId)
-        found?.show()
-        found?.focus()
+        revealExistingTab(existing)
         return { ok: true }
       }
       createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
@@ -488,17 +502,31 @@ function registerTabHandlers(): void {
     // 저장소를 보여 달라"는 요청은 전부 한 곳을 지나고, 이미 있으면 거기로 데려간다)
     const existing = registry.findTabByRepoPath(opened.path)
     if (existing !== undefined) {
-      registry.setActiveTab(existing.windowId, existing.tabId)
-      showActiveTab(existing.windowId)
-      const found = windowOfView.get(existing.tabId)
-      found?.show()
-      found?.focus()
+      revealExistingTab(existing)
       return { ok: true }
     }
     const view = createTab(senderWindow, senderWindowId, opened.path)
     registry.setActiveTab(senderWindowId, view.webContents.id)
     showActiveTab(senderWindowId)
     return { ok: true }
+  })
+
+  // 전환기 클릭의 판정 절반 (E15c Task 6 — 스펙 §3 첫 행). "이미 열려 있나"만 정본(레지스트리)에
+  // 묻고, false면 렌더러가 기존 갈아타기 경로(스토어 openRepository — E15a의 상태 정리·최근 목록
+  // 정책이 전부 거기 있다)로 잇는다. git을 안 돌린다 — 비교는 레지스트리의 정규화 루트와의
+  // 문자열 일치고, 호출자(전환기·RepoPicker 최근 목록)는 main이 정규화해 준 경로만 든다.
+  //
+  // 판정(여기 false)과 실행(렌더러의 repo:open) 사이에 다른 탭이 같은 저장소를 여는 경합은
+  // 이론상 있다 — 지면 같은 저장소가 두 탭에 남는다. 막지 않기로 한 근거: ① 그 틈은 IPC 왕복
+  // 하나 크기인데 끼어들려면 **다른 창에서의 사용자 조작**이 그 안에 들어와야 한다 ② 같은 모양의
+  // 틈이 tabs:open·window:open 안에도 이미 있다(await openRepoPath 동안 레지스트리가 변한다) —
+  // 판정/실행 분리가 새 종류의 경합을 만드는 게 아니다 ③ 져도 값이 깨지는 곳이 없다(감시·pty·
+  // 설정 전부 탭 단위라 두 탭이 같은 저장소를 봐도 각자 정합하고, 한쪽이 떠나면 저절로 풀린다)
+  ipcMain.handle(TAB_CHANNELS.showExisting, (_event, repoPath: unknown): boolean => {
+    const existing = registry.findTabByRepoPath(assertAbsoluteRepoPath(repoPath))
+    if (existing === undefined) return false
+    revealExistingTab(existing)
+    return true
   })
 
   ipcMain.handle(TAB_CHANNELS.activate, (event, tabId: unknown) => {

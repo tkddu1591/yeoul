@@ -6199,3 +6199,279 @@ test('E15c — ⌘W가 활성 탭을 닫고 이웃 탭이 활성이 된다', asy
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c Task 6 ① — 전환기 클릭도 중복 차단을 지난다 (스펙 §3 첫 행 — "규칙 하나").
+ *
+ * E15a부터 전환기 클릭(openRepository)은 무조건 이 탭을 갈아탔다 — 탭이 생기자 같은 저장소가
+ * 두 탭에 생길 수 있는 구멍이 됐다. 이제 렌더러가 main에 "이미 열려 있나"(tabs:show-existing)를
+ * 먼저 묻고, 있으면 갈아타지 않는다. 그래서 단언은 둘 다 필요하다: **그 탭이 활성이 됐다**
+ * (가시성은 main의 getVisible()로만 — Task 3 실측: 숨은 뷰도 렌더러 단언은 전부 통과한다)와
+ * **이 탭이 갈아타지 않았다**(B 탭이 여전히 제 저장소·파일을 들고 있다 — 활성 전환만 봐서는
+ * 갈아탄 뒤 A 탭을 활성화한 것과 구분이 안 된다).
+ */
+test('E15c — 전환기에서 딴 탭에 열린 저장소를 클릭하면 이 탭이 안 갈아타고 그 탭이 활성이 된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  // B 탭의 전환기 목록에 A가 있어야 한다 — 최근 목록은 settings.json에서 온다 (E15a)
+  const userData = await seedRecentRepos([pathA])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 탭 id는 구독 스냅샷에서 (Task 3 관용구). A 탭이 비활성이어야 "그 탭이 활성이 된다"가
+    // 공허하지 않다 — 사전 조건부터 못박는다
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    expect(tabA.active).toBe(false)
+
+    // 활성 탭 B의 전환기에서 A를 **평범히** 클릭한다 (⌥ 없음 — E15a부터 있던 갈아타기 진입점)
+    await second.getByTestId('repo-switcher').click()
+    await expect(second.getByTestId('repo-switcher-browse')).toBeVisible()
+    await second.getByTestId(`repo-switcher-item-${pathA}`).click()
+
+    // 데려간다 — 보이는 뷰가 A 탭 하나가 될 때까지 (클릭→IPC→setVisible은 비동기다)
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 이 탭(B)은 갈아타지 않았다 — 여전히 제 저장소·파일을 들고 있다. 활성 전환만 봐서는
+    // "B가 A로 갈아탄 뒤 그 탭을 활성화했다"와 구분이 안 되므로 이 단언이 반쪽을 채운다
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('file-unstaged-beta.txt')).toBeVisible()
+    // 탭도 안 늘었다 — 갈아타기 대신 새 탭을 만든 것도 아니다
+    expect(app.windows()).toHaveLength(2)
+    // 탭바 강조도 A로 옮겨왔다
+    await expect(first.getByTestId(`tab-${tabA.id}`)).toHaveAttribute('aria-selected', 'true')
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15c Task 6 ② — 우클릭 "새 탭에서 열기"도 중복이면 새 탭 대신 그 탭을 활성화한다 (스펙 §3
+ * 둘째 행). 메뉴 항목의 배선(전환기 우클릭 → context-new-tab → tabs:open)은 이 껍데기에서만
+ * 검증된다 — evaluate로 tabs.open을 직접 부르면 항목이 사라져도 초록이다 (E15b ⑦과 같은 이유).
+ *
+ * **탭 수 불변만 보면 공허하다** (플랜 명시) — tabs:open이 통째로 죽어도 통과한다. 그래서
+ * 함께 문다: (1) 그 탭이 실제로 활성이 됐다(중복 분기가 **돌았고 성공했다**는 양성 신호 —
+ * 실패했다면 활성화가 없다), (2) 에러 배너가 없다(결과 ok — 실패면 openInNewTab이 배너를
+ * 띄운다), (3) 탭 수 불변, (4) 우클릭한 탭은 갈아타지 않았다.
+ */
+test('E15c — "새 탭에서 열기" 중복은 탭을 안 만들고 그 탭을 활성화한다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  // A 탭의 전환기 목록에 B가 있어야 우클릭할 항목이 있다
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // A 탭으로 돌아온다 — 대상 탭(B)이 비활성이어야 "활성 전환" 단언이 공허하지 않다
+    await second.getByTestId(`tab-${tabA.id}`).click()
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // A 탭의 전환기에서 B(딴 탭에 이미 열린 저장소)를 우클릭 → "새 탭에서 열기"
+    await first.getByTestId('repo-switcher').click()
+    await expect(first.getByTestId('repo-switcher-browse')).toBeVisible()
+    await first.getByTestId(`repo-switcher-item-${pathB}`).click({ button: 'right' })
+    await expect(first.getByTestId('context-new-tab')).toBeVisible()
+    await first.getByTestId('context-new-tab').click()
+
+    // (1) 활성 전환 — 중복 분기가 돌았고 성공했다는 양성 신호
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabB.id])
+    }).toPass({ timeout: 5000 })
+    // (2) 결과 ok — 실패였다면 openInNewTab이 이 배너를 띄운다 (openInNewWindow와 같은 정책)
+    await expect(first.getByTestId('error')).toHaveCount(0)
+    // (3) 탭 수 불변 — 새 webContents가 생기지 않았다
+    expect(app.windows()).toHaveLength(2)
+    // (4) 우클릭한 탭(A)은 갈아타지 않았다 — "새 탭에서 열기"는 이 탭을 그대로 둔다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15c Task 6 ③ — ⌥클릭(새 창에서 열기) 중복은 **그 창을 앞으로 + 그 탭 활성화**까지 한다
+ * (스펙 §3 셋째 행). E15b ⑤는 창이 안 느는 것까지만 물었고, Task 2가 판정을 탭 단위로 바꾼
+ * 뒤에도 탭 활성화는 없었다(탭이 창마다 하나라 티가 안 났다) — 이 테스트가 그 나머지를 문다.
+ *
+ * 그래서 대상 저장소(B)는 **두 탭짜리 창(W1)의 비활성 탭**이어야 한다 — 활성 탭이면 활성화
+ * 단언이 공허하다. "창을 앞으로"는 E2E 숨김 창에서 show()가 실제로 돌았는지로 잰다 —
+ * 사전 조건(숨김)을 먼저 못박아 이 단언도 공허하지 않게 한다.
+ */
+test('E15c — ⌥클릭 중복은 그 창을 앞으로 가져오고 그 탭을 활성화한다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const pathC = realpathSync(repoC)
+  // W2의 전환기 목록에 B가 있어야 ⌥클릭할 항목이 있다
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    // W1에 B 탭을 더한다 → [A, B], B 활성
+    const pendingTab = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pendingTab
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // A 탭을 도로 활성으로 — 대상 탭(B)이 비활성이어야 활성화 단언이 공허하지 않다.
+    // tabs:activate는 show()를 부르지 않으므로 W1의 숨김(아래 사전 조건)도 그대로다
+    await second.getByTestId(`tab-${tabA.id}`).click()
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }, wanted: number) => {
+        const w1 = BaseWindow.getAllWindows().find((w) =>
+          w.contentView.children.some(
+            (child) => (child as Electron.WebContentsView).webContents.id === wanted,
+          ),
+        )!
+        return w1.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id)
+      }, tabA.id)
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 딴 창 W2 (C) — ⌥클릭은 여기서 한다
+    const pendingWindow = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathC)
+    const third = await pendingWindow
+    await expect(third.getByTestId('repo-path')).toHaveText(pathC)
+
+    // 사전 조건 — E2E 창은 숨어 있다(E6a). 아래 "앞으로 가져온다(show)" 단언의 공허 방지.
+    // GIT_GUI_E2E_SHOW=1(로컬 디버깅)은 처음부터 보이므로 이 켤레 단언만 건너뛴다 (기존 관례)
+    const w1Hidden = await app.evaluate(({ BaseWindow }, wanted: number) => {
+      const w1 = BaseWindow.getAllWindows().find((w) =>
+        w.contentView.children.some(
+          (child) => (child as Electron.WebContentsView).webContents.id === wanted,
+        ),
+      )!
+      return !w1.isVisible()
+    }, tabA.id)
+    if (process.env.GIT_GUI_E2E_SHOW !== '1') expect(w1Hidden).toBe(true)
+
+    // W2의 전환기에서 B(W1의 비활성 탭에 열린 저장소)를 ⌥클릭한다
+    await third.getByTestId('repo-switcher').click()
+    await expect(third.getByTestId('repo-switcher-browse')).toBeVisible()
+    await third.getByTestId(`repo-switcher-item-${pathB}`).click({ modifiers: ['Alt'] })
+
+    // 그 탭(B)이 활성이 된다 — W1의 보이는 뷰가 B 하나가 될 때까지
+    await expect(async () => {
+      const state = await app.evaluate(({ BaseWindow }, wanted: number) => {
+        const w1 = BaseWindow.getAllWindows().find((w) =>
+          w.contentView.children.some(
+            (child) => (child as Electron.WebContentsView).webContents.id === wanted,
+          ),
+        )!
+        return {
+          visibleTabs: w1.contentView.children
+            .filter((child) => child.getVisible())
+            .map((child) => (child as Electron.WebContentsView).webContents.id),
+          windowVisible: w1.isVisible(),
+        }
+      }, tabB.id)
+      expect(state.visibleTabs).toEqual([tabB.id])
+      // 그 창을 앞으로 — 숨어 있던 W1에 show()가 실제로 돌았다 (위 사전 조건과 켤레)
+      if (process.env.GIT_GUI_E2E_SHOW !== '1') expect(state.windowVisible).toBe(true)
+    }).toPass({ timeout: 5000 })
+
+    // 창도 탭도 안 늘었다 — 새 창 대신 데려갔다
+    expect(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length)).toBe(2)
+    expect(app.windows()).toHaveLength(3)
+    // ⌥클릭한 창(W2)은 갈아타지 않았다 — 여전히 C다
+    await expect(third.getByTestId('repo-path')).toHaveText(pathC)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})

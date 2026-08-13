@@ -130,6 +130,17 @@ export interface GitApi {
      * 타입을 하나 더 만들면 그 정책이 다시 갈라진다
      */
     open(repoPath: string | null): Promise<WindowOpenResult>
+    /**
+     * 이 저장소가 어느 창의 탭에든 이미 열려 있으면 그 창을 앞으로 + 그 탭을 활성화하고 true,
+     * 아니면 아무것도 하지 않고 false (E15c Task 6 — 스펙 §3 전환기 행의 판정 절반).
+     *
+     * "갈아탄다" 실행은 여기 없다 — false를 받은 호출자가 기존 갈아타기 경로(스토어
+     * openRepository)로 잇는다. E15a가 그 경로에 쌓은 것(상태 유출 정리·최근 목록 갱신·실패 시
+     * 목록 제거)을 main이 대신할 수 없어서 판정만 main(정본 레지스트리)에 묻는 모양이다.
+     * 비교는 레지스트리의 정규화된 저장소 루트와의 문자열 일치다 — 호출자는 main이 정규화해 준
+     * 경로(최근 목록·현재 경로)만 넘긴다
+     */
+    showExisting(repoPath: string): Promise<boolean>
     /** 이 탭을 활성으로 — **자기 창의 탭만** 유효하다(main이 sender의 창과 대조해 검증) */
     activate(tabId: number): Promise<void>
     /** 탭 닫기 — 마지막 탭이면 창이 닫힌다(스펙 §5). 자기 창의 탭만 유효하다(main 검증) */
@@ -646,6 +657,8 @@ export const TAB_CHANNELS = {
   list: 'tabs:list',
   /** 새 탭. repoPath null이면 빈 탭 */
   open: 'tabs:open',
+  /** 이미 연 탭이면 데려가기 — 전환기 클릭의 판정 절반 (E15c Task 6, GitApi.tabs.showExisting 주석) */
+  showExisting: 'tabs:show-existing',
   activate: 'tabs:activate',
   close: 'tabs:close',
 } as const
