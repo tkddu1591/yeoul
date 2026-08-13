@@ -118,7 +118,7 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
     // GIT_GUI_E2E_SHOW=1(로컬 디버깅 opt-out — E6b)은 의도적으로 보이므로 이 가드만 건너뛴다
     if (process.env.GIT_GUI_E2E_SHOW !== '1') {
       expect(
-        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+        await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
       ).toBe(false)
     }
 
@@ -410,8 +410,8 @@ test('960px 최소 창에서 중앙 diff 폭이 380px 이상으로 보장된다 
   })
   try {
     const window = await app.firstWindow()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]!.setSize(960, 800)
+    await app.evaluate(({ BaseWindow }) => {
+      BaseWindow.getAllWindows()[0]!.setSize(960, 800)
     })
     // 리사이즈 이벤트가 renderer에 닿아 열 폭이 재계산될 때까지 기다린 뒤 잰다
     await expect.poll(() => window.evaluate(() => window.innerWidth)).toBe(960)
@@ -2157,8 +2157,8 @@ test('창 제목이 "Git GUI"다 — 한 줄 타이틀바에서도 창 전환 UI
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('refresh')).toBeVisible()
-    const title = await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0]?.getTitle(),
+    const title = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]?.getTitle(),
     )
     expect(title).toBe('Git GUI')
   } finally {
@@ -3196,7 +3196,7 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * 실행에서 5초 타임아웃) — E11의 toPass 재시도는 그 증상을 흡수하는 완화였을 뿐, "다른 창이
  * 있으면 흔들린다"는 근본 원인은 그대로 남아 있었다.
  *
- * E12: 자극(stimulus)을 바꿔 이 결함을 근본에서 없앤다. Electron의 BrowserWindow는 표준
+ * E12: 자극(stimulus)을 바꿔 이 결함을 근본에서 없앤다. Electron의 BaseWindow는 표준
  * EventEmitter이고, main/index.ts:66의 `window.on('focus', …)`는 그 EventEmitter에 등록된
  * 보통의 JS 리스너다(OS가 네이티브 포커스를 감지했을 때 Electron 바인딩이 내부적으로 같은
  * `emit('focus')`를 호출해 도달하는 지점과 동일한 지점). app.evaluate로 메인 프로세스에서
@@ -3208,7 +3208,7 @@ test('E10 — 앱 밖에서 되돌린 수정이 새로고침 없이 사라진다
  * 이 방식이 못 잡는 것 — "OS가 실제로 네이티브 포커스 이벤트를 Electron에 전달하고,
  * Electron이 그걸 JS 'focus' 이벤트로 통역하는" 파이프라인 자체의 회귀. 하지만 그건 우리
  * 코드가 아니라 Electron의 책임이다(플랜 근거). 이 앱에는 창이 하나뿐이라 "리스너가 엉뚱한
- * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BrowserWindow.getAllWindows()[0]
+ * 창 인스턴스에 걸려 있다"는 종류의 버그도 이 emit이 그대로 잡아낸다(BaseWindow.getAllWindows()[0]
  * 이 바로 그 창이므로).
  *
  * 재조회 호출 자체는 렌더러에서 셀 수 없다 — contextBridge가 노출 객체를 deep-freeze한다
@@ -3257,8 +3257,8 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
     // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
     // toPass 재시도도 더 이상 필요 없다(남겨둔 5초는 IPC 왕복 지연만 흡수하는 여유다).
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]!.emit('focus')
+    await app.evaluate(({ BaseWindow }) => {
+      BaseWindow.getAllWindows()[0]!.emit('focus')
     })
     await expect
       .poll(

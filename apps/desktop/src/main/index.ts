@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, BaseWindow, ipcMain, nativeTheme, WebContentsView } from 'electron'
 import { isAbsolute, join } from 'node:path'
 import { WINDOW_CHANNELS, type WindowLayout, type WindowOpenResult } from '@git-gui/ipc-contract'
 import { openRepoPath, registerGitHandlers } from './git-handlers'
@@ -51,8 +51,8 @@ const registry = createWindowRegistry((kind) => {
 const APP_BACKGROUND = { light: '#f4f5f7', dark: '#16181d' } as const
 
 /** 창 배경색을 저장된 테마로 정한다 — 저장값이 없으면(첫 실행) renderer의 resolveInitialTheme과
- * 같은 폴백(OS 다크모드 설정)을 쓴다. 이 색은 BrowserWindow가 생성되는 순간부터 칠해져 있어,
- * 창이 페인트를 마치고 보이는 시점에 흰 배경이 낄 틈이 없다 */
+ * 같은 폴백(OS 다크모드 설정)을 쓴다. 이 색은 창(BaseWindow)과 뷰(WebContentsView) 둘 다에
+ * 생성 순간부터 칠해져 있어, 창이 페인트를 마치고 보이는 시점에 흰 배경이 낄 틈이 없다 */
 function resolveBackgroundColor(): string {
   const saved = readTheme()
   const dark = saved === 'dark' || (saved === undefined && nativeTheme.shouldUseDarkColors)
@@ -92,8 +92,18 @@ interface WindowSeed {
   layout: WindowLayout
 }
 
-function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): BrowserWindow {
-  const window = new BrowserWindow({
+/** createWindow의 산출물 (E15c) — Task 2~7이 창과 뷰를 각각 쓴다 */
+interface CreatedWindow {
+  window: BaseWindow
+  view: WebContentsView
+}
+
+/** 뷰 id → 그 뷰가 사는 창 (E15c). registry는 electron을 모르므로 실물 연결은 여기(index.ts) 몫이다.
+ * BaseWindow에는 webContents가 없어 예전의 getAllWindows().find(webContents.id)가 불가능하다 */
+const windowOfView = new Map<number, BaseWindow>()
+
+function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): CreatedWindow {
+  const window = new BaseWindow({
     width: 1200,
     height: 800,
     minWidth: 960,
@@ -103,16 +113,88 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Browse
     // hidden + trafficLightPosition으로 헤더 세로 중앙에 맞춘다.
     // y=22 실측: .app__header 실높이 58px → Math.round((58-14)/2) = 22 (신호등 지름 14px 관례)
     // 앱 헤더가 타이틀바를 겸한다(드래그·패딩은 renderer CSS). 숨김 캡처와 공존(실측 1)
+    // → E15c: BrowserWindow가 아니라 BaseWindow지만 같은 옵션을 받는다
+    // (실측: BaseWindowConstructorOptions에 titleBarStyle·trafficLightPosition 있음 — electron.d.ts).
+    // E15b에서 네이티브 탭을 막았던 hidden이 여기서는 아무것도 안 막는다 — 탭은 우리가 그린다
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 20, y: 22 } }
       : {}),
     // E13 — 창이 뜨는 순간부터 이 색으로 칠해져 있다(콘텐츠가 없는 흰 배경 대신). 저장된
     // 테마를 못 읽는 극단적 실패에도 폴백값이 있어 undefined가 되지 않는다
     backgroundColor: resolveBackgroundColor(),
-    // E13 — 페인트 전에 보여주지 않는다: 첫 페인트가 끝난 뒤(ready-to-show)에야 드러난다.
-    // 숨김 창도 첫 페인트는 일어난다(paintWhenInitiallyHidden 기본 true) — 스크린샷의 전제는
-    // 그대로 유지된다(show 여부와 무관)
+    // E13 — 페인트 전에 보여주지 않는다: 뷰가 로드를 마친 뒤에야 드러난다(아래 did-finish-load)
     show: false,
+  })
+
+  const view = createRepoView()
+  window.contentView.addChildView(view)
+  fitViewToWindow(window, view)
+  // 창 리사이즈마다 뷰를 창 크기에 맞춘다 — BrowserWindow 시절엔 공짜였던 것
+  window.on('resize', () => fitViewToWindow(window, view))
+
+  // ready-to-show는 BrowserWindow의 이벤트다 — BaseWindow에는 없다 (첫 페인트 신호가
+  // WebContentsView에는 노출되지 않는다: webContents의 'paint'는 오프스크린 전용).
+  // did-finish-load는 페인트 이전일 수 있지만, 뷰 배경색을 창 배경색과 같게 칠해 두므로
+  // (createRepoView의 setBackgroundColor) 페인트 전 프레임도 흰색이 아니라 테마색이다 —
+  // E13의 판정 기준(창이 드러날 때 흰 배경이 한 프레임도 안 보인다)을 배경색으로 만족한다.
+  // E2E 숨김 규칙(E6a)과의 합성은 그대로: isE2E && !isE2EShow는 계속 숨긴 채로 둔다
+  view.webContents.once('did-finish-load', () => {
+    if (!isE2E || isE2EShow) window.show()
+  })
+
+  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
+  // 늦게 돌고(동기 IPC도 이 틱이 끝나야 처리된다), 그때 이 창의 layout 씨앗을 읽어야 새 창이
+  // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다.
+  // 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
+  // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다)
+  registry.add(view.webContents.id, { repoPath: seed.repoPath, layout: seed.layout })
+  // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
+  const viewId = view.webContents.id
+  windowOfView.set(viewId, window)
+  window.on('closed', () => {
+    registry.remove(viewId)
+    windowOfView.delete(viewId)
+    // 실측 (E15c): BrowserWindow와 달리 BaseWindow는 닫혀도 뷰의 webContents를 파괴하지
+    // 않는다(닫은 뒤 getAllWebContents()에 1개 잔류·'destroyed' 미발화). 명시적으로 닫아야
+    // git-handlers·terminal-handlers의 once('destroyed') 정리(감시·pty)가 돈다
+    if (!view.webContents.isDestroyed()) view.webContents.close()
+  })
+  // 반대 방향도 (E15c 실측): webContents가 먼저 파괴돼도(Playwright page.close()의
+  // Target.closeTarget, DOM window.close()) BaseWindow는 안 닫힌다 — BrowserWindow 시절엔
+  // 자기 webContents 파괴가 곧 창 닫힘이었다. 빈 창이 남고 registry에서도 안 빠져,
+  // 복원이 닫은 창을 되살린다(E2E «창 둘 중 하나만 닫고 종료» 2건이 여기서 빨갰다 —
+  // 저장 목록에 [A,B]가 남아 복원이 2창을 만들었다). isDestroyed 가드가 상호 재귀를 끊는다
+  view.webContents.once('destroyed', () => {
+    if (!window.isDestroyed()) window.close()
+  })
+
+  // 전체화면에서는 신호등이 숨는다 — 헤더의 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가)
+  window.on('enter-full-screen', () => {
+    view.webContents.send(WINDOW_CHANNELS.fullScreen, true)
+  })
+  window.on('leave-full-screen', () => {
+    view.webContents.send(WINDOW_CHANNELS.fullScreen, false)
+  })
+
+  // 창으로 돌아오면 재조회 — 감시가 못 잡은 잔여와 감시가 죽은 경우(watch error로 조용히 닫힘)를 메운다 (E10)
+  window.on('focus', () => {
+    view.webContents.send(WINDOW_CHANNELS.focused)
+  })
+
+  return { window, view }
+}
+
+/** 뷰 하나가 창 콘텐츠 전체를 덮는다 — 탭이 늘어도 이 함수는 그대로다(전부 전체 크기,
+ * 보이는 것 하나) */
+function fitViewToWindow(window: BaseWindow, view: WebContentsView): void {
+  const { width, height } = window.getContentBounds()
+  view.setBounds({ x: 0, y: 0, width, height })
+}
+
+// 플랜은 createRepoView(seed)였지만 Task 1에서는 씨앗을 쓸 곳이 없다(레지스트리 등록은
+// createWindow가 한다) — 안 쓰는 매개변수는 lint에 걸리므로 탭별 씨앗이 생기는 태스크에서 더한다
+function createRepoView(): WebContentsView {
+  const view = new WebContentsView({
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -122,49 +204,21 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Browse
       backgroundThrottling: !isE2E,
     },
   })
-
-  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
-  // 늦게 돌고, 그때 이 창의 layout 씨앗을 읽어야 새 창이 열어준 창을 닮는다. loadFile 뒤로
-  // 미루면 늦는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다
-  registry.add(window.webContents.id, { repoPath: seed.repoPath, layout: seed.layout })
-  // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
-  const windowId = window.webContents.id
-  window.on('closed', () => registry.remove(windowId))
-
-  // E13 — 흰 화면 제거 2단계: 페인트가 끝난 뒤에만 보여준다. E2E 숨김 규칙(E6a)과 합성한다 —
-  // isE2E && !isE2EShow는 계속 숨긴 채로 둔다(이 분기를 안 타므로 창은 영원히 안 보인다).
-  // 그 외(일반 실행, GIT_GUI_E2E_SHOW=1)는 바뀐 게 시점뿐이다: 예전엔 창 생성 즉시(콘텐츠
-  // 없는 흰 화면) 보였다면, 이제는 첫 페인트가 끝난 뒤에야 보인다 — 그 사이는 backgroundColor가
-  // 대신 채운다
-  window.once('ready-to-show', () => {
-    if (!isE2E || isE2EShow) window.show()
-  })
-
-  // 전체화면에서는 신호등이 숨는다 — 헤더의 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가)
-  window.on('enter-full-screen', () => {
-    window.webContents.send(WINDOW_CHANNELS.fullScreen, true)
-  })
-  window.on('leave-full-screen', () => {
-    window.webContents.send(WINDOW_CHANNELS.fullScreen, false)
-  })
-
-  // 창으로 돌아오면 재조회 — 감시가 못 잡은 잔여와 감시가 죽은 경우(watch error로 조용히 닫힘)를 메운다 (E10)
-  window.on('focus', () => {
-    window.webContents.send(WINDOW_CHANNELS.focused)
-  })
-
-  // 이 창은 preload로 git 조작 API를 갖는 특권 창이다 — 외부 네비게이션과 새 창을 차단한다
+  // E13 — 뷰의 배킹은 기본 흰색이다: 창 backgroundColor 위를 뷰가 덮으므로, 뷰에도 같은
+  // 테마색을 칠해야 첫 페인트 전에 흰 프레임이 안 보인다 (위 did-finish-load 주석 참조)
+  view.setBackgroundColor(resolveBackgroundColor())
+  // 이 뷰는 preload로 git 조작 API를 갖는 특권 표면이다 — 외부 네비게이션과 새 창을 차단한다
   // (파일 드래그&드롭의 file:// 네비게이션 같은 기본 동작도 여기서 막힌다)
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('will-navigate', (event) => event.preventDefault())
+  view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  view.webContents.on('will-navigate', (event) => event.preventDefault())
 
   // 패키징된 앱에서는 env로 임의 URL을 주입할 수 없어야 한다
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void view.webContents.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'))
+    void view.webContents.loadFile(join(__dirname, '../renderer/index.html'))
   }
-  return window
+  return view
 }
 
 /** 새 창은 열어준 창의 레이아웃을 씨앗으로 받는다 (사용자 결정). 그 창이 없으면 빈 레이아웃 —
@@ -192,8 +246,9 @@ function registerWindowHandlers(): void {
       // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
       const existing = registry.findByRepoPath(opened.path)
       if (existing !== undefined) {
-        const found = BrowserWindow.getAllWindows().find((w) => w.webContents.id === existing)
-        // 탭으로 묶여 있어도 focus()면 macOS가 그 탭을 앞으로 가져온다
+        // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
+        // 뷰 id → 창 역방향 맵으로 찾는다 (E15c)
+        const found = windowOfView.get(existing)
         found?.show()
         found?.focus()
         return { ok: true }
@@ -271,7 +326,7 @@ app
       quitting = true
     })
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (BaseWindow.getAllWindows().length === 0) createWindow()
     })
     // GIT_GUI_E2E_REPO는 "**시작할 때** 이 저장소를 열어라"지 "새 창마다 열어라"가 아니다.
     // 예전엔 repo:initial-path가 씨앗이 없을 때마다 이 환경변수로 되돌아가, ⌘N이 만든 빈 창이
