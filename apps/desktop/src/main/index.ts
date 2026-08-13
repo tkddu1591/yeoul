@@ -1,6 +1,11 @@
 import { app, BaseWindow, ipcMain, nativeTheme, WebContentsView } from 'electron'
 import { isAbsolute, join } from 'node:path'
-import { WINDOW_CHANNELS, type WindowLayout, type WindowOpenResult } from '@git-gui/ipc-contract'
+import {
+  WINDOW_CHANNELS,
+  type PersistedWindow,
+  type WindowLayout,
+  type WindowOpenResult,
+} from '@git-gui/ipc-contract'
 import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
@@ -21,8 +26,21 @@ const LAYOUT_PERSIST_MS = 250
 // 지점이라, 창을 닫고 종료하면 그 창의 레이아웃이 통째로 증발했다(main 대비 회귀 — main은
 // `settings:set`마다 파일에 썼다). 레이아웃은 묶어서, 창 목록은 즉시 쓴다
 const persistLayout = createTrailingDebounce(LAYOUT_PERSIST_MS, () =>
-  saveWindows(registry.snapshot()),
+  saveWindows(persistedWindows()),
 )
+
+/**
+ * E15c Task 2 과도기 — 레지스트리는 이미 탭 목록(snapshot의 tabs·activeTab)인데 디스크 영속
+ * 형식은 아직 E15b(창=저장소 하나, `{ repoPath, layout }`)다. sanitize와 복원이 옛 형식을
+ * 전제하므로(Task 8이 형식 확장·마이그레이션을 맡는다) 여기서 활성 탭의 저장소를 창의
+ * 저장소로 접어 저장한다 — 탭이 아직 창마다 하나뿐이라(Task 3 전) 정보 손실이 없다
+ */
+function persistedWindows(): PersistedWindow[] {
+  return registry.snapshot().map((w) => ({
+    repoPath: w.tabs[w.activeTab]?.repoPath ?? null,
+    layout: w.layout,
+  }))
+}
 /**
  * `before-quit`이 지나갔는가 — 지나갔으면 **목록은 얼어붙는다** (E15b 리뷰 I-1 실측).
  *
@@ -39,7 +57,7 @@ let quitting = false
 const registry = createWindowRegistry((kind) => {
   if (quitting) return
   if (kind === 'layout') persistLayout.hit()
-  else saveWindows(registry.snapshot())
+  else saveWindows(persistedWindows())
 })
 
 /** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
@@ -102,6 +120,11 @@ interface CreatedWindow {
  * BaseWindow에는 webContents가 없어 예전의 getAllWindows().find(webContents.id)가 불가능하다 */
 const windowOfView = new Map<number, BaseWindow>()
 
+/** 창 id 발급 (E15c) — 창 id와 탭 id는 다른 이름 공간이다. 뷰가 여럿이라 webContents.id를 창
+ * 키로 못 쓴다. 단조 증가면 충분하다 — webContents.id도 단조 증가라 재사용 걱정이 없는 것을
+ * E15b 리뷰가 실측했고, 여기도 같은 성질만 필요하다 */
+let nextWindowId = 1
+
 function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): CreatedWindow {
   const window = new BaseWindow({
     width: 1200,
@@ -145,14 +168,18 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
   // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
   // 늦게 돌고(동기 IPC도 이 틱이 끝나야 처리된다), 그때 이 창의 layout 씨앗을 읽어야 새 창이
   // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다.
-  // 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
-  // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다)
-  registry.add(view.webContents.id, { repoPath: seed.repoPath, layout: seed.layout })
+  // 탭 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
+  // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다). 창 키만 새 이름 공간이다 (E15c)
+  const windowId = nextWindowId++
+  registry.addWindow(windowId, seed.layout)
+  registry.addTab(windowId, view.webContents.id, seed.repoPath)
   // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
   const viewId = view.webContents.id
   windowOfView.set(viewId, window)
   window.on('closed', () => {
-    registry.remove(viewId)
+    // removeWindow가 그 창의 탭 색인까지 청소한다. 탭을 하나씩 닫아 removeTab이 창 항목을
+    // 이미 지운 경우(마지막 탭=창 닫힘 동치)에도 이 호출은 무해하다 — 없는 id는 조용히 무시
+    registry.removeWindow(windowId)
     windowOfView.delete(viewId)
     // 실측 (E15c): BrowserWindow와 달리 BaseWindow는 닫혀도 뷰의 webContents를 파괴하지
     // 않는다(닫은 뒤 getAllWebContents()에 1개 잔류·'destroyed' 미발화). 명시적으로 닫아야
@@ -222,9 +249,10 @@ function createRepoView(): WebContentsView {
 }
 
 /** 새 창은 열어준 창의 레이아웃을 씨앗으로 받는다 (사용자 결정). 그 창이 없으면 빈 레이아웃 —
- * 렌더러가 기본값을 쓴다 */
+ * 렌더러가 기본값을 쓴다. openerId는 sender.id, 즉 탭(뷰) id다 — 레이아웃은 창 단위(스펙 §4)라
+ * 탭→창 조회를 layoutOfTab이 접는다 */
 function seedLayoutFrom(openerId: number): WindowLayout {
-  return { ...(registry.get(openerId)?.layout ?? {}) }
+  return { ...(registry.layoutOfTab(openerId) ?? {}) }
 }
 
 /** 새 창에서 연다 (E15b). 창을 만드는 것은 index.ts 책임이라 이 핸들러만 여기 있다 */
@@ -243,12 +271,14 @@ function registerWindowHandlers(): void {
       // E15a의 목록 제거 정책(reason !== 'failed')을 이 진입점에서도 쓸 수 있다.
       // 예전엔 여기서 throw했고 렌더러가 void로 버려 배너도 목록 정리도 없었다
       if (!opened.ok) return opened
-      // 이미 그 저장소를 연 창이 있으면 새로 만들지 않고 앞으로 가져온다 (사용자 결정)
-      const existing = registry.findByRepoPath(opened.path)
+      // 이미 그 저장소를 연 탭이 있으면 새로 만들지 않고 그 창을 앞으로 가져온다 (사용자 결정).
+      // 판정이 창 단위(findByRepoPath)에서 탭 단위(findTabByRepoPath)로 바뀌었다 — 탭이 아직
+      // 창마다 하나라 동작은 같고, 그 탭의 활성화까지는 Task 6(규칙 하나)이 맡는다
+      const existing = registry.findTabByRepoPath(opened.path)
       if (existing !== undefined) {
         // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
-        // 뷰 id → 창 역방향 맵으로 찾는다 (E15c)
-        const found = windowOfView.get(existing)
+        // 뷰(탭) id → 창 역방향 맵으로 찾는다 (E15c)
+        const found = windowOfView.get(existing.tabId)
         found?.show()
         found?.focus()
         return { ok: true }
@@ -321,7 +351,7 @@ app
     // saveWindows가 무시하므로 디스크의 마지막 목록이 그대로 남는다(그 함수의 주석 참조)
     app.on('before-quit', () => {
       persistLayout.dispose()
-      saveWindows(registry.snapshot())
+      saveWindows(persistedWindows())
       // 여기서부터 목록을 얼린다 — 뒤이어 창들이 하나씩 닫히는 것은 사용자의 조작이 아니다
       quitting = true
     })
