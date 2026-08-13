@@ -5916,3 +5916,116 @@ test('E15b — 취소된 ⌥ 누름이 다음 키보드 활성화에 실리지 �
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c Task 3 — 탭 IPC만으로 한 창에 탭 둘이 실존하고 전환·닫기가 된다 (탭바 UI는 Task 5).
+ *
+ * Playwright 실측이 이 테스트의 절반이다 (Task 5~8의 E2E 전부가 이 위에 선다):
+ * - 같은 BaseWindow에 더해진 **두 번째 WebContentsView**도 `waitForEvent('window')`로 잡히고
+ *   `app.windows()`에 실린다 — Playwright의 "window"는 창이 아니라 webContents 단위다.
+ * - 숨은 뷰(setVisible(false))의 page도 getByTestId·evaluate가 전부 동작한다 — 그래서
+ *   **가시성 단언은 렌더러가 아니라 main에서 한다**: 렌더러 쪽 단언은 숨어도 통과하므로
+ *   setVisible 전환을 물 수 없고, `contentView.children`의 getVisible()만이 실물이다.
+ */
+test('E15c — IPC만으로 두 번째 탭이 생기고 전환·닫기가 된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  // main은 --show-toplevel로 정규화한 경로를 돌려준다 — 심링크(/var → /private/var)를 푼 값이다
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    // 탭을 여는 동작보다 **먼저** 대기를 걸어 둔다 (nextWindow 관례) — 두 번째 "뷰"도 이 이벤트로 온다
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 창은 하나인데 Playwright의 window(webContents)는 둘이다
+    expect(app.windows()).toHaveLength(2)
+    expect(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length)).toBe(1)
+
+    // 새 탭 B가 활성 → 첫 탭 A는 숨었다. 숨은 뷰의 page 단언이 그대로 동작한다(실측)
+    await expect(first.getByTestId('file-unstaged-app.txt')).toBeVisible()
+
+    // onChanged는 등록 즉시 현재 목록을 준다 — 탭을 하나도 안 건드리고 구독만 해서 받는다
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(tabs).toHaveLength(2)
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+    expect(tabA.active).toBe(false)
+    expect(tabB.active).toBe(true)
+
+    // 가시성의 실물 — 보이는 자식 뷰는 활성 탭 B 하나뿐이다
+    const visibleAfterOpen = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.contentView.children.map((child) => ({
+        id: (child as Electron.WebContentsView).webContents.id,
+        visible: child.getVisible(),
+      })),
+    )
+    expect(visibleAfterOpen.filter((v) => v.visible).map((v) => v.id)).toEqual([tabB.id])
+
+    // 전환 — 보이는 뷰(second)에서 탭 A를 활성화한다
+    await second.evaluate((tabId: number) => window.gitApi.tabs.activate(tabId), tabA.id)
+    const visibleAfterActivate = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.contentView.children.map((child) => ({
+        id: (child as Electron.WebContentsView).webContents.id,
+        visible: child.getVisible(),
+      })),
+    )
+    expect(visibleAfterActivate.filter((v) => v.visible).map((v) => v.id)).toEqual([tabA.id])
+
+    // 닫기 — 이제 숨은 뷰가 된 B의 탭을 first에서 닫는다. destroy 실측: 탭 하나만 닫는 경로도
+    // webContents가 정말 파괴되는지('destroyed' 발화 → git-handlers·terminal-handlers의 감시·pty
+    // 정리가 그 훅에 실려 있다) — Task 1은 창 단위로만 실측했다
+    const closed = second.waitForEvent('close')
+    await first.evaluate((tabId: number) => window.gitApi.tabs.close(tabId), tabB.id)
+    await closed
+
+    // 탭 하나가 닫혔다고 창이 닫히면 안 된다 — 창은 그대로, webContents는 정말 하나만 남는다
+    expect(app.windows()).toHaveLength(1)
+    const after = await app.evaluate(({ BaseWindow, webContents }) => ({
+      windows: BaseWindow.getAllWindows().length,
+      contents: webContents.getAllWebContents().length,
+      visible: BaseWindow.getAllWindows()[0]!.contentView.children.map((child) =>
+        child.getVisible(),
+      ),
+    }))
+    expect(after.windows).toBe(1)
+    // 1이면 B의 webContents가 파괴됐다는 뜻이다 — 파괴 없이는 감시·pty 정리도 없다
+    expect(after.contents).toBe(1)
+    expect(after.visible).toEqual([true])
+
+    // 장부도 하나다 — 닫힌 탭이 목록에 안 남고 남은 탭이 활성이다
+    const tabsAfterClose = await first.evaluate(
+      () =>
+        new Promise<{ id: number; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(tabsAfterClose).toHaveLength(1)
+    expect(tabsAfterClose[0]!.id).toBe(tabA.id)
+    expect(tabsAfterClose[0]!.active).toBe(true)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})

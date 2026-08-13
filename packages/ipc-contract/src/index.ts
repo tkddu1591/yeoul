@@ -118,6 +118,25 @@ export interface GitApi {
      */
     open(repoPath: string | null): Promise<WindowOpenResult>
   }
+  /** 탭 (E15c) — 한 창 안의 저장소들. 탭 id는 그 탭 뷰의 webContents.id다 */
+  tabs: {
+    /**
+     * 이 저장소를 이 창의 새 탭으로 연다. `null`이면 빈 탭(RepoPicker) —
+     * 어느 창에든 이미 열려 있으면 새로 만들지 않고 **그 탭을 활성화**한다 (스펙 §3 규칙 하나).
+     *
+     * 반환은 `WindowOpenResult`를 **그대로 재사용한다** — 실패 사유 집합이 동일하고(경로 검증·
+     * missing·not-a-repository·failed), 렌더러의 최근 목록 제거 정책(reason !== 'failed')이
+     * window.open과 이 진입점에서 **같은 코드**로 돌아야 한다(E15b 리뷰 I-2의 결론).
+     * 타입을 하나 더 만들면 그 정책이 다시 갈라진다
+     */
+    open(repoPath: string | null): Promise<WindowOpenResult>
+    /** 이 탭을 활성으로 — **자기 창의 탭만** 유효하다(main이 sender의 창과 대조해 검증) */
+    activate(tabId: number): Promise<void>
+    /** 탭 닫기 — 마지막 탭이면 창이 닫힌다(스펙 §5). 자기 창의 탭만 유효하다(main 검증) */
+    close(tabId: number): Promise<void>
+    /** 구독 — 등록 즉시 현재 목록이 한 번 오고, 이후 이 창의 탭이 바뀔 때마다 push가 온다 */
+    onChanged(listener: (tabs: TabInfo[]) => void): () => void
+  }
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
     list(repoPath: string): Promise<WorktreeInfo[]>
@@ -605,4 +624,28 @@ export const WINDOW_CHANNELS = {
   focused: 'window:focused',
   /** 새 창에서 연다 — 경로가 null이면 빈 창 (E15b) */
   open: 'window:open',
+} as const
+
+/** 탭바가 그리는 한 탭 (E15c) — main이 그 창의 **모든 뷰**(숨은 뷰 포함)에 push한다 */
+export interface TabInfo {
+  /** 뷰 webContents.id — 클릭·닫기 요청의 키 */
+  id: number
+  repoPath: string | null
+  active: boolean
+}
+
+export const TAB_CHANNELS = {
+  /** push(main→renderer) — 이 창의 탭 목록이 바뀌었다 */
+  changed: 'tabs:changed',
+  /**
+   * preload 전용 invoke — onChanged 등록 즉시 현재 목록을 한 번 주기 위한 스냅샷 조회.
+   * push(changed)만으로는 안 된다: 뷰가 페이지를 로드하기 **전**에 보낸 push는 리스너 등록
+   * 이전이라 유실된다(웹콘텐츠 생성 직후 addTab이 정확히 그 시점이다) — 등록 시점의 pull이
+   * 결정적이다. settings:get-sync가 같은 이유로 pull인 것과 같은 판단
+   */
+  list: 'tabs:list',
+  /** 새 탭. repoPath null이면 빈 탭 */
+  open: 'tabs:open',
+  activate: 'tabs:activate',
+  close: 'tabs:close',
 } as const

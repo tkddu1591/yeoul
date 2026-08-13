@@ -1,8 +1,10 @@
 import { app, BaseWindow, ipcMain, nativeTheme, WebContentsView } from 'electron'
 import { isAbsolute, join } from 'node:path'
 import {
+  TAB_CHANNELS,
   WINDOW_CHANNELS,
   type PersistedWindow,
+  type TabInfo,
   type WindowLayout,
   type WindowOpenResult,
 } from '@git-gui/ipc-contract'
@@ -56,8 +58,15 @@ function persistedWindows(): PersistedWindow[] {
 let quitting = false
 const registry = createWindowRegistry((kind) => {
   if (quitting) return
-  if (kind === 'layout') persistLayout.hit()
-  else saveWindows(persistedWindows())
+  if (kind === 'layout') {
+    persistLayout.hit()
+    return
+  }
+  saveWindows(persistedWindows())
+  // 탭 목록 push (E15c) — 탭 증감·활성 전환·저장소 갈아타기(git-handlers의 remember)가 전부
+  // 'windows' 변경이라, 정본이 알리는 여기 한 곳이면 어느 경로도 탭바에 빠짐없이 닿는다.
+  // 핸들러마다 push를 흩으면 setTabRepoPath(전환기로 저장소를 갈아탄 탭의 라벨)를 빠뜨린다
+  pushAllTabs()
 })
 
 /** tokens.css의 --color-bg와 짝 — 부팅 창 배경색으로 쓴다(E13 흰 화면 제거).
@@ -120,6 +129,10 @@ interface CreatedWindow {
  * BaseWindow에는 webContents가 없어 예전의 getAllWindows().find(webContents.id)가 불가능하다 */
 const windowOfView = new Map<number, BaseWindow>()
 
+/** 탭 id → 뷰 실물 (E15c Task 3) — 가시성 전환·닫기·push가 뷰 객체를 필요로 한다.
+ * windowOfView와 항상 같은 키 집합이다(createTab이 함께 넣고 정리 경로들이 함께 지운다) */
+const viewOfTab = new Map<number, WebContentsView>()
+
 /** 창 id 발급 (E15c) — 창 id와 탭 id는 다른 이름 공간이다. 뷰가 여럿이라 webContents.id를 창
  * 키로 못 쓴다. 단조 증가면 충분하다 — webContents.id도 단조 증가라 재사용 걱정이 없는 것을
  * E15b 리뷰가 실측했고, 여기도 같은 성질만 필요하다 */
@@ -149,66 +162,206 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
     show: false,
   })
 
-  const view = createRepoView()
-  window.contentView.addChildView(view)
-  fitViewToWindow(window, view)
-  // 창 리사이즈마다 뷰를 창 크기에 맞춘다 — BrowserWindow 시절엔 공짜였던 것
-  window.on('resize', () => fitViewToWindow(window, view))
+  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
+  // 늦게 돌고(동기 IPC도 이 틱이 끝나야 처리된다), 그때 이 창의 layout 씨앗을 읽어야 새 창이
+  // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 여기(createTab) 등록된 repoPath를 읽는다.
+  // 탭 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
+  // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다). 창 키만 새 이름 공간이다 (E15c)
+  const windowId = nextWindowId++
+  registry.addWindow(windowId, seed.layout)
+  const view = createTab(window, windowId, seed.repoPath)
+
+  // 창 리사이즈마다 **모든** 탭 뷰를 창 크기에 맞춘다 — BrowserWindow 시절엔 공짜였던 것.
+  // 숨은 뷰도 같이 맞춰 두어야 전환하는 순간 헌 크기 레이아웃이 한 프레임도 안 보인다
+  window.on('resize', () => {
+    for (const tabId of registry.getWindow(windowId)?.tabs ?? []) {
+      const tabView = viewOfTab.get(tabId)
+      if (tabView !== undefined) fitViewToWindow(window, tabView)
+    }
+  })
 
   // ready-to-show는 BrowserWindow의 이벤트다 — BaseWindow에는 없다 (첫 페인트 신호가
   // WebContentsView에는 노출되지 않는다: webContents의 'paint'는 오프스크린 전용).
   // did-finish-load는 페인트 이전일 수 있지만, 뷰 배경색을 창 배경색과 같게 칠해 두므로
   // (createRepoView의 setBackgroundColor) 페인트 전 프레임도 흰색이 아니라 테마색이다 —
   // E13의 판정 기준(창이 드러날 때 흰 배경이 한 프레임도 안 보인다)을 배경색으로 만족한다.
-  // E2E 숨김 규칙(E6a)과의 합성은 그대로: isE2E && !isE2EShow는 계속 숨긴 채로 둔다
+  // E2E 숨김 규칙(E6a)과의 합성은 그대로: isE2E && !isE2EShow는 계속 숨긴 채로 둔다.
+  // 첫 탭에만 건다 — 이후 탭은 이미 보이는 창에 생기므로 show 신호가 필요 없다
   view.webContents.once('did-finish-load', () => {
     if (!isE2E || isE2EShow) window.show()
   })
 
-  // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
-  // 늦게 돌고(동기 IPC도 이 틱이 끝나야 처리된다), 그때 이 창의 layout 씨앗을 읽어야 새 창이
-  // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 여기 등록된 repoPath를 읽는다.
-  // 탭 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
-  // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다). 창 키만 새 이름 공간이다 (E15c)
-  const windowId = nextWindowId++
-  registry.addWindow(windowId, seed.layout)
-  registry.addTab(windowId, view.webContents.id, seed.repoPath)
-  // closed 시점에는 webContents가 이미 파괴돼 id 접근이 안전하지 않다 — 미리 잡아 둔다
-  const viewId = view.webContents.id
-  windowOfView.set(viewId, window)
   window.on('closed', () => {
-    // removeWindow가 그 창의 탭 색인까지 청소한다. 탭을 하나씩 닫아 removeTab이 창 항목을
-    // 이미 지운 경우(마지막 탭=창 닫힘 동치)에도 이 호출은 무해하다 — 없는 id는 조용히 무시
-    registry.removeWindow(windowId)
-    windowOfView.delete(viewId)
-    // 실측 (E15c): BrowserWindow와 달리 BaseWindow는 닫혀도 뷰의 webContents를 파괴하지
-    // 않는다(닫은 뒤 getAllWebContents()에 1개 잔류·'destroyed' 미발화). 명시적으로 닫아야
+    // 창이 닫히면 그 안의 **모든** 탭 뷰를 닫는다 (Task 1 배선의 탭 일반화).
+    // removeWindow를 먼저 — 각 뷰의 destroyed 훅이 "레지스트리에 내 탭이 없다"로 이 경로임을
+    // 알아보고 창을 또 닫으려 들지 않는다. removeTab이 창 항목을 이미 지운 경우(마지막 탭=창
+    // 닫힘 동치)에도 removeWindow는 무해하다 — 없는 id는 조용히 무시.
+    // 실측 (E15c Task 1): BrowserWindow와 달리 BaseWindow는 닫혀도 뷰의 webContents를 파괴하지
+    // 않는다(닫은 뒤 getAllWebContents()에 잔류·'destroyed' 미발화). 명시적으로 닫아야
     // git-handlers·terminal-handlers의 once('destroyed') 정리(감시·pty)가 돈다
-    if (!view.webContents.isDestroyed()) view.webContents.close()
-  })
-  // 반대 방향도 (E15c 실측): webContents가 먼저 파괴돼도(Playwright page.close()의
-  // Target.closeTarget, DOM window.close()) BaseWindow는 안 닫힌다 — BrowserWindow 시절엔
-  // 자기 webContents 파괴가 곧 창 닫힘이었다. 빈 창이 남고 registry에서도 안 빠져,
-  // 복원이 닫은 창을 되살린다(E2E «창 둘 중 하나만 닫고 종료» 2건이 여기서 빨갰다 —
-  // 저장 목록에 [A,B]가 남아 복원이 2창을 만들었다). isDestroyed 가드가 상호 재귀를 끊는다
-  view.webContents.once('destroyed', () => {
-    if (!window.isDestroyed()) window.close()
+    const tabIds = [...(registry.getWindow(windowId)?.tabs ?? [])]
+    registry.removeWindow(windowId)
+    for (const tabId of tabIds) {
+      const tabView = viewOfTab.get(tabId)
+      windowOfView.delete(tabId)
+      viewOfTab.delete(tabId)
+      if (tabView !== undefined && !tabView.webContents.isDestroyed()) tabView.webContents.close()
+    }
   })
 
-  // 전체화면에서는 신호등이 숨는다 — 헤더의 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가)
+  // 전체화면에서는 신호등이 숨는다 — 신호등 패딩을 접게 push (E7f 실측 2: CSS 신호 불가).
+  // 숨은 뷰에도 보낸다 — 전체화면 중에 전환한 탭이 접힌 패딩을 이미 알고 있어야 한다
   window.on('enter-full-screen', () => {
-    view.webContents.send(WINDOW_CHANNELS.fullScreen, true)
+    sendToWindowTabs(windowId, WINDOW_CHANNELS.fullScreen, true)
   })
   window.on('leave-full-screen', () => {
-    view.webContents.send(WINDOW_CHANNELS.fullScreen, false)
+    sendToWindowTabs(windowId, WINDOW_CHANNELS.fullScreen, false)
   })
 
-  // 창으로 돌아오면 재조회 — 감시가 못 잡은 잔여와 감시가 죽은 경우(watch error로 조용히 닫힘)를 메운다 (E10)
+  // 창으로 돌아오면 재조회 — 감시가 못 잡은 잔여와 감시가 죽은 경우(watch error로 조용히 닫힘)를
+  // 메운다 (E10). 숨은 뷰에도 보낸다 — 감시 사각지대는 숨은 탭에도 똑같이 생기고, 여기서 안
+  // 메우면 그 탭은 켜지는 순간까지 낡은 화면을 들고 있다
   window.on('focus', () => {
-    view.webContents.send(WINDOW_CHANNELS.focused)
+    sendToWindowTabs(windowId, WINDOW_CHANNELS.focused)
   })
 
   return { window, view }
+}
+
+/**
+ * 창에 탭(뷰) 하나를 만들어 단다 (E15c Task 3) — 실물 연결(맵)·레지스트리 등록·수명 배선까지.
+ * 가시성은 손대지 않는다: 활성 전환은 호출자가 `setActiveTab` + `showActiveTab`으로 정한다
+ * (레지스트리의 "첫 탭만 활성, 이후 추가는 활성을 안 훔친다"와 결이 같다)
+ */
+function createTab(window: BaseWindow, windowId: number, repoPath: string | null): WebContentsView {
+  const view = createRepoView()
+  const tabId = view.webContents.id
+  window.contentView.addChildView(view)
+  fitViewToWindow(window, view)
+  // 맵을 addTab보다 먼저 — addTab의 onChange가 곧장 pushAllTabs를 돌리는데, 그 시점에 맵이
+  // 비어 있으면 같은 창 다른 뷰들이 새 탭이 실린 목록을 못 받는다
+  windowOfView.set(tabId, window)
+  viewOfTab.set(tabId, view)
+  registry.addTab(windowId, tabId, repoPath)
+
+  // 뷰→창 방향 수명 (E15c Task 1 실측의 탭 일반화): webContents가 먼저 파괴돼도(Playwright
+  // page.close()의 Target.closeTarget, DOM window.close(), 렌더러 크래시) BaseWindow는 아무
+  // 반응이 없다 — BrowserWindow 시절엔 자기 webContents 파괴가 곧 창 닫힘이었다.
+  // 탭이 여럿이면 동치가 갈라진다: **탭 하나가 죽었다고 창이 닫히면 안 되고, 마지막 탭이
+  // 죽으면 빈 창이 남으면 안 된다**(남으면 registry에서도 안 빠져 복원이 유령 창을 만든다 —
+  // Task 1에서 E2E 2건이 정확히 이 모양으로 빨갰다). registry.removeTab의 "마지막 탭이면 창
+  // 항목도 지움"과 같은 판정을 실물(창·뷰)에도 적용한다
+  view.webContents.once('destroyed', () => {
+    windowOfView.delete(tabId)
+    viewOfTab.delete(tabId)
+    // 이미 레지스트리에 없다 — tabs:close(closeTab)나 창 closed 훅이 먼저 정리한 정상 경로다
+    if (registry.windowOfTab(tabId) === undefined) return
+    // 여기 도달했으면 렌더러가 스스로 죽은 경우다 — 레지스트리 정리는 이 훅 몫이다
+    registry.removeTab(tabId)
+    if (window.isDestroyed()) return
+    if (registry.getWindow(windowId) === undefined) {
+      // 마지막 탭이 죽었다 — 창 닫힘과 동치 (removeTab이 창 항목을 지운 것과 정합).
+      // isDestroyed 가드(위)가 closed 훅과의 상호 재귀를 끊는다
+      window.close()
+      return
+    }
+    window.contentView.removeChildView(view)
+    // 활성 탭이 죽었으면 removeTab의 승계(오른쪽 우선)를 화면에도 반영한다
+    showActiveTab(windowId)
+  })
+  return view
+}
+
+/** 이 창의 모든 뷰(숨은 뷰 포함)에 push한다 (E15c) — 숨은 탭도 상태를 받아 둬야 켜질 때 이미 맞다 */
+function sendToWindowTabs(windowId: number, channel: string, ...args: unknown[]): void {
+  for (const tabId of registry.getWindow(windowId)?.tabs ?? []) {
+    const view = viewOfTab.get(tabId)
+    if (view !== undefined && !view.webContents.isDestroyed()) {
+      view.webContents.send(channel, ...args)
+    }
+  }
+}
+
+/**
+ * 활성 탭 하나만 보인다 (E15c Task 3 — 이 태스크의 실물). 모든 뷰가 전체 크기로 겹쳐 있고
+ * setVisible로만 갈아탄다 — 숨은 뷰는 페인트하지 않는다(스펙 §2 실측). 활성 뷰는 보이기 전에
+ * 창 크기에 다시 맞춘다(숨어 있는 동안의 리사이즈를 resize 훅이 맞춰 주지만, 훅 등록 전
+ * 경합·창 이동 직후 등 어긋날 길을 여기서 한 번 더 닫는다)
+ */
+function showActiveTab(windowId: number): void {
+  const state = registry.getWindow(windowId)
+  if (state === undefined) return
+  for (const tabId of state.tabs) {
+    const view = viewOfTab.get(tabId)
+    const window = windowOfView.get(tabId)
+    if (view === undefined || window === undefined) continue
+    const visible = tabId === state.activeTab
+    if (visible) fitViewToWindow(window, view)
+    view.setVisible(visible)
+  }
+}
+
+/** 이 창의 탭 목록을 계약서 형태(TabInfo[])로 — push(tabs:changed)와 pull(tabs:list)이 같이 쓴다 */
+function tabInfosOf(windowId: number): TabInfo[] {
+  const state = registry.getWindow(windowId)
+  if (state === undefined) return []
+  return state.tabs.map((tabId) => ({
+    id: tabId,
+    repoPath: registry.getTabRepoPath(tabId) ?? null,
+    active: tabId === state.activeTab,
+  }))
+}
+
+/** 이 창의 탭 목록을 그 창의 **모든 뷰**에 알린다 — 숨은 뷰 포함(나중에 켜져도 탭바가 이미 맞다).
+ * 아직 로드 전인 뷰에는 유실되지만 초기 목록은 preload가 tabs:list로 당겨간다(계약서 주석 참조) */
+function pushTabs(windowId: number): void {
+  const tabs = tabInfosOf(windowId)
+  for (const tab of tabs) {
+    const view = viewOfTab.get(tab.id)
+    if (view !== undefined && !view.webContents.isDestroyed()) {
+      view.webContents.send(TAB_CHANNELS.changed, tabs)
+    }
+  }
+}
+
+/** 레지스트리 'windows' 변경마다 모든 창에 push — 창 id 열거는 실물 맵에서 얻는다
+ * (registry에는 창 id 열거가 없고, 뷰가 없는 창은 어차피 받을 곳도 없다) */
+function pushAllTabs(): void {
+  const windowIds = new Set<number>()
+  for (const tabId of viewOfTab.keys()) {
+    const windowId = registry.windowOfTab(tabId)
+    if (windowId !== undefined) windowIds.add(windowId)
+  }
+  for (const windowId of windowIds) pushTabs(windowId)
+}
+
+/**
+ * 탭 하나를 닫는다 (E15c Task 3). 마지막 탭이면 창을 닫는다 — registry.removeTab의 "마지막
+ * 탭이면 창 항목도 지움"과 실물(창)이 어긋나지 않게 창 닫기 경로에 위임한다(closed 훅이
+ * removeWindow·뷰 close를 다 한다)
+ */
+function closeTab(tabId: number): void {
+  const windowId = registry.windowOfTab(tabId)
+  if (windowId === undefined) return
+  const state = registry.getWindow(windowId)
+  const window = windowOfView.get(tabId)
+  const view = viewOfTab.get(tabId)
+  if (state === undefined || window === undefined || view === undefined) return
+  if (state.tabs.length === 1) {
+    window.close()
+    return
+  }
+  // 레지스트리 먼저 — 활성 승계(오른쪽 우선)가 여기서 정해지고, 이어지는 webContents.close()의
+  // destroyed 훅은 "레지스트리에 이미 없다"로 이 경로가 정리를 끝냈음을 알아본다
+  registry.removeTab(tabId)
+  windowOfView.delete(tabId)
+  viewOfTab.delete(tabId)
+  window.contentView.removeChildView(view)
+  // 실측 (Task 1): BaseWindow 세계에서 webContents는 아무도 대신 닫아 주지 않는다 — 명시적
+  // close()가 있어야 git-handlers·terminal-handlers의 once('destroyed') 정리(감시·pty)가 돈다
+  if (!view.webContents.isDestroyed()) view.webContents.close()
+  // 닫힌 탭이 활성이었으면 승계된 이웃을 실제로 보인다 — 아니었으면 이 호출은 무해한 재확인이다
+  showActiveTab(windowId)
 }
 
 /** 뷰 하나가 창 콘텐츠 전체를 덮는다 — 탭이 늘어도 이 함수는 그대로다(전부 전체 크기,
@@ -218,8 +371,9 @@ function fitViewToWindow(window: BaseWindow, view: WebContentsView): void {
   view.setBounds({ x: 0, y: 0, width, height })
 }
 
-// 플랜은 createRepoView(seed)였지만 Task 1에서는 씨앗을 쓸 곳이 없다(레지스트리 등록은
-// createWindow가 한다) — 안 쓰는 매개변수는 lint에 걸리므로 탭별 씨앗이 생기는 태스크에서 더한다
+// 플랜은 createRepoView(seed)였지만 씨앗은 여기 올 일이 없는 것으로 판명됐다 — 탭별 씨앗
+// (repoPath)은 createTab이 레지스트리에 등록하고 렌더러가 repo:initial-path로 당겨간다.
+// 이 함수는 "특권 표면을 가진 빈 뷰 하나"만 만든다
 function createRepoView(): WebContentsView {
   const view = new WebContentsView({
     webPreferences: {
@@ -289,6 +443,80 @@ function registerWindowHandlers(): void {
   )
 }
 
+/** 탭 id는 정수다 — 렌더러 입력이라 형식부터 막는다 (git-handlers의 assertString 관례) */
+function assertTabId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
+/**
+ * 탭 IPC (E15c Task 3). 탭의 실물(뷰 생성·가시성·닫기)은 전부 여기 — 레지스트리는 장부만 든다.
+ *
+ * `tabs:activate`/`tabs:close`의 tabId도 렌더러 입력이다 — **sender가 사는 창의 탭인지**
+ * 대조한다. 안 하면 한 렌더러가 다른 창의 탭을 닫거나 활성을 바꾸는 통로가 된다(레지스트리의
+ * setActiveTab에도 같은 가드가 있지만 close는 closeTab이 레지스트리를 안 거치고 뷰부터 만지므로
+ * 경계에서 막아야 한다)
+ */
+function registerTabHandlers(): void {
+  // preload 전용 스냅샷 — onChanged 등록 즉시 현재 목록 한 번 (계약서 TAB_CHANNELS.list 주석)
+  ipcMain.handle(TAB_CHANNELS.list, (event): TabInfo[] => {
+    const windowId = registry.windowOfTab(event.sender.id)
+    return windowId === undefined ? [] : tabInfosOf(windowId)
+  })
+
+  ipcMain.handle(TAB_CHANNELS.open, async (event, repoPath: unknown): Promise<WindowOpenResult> => {
+    const senderWindowId = registry.windowOfTab(event.sender.id)
+    const senderWindow = windowOfView.get(event.sender.id)
+    // 탭이 닫히는 중의 늦은 IPC — 조용히 버린다 (E15b 관례). 실패가 아니라 무의미다
+    if (senderWindowId === undefined || senderWindow === undefined) return { ok: true }
+    if (repoPath === null) {
+      // 빈 탭 (⌘T·탭바 +) — 중복 판정이 없다: 빈 탭은 몇 개든 열 수 있다
+      const view = createTab(senderWindow, senderWindowId, null)
+      registry.setActiveTab(senderWindowId, view.webContents.id)
+      showActiveTab(senderWindowId)
+      return { ok: true }
+    }
+    // 이 인자도 렌더러 입력이다 — window:open·repo:open과 **같은 검증**을 거친다. 검증 없이
+    // 씨앗으로 넣으면 그 탭이 임의 디렉터리에서 git을 돌리는 통로가 된다
+    const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+    if (!opened.ok) return opened
+    // 어느 창에든 이미 열려 있으면 새 탭을 만들지 않고 그 탭으로 데려간다 (스펙 §3 — "이
+    // 저장소를 보여 달라"는 요청은 전부 한 곳을 지나고, 이미 있으면 거기로 데려간다)
+    const existing = registry.findTabByRepoPath(opened.path)
+    if (existing !== undefined) {
+      registry.setActiveTab(existing.windowId, existing.tabId)
+      showActiveTab(existing.windowId)
+      const found = windowOfView.get(existing.tabId)
+      found?.show()
+      found?.focus()
+      return { ok: true }
+    }
+    const view = createTab(senderWindow, senderWindowId, opened.path)
+    registry.setActiveTab(senderWindowId, view.webContents.id)
+    showActiveTab(senderWindowId)
+    return { ok: true }
+  })
+
+  ipcMain.handle(TAB_CHANNELS.activate, (event, tabId: unknown) => {
+    const id = assertTabId(tabId)
+    const windowId = registry.windowOfTab(event.sender.id)
+    if (windowId === undefined) return
+    if (registry.windowOfTab(id) !== windowId) return
+    registry.setActiveTab(windowId, id)
+    showActiveTab(windowId)
+  })
+
+  ipcMain.handle(TAB_CHANNELS.close, (event, tabId: unknown) => {
+    const id = assertTabId(tabId)
+    const windowId = registry.windowOfTab(event.sender.id)
+    if (windowId === undefined) return
+    if (registry.windowOfTab(id) !== windowId) return
+    closeTab(id)
+  })
+}
+
 /**
  * 시작할 때 창을 만든다 — 껐을 때 그대로 (E15b).
  *
@@ -342,6 +570,7 @@ app
     registerHostingHandlers()
     registerTerminalHandlers()
     registerWindowHandlers()
+    registerTabHandlers()
     // 종료 직전의 스냅샷을 남긴다 (E15b). ⌘Q(app.quit)는 before-quit → 창 닫기 순서라 이
     // 시점의 레지스트리에 창들이 아직 다 있다 (실측: Playwright의 app.close()도 main에서
     // app.quit()을 부르므로 그대로 발화한다).
