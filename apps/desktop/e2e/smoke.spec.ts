@@ -6777,3 +6777,81 @@ test('E15c — 껐다 켜면 탭들이 순서·활성·레이아웃 그대로 �
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c 리뷰 I-1 — `tabs:open`이 `await openRepoPath` 틈에 창이 닫히면 고아 webContents를 만든다.
+ *
+ * 재현(리뷰어 실측): 한 탭짜리 창에서 tabs.open(C)를 부르고 **같은 마이크로태스크에서**
+ * tabs.close(자기 탭)를 부른다. 두 invoke는 순서대로 main에 닿는다 — open 핸들러는
+ * await openRepoPath(git 자회사 — 수십 ms)에 멈춰 있고, 그 사이 close가 마지막 탭을 닫아
+ * 창째 없앤다. await가 풀리면 핸들러는 진입 시 잡아 둔 senderWindow(닫힌 창)에 createTab을
+ * 불렀다 — createRepoView가 webContents를 이미 만든 뒤 addChildView/addTab에서 던지므로,
+ * 그 뷰는 어느 맵·레지스트리에도 없이 destroyed:false로 앱 종료까지 잔류한다(고아 렌더러
+ * 프로세스). 단언은 main의 getAllWebContents() 수로만 한다 — 렌더러 쪽에는 이 고아가 안 보인다.
+ */
+test('E15c 리뷰 I-1 — tabs:open의 await 틈에 창이 닫혀도 고아 webContents가 안 남는다', async () => {
+  const repoA = await createRepoWithFile('alpha.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const pathA = realpathSync(repoA)
+  const pathC = realpathSync(repoC)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    // 빈 두 번째 창 — 첫 창이 닫혀도 앱이 산다 (리뷰어 재현 그대로: BaseWindow 2→1)
+    const pendingEmpty = nextWindow(app)
+    await first.evaluate(() => window.gitApi.window.open(null))
+    const emptyPage = await pendingEmpty
+    await expect(emptyPage.getByTestId('open-repo')).toBeVisible()
+
+    // 자기 탭 id는 구독 스냅샷에서 (Task 3 관용구 — 등록 즉시 현재 목록 한 번)
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const myTabId = tabs[0]!.id
+
+    // 재현 본체 — open을 기다리지 않고 곧장 자기 탭(마지막 탭 = 창 닫힘 동치)을 닫는다.
+    // 페이지가 그 자리에서 파괴되므로 evaluate의 귀환이 실패할 수 있다 — 그 실패는 닫힘이
+    // 일어났다는 부수 신호일 뿐이라 삼킨다 (⌘W 테스트의 press 관례와 같은 이유)
+    const closed = first.waitForEvent('close')
+    await first
+      .evaluate(
+        (arg: { path: string; tabId: number }) => {
+          void window.gitApi.tabs.open(arg.path)
+          void window.gitApi.tabs.close(arg.tabId)
+        },
+        { path: pathC, tabId: myTabId },
+      )
+      .catch(() => {})
+    await closed
+
+    // 창은 하나 남았다 (2→1) — 닫힘 자체는 정상이다
+    await expect
+      .poll(() => app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length))
+      .toBe(1)
+    // await openRepoPath가 풀릴 시간을 준다 — git 자회사는 수십 ms라 1.5s면 넉넉하다
+    // (부정 단언이라 조건 대기가 불가능하다 — :5910 waitForTimeout 관례)
+    await emptyPage.waitForTimeout(1_500)
+    // 고아가 없다 — 남은 webContents는 빈 창의 탭 하나뿐이어야 한다. 수정 전에는 C 뷰가
+    // destroyed:false로 하나 더 남았다(원소가 둘이 된다)
+    const contents = await app.evaluate(({ webContents }) =>
+      webContents.getAllWebContents().map((wc) => wc.isDestroyed()),
+    )
+    expect(contents).toEqual([false])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+  }
+})
+

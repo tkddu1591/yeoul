@@ -508,6 +508,16 @@ function registerTabHandlers(): void {
     // 이 인자도 렌더러 입력이다 — window:open·repo:open과 **같은 검증**을 거친다. 검증 없이
     // 씨앗으로 넣으면 그 탭이 임의 디렉터리에서 git을 돌리는 통로가 된다
     const opened = await openRepoPath(assertAbsoluteRepoPath(repoPath))
+    // await 틈에 sender의 창이 닫혔으면 조용히 버린다 (E15c 리뷰 I-1 — E15b 늦은 IPC 관례).
+    // 재검사 없이 진입 시 잡아 둔 senderWindow로 createTab을 부르면, createRepoView가
+    // webContents를 만든 뒤 addChildView/addTab이 던져 그 뷰가 어느 맵에도 없이
+    // destroyed:false로 앱 종료까지 잔류한다(고아 렌더러 프로세스 — 리뷰어 실측:
+    // 한 탭짜리 창에서 tabs.open 직후 같은 마이크로태스크의 tabs.close(자기 탭)로 재현).
+    // 두 조건이 다 필요하다: close()가 'closed'(registry 정리)와 실물 파괴(isDestroyed)를
+    // 같은 틱에 끝낸다는 보장이 없다 — 어느 쪽이 먼저 관측되든 여기서 걸린다
+    if (senderWindow.isDestroyed() || registry.getWindow(senderWindowId) === undefined) {
+      return { ok: true }
+    }
     if (!opened.ok) return opened
     // 어느 창에든 이미 열려 있으면 새 탭을 만들지 않고 그 탭으로 데려간다 (스펙 §3 — "이
     // 저장소를 보여 달라"는 요청은 전부 한 곳을 지나고, 이미 있으면 거기로 데려간다)
