@@ -6029,3 +6029,173 @@ test('E15c — IPC만으로 두 번째 탭이 생기고 전환·닫기가 된다
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15c Task 5 ① — 탭바 `+` → 빈 탭(RepoPicker) → 최근 목록으로 열기 → 라벨 갱신.
+ *
+ * 라벨 갱신의 경로가 이 테스트의 실물이다: RepoPicker의 최근 항목 클릭은 repo:open이고,
+ * 그 remember(setTabRepoPath)가 레지스트리 onChange('windows') → 모든 뷰 push로 탭바에
+ * 닿는다 — 핸들러마다 push를 흩었다면 정확히 이 경로가 빠졌다 (index.ts 주석).
+ */
+test('E15c — 탭바 +로 빈 탭을 열고 최근 목록으로 저장소를 열면 라벨이 갱신된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const userData = await seedRecentRepos([pathB])
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    // 탭 하나일 때도 탭바를 그린다 (사용자 결정 "두 줄" — 숨기면 창 높이가 널뛴다)
+    await expect(first.getByTestId('tab-bar')).toBeVisible()
+    await expect(first.getByTestId('tab-bar')).toContainText(basename(pathA))
+
+    // 새 뷰 대기를 클릭보다 먼저 걸어 둔다 (nextWindow 관례)
+    const pending = nextWindow(app)
+    await first.getByTestId('tab-add').click()
+    const second = await pending
+    // 빈 탭 — RepoPicker가 뜨고 라벨은 '새 탭'
+    await expect(second.getByTestId('open-repo')).toBeVisible()
+    await expect(second.getByTestId('tab-bar')).toContainText('새 탭')
+
+    // 최근 목록으로 연다 → 이 탭이 갈아탄다(새 탭이 또 생기지 않는다) → 라벨이 저장소 이름으로
+    await second.getByTestId(`repo-picker-recent-${pathB}`).click()
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('tab-bar')).not.toContainText('새 탭')
+    await expect(second.getByTestId('tab-bar')).toContainText(basename(pathB))
+    // 탭은 여전히 둘이다 — 갈아타기가 새 탭을 만들지 않았다
+    expect(app.windows()).toHaveLength(2)
+    // 숨은 첫 탭의 탭바에도 같은 목록이 push됐다 — 켜기 전에 이미 맞다 (스펙 §2)
+    await expect(first.getByTestId('tab-bar')).toContainText(basename(pathB))
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15c Task 5 ② — 탭 클릭으로 전환된다.
+ *
+ * 가시성 단언은 main의 getVisible()로만 한다 (Task 3 실측 — 숨은 뷰도 렌더러 단언은 전부
+ * 통과하므로 렌더러 쪽 단언은 setVisible 전환을 물지 못한다). 각 뷰의 repo-path는 "그 뷰가
+ * 제 저장소를 그대로 들고 있다"는 별개 사실을 문다.
+ */
+test('E15c — 탭 클릭으로 전환된다 (실제 가시성이 바뀐다)', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 탭 id는 구독 스냅샷에서 얻는다 (Task 3 관용구 — 등록 즉시 현재 목록 한 번)
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    expect(tabA.active).toBe(false)
+
+    // 보이는 뷰(second)의 탭바에서 탭 A를 **클릭**한다 — 탭바 UI가 이 태스크의 실물이다
+    await second.getByTestId(`tab-${tabA.id}`).click()
+
+    // 실물 가시성 — 보이는 자식 뷰가 A 하나가 될 때까지 (클릭→IPC→setVisible은 비동기다)
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 각 뷰는 제 저장소를 그대로 들고 있다 — 전환은 가시성이지 내용 교체가 아니다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    // 탭바 강조도 A로 옮겨왔다 (이제 보이는 first의 탭바 기준)
+    await expect(first.getByTestId(`tab-${tabA.id}`)).toHaveAttribute('aria-selected', 'true')
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15c Task 5 ③ — ⌘W가 활성 탭을 닫고 이웃이 활성이 된다.
+ *
+ * 렌더러는 활성 탭 id로 tabs:close를 부를 뿐, "마지막 탭이면 창 닫기" 판단은 main(closeTab)
+ * 몫이다. 닫힘의 실물은 webContents 파괴(감시·pty 정리가 destroyed 훅에 실려 있다)와
+ * 이웃 뷰의 가시성 승계다.
+ */
+test('E15c — ⌘W가 활성 탭을 닫고 이웃 탭이 활성이 된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+    await expect(second.getByTestId('tab-bar')).toContainText(basename(pathB))
+
+    // 활성 탭(B, 보이는 뷰)에서 ⌘W — 그 탭이 닫힌다.
+    // press는 keydown+keyup 한 쌍인데 keydown이 탭을 닫아 keyup을 보낼 페이지가 그 자리에서
+    // 파괴된다(실측: "Target page has been closed") — 그 실패가 곧 닫힘이 일어났다는 부수
+    // 신호일 뿐이라 삼킨다. 실제 검증은 close 이벤트 대기와 아래 단언들이다(⌘W 분기를
+    // 무력화하면 press는 멀쩡히 성공하고 close가 영영 안 와 timeout으로 빨개진다 — 반증 유효)
+    const closed = second.waitForEvent('close')
+    await second.keyboard.press('Meta+w').catch(() => {})
+    await closed
+
+    // 탭 하나가 닫혔다고 창이 닫히면 안 된다 — 창은 그대로, webContents는 하나만 남고,
+    // 이웃(A)이 실제로 보인다
+    const after = await app.evaluate(({ BaseWindow, webContents }) => ({
+      windows: BaseWindow.getAllWindows().length,
+      contents: webContents.getAllWebContents().length,
+      visible: BaseWindow.getAllWindows()[0]!.contentView.children.map((child) =>
+        child.getVisible(),
+      ),
+    }))
+    expect(after.windows).toBe(1)
+    expect(after.contents).toBe(1)
+    expect(after.visible).toEqual([true])
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    // 남은 탭바에서 닫힌 탭이 사라졌다
+    await expect(first.getByTestId('tab-bar')).not.toContainText(basename(pathB))
+    await expect(first.getByTestId('tab-bar')).toContainText(basename(pathA))
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})

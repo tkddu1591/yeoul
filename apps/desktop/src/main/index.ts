@@ -146,14 +146,16 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
     minHeight: 600,
     title: 'Git GUI',
     // E7f 한 줄 타이틀바(macOS) → E7h ⑦: hiddenInset은 신호등 y가 OS 고정이라 헤더와 안 맞았다 —
-    // hidden + trafficLightPosition으로 헤더 세로 중앙에 맞춘다.
-    // y=22 실측: .app__header 실높이 58px → Math.round((58-14)/2) = 22 (신호등 지름 14px 관례)
-    // 앱 헤더가 타이틀바를 겸한다(드래그·패딩은 renderer CSS). 숨김 캡처와 공존(실측 1)
-    // → E15c: BrowserWindow가 아니라 BaseWindow지만 같은 옵션을 받는다
+    // hidden + trafficLightPosition으로 세로 중앙에 맞춘다.
+    // E15c — 타이틀바 구실이 헤더에서 탭바로 옮겨가(스펙 §3 "두 줄") 기준 높이도 바뀌었다:
+    // y=10 실측: .tab-bar 실높이 34px(getBoundingClientRect) → Math.round((34-14)/2) = 10
+    // (신호등 지름 14px 관례 — E7h와 같은 식, 기준만 헤더 58px→탭바 34px).
+    // 탭바가 타이틀바를 겸한다(드래그·패딩은 tab-bar.css). 숨김 캡처와 공존(실측 1)
+    // BrowserWindow가 아니라 BaseWindow지만 같은 옵션을 받는다
     // (실측: BaseWindowConstructorOptions에 titleBarStyle·trafficLightPosition 있음 — electron.d.ts).
     // E15b에서 네이티브 탭을 막았던 hidden이 여기서는 아무것도 안 막는다 — 탭은 우리가 그린다
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 20, y: 22 } }
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 20, y: 10 } }
       : {}),
     // E13 — 창이 뜨는 순간부터 이 색으로 칠해져 있다(콘텐츠가 없는 흰 배경 대신). 저장된
     // 테마를 못 읽는 극단적 실패에도 폴백값이 있어 undefined가 되지 않는다
