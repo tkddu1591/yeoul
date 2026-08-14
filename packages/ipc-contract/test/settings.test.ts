@@ -119,11 +119,23 @@ describe('sanitizePersistedSettings', () => {
   })
 })
 
-describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
-  it('정상 목록은 그대로 통과한다', () => {
-    const value = { windows: [{ repoPath: '/a', layout: { rightWidth: 300 } }] }
+describe('sanitizePersistedSettings의 windows 방어 (E15c 형식)', () => {
+  it('정상 목록은 그대로 통과한다 — 탭 순서·활성 인덱스·창 layout', () => {
+    const value = {
+      windows: [
+        {
+          tabs: [{ repoPath: '/a' }, { repoPath: null }, { repoPath: '/b' }],
+          activeTab: 1,
+          layout: { rightWidth: 300 },
+        },
+      ],
+    }
     expect(sanitizePersistedSettings(value).windows).toEqual([
-      { repoPath: '/a', layout: { rightWidth: 300 } },
+      {
+        tabs: [{ repoPath: '/a' }, { repoPath: null }, { repoPath: '/b' }],
+        activeTab: 1,
+        layout: { rightWidth: 300 },
+      },
     ])
   })
 
@@ -135,43 +147,163 @@ describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
     expect(sanitizePersistedSettings({ windows: ['/a', null, 3, []] }).windows).toEqual([])
   })
 
+  it('tabs가 배열이 아니면 그 창째 버린다', () => {
+    expect(
+      sanitizePersistedSettings({ windows: [{ tabs: '탭들', activeTab: 0, layout: {} }] }).windows,
+    ).toEqual([])
+    expect(
+      sanitizePersistedSettings({ windows: [{ tabs: { 0: { repoPath: '/a' } }, activeTab: 0 }] })
+        .windows,
+    ).toEqual([])
+  })
+
+  it('탭 원소가 객체가 아니거나 배열이면 그 탭을 버린다 — 배열은 typeof object를 통과한다', () => {
+    const value = {
+      windows: [{ tabs: ['/a', null, 3, ['/b'], { repoPath: '/c' }], activeTab: 0, layout: {} }],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/c' }], activeTab: 0, layout: {} },
+    ])
+  })
+
   /**
-   * E15b 리뷰 N-1 — 예전엔 `null`로 **낮췄다.** 그런데 `null`은 ⌘N 빈 창의 정당한 값이라,
-   * 손상된 한 줄이 유령 빈 창을 띄우고 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼
-   * **매 실행 반복**됐다(고착). 낮추기 대신 버린다 — Task 7이 배열 원소를 버린 것과 같은 판단이다
+   * E15b 리뷰 N-1 계승 — `null`로 낮추면 손상된 한 줄이 유령 빈 탭을 띄우고 종료 때
+   * `{"repoPath":null}`로 다시 저장돼 매 실행 고착된다. 낮추기 대신 그 탭을 버린다
    */
-  it('repoPath의 타입이 틀리면 그 항목째 버린다 — 낮추면 유령 빈 창이 고착된다', () => {
+  it('탭 repoPath의 타입이 틀리면 그 탭째 버린다 — 낮추면 유령 빈 탭이 고착된다', () => {
+    const value = {
+      windows: [
+        { tabs: [{ repoPath: 42 }, { repoPath: '/a' }, { repoPath: ['/b'] }], activeTab: 0, layout: {} },
+      ],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} },
+    ])
+  })
+
+  it('repoPath 키가 없는 탭도 버린다 — 우리가 쓴 파일은 빈 탭도 null을 명시한다', () => {
+    expect(
+      sanitizePersistedSettings({ windows: [{ tabs: [{ path: '/a' }], activeTab: 0, layout: {} }] })
+        .windows,
+    ).toEqual([])
+  })
+
+  it('명시적 null 탭은 남긴다 — 빈 탭(RepoPicker)의 정당한 값이다', () => {
+    expect(
+      sanitizePersistedSettings({ windows: [{ tabs: [{ repoPath: null }], activeTab: 0, layout: {} }] })
+        .windows,
+    ).toEqual([{ tabs: [{ repoPath: null }], activeTab: 0, layout: {} }])
+  })
+
+  it('탭이 전부 버려지면 그 창째 버린다 — 탭 없는 창은 없다', () => {
+    const value = {
+      windows: [
+        { tabs: [{ repoPath: 42 }], activeTab: 0, layout: {} },
+        { tabs: [], activeTab: 0, layout: {} },
+        { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} },
+      ],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} },
+    ])
+  })
+
+  it('activeTab이 정수가 아니거나 범위 밖이면 0으로 접는다 — 음수·초과·비정수·비숫자·없음 전부', () => {
+    const tabs = [{ repoPath: '/a' }, { repoPath: '/b' }]
+    for (const activeTab of [-1, 2, 99, 1.5, '1', null, undefined]) {
+      expect(
+        sanitizePersistedSettings({ windows: [{ tabs, activeTab, layout: {} }] }).windows,
+      ).toEqual([{ tabs, activeTab: 0, layout: {} }])
+    }
+    // 범위 안 정수는 그대로 — 접기가 유효값까지 뭉개지 않는다
+    expect(
+      sanitizePersistedSettings({ windows: [{ tabs, activeTab: 1, layout: {} }] }).windows,
+    ).toEqual([{ tabs, activeTab: 1, layout: {} }])
+  })
+
+  it('layout의 알 수 없는 키·틀린 타입은 걷어낸다', () => {
+    const value = {
+      windows: [
+        {
+          tabs: [{ repoPath: '/a' }],
+          activeTab: 0,
+          layout: { rightWidth: '넓게', 몰래: 1, terminalOpen: true },
+        },
+      ],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: { terminalOpen: true } },
+    ])
+  })
+
+  it('windows는 renderer 표면이 아니다 — sanitizeSettings가 걷어낸다', () => {
+    expect(
+      sanitizeSettings({
+        theme: 'dark',
+        windows: [{ tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} }],
+      }),
+    ).toEqual({ theme: 'dark' })
+  })
+})
+
+/**
+ * E15b 옛 형식(`{ repoPath, layout }`) 마이그레이션 (E15c Task 8, 스펙 §6) — 옛 형식을 버리면
+ * E15b 사용자의 settings.json이 E15c 첫 실행에서 **조용히** 복원을 잃는다. 탭 하나짜리 창으로
+ * 받아들이고, 종료 때 새 형식으로 다시 저장되므로 마이그레이션은 한 번만 일어난다.
+ */
+describe('sanitizePersistedSettings — E15b 옛 형식 마이그레이션 (E15c)', () => {
+  it('옛 형식은 탭 하나짜리 창이 된다 — 저장소·레이아웃 무손실', () => {
+    const value = {
+      windows: [
+        { repoPath: '/a', layout: { rightWidth: 300 } },
+        { repoPath: '/b', layout: {} },
+      ],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: { rightWidth: 300 } },
+      { tabs: [{ repoPath: '/b' }], activeTab: 0, layout: {} },
+    ])
+  })
+
+  it('옛 형식의 빈 창(repoPath null)은 빈 탭 하나가 된다', () => {
+    expect(sanitizePersistedSettings({ windows: [{ repoPath: null, layout: {} }] }).windows).toEqual(
+      [{ tabs: [{ repoPath: null }], activeTab: 0, layout: {} }],
+    )
+  })
+
+  it('옛 형식의 repoPath 타입이 틀리면 그 항목째 버린다 (E15b 리뷰 N-1 그대로)', () => {
     const value = {
       windows: [{ repoPath: 42 }, { repoPath: '/a', layout: {} }, { repoPath: ['/b'] }],
     }
-    expect(sanitizePersistedSettings(value).windows).toEqual([{ repoPath: '/a', layout: {} }])
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} },
+    ])
   })
 
-  it('repoPath 키가 아예 없어도 버린다 — 우리가 쓴 파일은 빈 창도 null을 명시한다', () => {
+  it('repoPath도 tabs도 없는 원소는 버린다 — 어느 형식도 아니다', () => {
     expect(sanitizePersistedSettings({ windows: [{ layout: { rightWidth: 300 } }] }).windows).toEqual(
       [],
     )
   })
 
-  it('명시적 null은 남긴다 — ⌘N 빈 창의 정당한 값이다', () => {
-    expect(sanitizePersistedSettings({ windows: [{ repoPath: null, layout: {} }] }).windows).toEqual(
-      [{ repoPath: null, layout: {} }],
-    )
-  })
-
-  it('layout의 알 수 없는 키·틀린 타입은 걷어낸다', () => {
+  it('옛 형식과 새 형식이 섞여 있어도 각각 제 모양으로 온다 — 순서 보존', () => {
     const value = {
-      windows: [{ repoPath: '/a', layout: { rightWidth: '넓게', 몰래: 1, terminalOpen: true } }],
+      windows: [
+        { repoPath: '/old', layout: {} },
+        { tabs: [{ repoPath: '/new-a' }, { repoPath: '/new-b' }], activeTab: 1, layout: {} },
+      ],
     }
     expect(sanitizePersistedSettings(value).windows).toEqual([
-      { repoPath: '/a', layout: { terminalOpen: true } },
+      { tabs: [{ repoPath: '/old' }], activeTab: 0, layout: {} },
+      { tabs: [{ repoPath: '/new-a' }, { repoPath: '/new-b' }], activeTab: 1, layout: {} },
     ])
   })
 
-  it('windows는 renderer 표면이 아니다 — sanitizeSettings가 걷어낸다', () => {
-    expect(sanitizeSettings({ theme: 'dark', windows: [{ repoPath: '/a', layout: {} }] })).toEqual({
-      theme: 'dark',
-    })
+  it('옛 형식의 layout도 sanitize를 거친다', () => {
+    const value = { windows: [{ repoPath: '/a', layout: { rightWidth: '넓게', terminalOpen: true } }] }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      { tabs: [{ repoPath: '/a' }], activeTab: 0, layout: { terminalOpen: true } },
+    ])
   })
 })
 

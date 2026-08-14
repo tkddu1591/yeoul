@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
+import type { TabInfo } from '@git-gui/ipc-contract'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
 import { BranchesPanel } from './components/BranchesPanel'
@@ -25,6 +26,7 @@ import { HistoryPanel } from './components/HistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
 import { RepoSwitcher } from './components/RepoSwitcher'
+import { TabBar } from './components/TabBar'
 import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
@@ -305,6 +307,32 @@ export function App() {
     rightCollapsedRef.current = rightCollapsed
   }, [rightCollapsed])
 
+  // 같은 창 **다른** 탭의 레이아웃 조작을 받아 화면을 맞춘다 (E15c Task 7, 스펙 §4 — 접힘·폭·
+  // 터미널은 창 단위다. 탭이 각자 webContents라 아무것도 안 하면 자연히 탭별이 된다).
+  //
+  // **적용은 저장 없는 raw setter만 부른다** — 메아리 차단의 렌더러 쪽 절반이다. 이 파일의
+  // 사용자 조작 경로(toggleDock·toggleLeftCollapsed·키다운·드래그 onUp)는 전부 "setState + 명시적
+  // save*" 짝 관용구라 저장이 setter에 붙어 있지 않다 — 그래서 적용 전용 경로를 따로 가르지 않고
+  // setter만 부르면 이미 저장이 없다. 여기서 settingsApi.set(save*)을 부르면 main이 그 set을 또
+  // 이웃에 push해(sender만 빠진다) 두 탭이 무한히 서로를 갱신한다(반증 실측 — 커밋 메시지).
+  // 값은 발신 탭이 이미 클램프해 보냈지만 수신 창의 뷰포트로 한 번 더 클램프한다 — 같은 창이라
+  // 같은 크기여야 맞지만, 클램프는 로드 경로(loadDockHeight 등)와 같은 방어다.
+  // 구독은 이펙트, set은 콜백 안 — set-state-in-effect는 렌더 직후 동기 set만 잡는다(E14b,
+  // tabs.onChanged와 같은 관용구)
+  useEffect(() => {
+    return window.settingsApi.onLayoutChanged((layout) => {
+      if (layout.leftCollapsed !== undefined) setLeftCollapsed(layout.leftCollapsed)
+      if (layout.rightCollapsed !== undefined) setRightCollapsed(layout.rightCollapsed)
+      if (layout.rightWidth !== undefined) {
+        setRightWidth(clampRightWidth(layout.rightWidth, window.innerWidth))
+      }
+      if (layout.terminalOpen !== undefined) setDockOpen(layout.terminalOpen)
+      if (layout.terminalHeight !== undefined) {
+        setDockHeight(clampDockHeight(layout.terminalHeight, window.innerHeight))
+      }
+    })
+  }, [])
+
   // 상세 전환이 열 폭을 강제로 넓히면 중앙이 밀린다(피드백 4: 레이아웃 시프트) — 사용자가 정한
   // 폭은 존중하되, 중앙 diff 최소 폭(380px)이 깨지면 좌측→우측 순으로 함께 줄인다 (E6a 반응형)
   const columns = computeColumns(viewportWidth, rightWidth, {
@@ -446,11 +474,27 @@ export function App() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [])
 
+  // E15c 탭바 — 정본은 main의 레지스트리고 렌더러는 구독만 한다 (repo:changed 관용구).
+  // 등록 즉시 현재 목록이 한 번 오고(preload가 tabs:list로 당겨온다) 이후 변경마다 push.
+  // ref를 나란히 두는 이유: 아래 키다운 리스너가 []로 마운트 시 1회만 등록돼 상태를 클로저로
+  // 물면 첫 렌더의 빈 목록을 영영 붙든다(E14b 실측 — 같은 함정에 ⌘F E2E 7건이 통째로 빨개졌다).
+  // leftCollapsedRef와 같은 관용구 — 상태는 렌더 몫, ref는 리스너 몫
+  const [tabs, setTabs] = useState<TabInfo[]>([])
+  const tabsRef = useRef<TabInfo[]>([])
+  useEffect(() => {
+    // 구독 콜백 안의 set은 합법이다 (set-state-in-effect는 렌더 직후 동기 set만 잡는다)
+    return window.gitApi.tabs.onChanged((list) => {
+      tabsRef.current = list
+      setTabs(list)
+    })
+  }, [])
+
   // ⌘`(맥)/Ctrl+` — 터미널 도크 토글 (E7b). 수정키 조합이라 입력 필드와 충돌하지 않는다.
   // ⌘F/Ctrl+F — 패널 검색 오버레이 열기 (E7h ⑥, 같은 훅에 이어 붙인다). 마우스가 올라간
   // 패널의 data-find-scope를 대상으로 삼는다 — 없으면 중앙 diff를 기본으로 한다
   // ⌘O/Ctrl+O — 다른 폴더 열기 (E15a). 헤더 전환기의 "다른 폴더 열기…"와 같은 동작이다
   // ⌘N/Ctrl+N — 저장소 없는 빈 새 창 (E15b)
+  // ⌘T/⌘W/⌃Tab/⌘1..9 — 탭 (E15c). 각 분기의 터미널 가드 판단은 분기 주석에
   // ⌘⌥1/⌘⌥2 — 좌·우 사이드 접기 토글 (E12). event.altKey를 반드시 같이 봐야 한다 — macOS는
   // Option을 누른 채면 event.key가 '1'이 아니라 특수문자(예: '¡')로 바뀐다(실측) — event.key만
   // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
@@ -529,6 +573,54 @@ export function App() {
         event.preventDefault()
         // 위 ⌘O가 getState()로 피한 오래된 클로저 문제가 여기엔 없다 — window.gitApi는 전역이다
         void window.gitApi.window.open(null)
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 't' || event.key === 'T')) {
+        // ⌘T — 새 빈 탭 (E15c). 터미널 가드는 위 ⌘O·⌘N과 **같은 줄, 같은 이유**다.
+        // 조건이 metaKey || ctrlKey라 Ctrl+T도 잡히는데, 그건 도크 터미널에서 readline의
+        // transpose-chars(글자 자리 바꾸기)다 — 삼키면 그 기능이 죽는다
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        void window.gitApi.tabs.open(null)
+      } else if ((event.metaKey || event.ctrlKey) && (event.key === 'w' || event.key === 'W')) {
+        // ⌘W — 활성 탭 닫기 (E15c). 마지막 탭이면 창이 닫히는데 그 판단은 main이 한다
+        // (tabs:close의 closeTab) — 렌더러는 활성 탭 id만 넘긴다.
+        //
+        // 터미널 가드 판단: macOS의 ⌘W 자체는 xterm이 pty로 보내지 않아 가로채도 안전하지만,
+        // 조건이 metaKey || ctrlKey라 **Ctrl+W가 함께 잡힌다** — 그건 도크 터미널에서 readline의
+        // unix-word-rubout(단어 지우기)로, 셸에서 아주 자주 쓰는 키다. 삼키면 단어 지우기 대신
+        // 탭이 닫힌다(작업 중인 pty째) — ⌘O·⌘N과 같은 줄에 선다. 대가는 "터미널 포커스 중
+        // ⌘W로 탭 닫기"가 안 되는 것뿐이고, 탭바 ×가 항상 있다
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        const active = tabsRef.current.find((tab) => tab.active)
+        if (active !== undefined) void window.gitApi.tabs.close(active.id)
+      } else if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'Tab') {
+        // ⌃Tab/⌃⇧Tab — 다음/이전 탭 (E15c). 터미널 가드를 **걸지 않는 유일한 탭 단축키**다:
+        // 터미널 에뮬레이터는 역사적으로 Ctrl+Tab을 Tab과 구분해 pty로 보낼 수 없어(제어문자
+        // 표현이 없다) xterm.js도 그냥 버린다 — tmux 등에서 바인딩하려 해도 애초에 도달하지
+        // 않는 키라 삼켜도 잃는 것이 없다(VS Code 내장 터미널도 Ctrl+Tab은 에디터가 가로챈다)
+        event.preventDefault()
+        const list = tabsRef.current
+        const index = list.findIndex((tab) => tab.active)
+        if (index !== -1 && list.length > 1) {
+          const step = event.shiftKey ? list.length - 1 : 1
+          void window.gitApi.tabs.activate(list[(index + step) % list.length]!.id)
+        }
+      } else if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        /^Digit[1-9]$/.test(event.code)
+      ) {
+        // ⌘1..9 — n번째 탭, 9는 마지막 탭(브라우저 관례) (E15c). ⌘⌥1/⌘⌥2(사이드 접기)는 위
+        // 분기가 altKey로 먼저 잡는다 — 여기는 !altKey라 겹치지 않는다. event.code인 이유도
+        // 그 분기와 같다(⌥ 조합에서 event.key가 특수문자로 바뀌는 macOS 실측).
+        // 터미널 가드: Ctrl+숫자는 제어문자다(Ctrl+2=NUL·Ctrl+3=ESC·Ctrl+4..7=^\ ^] ^^ ^_) —
+        // vi 사용자에게 Ctrl+3은 ESC 그 자체라 삼키면 안 된다 (⌘O·⌘N과 같은 줄)
+        if (document.activeElement?.closest('.terminal-dock') !== null) return
+        event.preventDefault()
+        const list = tabsRef.current
+        const n = Number(event.code.slice(5))
+        const target = n === 9 ? list[list.length - 1] : list[n - 1]
+        if (target !== undefined) void window.gitApi.tabs.activate(target.id)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -584,13 +676,24 @@ export function App() {
 
   if (!store.repoPath) {
     return (
-      <RepoPicker
-        onOpen={() => void store.openRepository()}
-        recent={store.recentRepos}
-        home={home}
-        onOpenRecent={(path) => void store.openRepository(path)}
-        error={store.error}
-      />
+      // E15c — 빈 탭에도 탭바는 있다: 탭바가 곧 타이틀바라(드래그·신호등 자리) 없으면 창을
+      // 움직일 수 없고, 다른 탭으로 돌아갈 길도 없다. .app으로 감싸 탭바+RepoPicker 두 층이
+      // 저장소 화면과 같은 세로 구조(flex column, 100vh)를 갖는다
+      <div className="app">
+        <TabBar
+          tabs={tabs}
+          onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
+          onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
+          onAdd={() => void window.gitApi.tabs.open(null)}
+        />
+        <RepoPicker
+          onOpen={() => void store.openRepository()}
+          recent={store.recentRepos}
+          home={home}
+          onOpenRecent={(path) => void store.openRepository(path)}
+          error={store.error}
+        />
+      </div>
     )
   }
 
@@ -608,6 +711,14 @@ export function App() {
 
   return (
     <div className="app">
+      {/* E15c — 탭바가 맨 위에서 타이틀바를 겸한다(스펙 §3 "두 줄"). 콜백만 내린다 —
+          TabBar는 window.gitApi를 모른다 (E15b Task 5 확립 규칙) */}
+      <TabBar
+        tabs={tabs}
+        onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
+        onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
+        onAdd={() => void window.gitApi.tabs.open(null)}
+      />
       <header className={`app__header${compactHeader ? ' app__header--compact' : ''}`}>
         {/* E12 — 좌측 사이드 접기. 헤더 툴바에 두면 열이 접혀 트랙이 사라져도(app__left
             언마운트) 진입점이 화면에서 사라지지 않는다 — 헤더는 접힘과 무관하게 항상 그대로다.
@@ -640,6 +751,7 @@ export function App() {
           busy={store.busy}
           onOpen={(path) => void store.openRepository(path)}
           onOpenInNewWindow={(path) => void store.openInNewWindow(path)}
+          onOpenInNewTab={(path) => void store.openInNewTab(path)}
         />
         {status && (
           <div className="app__status">
@@ -1092,6 +1204,11 @@ export function App() {
                     break
                   case 'open':
                     void store.openWorktree(action.path)
+                    break
+                  case 'new-tab':
+                    // "새 창에서 열기"의 탭 짝 (E15c) — 검증·실패 처리 경로는 아래 new-window와
+                    // 같은 결이다(WindowOpenResult 재사용 — 계약서 tabs.open 주석)
+                    void store.openInNewTab(action.path)
                     break
                   case 'new-window':
                     // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은

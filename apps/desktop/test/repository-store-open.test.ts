@@ -63,6 +63,9 @@ function makeGitApi() {
       list: async () => [],
       headInfo: async () => ({ subject: '첫 저장', authoredAt: 0, author: 'E2E' }),
     },
+    // E15c Task 6 — openRepository(path)는 갈아타기 전에 "이미 열려 있나"를 main에 묻는다.
+    // 이 파일의 주제(저장소 경계)는 전부 "안 열려 있어서 갈아타는" 경로다 — 항상 false
+    tabs: { showExisting: async () => false },
     rebase: { progress: async () => null },
     remotes: {
       fetch: async () => {

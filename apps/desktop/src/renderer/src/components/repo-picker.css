@@ -1,7 +1,10 @@
 .repo-picker {
   display: grid;
   place-items: center;
-  height: 100vh;
+  /* E15c — 위에 탭바가 앉으면서 100vh는 넘친다: 이제 항상 .app(flex column, 100vh) 안의 한
+     층이라 남은 세로를 채운다(App.tsx가 빈 탭 분기에서도 .app으로 감싼다) */
+  flex: 1;
+  min-height: 0;
   background: var(--color-bg);
 }
 .repo-picker__card {

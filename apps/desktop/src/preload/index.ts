@@ -5,8 +5,10 @@ import type {
   GitApi,
   HostingApi,
   SettingsApi,
+  TabInfo,
   TerminalApi,
   WindowApi,
+  WindowLayout,
 } from '@git-gui/ipc-contract'
 import {
   CHANNELS,
@@ -15,6 +17,7 @@ import {
   HOSTING_CHANNELS,
   SETTINGS_API_KEY,
   SETTINGS_CHANNELS,
+  TAB_CHANNELS,
   TERMINAL_API_KEY,
   TERMINAL_CHANNELS,
   WINDOW_API_KEY,
@@ -44,6 +47,21 @@ const api: GitApi = {
   },
   window: {
     open: (repoPath) => ipcRenderer.invoke(WINDOW_CHANNELS.open, repoPath),
+  },
+  tabs: {
+    open: (repoPath) => ipcRenderer.invoke(TAB_CHANNELS.open, repoPath),
+    showExisting: (repoPath) => ipcRenderer.invoke(TAB_CHANNELS.showExisting, repoPath),
+    activate: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.activate, tabId),
+    close: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.close, tabId),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, tabs: TabInfo[]) => listener(tabs)
+      ipcRenderer.on(TAB_CHANNELS.changed, wrapped)
+      // 등록 즉시 현재 목록 한 번 — push만으로는 안 된다: 이 뷰가 로드되기 전(addTab 직후)에
+      // 온 push는 리스너 등록 이전이라 유실됐다. 그래서 등록 시점에 스냅샷을 당겨온다.
+      // push가 이 응답보다 먼저 끼어들어도 목록은 매번 전체 스냅샷이라 마지막 것이 이긴다
+      void ipcRenderer.invoke(TAB_CHANNELS.list).then((tabs: TabInfo[]) => listener(tabs))
+      return () => ipcRenderer.removeListener(TAB_CHANNELS.changed, wrapped)
+    },
   },
   worktrees: {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.worktreesList, repoPath),
@@ -204,6 +222,13 @@ if (document.readyState === 'loading') {
 const settingsApi: SettingsApi = {
   initial: initialSettings,
   set: (partial) => ipcRenderer.invoke(SETTINGS_CHANNELS.set, partial),
+  // 같은 창 다른 탭의 레이아웃 조작 push (E15c, 스펙 §4) — repo.onChanged와 같은 순수 브리지.
+  // pull 짝이 없는 이유: 초기값은 이미 initial(get-sync가 창 layout을 병합해 준다)이 담당한다
+  onLayoutChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, layout: WindowLayout) => listener(layout)
+    ipcRenderer.on(SETTINGS_CHANNELS.layoutChanged, wrapped)
+    return () => ipcRenderer.removeListener(SETTINGS_CHANNELS.layoutChanged, wrapped)
+  },
 }
 
 contextBridge.exposeInMainWorld(SETTINGS_API_KEY, settingsApi)

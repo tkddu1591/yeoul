@@ -1,0 +1,102 @@
+/* E15c 탭바 — 타이틀바를 겸한다 (스펙 §3 "두 줄": 탭바가 맨 위, 기존 헤더는 그 아래).
+   .app__header가 갖고 있던 타이틀바 구실 셋(신호등 패딩·드래그·인터랙티브 no-drag)이 여기로
+   **이전**됐다 — 복제가 아니다: 두 곳에 남으면 신호등 패딩 80px이 이중으로 남는다 (layout.css 참조) */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  /* E7f 이전 — 신호등(닫기·최소화·전체) 폭만큼 왼쪽을 비운다(hidden 타이틀바 인셋).
+     전체화면에서는 신호등이 숨어 body.is-fullscreen이 접는다(실측 2: push 신호) */
+  padding: 5px var(--space-2) 5px 80px;
+  /* 헤더(--color-surface)보다 한 층 뒤(--color-bg) — 활성 탭이 surface로 채워져 바로 아래
+     헤더와 같은 층으로 이어져 읽힌다 (E12 알약 탭의 "활성=가라앉은 서피스"와 같은 원리, 방향만 반전) */
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  /* 탭바가 타이틀바다 — 빈 곳 드래그로 창 이동·더블클릭 최대화 (헤더에서 이전) */
+  -webkit-app-region: drag;
+}
+body.is-fullscreen .tab-bar {
+  padding-left: var(--space-2);
+}
+/* 드래그 영역이 클릭을 삼키면 안 된다 — 탭바 안 인터랙티브 요소 공용 no-drag
+   (개별 나열 금지 — 헤더에 있던 규칙의 이전. 새 버튼이 추가돼도 자동 적용) */
+.tab-bar :is(button, input, select, a, [role='button']) {
+  -webkit-app-region: no-drag;
+}
+/* 알약형 탭 — E12 터미널 탭(terminal-dock__tab)의 관용구. 활성은 채움+테두리로 가라앉지 않고
+   떠오른다(아래가 --color-bg라 sunken 대신 surface가 "강조"다) */
+.tab-bar__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-control);
+  padding: 1px var(--space-1) 1px 2px;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  background: transparent;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+.tab-bar__tab--on {
+  color: inherit;
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+.tab-bar__name {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: var(--text-sm);
+  padding: 2px var(--space-1);
+  cursor: pointer;
+  /* 긴 저장소 이름(동명 구분 부모 포함)이 탭바를 밀어내지 않게 — 말줄임 */
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-bar__tab--on .tab-bar__name {
+  font-weight: 600;
+}
+/* 닫기 ×는 호버·활성일 때만 — 탭마다 항상 떠 있으면 시끄럽다 (E12 터미널 탭과 같은 판단).
+   포커스(키보드 탐색)에서도 드러나야 접근성이 죽지 않는다 */
+.tab-bar__close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: var(--radius-control);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+.tab-bar__tab:hover .tab-bar__close,
+.tab-bar__tab:focus-within .tab-bar__close,
+.tab-bar__tab--on .tab-bar__close {
+  opacity: 1;
+}
+.tab-bar__close:hover {
+  color: inherit;
+  background: var(--color-surface-sunken);
+}
+.tab-bar__add {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--radius-control);
+}
+.tab-bar__add:hover {
+  color: inherit;
+  background: var(--color-surface-sunken);
+}

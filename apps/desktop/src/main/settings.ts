@@ -8,6 +8,7 @@ import {
   splitSettings,
   type PersistedSettings,
   type PersistedWindow,
+  type WindowLayout,
 } from '@git-gui/ipc-contract'
 import type { WindowRegistry } from './window-registry'
 
@@ -72,12 +73,21 @@ export function saveWindows(list: PersistedWindow[]): void {
   save({ ...current(), windows: list })
 }
 
-export function registerSettingsHandlers(registry: WindowRegistry): void {
+/**
+ * @param pushLayoutToSiblings 같은 창의 **다른** 탭들에 레이아웃 patch를 push한다 (E15c Task 7,
+ * 스펙 §4). 뷰 실물은 index.ts만 알므로 여기는 콜백으로 받는다 — 레지스트리(장부)와 같은 분리.
+ * 보낸 탭 자신을 빼는 것까지 그 콜백의 계약이다 — 메아리 차단의 main 쪽 절반(주석 아래 참조)
+ */
+export function registerSettingsHandlers(
+  registry: WindowRegistry,
+  pushLayoutToSiblings: (senderTabId: number, layout: WindowLayout) => void,
+): void {
   ipcMain.on(SETTINGS_CHANNELS.getSync, (event) => {
     // renderer 표면 필드만 추린다 — hosting(토큰)은 renderer로 절대 보내지 않는다.
-    // 거기에 **이 창의** 레이아웃을 얹어 평평하게 돌려준다 (E15b) — 렌더러는 분리를 모른다.
-    // 레지스트리 등록이 new BrowserWindow 직후 동기적으로 일어나므로 여기서 이미 있다
-    const layout = registry.get(event.sender.id)?.layout ?? {}
+    // 거기에 **이 탭이 사는 창의** 레이아웃을 얹어 평평하게 돌려준다 (E15b, 스펙 §4 — 레이아웃은
+    // 창 단위) — 렌더러는 분리를 모른다. sender.id는 탭(뷰) id라 탭→창 조회를 layoutOfTab이
+    // 접는다 (E15c). 레지스트리 등록이 createWindow에서 동기적으로 일어나므로 여기서 이미 있다
+    const layout = registry.layoutOfTab(event.sender.id) ?? {}
     event.returnValue = { ...sanitizeSettings(current()), ...layout }
   })
   ipcMain.handle(SETTINGS_CHANNELS.set, (event, partial: unknown) => {
@@ -87,7 +97,20 @@ export function registerSettingsHandlers(registry: WindowRegistry): void {
     // 빈 객체면 건너뛴다 — 창별 필드만 담긴 set이 앱 설정 파일을 매번 다시 쓰면 디스크 쓰기가
     // 무의미하게 는다(도크 높이 드래그는 초당 여러 번 온다)
     if (Object.keys(appPart).length > 0) save({ ...current(), ...appPart })
-    if (Object.keys(layout).length > 0) registry.setLayout(event.sender.id, layout)
+    if (Object.keys(layout).length > 0) {
+      // 쓰기는 창 id가 필요하다 — 탭이 닫히는 중에 늦은 set이 오면 windowOfTab이 undefined라
+      // 조용히 버린다 (E15b의 "없는 창에 온 늦은 IPC" 관례 그대로)
+      const windowId = registry.windowOfTab(event.sender.id)
+      if (windowId !== undefined) {
+        registry.setLayout(windowId, layout)
+        // 레이아웃은 창 단위다 (E15c Task 7, 스펙 §4) — 같은 창의 다른 탭들이 이 patch를 받아
+        // 화면을 맞춘다(숨은 탭 포함 — 켜기 전에 이미 맞아 있게). **보낸 탭 자신에게는 보내지
+        // 않는다** — 자신에게 되돌아온 push는 순수 메아리인데, 도크 높이·우측 폭 드래그처럼
+        // set이 초당 여러 번 나가는 조작에서 낡은 값이 방금 만진 화면을 되덮는다. 렌더러 쪽
+        // 절반(push 적용은 저장 없는 setter만 — App.tsx)과 합쳐져야 무한 상호 갱신이 안 생긴다
+        pushLayoutToSiblings(event.sender.id, layout)
+      }
+    }
   })
 }
 

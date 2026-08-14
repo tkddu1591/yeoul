@@ -118,6 +118,36 @@ export interface GitApi {
      */
     open(repoPath: string | null): Promise<WindowOpenResult>
   }
+  /** 탭 (E15c) — 한 창 안의 저장소들. 탭 id는 그 탭 뷰의 webContents.id다 */
+  tabs: {
+    /**
+     * 이 저장소를 이 창의 새 탭으로 연다. `null`이면 빈 탭(RepoPicker) —
+     * 어느 창에든 이미 열려 있으면 새로 만들지 않고 **그 탭을 활성화**한다 (스펙 §3 규칙 하나).
+     *
+     * 반환은 `WindowOpenResult`를 **그대로 재사용한다** — 실패 사유 집합이 동일하고(경로 검증·
+     * missing·not-a-repository·failed), 렌더러의 최근 목록 제거 정책(reason !== 'failed')이
+     * window.open과 이 진입점에서 **같은 코드**로 돌아야 한다(E15b 리뷰 I-2의 결론).
+     * 타입을 하나 더 만들면 그 정책이 다시 갈라진다
+     */
+    open(repoPath: string | null): Promise<WindowOpenResult>
+    /**
+     * 이 저장소가 어느 창의 탭에든 이미 열려 있으면 그 창을 앞으로 + 그 탭을 활성화하고 true,
+     * 아니면 아무것도 하지 않고 false (E15c Task 6 — 스펙 §3 전환기 행의 판정 절반).
+     *
+     * "갈아탄다" 실행은 여기 없다 — false를 받은 호출자가 기존 갈아타기 경로(스토어
+     * openRepository)로 잇는다. E15a가 그 경로에 쌓은 것(상태 유출 정리·최근 목록 갱신·실패 시
+     * 목록 제거)을 main이 대신할 수 없어서 판정만 main(정본 레지스트리)에 묻는 모양이다.
+     * 비교는 레지스트리의 정규화된 저장소 루트와의 문자열 일치다 — 호출자는 main이 정규화해 준
+     * 경로(최근 목록·현재 경로)만 넘긴다
+     */
+    showExisting(repoPath: string): Promise<boolean>
+    /** 이 탭을 활성으로 — **자기 창의 탭만** 유효하다(main이 sender의 창과 대조해 검증) */
+    activate(tabId: number): Promise<void>
+    /** 탭 닫기 — 마지막 탭이면 창이 닫힌다(스펙 §5). 자기 창의 탭만 유효하다(main 검증) */
+    close(tabId: number): Promise<void>
+    /** 구독 — 등록 즉시 현재 목록이 한 번 오고, 이후 이 창의 탭이 바뀔 때마다 push가 온다 */
+    onChanged(listener: (tabs: TabInfo[]) => void): () => void
+  }
   worktrees: {
     /** 워크트리 목록 — 첫 항목이 본체 (E7c) */
     list(repoPath: string): Promise<WorktreeInfo[]>
@@ -483,12 +513,22 @@ export function sanitizeWindowLayout(value: unknown): WindowLayout {
   return splitSettings(value).layout
 }
 
+/** 마지막 종료 시점의 탭 하나 (E15c) — 빈 탭(RepoPicker)은 명시적 null이다 */
+export interface PersistedTab {
+  repoPath: string | null
+}
+
 /**
- * 마지막 종료 시점의 창 하나 (E15b) — 무엇을 열고 있었나 · 어떤 모습이었나.
- * 창을 만드는 것은 main뿐이라 renderer 표면(AppSettings)에는 넣지 않는다
+ * 마지막 종료 시점의 창 하나 (E15b → E15c: 창이 저장소 하나가 아니라 탭들을 갖는다 — 스펙 §6).
+ * 창을 만드는 것은 main뿐이라 renderer 표면(AppSettings)에는 넣지 않는다.
+ *
+ * `activeTab`은 **tabs의 인덱스**다 — 탭 id(webContents.id)는 재시작하면 무의미해서
+ * 영속 경계에서 변환한다(window-registry snapshot 주석과 켤레)
  */
 export interface PersistedWindow {
-  repoPath: string | null
+  /** 배열 순서가 곧 탭 순서 */
+  tabs: PersistedTab[]
+  activeTab: number
   layout: WindowLayout
 }
 
@@ -503,38 +543,82 @@ export interface PersistedSettings extends AppSettings {
   windows?: PersistedWindow[]
 }
 
+/**
+ * 탭 목록 방어 (E15c) — 배열이 아니면 undefined(호출자가 그 창째 버린다).
+ *
+ * E15b가 배운 것 그대로다:
+ * - 배열 원소는 `typeof === 'object'`를 통과하므로 `!Array.isArray(entry)`가 따로 필요하다.
+ * - **낮추지 않고 버린다** (E15b 리뷰 N-1): `repoPath`가 문자열이 아니면 `null`로 낮추는 대신
+ *   그 탭을 버린다 — `null`은 빈 탭(RepoPicker)의 **정당한 값**이라, 낮추면 손상된 한 줄이
+ *   유령 빈 탭을 띄우고 종료 때 `{"repoPath":null}`로 다시 저장돼 매 실행 고착된다.
+ * - 키가 아예 없는 것도 버린다 — 이 파일을 쓰는 쪽(saveWindows ← registry.snapshot)은 빈 탭도
+ *   항상 `repoPath: null`을 명시하므로, 없다는 것은 우리가 쓴 파일이 아니라는 뜻이다.
+ * - sparse array의 hole은 spread로 실체화한 뒤 filter가 걷어낸다 (recentRepos와 같은 관례)
+ */
+function sanitizePersistedTabs(value: unknown): PersistedTab[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return [...(value as unknown[])]
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+    )
+    .filter(
+      (entry) =>
+        'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
+    )
+    .map((entry) => ({ repoPath: entry.repoPath as string | null }))
+}
+
 /** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)과 windows를 더한다 */
 export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   const settings: PersistedSettings = sanitizeSettings(value)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
-  // 창 목록 (E15b) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수 있는
-  // 디스크 파일에서 오고 repoPath가 **창을 만드는 인자**가 된다. sparse array의 hole은
-  // spread로 실체화한 뒤 filter가 걷어낸다 (sanitizeSettings의 recentRepos와 같은 관례).
+  // 창 목록 (E15b → E15c) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수
+  // 있는 디스크 파일에서 오고 각 탭의 repoPath가 **뷰를 만드는 인자**가 된다.
   //
-  // **낮추지 않고 버린다** (E15b 리뷰 N-1). 예전엔 `repoPath`가 문자열이 아니면 `null`로
-  // 낮췄는데, `null`은 ⌘N 빈 창의 **정당한 값**이라 손상된 항목 한 줄이 빈 창을 하나 띄우고
-  // 종료 때 `{"repoPath":null,"layout":{}}`로 다시 저장돼 **매 실행 반복**됐다(리뷰 실측).
-  // Task 7이 배열 원소를 `!Array.isArray`로 막은 것과 같은 판단이다 — 낮추기는 손상을 정상값의
-  // 탈을 씌워 통과시킨다.
-  //
-  // 그래서 "명시적 null"과 "타입이 틀림"을 가른다: **키가 있고 값이 string이거나 null일 때만**
-  // 통과한다. 키가 아예 없는 것도 버린다 — 이 파일을 쓰는 쪽(saveWindows)은 빈 창도 항상
-  // `repoPath: null`을 명시하므로, 없다는 것은 우리가 쓴 파일이 아니라는 뜻이다
+  // 형식이 둘이다 (E15c Task 8): `tabs` 키가 있으면 E15c 형식, 없고 `repoPath` 키가 있으면
+  // E15b 옛 형식(`{ repoPath, layout }`)이라 **탭 하나짜리 창으로 마이그레이션한다** — 옛
+  // 형식을 버리면 E15b 사용자의 복원이 첫 실행에서 조용히 사라진다. 종료 때 새 형식으로
+  // 다시 저장되므로 마이그레이션은 한 번만 일어난다
   const candidate = value as { windows?: unknown; hosting?: unknown }
   if (Array.isArray(candidate.windows)) {
-    settings.windows = [...(candidate.windows as unknown[])]
-      .filter(
-        (entry): entry is Record<string, unknown> =>
-          typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-      )
-      .filter(
-        (entry) =>
-          'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
-      )
-      .map((entry) => ({
-        repoPath: typeof entry.repoPath === 'string' ? entry.repoPath : null,
-        layout: sanitizeWindowLayout(entry.layout),
-      }))
+    const windows: PersistedWindow[] = []
+    for (const entry of [...(candidate.windows as unknown[])]) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+      const record = entry as Record<string, unknown>
+      if ('tabs' in record) {
+        // E15c 형식. 탭이 전부 버려진(또는 원래 빈) 창도 버린다 — 탭 없는 창은 없다
+        // (registry removeTab의 "마지막 탭이면 창 항목도 지움"과 같은 판단. 남기면 복원이
+        // 껍데기 창을 만들거나, 복원 쪽 가드에 걸려 어차피 안 만들어질 죽은 항목만 남는다)
+        const tabs = sanitizePersistedTabs(record.tabs)
+        if (tabs === undefined || tabs.length === 0) continue
+        // activeTab은 tabs의 **인덱스**다 — 정수가 아니거나 범위 밖이면 0으로 접는다
+        // (registry snapshot이 과도기 -1을 0으로 접는 것과 같은 정책). 낮추기가 아니라 접기인
+        // 이유: 활성 탭은 어차피 tabs 중 하나여야 하고, 첫 탭은 항상 존재한다(위 가드)
+        const activeTab =
+          typeof record.activeTab === 'number' &&
+          Number.isInteger(record.activeTab) &&
+          record.activeTab >= 0 &&
+          record.activeTab < tabs.length
+            ? record.activeTab
+            : 0
+        windows.push({ tabs, activeTab, layout: sanitizeWindowLayout(record.layout) })
+        continue
+      }
+      // E15b 옛 형식 마이그레이션 — repoPath 검증 규칙은 E15b 그대로(명시적 null만 통과,
+      // 타입이 틀리거나 키가 없으면 그 항목째 버린다 — 낮추면 유령 빈 창이 고착된다, 리뷰 N-1)
+      if (
+        'repoPath' in record &&
+        (typeof record.repoPath === 'string' || record.repoPath === null)
+      ) {
+        windows.push({
+          tabs: [{ repoPath: record.repoPath as string | null }],
+          activeTab: 0,
+          layout: sanitizeWindowLayout(record.layout),
+        })
+      }
+    }
+    settings.windows = windows
   }
   const hosting = candidate.hosting
   if (typeof hosting !== 'object' || hosting === null || Array.isArray(hosting)) return settings
@@ -552,6 +636,12 @@ export function sanitizePersistedSettings(value: unknown): PersistedSettings {
 export interface SettingsApi {
   initial: AppSettings
   set(partial: AppSettings): Promise<void>
+  /**
+   * 같은 창 **다른** 탭의 레이아웃 조작 push 구독 (E15c, 스펙 §4 — 레이아웃은 창 단위).
+   * 받은 patch는 저장 없이 화면에만 적용해야 한다 — 다시 set을 부르면 main이 그 변경을 또
+   * 이웃에 push해 두 탭이 무한히 서로를 갱신한다(메아리). 해제 함수를 반환한다
+   */
+  onLayoutChanged(listener: (layout: WindowLayout) => void): () => void
 }
 
 export const SETTINGS_API_KEY = 'settingsApi' as const
@@ -560,6 +650,8 @@ export const SETTINGS_CHANNELS = {
   /** preload 전용 동기 채널 — 첫 렌더 전에 테마를 결정해야 깜빡임이 없다 */
   getSync: 'settings:get-sync',
   set: 'settings:set',
+  /** push(main→renderer) — 같은 창 다른 탭이 창별 레이아웃을 바꿨다 (E15c, 스펙 §4) */
+  layoutChanged: 'settings:layout-changed',
 } as const
 
 /** 터미널 표면 (E7b) — pty는 main 전용. renderer는 세션 id와 바이트 스트림만 다룬다 */
@@ -605,4 +697,30 @@ export const WINDOW_CHANNELS = {
   focused: 'window:focused',
   /** 새 창에서 연다 — 경로가 null이면 빈 창 (E15b) */
   open: 'window:open',
+} as const
+
+/** 탭바가 그리는 한 탭 (E15c) — main이 그 창의 **모든 뷰**(숨은 뷰 포함)에 push한다 */
+export interface TabInfo {
+  /** 뷰 webContents.id — 클릭·닫기 요청의 키 */
+  id: number
+  repoPath: string | null
+  active: boolean
+}
+
+export const TAB_CHANNELS = {
+  /** push(main→renderer) — 이 창의 탭 목록이 바뀌었다 */
+  changed: 'tabs:changed',
+  /**
+   * preload 전용 invoke — onChanged 등록 즉시 현재 목록을 한 번 주기 위한 스냅샷 조회.
+   * push(changed)만으로는 안 된다: 뷰가 페이지를 로드하기 **전**에 보낸 push는 리스너 등록
+   * 이전이라 유실된다(웹콘텐츠 생성 직후 addTab이 정확히 그 시점이다) — 등록 시점의 pull이
+   * 결정적이다. settings:get-sync가 같은 이유로 pull인 것과 같은 판단
+   */
+  list: 'tabs:list',
+  /** 새 탭. repoPath null이면 빈 탭 */
+  open: 'tabs:open',
+  /** 이미 연 탭이면 데려가기 — 전환기 클릭의 판정 절반 (E15c Task 6, GitApi.tabs.showExisting 주석) */
+  showExisting: 'tabs:show-existing',
+  activate: 'tabs:activate',
+  close: 'tabs:close',
 } as const

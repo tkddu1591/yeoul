@@ -21,6 +21,8 @@ interface RepoSwitcherProps {
   onOpen(path?: string): void
   /** ⌥클릭·우클릭 "새 창에서 열기" — 이 창은 그대로 두고 새 창에서 연다 (E15b) */
   onOpenInNewWindow(path: string): void
+  /** 우클릭 "새 탭에서 열기" — 이 탭은 그대로 두고 새 탭에서 연다 (E15c) */
+  onOpenInNewTab(path: string): void
 }
 
 const BROWSE_KEY = '__browse__'
@@ -42,10 +44,11 @@ export function RepoSwitcher({
   busy,
   onOpen,
   onOpenInNewWindow,
+  onOpenInNewTab,
 }: RepoSwitcherProps) {
   // ESC fallback을 걸기 위해 제어형으로 둔다 (BranchSwitcher 관례)
   const [open, setOpen] = useState(false)
-  // 우클릭 메뉴 (E15b) — ⌥클릭의 발견 가능한 짝. 항목은 "새 창에서 열기" 하나다
+  // 우클릭 메뉴 (E15b) — ⌥클릭의 발견 가능한 짝. E15c가 "새 탭에서 열기"를 짝으로 붙였다
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
   // react-aria의 onAction은 수식 키를 전달하지 않는다(키보드 활성화와 클릭을 같은 콜백으로
   // 합치기 때문). 항목의 포인터 이벤트에서 altKey를 기억해 두고 onAction에서 읽는다 (E15b)
@@ -162,6 +165,12 @@ export function RepoSwitcher({
           x={menu.x}
           y={menu.y}
           items={[
+            {
+              // 브라우저 관례 순서 — 탭이 창보다 앞 (E15c)
+              key: 'new-tab',
+              label: '새 탭에서 열기',
+              onSelect: () => onOpenInNewTab(menu.path),
+            },
             {
               key: 'new-window',
               label: '새 창에서 열기',

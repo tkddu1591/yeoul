@@ -157,15 +157,15 @@ export async function openRepoPath(path: string): Promise<RepoOpenResult> {
 
 export function registerGitHandlers(registry: WindowRegistry): void {
   /**
-   * 이 창이 지금 무엇을 열었는지 레지스트리에 반영한다 (E15b).
+   * 이 탭이 지금 무엇을 열었는지 레지스트리에 반영한다 (E15b, E15c에서 창→탭).
    *
-   * 창의 저장소를 바꾸는 핸들러는 전부 여기를 지난다(select·open·initial-path·open-path).
+   * 탭의 저장소를 바꾸는 핸들러는 전부 여기를 지난다(select·open·initial-path·open-path).
    * 빠뜨리면 E15a 전환기로 저장소를 바꿨을 때 레지스트리가 옛 경로를 들고 있어
    * **중복 차단이 틀리고**(A가 이미 B로 갈아탔는데 B를 열려 하면 새 창이 뜬다)
-   * **복원이 옛 저장소를 되살린다.**
+   * **복원이 옛 저장소를 되살린다.** senderId는 뷰의 webContents.id — 곧 탭 id다
    */
   const remember = (senderId: number, topLevel: string): string => {
-    registry.setRepoPath(senderId, topLevel)
+    registry.setTabRepoPath(senderId, topLevel)
     return topLevel
   }
 
@@ -191,10 +191,10 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   })
 
   ipcMain.handle(CHANNELS.repoInitialPath, async (event) => {
-    // 이 창의 씨앗 저장소 (E15b — 새 창·복원·E2E 주입). 없으면 저장소 없는 빈 창이다.
-    // E2E 주입(GIT_GUI_E2E_REPO)도 index.ts가 **첫 창의 씨앗으로만** 넣는다 — 여기서 환경변수로
-    // 되돌아가면 ⌘N이 만든 빈 창까지 그 저장소를 열어 빈 창 경로가 검증 불가능해진다
-    const seeded = registry.get(event.sender.id)?.repoPath
+    // 이 탭의 씨앗 저장소 (E15b — 새 창·복원·E2E 주입, E15c에서 창→탭). 없으면 저장소 없는
+    // 빈 탭이다. E2E 주입(GIT_GUI_E2E_REPO)도 index.ts가 **첫 창의 씨앗으로만** 넣는다 —
+    // 여기서 환경변수로 되돌아가면 ⌘N이 만든 빈 창까지 그 저장소를 열어 검증 불가능해진다
+    const seeded = registry.getTabRepoPath(event.sender.id)
     if (!seeded) return null
     return remember(event.sender.id, await registerRepoPath(seeded))
   })
