@@ -7438,3 +7438,493 @@ test('E15e — 수동 클릭 복구는 자동 재시동 상한 너머에서도 �
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15d Task 1 관문 — 탭 드래그가 CDP 합성으로 배선 전체(렌더러 캡처→IPC→main 좌표 판정→
+ * moveTab→push)를 지나 같은 탭바 안 순서를 바꾼다. 임계값 미만은 클릭으로 남는다(같은 건).
+ *
+ * 관문 실측 (프로브 — 이 테스트가 선 자리):
+ * - Playwright `mouse.down/move/up`(CDP Input.dispatchMouseEvent)은 렌더러에 pointerdown/
+ *   pointermove/pointerup + click으로 실린다 (pointerId=1, pointerType='mouse').
+ * - `setPointerCapture`가 합성 입력에서도 동작한다 — gotpointercapture 발화, 이후 move·up이
+ *   캡처 요소로 재타게팅되고 **창 밖 좌표(-50,-40·2000,17)에서도 전달**된다(스펙 §1의 토대).
+ * - 합성 이벤트의 event.screenX/Y는 **창 상대**다(창 (360,84)에서 screenX===clientX) —
+ *   그래서 렌더러가 clientX+window.screenX로 절대 좌표를 만들어 중계한다(TabBar 주석).
+ *   이 테스트의 순서 단언은 main의 getBounds() 탭바 영역 판정을 **실제로 통과**해야만
+ *   초록이다 — 좌표 보정이 틀리면 dragEnd가 no-op라 순서가 안 바뀐다.
+ */
+test('E15d — 탭을 끌어 같은 탭바 안 순서를 바꾸고, 4px 미만 드래그는 클릭으로 남는다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 탭 id·시작 순서 (구독 스냅샷 관용구) — [A, B], 활성은 B(방금 연 탭)
+    const tabs = await second.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+    expect(tabs.map((tab) => tab.id)).toEqual([tabA.id, tabB.id])
+    expect(tabB.active).toBe(true)
+
+    // 보이는 뷰(B)의 탭바에서 B 탭을 A의 왼쪽 절반까지 끈다 — 4px 초과 move를 거쳐 up
+    const boxB = (await second.getByTestId(`tab-${tabB.id}`).boundingBox())!
+    const boxA = (await second.getByTestId(`tab-${tabA.id}`).boundingBox())!
+    await second.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2)
+    await second.mouse.down()
+    await second.mouse.move(boxB.x + boxB.width / 2 - 12, boxB.y + boxB.height / 2)
+    await second.mouse.move(boxA.x + 2, boxA.y + boxA.height / 2)
+    // 드래그 중 드롭 예상 위치 삽입선이 정확히 하나 떠 있다 (렌더러 로컬 — 스펙 §2)
+    await expect(
+      second.locator('.tab-bar__tab--insert-before, .tab-bar__tab--insert-after'),
+    ).toHaveCount(1)
+    await second.mouse.up()
+
+    // 순서의 정본이 [B, A]가 된다 — 렌더러 좌표 보정→main 탭바 영역 판정→moveTab을 다 지난 실물
+    await expect(async () => {
+      const after = await second.evaluate(
+        () =>
+          new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+            const off = window.gitApi.tabs.onChanged((list) => {
+              off()
+              resolve(list)
+            })
+          }),
+      )
+      expect(after.map((tab) => tab.repoPath)).toEqual([pathB, pathA])
+      // 활성은 그대로 B — 순서 변경은 뷰 무변이다 (스펙 §2 "가시성만 유지")
+      expect(after.find((tab) => tab.active)!.id).toBe(tabB.id)
+    }).toPass({ timeout: 5000 })
+    // 탭바 DOM 순서도 [B, A] — push가 렌더러 목록까지 닿았다. poll인 이유: 위 단언은 main의
+    // 장부(pull)라 즉답이지만 DOM은 push 수신 → React 재렌더 뒤에야 바뀐다(실측 — 한 박자 늦다)
+    await expect
+      .poll(
+        () =>
+          second.evaluate(() =>
+            [...document.querySelectorAll('.tab-bar__name')].map((el) =>
+              el.getAttribute('data-testid'),
+            ),
+          ),
+        { timeout: 5000 },
+      )
+      .toEqual([`tab-${tabB.id}`, `tab-${tabA.id}`])
+    // 드롭이 끝나면 삽입선은 걷힌다
+    await expect(
+      second.locator('.tab-bar__tab--insert-before, .tab-bar__tab--insert-after'),
+    ).toHaveCount(0)
+
+    // ── 같은 건의 반쪽: 임계값(4px) 미만 이동은 드래그가 아니라 클릭이다 — A로 전환된다.
+    // 순서가 바뀌었으니 좌표는 다시 잰다 (A가 이제 오른쪽 알약이다)
+    const boxA2 = (await second.getByTestId(`tab-${tabA.id}`).boundingBox())!
+    await second.mouse.move(boxA2.x + boxA2.width / 2, boxA2.y + boxA2.height / 2)
+    await second.mouse.down()
+    await second.mouse.move(boxA2.x + boxA2.width / 2 + 2, boxA2.y + boxA2.height / 2)
+    await second.mouse.up()
+    // 실물 가시성 — 보이는 뷰가 A 하나가 된다 (E15c Task 5 ② 관용구: 가시성 단언은 main에서)
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+    // 클릭은 순서를 건드리지 않는다 — 여전히 [B, A]
+    const final = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(final.map((tab) => tab.repoPath)).toEqual([pathB, pathA])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15d Task 2 ① — 탭을 **다른 창의 탭바**에 끌어다 놓으면 그 창으로 이동한다 (스펙 §2 둘째 행).
+ *
+ * 판정 좌표는 실측 위에서 계산한다: 두 창의 bounds를 main에서 되읽어, 대상(W2) 탭바 띠 안의
+ * 스크린 좌표를 드래그하는 창(W1)의 client 좌표로 역산한다(렌더러가 clientX+window.screenX로
+ * 절대 좌표를 만들어 중계하므로 — Task 1 관문 실측). 두 창의 탭바 띠(상단 34px)가 안 겹치게
+ * 배치한다 — W2가 나중에 생겨 z-순서 장부의 앞이므로, W1 본문 위에 겹친 W2 탭바도 "맨 위 창의
+ * 탭바"로 판정된다(겹침 우선의 실증을 겸한다).
+ *
+ * **이동한 탭의 감시가 살아 있는가**가 이 테스트의 핵심 절반이다 — webContents가 직렬화 없이
+ * 실물째 옮겨졌다는 실증(스펙 §3: 감시·터미널·설정은 전부 webContents.id 키라 자동으로
+ * 따라간다). E15b ②의 감시 관용구 그대로: 앱 밖에서 파일을 만들고 새로고침 없이 나타나야 한다.
+ */
+test('E15d — 탭을 다른 창의 탭바에 놓으면 그 창으로 이동하고 감시도 따라간다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const repoC = await createRepoWithFile('gamma.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const pathC = realpathSync(repoC)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    // W1에 탭 B — pageB가 이동 뒤에도 같은 webContents다(감시 단언이 이 페이지로 돈다)
+    const pendingB = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    // W2 — 탭 하나(C)
+    const pendingC = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.window.open(path), pathC)
+    const pageC = await pendingC
+    await expect(pageC.getByTestId('repo-path')).toHaveText(pathC)
+
+    const w1Tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = w1Tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = w1Tabs.find((tab) => tab.repoPath === pathB)!
+    const w2Tabs = await pageC.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabC = w2Tabs[0]!
+
+    // 두 창을 탭바 띠가 안 겹치게 배치하고 실제 bounds를 되읽는다 — 좌표 계산의 근거는 실측이다
+    const bounds = await app.evaluate(
+      ({ BaseWindow }, ids: { b: number; c: number }) => {
+        const windows = BaseWindow.getAllWindows()
+        const windowOf = (tabId: number) =>
+          windows.find((candidate) =>
+            candidate.contentView.children.some(
+              (child) => (child as Electron.WebContentsView).webContents.id === tabId,
+            ),
+          )!
+        const w1 = windowOf(ids.b)
+        const w2 = windowOf(ids.c)
+        w1.setBounds({ x: 40, y: 40, width: 960, height: 600 })
+        w2.setBounds({ x: 80, y: 500, width: 960, height: 600 })
+        return { w1: w1.getBounds(), w2: w2.getBounds() }
+      },
+      { b: tabB.id, c: tabC.id },
+    )
+
+    // 드래그는 비활성 탭(B)으로 — 먼저 A를 활성으로(현재 보이는 뷰 B의 탭바에서 클릭)
+    await pageB.getByTestId(`tab-${tabA.id}`).click()
+    await expect(async () => {
+      const visibleIds = await app.evaluate(({ BaseWindow }, id: number) => {
+        const w1 = BaseWindow.getAllWindows().find((candidate) =>
+          candidate.contentView.children.some(
+            (child) => (child as Electron.WebContentsView).webContents.id === id,
+          ),
+        )!
+        return w1.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id)
+      }, tabA.id)
+      expect(visibleIds).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 보이는 뷰(A)의 탭바에서 B 알약을 잡아 W2 탭바 띠 안 스크린 좌표로 끈다.
+    // client 좌표 = 목표 스크린 좌표 - W1 원점 (렌더러의 clientX+screenX 보정의 역산)
+    const pill = (await first.getByTestId(`tab-${tabB.id}`).boundingBox())!
+    const targetScreen = { x: bounds.w2.x + 480, y: bounds.w2.y + 17 }
+    await first.mouse.move(pill.x + pill.width / 2, pill.y + pill.height / 2)
+    await first.mouse.down()
+    await first.mouse.move(pill.x + pill.width / 2 + 12, pill.y + pill.height / 2)
+    await first.mouse.move(targetScreen.x - bounds.w1.x, targetScreen.y - bounds.w1.y)
+    await first.mouse.up()
+
+    // W2 목록에 B가 나타나고 **활성**이다 — 끌어다 놓은 탭이 안 보이면 이상하다(transferTab)
+    await expect(async () => {
+      const after = await pageC.evaluate(
+        () =>
+          new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+            const off = window.gitApi.tabs.onChanged((list) => {
+              off()
+              resolve(list)
+            })
+          }),
+      )
+      expect(after.map((tab) => tab.repoPath)).toEqual([pathC, pathB])
+      expect(after.find((tab) => tab.active)!.id).toBe(tabB.id)
+    }).toPass({ timeout: 5000 })
+    // W1 목록에서는 빠졌다
+    const w1After = await first.evaluate(
+      () =>
+        new Promise<{ repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(w1After.map((tab) => tab.repoPath)).toEqual([pathA])
+    // 실물 가시성 — W2의 보이는 뷰가 B 하나다 (뷰가 실제로 이사했고 화면에 섰다)
+    await expect(async () => {
+      const visibleIds = await app.evaluate(({ BaseWindow }, id: number) => {
+        const w2 = BaseWindow.getAllWindows().find((candidate) =>
+          candidate.contentView.children.some(
+            (child) => (child as Electron.WebContentsView).webContents.id === id,
+          ),
+        )!
+        return w2.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id)
+      }, tabC.id)
+      expect(visibleIds).toEqual([tabB.id])
+    }).toPass({ timeout: 5000 })
+
+    // 이동한 탭의 감시가 살아 있다 — 앱 밖의 새 파일이 새로고침 없이 나타난다 (E15b ② 관용구).
+    // webContents가 실물째 옮겨졌다는 실증: 감시는 webContents.id 키라 창 소속과 무관하다
+    await writeFile(join(repoB, 'moved-watch.txt'), '외부 변경\n')
+    await expect(pageB.getByTestId('file-unstaged-moved-watch.txt')).toBeVisible({
+      timeout: 15_000,
+    })
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+    await rm(repoC, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15d Task 2 ② — 어느 탭바도 아닌 곳에 놓으면 **새 창**이 생긴다 (스펙 §2 셋째 행) + 드래그
+ * 중 크래시한 탭의 드롭은 통째로 취소된다 (스펙 §3 — E15e 연동).
+ *
+ * 취소 절반이 먼저다: B를 크래시시킨 채 창 밖 좌표로 dragEnd를 직접 부른다(게이트는 main에
+ * 있으므로 IPC 직접 호출이 정당한 실증이다 — 죽은 렌더러는 포인터를 못 내니 합성 드래그로는
+ * 이 경계를 만들 수 없다). 창이 안 늘어야 한다. 그 뒤 크래시 알약 클릭(=복구, E15e)으로 B를
+ * 되살리고, **산** B를 창 밖으로 끌면 그제야 새 창이다.
+ */
+test('E15d — 크래시 탭 드롭은 취소되고, 산 탭을 창 밖에 놓으면 새 창으로 떨어진다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pendingB = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // A를 활성으로 — 이후 크래시·드래그 단언은 전부 산 렌더러(first)와 main에서 한다
+    await pageB.getByTestId(`tab-${tabA.id}`).click()
+    const bounds = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.getBounds())
+    // 창 밖 좌표 — 어느 창의 bounds에도 안 들어간다 (오른쪽 바깥)
+    const outside = { x: bounds.x + bounds.width + 300, y: bounds.y + 300 }
+
+    // B 크래시 → 죽음 표시가 산 형제(A)의 탭바에 뜬다 (E15e)
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabB.id)
+    await expect(first.getByTestId(`tab-crashed-${tabB.id}`)).toBeVisible()
+
+    // 크래시 중 드롭 — 취소돼야 한다: 창이 안 늘고 목록도 그대로다
+    await first.evaluate(
+      (args: { id: number; x: number; y: number }) =>
+        window.gitApi.tabs.dragEnd(args.id, args.x, args.y, 0),
+      { id: tabB.id, x: outside.x, y: outside.y },
+    )
+    expect(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length)).toBe(1)
+    const during = await first.evaluate(
+      () =>
+        new Promise<{ repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(during.map((tab) => tab.repoPath)).toEqual([pathA, pathB])
+
+    // 복구 — 크래시 알약 클릭이 곧 reload다 (E15e). 표시가 걷힐 때까지 기다린다
+    await first.getByTestId(`tab-${tabB.id}`).click()
+    await expect(first.getByTestId(`tab-crashed-${tabB.id}`)).toHaveCount(0, { timeout: 10_000 })
+    // 다시 A를 활성으로 — 드래그는 보이는 뷰(A)의 탭바에서 한다. pageB(크래시를 겪은 페이지)는
+    // 신뢰하지 않는다 (E15e 관용구: 크래시 후 단언은 산 페이지와 main에서만)
+    await first.evaluate((id: number) => window.gitApi.tabs.activate(id), tabA.id)
+    await expect(async () => {
+      const visibleIds = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visibleIds).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 산 B를 창 밖으로 — 캡처가 창 밖 좌표까지 전달한다 (Task 1 관문 실측 (2000,17))
+    const pill = (await first.getByTestId(`tab-${tabB.id}`).boundingBox())!
+    await first.mouse.move(pill.x + pill.width / 2, pill.y + pill.height / 2)
+    await first.mouse.down()
+    await first.mouse.move(pill.x + pill.width / 2 + 12, pill.y + pill.height / 2)
+    await first.mouse.move(outside.x - bounds.x, outside.y - bounds.y)
+    await first.mouse.up()
+
+    // 창이 하나 늘었고, 새 창의 보이는 뷰가 B다. 원 창은 [A] 그대로.
+    // 새 창도 숨김이어야 한다 — E2E 창 절대 금지(하네스 불변식이 close에서 또 문다)
+    await expect(async () => {
+      const state = await app.evaluate(({ BaseWindow }, id: number) => {
+        const windows = BaseWindow.getAllWindows()
+        const holder = windows.find((candidate) =>
+          candidate.contentView.children.some(
+            (child) => (child as Electron.WebContentsView).webContents.id === id,
+          ),
+        )
+        return {
+          count: windows.length,
+          holderVisibleIds:
+            holder === undefined
+              ? []
+              : holder.contentView.children
+                  .filter((child) => child.getVisible())
+                  .map((child) => (child as Electron.WebContentsView).webContents.id),
+          holderShown: holder?.isVisible() ?? true,
+        }
+      }, tabB.id)
+      expect(state.count).toBe(2)
+      expect(state.holderVisibleIds).toEqual([tabB.id])
+      expect(state.holderShown).toBe(false)
+    }).toPass({ timeout: 5000 })
+    const w1After = await first.evaluate(
+      () =>
+        new Promise<{ repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(w1After.map((tab) => tab.repoPath)).toEqual([pathA])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15d Task 2 ③ — **마지막 탭**을 떼어내면 새 창이 커서 위치에 생기고 원 창은 닫힌다
+ * (스펙 §2 셋째 행 후반 — transferTab이 빈 원 창 항목을 지우면 실물 창이 따라 닫힌다).
+ *
+ * 창 수 불변(1→1)만으로는 "아무 일도 안 일어남"과 못 가른다 — 새 창임은 **위치**로 문다:
+ * 떼어내기는 커서 위치에 창을 만든다(x=커서-80, y=커서-17 — 커서가 첫 탭 알약 위에 오는 보정).
+ * 원 창은 기본 위치(가운데)라 두 값이 겹칠 수 없다. 탭(webContents)이 산 채 새 창에 있어야
+ * 하고 — 원 창 closed 훅이 이적한 뷰를 죽였다면 repo-path 단언이 빨갛다.
+ */
+test('E15d — 마지막 탭을 떼어내면 커서 위치의 새 창이 생기고 원 창은 닫힌다', async () => {
+  const repoA = await createRepoWithChange()
+  const pathA = realpathSync(repoA)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+    const tabs = await first.evaluate(
+      () =>
+        new Promise<{ id: number }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs[0]!
+    const bounds = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.getBounds())
+    // 어느 탭바도 아닌 곳 — 창 **본문**(탭바 아래)도 "그 외"다(스펙 §2 셋째 행). 화면 안 좌표라
+    // 새 창 위치 단언이 디스플레이 크기에 안 걸린다 (진짜 창 밖 드롭은 ②가 문다)
+    const dropAt = { x: bounds.x + 500, y: bounds.y + 400 }
+
+    const pill = (await first.getByTestId(`tab-${tabA.id}`).boundingBox())!
+    await first.mouse.move(pill.x + pill.width / 2, pill.y + pill.height / 2)
+    await first.mouse.down()
+    await first.mouse.move(pill.x + pill.width / 2 + 12, pill.y + pill.height / 2)
+    await first.mouse.move(dropAt.x - bounds.x, dropAt.y - bounds.y)
+    await first.mouse.up()
+
+    // 창 수는 그대로 1 — 새 창이 생기고 원 창이 닫혔다. 새 창임은 위치(커서-80, 커서-17)로
+    // 판별한다. close는 비동기라 잠깐 2였다 1이 된다 — poll로 끝 상태만 문다
+    await expect(async () => {
+      const state = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows().map((candidate) => ({
+          bounds: candidate.getBounds(),
+          shown: candidate.isVisible(),
+          viewIds: candidate.contentView.children.map(
+            (child) => (child as Electron.WebContentsView).webContents.id,
+          ),
+        })),
+      )
+      expect(state).toHaveLength(1)
+      expect(state[0]!.bounds.x).toBe(dropAt.x - 80)
+      expect(state[0]!.bounds.y).toBe(dropAt.y - 17)
+      expect(state[0]!.viewIds).toEqual([tabA.id])
+      // 새 창도 숨김 — E2E 창 절대 금지
+      expect(state[0]!.shown).toBe(false)
+    }).toPass({ timeout: 5000 })
+    // 탭(webContents)은 산 채로 이사했다 — 원 창 closed 훅이 뷰를 죽였다면 여기서 빨갛다
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+  }
+})

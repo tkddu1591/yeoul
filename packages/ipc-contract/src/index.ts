@@ -145,6 +145,18 @@ export interface GitApi {
     activate(tabId: number): Promise<void>
     /** 탭 닫기 — 마지막 탭이면 창이 닫힌다(스펙 §5). 자기 창의 탭만 유효하다(main 검증) */
     close(tabId: number): Promise<void>
+    /**
+     * 탭 드래그 드롭 (E15d). screenX/screenY는 **렌더러가 clientX+window.screenX로 계산한
+     * 절대 스크린 좌표**다 — event.screenX가 아니다: CDP 합성 입력(E2E)에서는 event.screenX가
+     * 창 상대 좌표로 오고(실측 — 창 (360,84)에서 screenX===clientX), 실제 입력에서는 뷰가 창
+     * 원점 전체 크기라(contentBounds==bounds 실측) 두 식이 같은 값이 된다. toIndex는 같은
+     * 탭바 안 드롭일 때 옮겨 갈 자리(삽입선과 같은 계산) — main이 드롭 좌표가 제 창 탭바
+     * 영역일 때만 쓰고 범위는 레지스트리가 클램프한다. 자기 창의 탭만 유효(main 검증).
+     * 다른 창의 탭바 드롭은 그 창으로 이동(끝 삽입·이동한 탭이 활성), 어느 탭바도 아니면
+     * 커서 위치의 새 창으로 떼어내기 — 판정은 전부 main의 z-순서 장부+getBounds() 몫이다.
+     * 드래그 중 그 탭이 크래시했으면(E15e) 드롭은 통째로 취소된다
+     */
+    dragEnd(tabId: number, screenX: number, screenY: number, toIndex: number): Promise<void>
     /** 구독 — 등록 즉시 현재 목록이 한 번 오고, 이후 이 창의 탭이 바뀔 때마다 push가 온다 */
     onChanged(listener: (tabs: TabInfo[]) => void): () => void
   }
@@ -726,4 +738,6 @@ export const TAB_CHANNELS = {
   showExisting: 'tabs:show-existing',
   activate: 'tabs:activate',
   close: 'tabs:close',
+  /** 탭 드래그 드롭 (E15d) — 좌표 의미는 GitApi.tabs.dragEnd 주석 참조 */
+  dragEnd: 'tab-drag:end',
 } as const

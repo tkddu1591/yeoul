@@ -685,6 +685,9 @@ export function App() {
           onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
           onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
           onAdd={() => void window.gitApi.tabs.open(null)}
+          onDragEnd={(tabId, screenX, screenY, toIndex) =>
+            void window.gitApi.tabs.dragEnd(tabId, screenX, screenY, toIndex)
+          }
         />
         <RepoPicker
           onOpen={() => void store.openRepository()}
@@ -718,6 +721,9 @@ export function App() {
         onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
         onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
         onAdd={() => void window.gitApi.tabs.open(null)}
+        onDragEnd={(tabId, screenX, screenY, toIndex) =>
+          void window.gitApi.tabs.dragEnd(tabId, screenX, screenY, toIndex)
+        }
       />
       <header className={`app__header${compactHeader ? ' app__header--compact' : ''}`}>
         {/* E12 — 좌측 사이드 접기. 헤더 툴바에 두면 열이 접혀 트랙이 사라져도(app__left

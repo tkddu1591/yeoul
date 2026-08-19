@@ -42,6 +42,26 @@ export interface WindowRegistry {
   removeTab(tabId: number): void
   setActiveTab(windowId: number, tabId: number): void
   /**
+   * 탭 순서 변경 (E15d — 같은 탭바 안 드래그 드롭). toIndex는 옮긴 뒤 배열에서의 자리다.
+   * tabId·toIndex는 드래그 드롭에서 온 렌더러 입력 — 없는 창·없는 탭·그 창에 없는 탭은 무해,
+   * 범위 밖 toIndex는 처음·끝으로 클램프. 활성은 건드리지 않는다(순서만 바뀌고 뷰는 무변 —
+   * 스펙 §2). 실제로 순서가 바뀔 때만 onChange('windows') — 제자리 드롭마다 쓰기가 나가면 안 된다
+   */
+  moveTab(windowId: number, tabId: number, toIndex: number): void
+  /**
+   * 탭을 다른 창으로 이적한다 (E15d — 창 간 이동·떼어내기의 장부 절반). toIndex는 대상 창
+   * 배열에서의 삽입 자리 — 0..길이로 클램프(끝 삽입이 유효하다 — moveTab의 길이-1 클램프와
+   * 다른 이유: 옮겨 온 탭은 아직 대상 배열에 없다).
+   *
+   * - 원 창에서 뗀다 — 활성이었으면 removeTab·setCrashed와 **같은 승계**(pickSuccessor,
+   *   산 이웃 우선)다. 마지막 탭이었으면 원 창 항목도 지운다(removeTab의 "탭 없는 창은 없다").
+   * - 이적한 탭은 대상 창의 **활성이 된다** — 사용자가 방금 끌어다 놓은 탭이 안 보이면 이상하다
+   *   (addTab의 "활성 안 훔침"과 다른 이유: 추가는 프로그램의 일이지만 드롭은 사용자의 의지다).
+   * - 색인(repoPath·crashed)은 그대로 따라간다 — 이적이지 소멸이 아니다.
+   * - 없는 탭·없는 대상 창·같은 창(이미 moveTab 몫)은 무해·무발화. 실제 이적만 onChange('windows') 1회
+   */
+  transferTab(tabId: number, toWindowId: number, toIndex: number): void
+  /**
    * 탭 렌더러의 크래시 표시 (E15e — E15c 리뷰 I-2). main의 render-process-gone이 true로,
    * did-finish-load(reload 완료)가 false로 부른다. 없는 탭·같은 값은 무해·무발화.
    *
@@ -169,6 +189,49 @@ export function createWindowRegistry(
       // 이미 활성인 탭의 재활성화는 변화가 아니다 — 탭 클릭마다 즉시 쓰기('windows')가 나가면 안 된다
       if (state.activeTab === tabId) return
       state.activeTab = tabId
+      onChange('windows')
+    },
+    moveTab(windowId, tabId, toIndex) {
+      const state = windows.get(windowId)
+      if (state === undefined) return
+      // indexOf가 그 창 소속 검증을 겸한다 — 다른 창의 탭 id는 여기서 -1이라 조용히 무시된다
+      const fromIndex = state.tabs.indexOf(tabId)
+      if (fromIndex === -1) return
+      const clamped = Math.min(Math.max(toIndex, 0), state.tabs.length - 1)
+      if (clamped === fromIndex) return
+      state.tabs.splice(fromIndex, 1)
+      state.tabs.splice(clamped, 0, tabId)
+      // activeTab은 탭 id라 순서가 바뀌어도 그대로 유효하다 — 손대지 않는다
+      onChange('windows')
+    },
+    transferTab(tabId, toWindowId, toIndex) {
+      const entry = tabEntries.get(tabId)
+      if (entry === undefined) return
+      const target = windows.get(toWindowId)
+      if (target === undefined) return
+      // 같은 창 안의 자리 이동은 moveTab 몫이다 — 여기로 오면 조용히 무시(무발화)
+      if (entry.windowId === toWindowId) return
+      // 정합 불변식: tabEntries에 있으면 그 창과 tabs 배열에 반드시 있다 (removeTab과 같은 근거)
+      const source = windows.get(entry.windowId)!
+      const fromIndex = source.tabs.indexOf(tabId)
+      if (source.tabs.length === 1) {
+        // 마지막 탭이 떠나면 원 창 항목도 지운다 — removeTab과 같은 관례(탭 없는 창은 없다).
+        // 실물 창 닫기는 호출자(main) 몫이다 — 레지스트리 먼저, 실물은 따라간다
+        windows.delete(entry.windowId)
+      } else {
+        if (source.activeTab === tabId) {
+          // 활성이 떠나면 산 이웃이 잇는다 — removeTab·setCrashed와 같은 한 함수(pickSuccessor).
+          // 남은 탭이 전부 크래시면 관례(오른쪽 우선)대로라도 잇는다 — 불변식이 먼저다
+          const living = pickSuccessor(source.tabs, fromIndex, (id) => !tabEntries.get(id)!.crashed)
+          source.activeTab = living ?? pickSuccessor(source.tabs, fromIndex, () => true)!
+        }
+        source.tabs.splice(fromIndex, 1)
+      }
+      // 대상 창 삽입 — toIndex는 드롭에서 온 값이라 클램프. 색인은 창 소속만 갈아탄다
+      const clamped = Math.min(Math.max(toIndex, 0), target.tabs.length)
+      target.tabs.splice(clamped, 0, tabId)
+      entry.windowId = toWindowId
+      target.activeTab = tabId
       onChange('windows')
     },
     setCrashed(tabId, crashed) {

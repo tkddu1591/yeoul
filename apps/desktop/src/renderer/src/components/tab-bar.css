@@ -30,6 +30,8 @@ body.is-fullscreen .tab-bar {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  /* E15d 삽입선의 기준 상자 — ::before/::after 수직선이 알약 가장자리에 붙는다 */
+  position: relative;
   border-radius: var(--radius-control);
   padding: 1px var(--space-1) 1px 2px;
   border: 1px solid transparent;
@@ -44,6 +46,26 @@ body.is-fullscreen .tab-bar {
   color: inherit;
   background: var(--color-surface);
   border-color: var(--color-border-strong);
+}
+/* E15d 드롭 예상 위치 삽입선 — 드래그 중 틈 i의 표시는 i번째 알약의 왼쪽 선, 맨 끝 틈만
+   마지막 알약의 오른쪽 선이다(TabBar.tsx의 insertion 계산과 짝). 고스트는 그리지 않는다
+   (스펙 §2 — 1차 범위는 커서+삽입선뿐). 틈 간격이 --space-1(4px)이라 -3px가 그 중앙이다 */
+.tab-bar__tab--insert-before::before,
+.tab-bar__tab--insert-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+.tab-bar__tab--insert-before::before {
+  left: -3px;
+}
+.tab-bar__tab--insert-after::after {
+  right: -3px;
 }
 .tab-bar__name {
   appearance: none;
