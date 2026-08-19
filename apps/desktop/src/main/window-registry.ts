@@ -41,6 +41,18 @@ export interface WindowRegistry {
   /** 탭을 뗀다. 마지막 탭이었으면 창 항목도 지운다(창 닫힘과 동치) */
   removeTab(tabId: number): void
   setActiveTab(windowId: number, tabId: number): void
+  /**
+   * 탭 렌더러의 크래시 표시 (E15e — E15c 리뷰 I-2). main의 render-process-gone이 true로,
+   * did-finish-load(reload 완료)가 false로 부른다. 없는 탭·같은 값은 무해·무발화.
+   *
+   * **활성 탭이 크래시하면 산 이웃이 활성을 잇는다** — removeTab 승계와 같은 오른쪽 우선.
+   * 이 승계가 여기(레지스트리) 몫인 이유: "activeTab은 쓸 수 있는 탭"이라는 불변식의 주인이
+   * 레지스트리고, 후보에서 크래시 탭을 걸러야 하는데 크래시 여부도 레지스트리만 안다.
+   * 산 이웃이 없으면(유일 탭·전부 크래시) 활성을 남겨 둔다 — main이 reload로 재시동한다.
+   * 크래시는 영속되지 않는다(snapshot 무변) — 재시작은 어차피 전체 reload다
+   */
+  setCrashed(tabId: number, crashed: boolean): void
+  isTabCrashed(tabId: number): boolean
   /** 탭이 갈아탄 저장소 — E15b setRepoPath의 후계 */
   setTabRepoPath(tabId: number, repoPath: string | null): void
   setLayout(windowId: number, patch: WindowLayout): void
@@ -77,7 +89,24 @@ export function createWindowRegistry(
   // 두 맵의 정합(탭이 정확히 한 창의 tabs에 있고 tabEntries에도 있다)은 addTab/removeTab/
   // removeWindow만 지나므로 거기서 지킨다 — 탭 검색·windowOfTab이 O(1)이 되는 대가다
   const windows = new Map<number, WindowState>()
-  const tabEntries = new Map<number, { windowId: number; repoPath: string | null }>()
+  const tabEntries = new Map<number, { windowId: number; repoPath: string | null; crashed: boolean }>()
+
+  /**
+   * 활성 승계 — 떠나는 자리(fromIndex)에서 가장 가까운 오른쪽 후보, 없으면 가장 가까운 왼쪽
+   * (브라우저 탭 관례). removeTab(탭이 떠날 때)과 setCrashed(활성이 죽을 때)가 **이 한 함수**를
+   * 공유한다 (E15e) — 같은 규칙이 두 곳에서 다르게 굳으면 크래시 탭으로 승계해 창이 도로
+   * 인질이 되는 종류의 어긋남이 생긴다. eligible이 후보를 거른다(산 탭만)
+   */
+  function pickSuccessor(
+    tabs: number[],
+    fromIndex: number,
+    eligible: (tabId: number) => boolean,
+  ): number | undefined {
+    for (let i = fromIndex + 1; i < tabs.length; i++) if (eligible(tabs[i]!)) return tabs[i]
+    for (let i = fromIndex - 1; i >= 0; i--) if (eligible(tabs[i]!)) return tabs[i]
+    return undefined
+  }
+
   return {
     addWindow(windowId, layout) {
       // layout을 복사해 담는다 — 호출자가 넘긴 객체(씨앗·디스크 캐시)를 나중에 고쳐도 이 창이 안 흔들린다
@@ -105,7 +134,7 @@ export function createWindowRegistry(
       if (state === undefined) throw new Error(`없는 창(${windowId})에 탭을 넣을 수 없어요`)
       if (tabEntries.has(tabId)) throw new Error(`탭(${tabId})은 이미 다른 창에 있어요 — 뷰는 한 창에만 산다`)
       state.tabs.splice(index ?? state.tabs.length, 0, tabId)
-      tabEntries.set(tabId, { windowId, repoPath })
+      tabEntries.set(tabId, { windowId, repoPath, crashed: false })
       // 첫 탭이 활성이 된다 — 이후 추가는 활성을 훔치지 않는다(활성 전환은 setActiveTab의 일)
       if (state.activeTab === -1) state.activeTab = tabId
       onChange('windows')
@@ -115,18 +144,20 @@ export function createWindowRegistry(
       if (entry === undefined) return
       // 정합 불변식: tabEntries에 있으면 그 창과 tabs 배열에 반드시 있다 (addTab/removeWindow가 지킨다)
       const state = windows.get(entry.windowId)!
-      tabEntries.delete(tabId)
       const removedAt = state.tabs.indexOf(tabId)
-      state.tabs.splice(removedAt, 1)
-      if (state.tabs.length === 0) {
+      if (state.tabs.length === 1) {
         // 마지막 탭이 떠나면 창 항목도 지운다 — 탭 없는 창은 없다(창 닫힘과 동치).
         // 남기면 snapshot에 빈 창이 실려 복원이 껍데기 창을 만든다
         windows.delete(entry.windowId)
       } else if (state.activeTab === tabId) {
-        // 활성 탭이 떠나면 이웃이 잇는다 — 오른쪽 우선(splice 후 같은 인덱스가 옛 오른쪽 이웃이다),
-        // 오른쪽이 없으면(맨 끝을 지웠으면) 왼쪽. 브라우저 탭 관례와 같다
-        state.activeTab = state.tabs[Math.min(removedAt, state.tabs.length - 1)]!
+        // 활성 탭이 떠나면 이웃이 잇는다 — 오른쪽 우선, 없으면 왼쪽(브라우저 탭 관례).
+        // **산 이웃 우선** (E15e): 크래시 탭으로 승계하면 그 창이 도로 인질이다. 남은 탭이
+        // 전부 크래시면 관례대로라도 잇는다 — activeTab은 tabs의 원소여야 한다는 불변식이 먼저다
+        const living = pickSuccessor(state.tabs, removedAt, (id) => !tabEntries.get(id)!.crashed)
+        state.activeTab = living ?? pickSuccessor(state.tabs, removedAt, () => true)!
       }
+      tabEntries.delete(tabId)
+      state.tabs.splice(removedAt, 1)
       onChange('windows')
     },
     setActiveTab(windowId, tabId) {
@@ -139,6 +170,31 @@ export function createWindowRegistry(
       if (state.activeTab === tabId) return
       state.activeTab = tabId
       onChange('windows')
+    },
+    setCrashed(tabId, crashed) {
+      const entry = tabEntries.get(tabId)
+      // 크래시·로드 완료 이벤트가 닫힌 탭보다 늦게 올 수 있다 — 없는 탭은 조용히 무시
+      if (entry === undefined) return
+      // 같은 값 재표시는 변화가 아니다 — 산 탭의 정상 로드 완료(false)마다 디스크 쓰기·push가
+      // 나가면 안 된다 (setActiveTab의 "이미 활성" 무발화와 같은 판단)
+      if (entry.crashed === crashed) return
+      entry.crashed = crashed
+      const state = windows.get(entry.windowId)!
+      if (crashed && state.activeTab === tabId) {
+        // 인질 해방의 장부 절반 — 활성이 죽으면 산 이웃이 잇는다(오른쪽 우선, removeTab과 공유).
+        // 산 이웃이 없으면 활성을 남겨 둔다 — main이 그 뷰를 reload로 재시동한다.
+        // 해제(false)는 활성을 되돌리지 않는다 — 복구는 조용해야 한다(활성 안 훔침 관례)
+        const living = pickSuccessor(
+          state.tabs,
+          state.tabs.indexOf(tabId),
+          (id) => !tabEntries.get(id)!.crashed,
+        )
+        if (living !== undefined) state.activeTab = living
+      }
+      onChange('windows')
+    },
+    isTabCrashed(tabId) {
+      return tabEntries.get(tabId)?.crashed === true
     },
     setTabRepoPath(tabId, repoPath) {
       const entry = tabEntries.get(tabId)

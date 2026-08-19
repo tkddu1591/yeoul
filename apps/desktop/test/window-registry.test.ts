@@ -228,6 +228,132 @@ describe('탭 (E15c)', () => {
 })
 
 /**
+ * 크래시 표시 (E15e — E15c 리뷰 I-2). 크래시한 렌더러는 destroyed가 아니라 레지스트리에
+ * 잔류한다 — main의 render-process-gone 훅이 여기 표시하고, did-finish-load(reload 완료)가
+ * 걷는다. **활성 승계는 레지스트리 몫이다**: "activeTab은 쓸 수 있는 탭을 가리킨다"는 불변식의
+ * 주인이 레지스트리고(removeTab 승계와 같은 자리), 크래시 여부를 아는 것도 레지스트리뿐이며,
+ * main(electron)은 vitest가 못 무는데 이 규칙은 물려야 한다(E15c Global Constraints — 순수부).
+ */
+describe('크래시 표시 (E15e)', () => {
+  it('setCrashed로 표시하고 걷는다 — isTabCrashed로 읽는다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    expect(r.isTabCrashed(10)).toBe(false)
+    r.setCrashed(10, true)
+    expect(r.isTabCrashed(10)).toBe(true)
+    r.setCrashed(10, false)
+    expect(r.isTabCrashed(10)).toBe(false)
+  })
+
+  it('없는 탭은 무해하다 — 크래시·로드 완료가 닫힌 탭보다 늦게 올 수 있다', () => {
+    const r = createWindowRegistry()
+    expect(() => r.setCrashed(99, true)).not.toThrow()
+    expect(r.isTabCrashed(99)).toBe(false)
+  })
+
+  it('변화가 있을 때만 windows로 알린다 — 매 did-finish-load마다 디스크를 쓰면 안 된다', () => {
+    const kinds: string[] = []
+    const r = createWindowRegistry((kind) => kinds.push(kind))
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    kinds.length = 0
+    r.setCrashed(10, false) // 산 탭의 정상 로드 완료 — 변화가 아니다
+    r.setCrashed(99, true) // 없는 탭 — 변화가 아니다
+    expect(kinds).toEqual([])
+    r.setCrashed(10, true)
+    r.setCrashed(10, true) // 같은 값 재표시 — 변화가 아니다
+    expect(kinds).toEqual(['windows'])
+    r.setCrashed(10, false)
+    expect(kinds).toEqual(['windows', 'windows'])
+  })
+
+  it('활성 탭이 크래시하면 산 이웃이 잇는다 — 오른쪽 우선, 크래시한 오른쪽은 건너뛴다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.setCrashed(11, true) // 가운데가 먼저 죽어 있다
+    r.setActiveTab(1, 10)
+    r.setCrashed(10, true) // 활성이 죽는다 — 오른쪽 11은 크래시라 건너뛰고 12가 잇는다
+    expect(r.getWindow(1)?.activeTab).toBe(12)
+  })
+
+  it('오른쪽에 산 탭이 없으면 왼쪽이 잇는다 — removeTab과 같은 규칙', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.setActiveTab(1, 11)
+    r.setCrashed(11, true)
+    expect(r.getWindow(1)?.activeTab).toBe(10)
+  })
+
+  it('산 이웃이 없으면(유일 탭·전부 크래시) 활성이 크래시 탭에 남는다 — main이 reload로 재시동한다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.setCrashed(10, true)
+    expect(r.getWindow(1)?.activeTab).toBe(10)
+  })
+
+  it('비활성 탭 크래시·해제는 활성을 건드리지 않는다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.setCrashed(11, true) // 비활성이 죽어도 활성은 그대로
+    expect(r.getWindow(1)?.activeTab).toBe(10)
+    r.setCrashed(11, false) // 되살아나도 활성을 훔치지 않는다 (addTab의 "활성 안 훔침"과 결이 같다)
+    expect(r.getWindow(1)?.activeTab).toBe(10)
+  })
+
+  it('removeTab 승계도 산 이웃 우선이다 — 크래시 탭으로 승계하면 창이 도로 인질이다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.setCrashed(11, true)
+    // 활성 10을 닫으면 오른쪽 이웃 11이 관례상 후계지만 크래시 상태다 — 산 12가 이어야 한다
+    r.removeTab(10)
+    expect(r.getWindow(1)?.activeTab).toBe(12)
+  })
+
+  it('남은 탭이 전부 크래시면 removeTab은 관례(오른쪽 우선)대로 잇는다 — activeTab은 tabs의 원소여야 한다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.setCrashed(11, true)
+    r.setCrashed(12, true)
+    r.removeTab(10)
+    expect(r.getWindow(1)?.activeTab).toBe(11)
+  })
+
+  it('탭을 떼면 크래시 표시도 함께 사라진다 — 색인과 같은 수명이다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.setCrashed(11, true)
+    r.removeTab(11)
+    expect(r.isTabCrashed(11)).toBe(false)
+  })
+
+  it('크래시는 영속되지 않는다 — snapshot 형상 무변(재시작이 곧 전체 reload다)', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    const before = r.snapshot()
+    r.setCrashed(10, true)
+    expect(r.snapshot()).toEqual(before)
+  })
+})
+
+/**
  * 영속 신호 (E15b 리뷰 I-1 계승). 레지스트리가 바뀔 때마다 알린다 — 종류를 가르는 이유는
  * 영속 정책이 다르기 때문이다: 창·탭 목록은 즉시, 레이아웃은 디바운스.
  * 그래서 "알렸다"만으로는 부족하고 **어느 종류로 알렸는지**까지 문다.

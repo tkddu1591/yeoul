@@ -34,15 +34,27 @@ export const electron = {
       injectedUserData = await mkdtemp(join(tmpdir(), 'gg-e2e-userdata-'))
       env = { ...(env ?? process.env), GIT_GUI_USER_DATA: injectedUserData }
     }
+    // E2E 숨김 플래그 — main의 isE2E 판정이 GIT_GUI_E2E_REPO에만 걸려 있으면, 복원 2회차처럼
+    // GIT_GUI_E2E_REPO 없이 띄우는 launch가 **사용자 화면에 창을 띄웠다**(사용자 불만 — 독 아이콘·
+    // 포커스 강탈 포함). harness를 거치는 모든 launch에 명시적 플래그를 넣어 항상 숨긴다.
+    // 호출자가 이미 명시했으면 존중한다 — GIT_GUI_E2E_SHOW=1 디버깅 조합도 그대로 동작한다
+    if (!('GIT_GUI_E2E' in env)) {
+      env = { ...env, GIT_GUI_E2E: '1' }
+    }
     const app = await _electron.launch({ ...options, env })
     const close = app.close.bind(app)
     app.close = async () => {
       captureIndex += 1
       const path = test.info().outputPath(`last-screen-${captureIndex}.png`)
-      // 창이 이미 죽었어도 닫기는 계속한다 — 진단 보조일 뿐 테스트를 실패시키지 않는다
+      // 창이 이미 죽었어도 닫기는 계속한다 — 진단 보조일 뿐 테스트를 실패시키지 않는다.
+      // timeout 5초 (E15e 실측): firstWindow가 끝 상태에서 **숨은 뷰**면 페인트하지 않아
+      // (E15c 스펙 §2 실측) 새 프레임이 영영 안 올 수 있다 — 캐시 프레임이 있으면 즉시 오지만
+      // 없으면(형제 탭 크래시+reload를 지난 세션에서 실측) 기본 30초를 다 기다려 그런 끝
+      // 상태의 테스트마다 close가 30초씩 인질이다(크래시 복구 테스트 31.5s→6.8s). 진단
+      // 보조가 테스트 시간을 잡아먹으면 안 된다 — 못 찍으면 못 찍은 대로 닫는다
       await app
         .firstWindow()
-        .then((window) => window.screenshot({ path }))
+        .then((window) => window.screenshot({ path, timeout: 5000 }))
         .catch(() => {})
       captured.push(path)
       try {

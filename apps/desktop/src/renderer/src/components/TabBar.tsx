@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react'
+import { Plus, TriangleAlert, X } from 'lucide-react'
 import type { TabInfo } from '@git-gui/ipc-contract'
 import { tabLabels } from './tab-labels'
 import './tab-bar.css'
@@ -24,15 +24,34 @@ export function TabBar({ tabs, onActivate, onClose, onAdd }: TabBarProps) {
   return (
     <div className="tab-bar" data-testid="tab-bar" role="tablist" aria-label="저장소 탭">
       {tabs.map((tab, index) => (
-        <span key={tab.id} className={`tab-bar__tab${tab.active ? ' tab-bar__tab--on' : ''}`}>
+        <span
+          key={tab.id}
+          className={`tab-bar__tab${tab.active ? ' tab-bar__tab--on' : ''}${tab.crashed ? ' tab-bar__tab--crashed' : ''}`}
+        >
+          {/* 죽음 표시 (E15e) — 이 탭바는 **산 형제** 렌더러가 그린다: 죽은 탭 자신은 아무것도
+              못 그리므로(스펙 §1) 표시가 뜨는 곳은 언제나 이웃의 탭바다. 클릭(onActivate)이 곧
+              복구다 — main의 tabs:activate가 크래시 탭이면 reload 후 세운다. 글리프는 이름
+              버튼 안에 둔다: 표시를 보고 누르는 자리가 그대로 복구 버튼이어야 한다 */}
           <button
             type="button"
             role="tab"
             aria-selected={tab.active}
             className="tab-bar__name"
             data-testid={`tab-${tab.id}`}
+            title={tab.crashed ? '응답 없음 — 누르면 다시 열어요' : undefined}
+            aria-label={
+              tab.crashed ? `${labels[index]} (응답 없음 — 누르면 다시 열어요)` : undefined
+            }
             onClick={() => onActivate(tab.id)}
           >
+            {tab.crashed ? (
+              <TriangleAlert
+                size={11}
+                aria-hidden="true"
+                className="tab-bar__crash"
+                data-testid={`tab-crashed-${tab.id}`}
+              />
+            ) : null}
             {labels[index]}
           </button>
           <button

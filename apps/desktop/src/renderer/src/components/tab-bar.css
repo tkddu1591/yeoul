@@ -62,6 +62,20 @@ body.is-fullscreen .tab-bar {
 .tab-bar__tab--on .tab-bar__name {
   font-weight: 600;
 }
+/* E15e 죽음 표시 — 라벨은 앱의 흐림 관례(E7g: 부차 정보는 --color-text-faint — 전환기·최근
+   목록의 경로 흐림과 같은 톤)로 가라앉히고, 경고 글리프가 "고장"을 든다. opacity가 아니라
+   색으로 흐리는 이유: 글리프가 이름 버튼 **안**에 살아서(클릭 자리가 곧 복구 버튼) opacity면
+   글리프까지 같이 바래다 — 색 상속은 글리프의 자기 색이 덮는다 */
+.tab-bar__tab--crashed .tab-bar__name {
+  color: var(--color-text-faint);
+}
+.tab-bar__crash {
+  color: var(--color-danger);
+  /* 이름 버튼은 말줄임 때문에 flex가 아니라 인라인 흐름이다 — 글리프만 베이스라인을 살짝
+     내려 텍스트와 눈높이를 맞춘다 (App.tsx의 인라인 아이콘 관례와 같은 처지) */
+  vertical-align: -1px;
+  margin-right: 3px;
+}
 /* 닫기 ×는 호버·활성일 때만 — 탭마다 항상 떠 있으면 시끄럽다 (E12 터미널 탭과 같은 판단).
    포커스(키보드 탐색)에서도 드러나야 접근성이 죽지 않는다 */
 .tab-bar__close {

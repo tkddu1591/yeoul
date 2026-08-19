@@ -5545,6 +5545,12 @@ test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 �
       await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(2)
       const pages = second.windows()
       await Promise.all(pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })))
+      // E2E 창 비간섭 — 복원 2회차는 GIT_GUI_E2E_REPO 없이 뜨므로, harness가 GIT_GUI_E2E=1을
+      // 주입하지 않으면 isE2E 판정이 무너져 창이 **사용자 화면에 실제로 뜬다**(사용자 불만).
+      // 복원 계열 전체를 대표해 여기 한 곳에서 "모든 창이 숨김"을 못박는다.
+      expect(
+        await second.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().map((w) => w.isVisible())),
+      ).toEqual([false, false])
       // (2) 순서는 등록 순서 = 저장 순서다
       const paths = await Promise.all(
         pages.map((page) => page.getByTestId('repo-path').textContent()),
@@ -6929,5 +6935,500 @@ test('E15c 리뷰 N-3 — 복원에서 버려진 탭이 있어도 저장된 활�
     await rm(repoA, { recursive: true, force: true })
     await rm(repoC, { recursive: true, force: true })
     await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e Task 1 ① — 활성 탭이 크래시하면 산 이웃이 활성을 잇는다 (인질 해방).
+ *
+ * E15c 리뷰 I-2 실측: 크래시한 렌더러는 destroyed가 아니라 수명 배선(once('destroyed'))이
+ * 안 돌고 뷰·레지스트리에 잔류한다. 탭바가 각 렌더러 안에 있으므로(E15c 스펙 §1) 활성 탭이
+ * 크래시하면 산 탭으로 갈 UI(탭바·단축키)가 전부 죽은 렌더러 안이다 — main이 산 이웃으로
+ * 활성을 옮겨야만 창이 풀린다.
+ *
+ * 크래시는 리뷰 프로브2가 검증한 forcefullyCrashRenderer로 낸다. 크래시 순간 그 탭의 page
+ * 객체는 죽는다 — 이후 단언은 산 탭의 page와 app.evaluate로만 한다.
+ * 가시성 단언은 main의 getVisible()로만 (Task 3 실측 — 숨은 뷰도 렌더러 단언은 통과한다).
+ */
+test('E15e — 활성 탭이 크래시하면 산 이웃이 활성을 잇는다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const pageA = await app.firstWindow()
+    await expect(pageA.getByTestId('repo-path')).toHaveText(pathA)
+
+    // 탭을 여는 동작보다 **먼저** 대기를 걸어 둔다 (nextWindow 관례)
+    const pendingB = nextWindow(app)
+    await pageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 탭 id는 구독 스냅샷에서 (Task 3 관용구 — 등록 즉시 현재 목록 한 번)
+    const tabs = await pageA.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // 사전 조건 못박기 — 막 연 B가 활성(보이는 뷰)이다. 이게 참이어야 아래 전환 단언이 공허하지 않다
+    const before = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.contentView.children
+        .filter((child) => child.getVisible())
+        .map((child) => (child as Electron.WebContentsView).webContents.id),
+    )
+    expect(before).toEqual([tabB.id])
+
+    // 크래시 — 이 줄부터 pageB는 죽었다: 이후 단언은 pageA와 app.evaluate로만
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabB.id)
+
+    // 인질 해방 — 산 이웃 A가 활성 실물이 된다. 수정 전에는 죽은 B가 활성으로 남아 여기서 빨갛다
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 장부 — 산 탭 A가 받는 목록에 B가 crashed로 실린다. A는 활성이고 crashed가 **없다**
+    // (없으면 산 것 — 계약서: false를 매 탭에 싣지 않아 기존 소비처가 무변이다)
+    const after = await pageA.evaluate(
+      () =>
+        new Promise<{ id: number; active: boolean; crashed?: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(after.find((tab) => tab.id === tabB.id)?.crashed).toBe(true)
+    const living = after.find((tab) => tab.id === tabA.id)!
+    expect(living.active).toBe(true)
+    expect(living.crashed).toBeUndefined()
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e Task 1 ② — 유일 탭이 크래시하면 자동 재시동된다.
+ *
+ * 산 이웃이 없으면 옮겨 갈 곳이 없고, 죽은 뷰에는 안내(sad-tab)를 그릴 수도 없다(스펙 §1) —
+ * reload가 유일한 복구다. 재시동은 repo-path가 다시 뜨는 것으로 잰다: 렌더러 재부팅 +
+ * repo:initial-path 경로(레지스트리에 남은 그 탭의 저장소)로 같은 저장소를 다시 열었다는
+ * 켤레 증거다. 크래시 후 page 객체는 죽으므로 단언은 app.evaluate(executeJavaScript)로만 한다.
+ */
+test('E15e — 유일 탭이 크래시하면 자동 재시동된다', async () => {
+  const repo = await createRepoWithChange()
+  const path = realpathSync(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByTestId('repo-path')).toHaveText(path)
+    const tabId = await app.evaluate(
+      ({ BaseWindow }) =>
+        (BaseWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView)
+          .webContents.id,
+    )
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabId)
+    // 재시동 — 같은 webContents(id 불변)가 다시 로드를 마치고 repo-path를 그린다.
+    // 수정 전에는 죽은 채 잔류해 이 poll이 타임아웃으로 빨갛다
+    await expect
+      .poll(
+        () =>
+          app
+            .evaluate(async ({ webContents }, id: number) => {
+              const contents = webContents.fromId(id)
+              if (!contents || contents.isDestroyed() || contents.isCrashed()) return null
+              if (contents.isLoading()) return null
+              return (await contents.executeJavaScript(
+                'document.querySelector(\'[data-testid="repo-path"]\')?.textContent ?? null',
+              )) as string | null
+            }, tabId)
+            .catch(() => null),
+        { timeout: 30_000 },
+      )
+      .toBe(path)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e Task 2 — 산 탭바의 죽음 표시와 클릭 복구.
+ *
+ * 표시가 뜨는 곳은 언제나 **산 형제**의 탭바다 — 죽은 탭 자신은 아무것도 못 그린다(스펙 §1).
+ * 그래서 비활성 탭을 죽인다: 활성(산) 탭의 탭바에 죽음 표시가 push로 실리고, 그 표시를
+ * 클릭하는 것이 곧 복구(tabs:activate → showActiveTab의 reload 분기)다. 되살아남은 Task 1 ②와
+ * 같은 켤레 증거(repo-path 재등장 — 렌더러 재부팅 + repo:initial-path로 같은 저장소)로 잰다.
+ * 크래시 순간 그 탭의 page 객체는 죽는다 — 이후 단언은 산 탭의 page와 app.evaluate로만.
+ * 가시성 단언은 main의 getVisible()로만 (Task 3 실측 — 숨은 뷰도 렌더러 단언은 통과한다).
+ */
+test('E15e — 산 탭바에 죽음 표시가 뜨고, 클릭하면 되살아나 활성이 된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const pageA = await app.firstWindow()
+    await expect(pageA.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pendingB = nextWindow(app)
+    await pageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await pageA.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // 사전 조건 — A를 도로 활성으로: B를 "비활성인 채" 죽여야 산 탭바(A)가 계속 화면에 있다
+    await pageB.getByTestId(`tab-${tabA.id}`).click()
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+
+    // 크래시 — 이 줄부터 pageB는 죽었다
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabB.id)
+
+    // 죽음 표시 — 산 탭바(pageA)에 경고 글리프가 뜨고, 그 탭 버튼이 복구를 예고한다
+    // (툴팁 — 표시 렌더를 무력화하면 여기서 빨갛다)
+    await expect(pageA.getByTestId(`tab-crashed-${tabB.id}`)).toBeVisible()
+    await expect(pageA.getByTestId(`tab-${tabB.id}`)).toHaveAttribute(
+      'title',
+      '응답 없음 — 누르면 다시 열어요',
+    )
+
+    // 클릭이 곧 복구 — 산 탭바에서 죽은 탭을 누른다
+    await pageA.getByTestId(`tab-${tabB.id}`).click()
+
+    // 활성화는 즉시다 — 화면은 did-finish-load가 채우고 그동안은 뷰 배경색이 선다(흰 프레임 방지)
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabB.id])
+    }).toPass({ timeout: 5000 })
+
+    // 되살아났다 — 같은 webContents(id 불변)가 다시 로드를 마치고 같은 저장소를 그린다.
+    // activate의 reload 분기를 무력화하면 죽은 뷰가 활성으로 서기만 하고 여기서 timeout이다
+    await expect
+      .poll(
+        () =>
+          app
+            .evaluate(async ({ webContents }, id: number) => {
+              const contents = webContents.fromId(id)
+              if (!contents || contents.isDestroyed() || contents.isCrashed()) return null
+              if (contents.isLoading()) return null
+              return (await contents.executeJavaScript(
+                'document.querySelector(\'[data-testid="repo-path"]\')?.textContent ?? null',
+              )) as string | null
+            }, tabB.id)
+            .catch(() => null),
+        { timeout: 30_000 },
+      )
+      .toBe(pathB)
+
+    // 표시가 걷혔다 — did-finish-load의 setCrashed(false)가 push로 산 탭바에도 닿는다
+    await expect(pageA.getByTestId(`tab-crashed-${tabB.id}`)).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e Task 2 경계 (Task 1이 넘김) — 마지막 산 탭을 닫아 **전부 크래시만 남으면** 재시동된다.
+ *
+ * [A(크래시)·B(산·활성)]에서 B를 닫으면 removeTab 승계가 A를 활성으로 세우는데, A는 죽어
+ * 있다 — closeTab 끝의 showActiveTab에 있는 복구 분기가 reload로 재시동해야 창이 인질이
+ * 되지 않는다(크래시 훅의 "전부 죽음" reload는 **크래시 순간**에만 돌아 이 경로를 못 덮는다).
+ * B는 자기 탭을 닫으므로 close 이벤트 대기 + catch 삼킴(⌘W 테스트의 실측 관용구)을 쓴다.
+ */
+test('E15e — 마지막 산 탭을 닫아 크래시 탭만 남으면 재시동된다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const pageA = await app.firstWindow()
+    await expect(pageA.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pendingB = nextWindow(app)
+    await pageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await pageB.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // 비활성 A를 죽인다 (B가 방금 열려 활성이다) — 이 줄부터 pageA는 죽었다
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabA.id)
+    // 장부가 정리된 뒤에 닫는다 — 죽음 표시가 B 탭바에 실린 것이 그 신호다 (순서가 곧 단언)
+    await expect(pageB.getByTestId(`tab-crashed-${tabA.id}`)).toBeVisible()
+
+    // 마지막 산 탭(B, 자기 자신)을 닫는다 — invoke의 sender가 그 자리에서 파괴되므로 응답이
+    // 영영 안 온다: close 이벤트가 실제 검증이고 evaluate 실패는 삼킨다 (⌘W 테스트 실측 관례)
+    const closed = pageB.waitForEvent('close')
+    await pageB.evaluate((id: number) => window.gitApi.tabs.close(id), tabB.id).catch(() => {})
+    await closed
+
+    // 탭 하나가 닫혔다고 창이 닫히면 안 된다 — 창은 그대로, 남은 A가 보이는 활성이다
+    await expect(async () => {
+      const shape = await app.evaluate(({ BaseWindow }) => ({
+        windows: BaseWindow.getAllWindows().length,
+        visible: BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      }))
+      expect(shape).toEqual({ windows: 1, visible: [tabA.id] })
+    }).toPass({ timeout: 5000 })
+
+    // 재시동 — 닫기 승계의 복구 분기를 무력화하면 죽은 A가 활성으로 남아 여기서 timeout이다
+    await expect
+      .poll(
+        () =>
+          app
+            .evaluate(async ({ webContents }, id: number) => {
+              const contents = webContents.fromId(id)
+              if (!contents || contents.isDestroyed() || contents.isCrashed()) return null
+              if (contents.isLoading()) return null
+              return (await contents.executeJavaScript(
+                'document.querySelector(\'[data-testid="repo-path"]\')?.textContent ?? null',
+              )) as string | null
+            }, tabA.id)
+            .catch(() => null),
+        { timeout: 30_000 },
+      )
+      .toBe(pathA)
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e 리뷰 I-1 ① — "로드하면 반드시 죽는" 유일 탭은 자동 재시동이 연속 상한(3회)에서 멈춘다.
+ *
+ * 수정 전 실측: crash → showActiveTab의 자동 reload → did-finish-load → 또 crash가 무한히
+ * 돌아 15초에 크래시 157회·reload 156회(~10회/초) + 크래시마다 setCrashed의 즉시 디스크
+ * 쓰기 — 스펙 §3("자동 재시도 루프 없음") 위반이었다.
+ *
+ * 크래시-온-로드는 **런타임 주입**으로 만든다 — main 코드 수정 없이 app.evaluate에서 그 탭의
+ * webContents에 did-finish-load→즉시 forcefullyCrashRenderer 리스너를 얹는다(리뷰 프로브 A
+ * 방식). 같은 자리에서 로드·크래시 횟수를 계수해 "몇 번 돌고 멈췄나"를 결정론으로 잰다:
+ * 자동 reload 상한 3회 → 로드 3회, 크래시는 최초 1회 + 로드마다 1회 = 4회에서 정지.
+ */
+test('E15e — 로드하면 죽는 유일 탭은 자동 재시동이 상한에서 멈춘다 (무한 루프 없음)', async () => {
+  const repo = await createRepoWithChange()
+  const path = realpathSync(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByTestId('repo-path')).toHaveText(path)
+    const tabId = await app.evaluate(
+      ({ BaseWindow }) =>
+        (BaseWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView)
+          .webContents.id,
+    )
+    await app.evaluate(({ webContents }, id: number) => {
+      const contents = webContents.fromId(id)!
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      g.__e2eLoads = 0
+      g.__e2eCrashes = 0
+      contents.on('did-finish-load', () => {
+        g.__e2eLoads += 1
+        contents.forcefullyCrashRenderer()
+      })
+      contents.on('render-process-gone', () => {
+        g.__e2eCrashes += 1
+      })
+    }, tabId)
+    // 최초 크래시 — 이후는 앱의 자동 재시동 경로만 돈다(수정 전에는 여기서부터 무한 루프였다)
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabId)
+    // 상한 도달 — 정확히 이 숫자에서 선다. 상한 판정을 지우면(항상 reload) loads가 3을 지나쳐
+    // 계속 자라 여기서 빨갛다
+    await expect
+      .poll(
+        () =>
+          app.evaluate(() => {
+            const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+            return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+          }),
+        { timeout: 30_000 },
+      )
+      .toEqual({ loads: 3, crashes: 4 })
+    // 정지의 확인 — 루프라면(수정 전 ~10회/초) 2초면 스무 번을 더 돌았다. 숫자가 그대로여야 한다
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    const settled = await app.evaluate(() => {
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+    })
+    expect(settled).toEqual({ loads: 3, crashes: 4 })
+    // 크래시 표시를 남긴 채 죽어 있다 — 스펙 §3이 감수한 끝 상태(수동 복구 대기, 루프 없음)
+    const crashed = await app.evaluate(
+      ({ webContents }, id: number) => webContents.fromId(id)!.isCrashed(),
+      tabId,
+    )
+    expect(crashed).toBe(true)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e 리뷰 I-1 ② — 수동 클릭 복구(tabs:activate)는 자동 재시동 상한과 무관하다.
+ *
+ * 상한은 앱의 추측(자동 reload)만 유한하게 만든다 — 사용자가 산 탭바에서 죽은 탭을 누르는
+ * 것은 의지라 상한 너머에서도 언제나 reload여야 한다(스펙 §2·§3). 다탭에선 크래시 승계가
+ * 활성을 산 이웃으로 옮기므로 자동 reload는 애초에 없다 — 클릭마다 reload → (주입 리스너로)
+ * 곧장 크래시가 반복되며 연속 카운트만 쌓인다. 4번째 클릭은 카운트가 상한(3)을 넘긴 뒤인데도
+ * reload가 나가야 한다 — 상한이 수동 경로까지 물면 loads가 3에 멈춰 4번째 poll이 빨갛다.
+ */
+test('E15e — 수동 클릭 복구는 자동 재시동 상한 너머에서도 언제나 reload다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const pageA = await app.firstWindow()
+    await expect(pageA.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pendingB = nextWindow(app)
+    await pageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await pageA.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // B를 크래시-온-로드로 만든다 (런타임 주입 — 위 ① 테스트와 같은 방식·같은 계수)
+    await app.evaluate(({ webContents }, id: number) => {
+      const contents = webContents.fromId(id)!
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      g.__e2eLoads = 0
+      g.__e2eCrashes = 0
+      contents.on('did-finish-load', () => {
+        g.__e2eLoads += 1
+        contents.forcefullyCrashRenderer()
+      })
+      contents.on('render-process-gone', () => {
+        g.__e2eCrashes += 1
+      })
+    }, tabB.id)
+    // 최초 크래시 — 활성이던 B가 죽으면 승계가 A를 세운다(자동 reload는 다탭이라 없다).
+    // 이 줄부터 pageB는 죽었다: 이후 단언은 pageA와 app.evaluate로만
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabB.id)
+    await expect(pageA.getByTestId(`tab-crashed-${tabB.id}`)).toBeVisible()
+
+    // 클릭 4회 — 연속 카운트는 클릭마다 crash로 쌓여(2→3→4→5) 3번째 클릭부터는 상한 너머다.
+    // 매 클릭: reload(loads +1) → 주입 크래시(crashes +1) → 승계로 활성이 A로 복귀(다음 클릭 준비)
+    for (let click = 1; click <= 4; click++) {
+      await expect(async () => {
+        const visible = await app.evaluate(({ BaseWindow }) =>
+          BaseWindow.getAllWindows()[0]!.contentView.children
+            .filter((child) => child.getVisible())
+            .map((child) => (child as Electron.WebContentsView).webContents.id),
+        )
+        expect(visible).toEqual([tabA.id])
+      }).toPass({ timeout: 5000 })
+      await pageA.getByTestId(`tab-${tabB.id}`).click()
+      await expect
+        .poll(
+          () =>
+            app.evaluate(() => {
+              const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+              return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+            }),
+          { timeout: 15_000 },
+        )
+        .toEqual({ loads: click, crashes: click + 1 })
+    }
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
   }
 })
