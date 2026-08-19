@@ -34,6 +34,13 @@ export const electron = {
       injectedUserData = await mkdtemp(join(tmpdir(), 'gg-e2e-userdata-'))
       env = { ...(env ?? process.env), GIT_GUI_USER_DATA: injectedUserData }
     }
+    // E2E 숨김 플래그 — main의 isE2E 판정이 GIT_GUI_E2E_REPO에만 걸려 있으면, 복원 2회차처럼
+    // GIT_GUI_E2E_REPO 없이 띄우는 launch가 **사용자 화면에 창을 띄웠다**(사용자 불만 — 독 아이콘·
+    // 포커스 강탈 포함). harness를 거치는 모든 launch에 명시적 플래그를 넣어 항상 숨긴다.
+    // 호출자가 이미 명시했으면 존중한다 — GIT_GUI_E2E_SHOW=1 디버깅 조합도 그대로 동작한다
+    if (!('GIT_GUI_E2E' in env)) {
+      env = { ...env, GIT_GUI_E2E: '1' }
+    }
     const app = await _electron.launch({ ...options, env })
     const close = app.close.bind(app)
     app.close = async () => {

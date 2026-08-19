@@ -98,7 +98,12 @@ if (process.env.GIT_GUI_USER_DATA) {
 // CDP 입력·렌더·스크린샷은 숨김 창에서도 전부 동작한다(플랜 실측: isVisible false에서
 // 클릭·드래그·키보드·screenshot(1200·960) 정상 + 기존 42건 전체 통과).
 // 패키징된 앱에서는 무시한다 (GIT_GUI_E2E_GH_TOKEN과 동일 관례)
-const isE2E = !app.isPackaged && process.env.GIT_GUI_E2E_REPO !== undefined
+// GIT_GUI_E2E=1: 명시적 E2E 플래그 — harness가 모든 launch에 주입한다. GIT_GUI_E2E_REPO만으로
+// 판정하면 복원 2회차처럼 REPO 없이 띄우는 launch가 사용자 화면에 창을 띄운다(사용자 불만).
+// GIT_GUI_E2E_REPO 폴백은 하위 호환 — 하네스를 안 거치는 프로브가 옛 방식으로 띄울 수 있다
+const isE2E =
+  !app.isPackaged &&
+  (process.env.GIT_GUI_E2E === '1' || process.env.GIT_GUI_E2E_REPO !== undefined)
 // 로컬 디버깅 opt-out (E6a 후속) — GIT_GUI_E2E_SHOW=1이면 숨김 게이트만 무시하고 창을 보여준다.
 // 스로틀 해제 등 나머지 E2E 동작은 유지. 프로덕션(isPackaged)·CI 기본 동작 무변
 const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'

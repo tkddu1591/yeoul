@@ -5545,6 +5545,12 @@ test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 �
       await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(2)
       const pages = second.windows()
       await Promise.all(pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })))
+      // E2E 창 비간섭 — 복원 2회차는 GIT_GUI_E2E_REPO 없이 뜨므로, harness가 GIT_GUI_E2E=1을
+      // 주입하지 않으면 isE2E 판정이 무너져 창이 **사용자 화면에 실제로 뜬다**(사용자 불만).
+      // 복원 계열 전체를 대표해 여기 한 곳에서 "모든 창이 숨김"을 못박는다.
+      expect(
+        await second.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().map((w) => w.isVisible())),
+      ).toEqual([false, false])
       // (2) 순서는 등록 순서 = 저장 순서다
       const paths = await Promise.all(
         pages.map((page) => page.getByTestId('repo-path').textContent()),
