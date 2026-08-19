@@ -262,6 +262,40 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
     // 활성 탭이 죽었으면 removeTab의 승계(오른쪽 우선)를 화면에도 반영한다
     showActiveTab(windowId)
   })
+
+  // 크래시한 렌더러는 destroyed가 **아니다** (E15c 리뷰 I-2 실측) — 위 destroyed 훅이 안 돌고
+  // 뷰·레지스트리에 그대로 잔류한다. 탭바가 각 렌더러 안에 있으므로(E15c 스펙 §1) 여기서
+  // main이 안 움직이면 활성 탭 크래시 = 창 인질이다: 산 탭으로 갈 UI(탭바·단축키)가 전부
+  // 죽은 렌더러 안이라 유일한 출구(창 닫기)가 산 탭까지 잃는다.
+  // 정상 닫힘 경로는 여기 안 걸린다 — closeTab·closed 훅이 레지스트리를 먼저 지우므로
+  // 그 뒤에 이 이벤트가 와도 setCrashed는 없는 탭으로 무해하다
+  view.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`탭 렌더러 크래시 (tab ${tabId}): ${details.reason}`)
+    // 장부 절반 — 크래시 표시 + (활성이었으면) 산 이웃 승계(레지스트리가 removeTab과 같은
+    // 오른쪽 우선으로 잇는다). onChange가 push를 돌려 산 형제의 탭바에 죽음 표시가 실린다
+    registry.setCrashed(tabId, true)
+    const where = registry.windowOfTab(tabId)
+    if (where === undefined) return
+    const state = registry.getWindow(where)
+    if (state === undefined) return
+    if (!state.tabs.some((id) => !registry.isTabCrashed(id))) {
+      // 유일한(또는 전부 죽은) 탭 — 옮겨 갈 산 이웃이 없고 죽은 뷰엔 안내도 그릴 수 없다
+      // (스펙 §1) — 재시동이 유일한 복구다. 자동 재시도 루프가 아니다: 크래시 1회당 reload
+      // 1회고, reload가 또 죽으면 다음 crash 이벤트가 또 한 번 시도할 뿐이다 (스펙 §3)
+      view.webContents.reload()
+      return
+    }
+    // 실물 절반 — setCrashed가 옮긴 활성(산 이웃)을 화면에 반영한다. 비활성 탭 크래시면
+    // 활성이 안 변했고 이 호출은 무해한 재확인이다
+    showActiveTab(where)
+  })
+
+  // 크래시 표시 해제 — reload(위 자동 재시동·Task 2의 클릭 복구)가 끝날 때마다 와야 하므로
+  // once가 아니라 **on**이다 (createWindow의 once('did-finish-load')는 첫 show용 1회 — 역할이
+  // 다르다). 산 탭의 정상 로드에서는 setCrashed(false)가 무변화 무발화라 아무 일도 없다
+  view.webContents.on('did-finish-load', () => {
+    registry.setCrashed(tabId, false)
+  })
   return view
 }
 
@@ -322,6 +356,8 @@ function tabInfosOf(windowId: number): TabInfo[] {
     id: tabId,
     repoPath: registry.getTabRepoPath(tabId) ?? null,
     active: tabId === state.activeTab,
+    // 계약서: 없으면 산 것 — false를 매 탭에 싣지 않아 기존 소비처·단언이 무변이다 (E15e)
+    ...(registry.isTabCrashed(tabId) ? { crashed: true } : {}),
   }))
 }
 

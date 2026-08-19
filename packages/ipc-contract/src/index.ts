@@ -705,6 +705,9 @@ export interface TabInfo {
   id: number
   repoPath: string | null
   active: boolean
+  /** 렌더러가 크래시해 응답 없음 (E15e) — **없으면 산 것이다**(기존 소비처 무변). 산 형제의
+   * 탭바가 죽음 표시를 그리고, 클릭(tabs:activate)이 reload를 겸해 되살린다 */
+  crashed?: boolean
 }
 
 export const TAB_CHANNELS = {
