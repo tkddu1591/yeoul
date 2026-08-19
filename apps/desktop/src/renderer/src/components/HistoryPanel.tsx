@@ -215,14 +215,46 @@ export function HistoryPanel({
   const historyLenRef = useRef(history.length)
   historyLenRef.current = history.length
 
-  // 검색 실행 — 쿼리·스코프(historyRef)·목록 갱신에 반응한다. 닫히면 결과를 비운다
+  /** 그 인덱스로 이동 — 로드 범위 밖이면 먼저 더 불러온다 (E7i) */
+  const jumpTo = async (index: number) => {
+    if (index >= historyLenRef.current) {
+      await onEnsureLoaded(index)
+      // ensureHistoryLoaded는 조회(runRead)라 busy와 무관하게 언제나 실제로 돈다 — 예전엔
+      // busy면 조용히 끝났고 그래서 로드 없이 돌아올 수 있었다(E14a가 개선한 지점). 그래도
+      // 상한(HISTORY_MAX)이나 늦게 온 응답 폐기로 로드가 안 될 수 있으니, 로드 후에도
+      // 범위 밖이면 스크롤을 건너뛴다(안 그러면 가상 목록이 바닥으로 튄다). historyLenRef는
+      // 렌더마다 갱신되므로 이 시점에 store가 반영한 최신 길이를 읽는다 (리뷰 가드 — E7i)
+      if (index >= historyLenRef.current) return
+    }
+    virtualizer.scrollToIndex(index, { align: 'center' })
+  }
+
+  // E14c — 검색 이펙트가 "값은 읽되 재실행 트리거로는 삼지 않는" 것들은 렌더마다 ref에 반영해
+  // 최신 판을 읽는다(historyLenRef와 같은 관용구):
+  // · jumpTo — 지역 화살표라 렌더마다 새 참조. deps에 넣으면 매 렌더 재검색이라 E7i 리뷰가
+  //   잡았던 "타이핑 중 카운터 역전" 플레이크가 되살아난다(함수 정체성은 재검색 신호가 아니다)
+  // · findPos — 이동 핸들러(moveFind)가 이미 직접 점프한다. 트리거로 삼으면 ↑↓ 한 번마다
+  //   200ms 디바운스 검색이 git으로 다시 나간다
+  // · findHits.length — 닫기 분기의 헛렌더 방지 가드일 뿐. 트리거로 삼으면 결과 도착마다 재검색이다
+  const jumpToRef = useRef(jumpTo)
+  jumpToRef.current = jumpTo
+  const findPosRef = useRef(findPos)
+  findPosRef.current = findPos
+  const findHitsLenRef = useRef(findHits.length)
+  findHitsLenRef.current = findHits.length
+  // 복합식(history[0]?.hash)은 deps에서 정적으로 검사할 수 없다 — 지역 변수로 빼서 넣는다 (E14c)
+  const firstHash = history[0]?.hash
+
+  // 검색 실행 — 쿼리·스코프(historyRef)·목록 갱신에 반응한다. 닫히면 결과를 비운다.
+  // onSearch는 App이 셀렉터로 받은 zustand 액션을 그대로 내려주는 안정 참조라(E14c) deps에
+  // 있어도 재검색을 일으키지 않는다
   useEffect(() => {
     if (!findOpen || findQuery === '') {
       // 진행 중 응답을 폐기한다 — 안 그러면 닫은 뒤에 하이라이트·스크롤이 되살아난다 (보완 I-1)
       findSeqRef.current += 1
       lastJumpKeyRef.current = ''
       // 닫힌 상태에서 매 스냅샷마다 새 배열을 넣어 헛렌더하지 않는다
-      if (findHits.length > 0) {
+      if (findHitsLenRef.current > 0) {
         setFindHits([])
         setFindTruncated(false)
       }
@@ -241,37 +273,14 @@ export function HistoryPanel({
         const jumpKey = `${findQuery}\u0000${historyRef ?? ''}`
         if (lastJumpKeyRef.current !== jumpKey && result.indices.length > 0) {
           lastJumpKeyRef.current = jumpKey
-          void jumpTo(result.indices[Math.min(findPos, result.indices.length - 1)]!)
+          void jumpToRef.current(
+            result.indices[Math.min(findPosRef.current, result.indices.length - 1)]!,
+          )
         }
       })
     }, 200)
     return () => clearTimeout(timer)
-    // 이 억제 한 줄이 보고 둘을 덮는다(넷 + 복합식):
-    // ① findPos·findHits.length — 이동 핸들러(moveFind)가 이미 직접 점프하므로, 넣으면 ↑↓
-    //    한 번마다 200ms 디바운스 검색이 git으로 다시 나간다.
-    // ② jumpTo·onSearch — 렌더마다 새 함수다(jumpTo는 이 컴포넌트 지역 화살표, onSearch는 App이
-    //    인라인으로 내려준다). 넣으면 렌더마다 재검색이라 E7i 리뷰가 잡았던 "타이핑 중 카운터
-    //    역전" 플레이크가 그대로 되살아난다(seq 폐기 장치가 있어도 요청 폭주는 남는다).
-    // ③ history[0]?.hash는 "복합식은 정적으로 검사할 수 없다"는 별개 보고 — 지역 변수로 빼면
-    //    그것만 사라지지만 ①②가 남아 억제는 어차피 유지된다.
-    // E14c: onSearch를 App에서 안정화하고 jumpTo를 안정 참조로 올리면 ②가 풀린다. ①은 참조
-    // 문제가 아니라 "값은 읽되 재실행 트리거로는 삼지 않겠다"는 의도라 findPos를 ref로 읽어야 없어진다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, findQuery, historyRef, history.length, history[0]?.hash])
-
-  /** 그 인덱스로 이동 — 로드 범위 밖이면 먼저 더 불러온다 (E7i) */
-  const jumpTo = async (index: number) => {
-    if (index >= historyLenRef.current) {
-      await onEnsureLoaded(index)
-      // ensureHistoryLoaded는 조회(runRead)라 busy와 무관하게 언제나 실제로 돈다 — 예전엔
-      // busy면 조용히 끝났고 그래서 로드 없이 돌아올 수 있었다(E14a가 개선한 지점). 그래도
-      // 상한(HISTORY_MAX)이나 늦게 온 응답 폐기로 로드가 안 될 수 있으니, 로드 후에도
-      // 범위 밖이면 스크롤을 건너뛴다(안 그러면 가상 목록이 바닥으로 튄다). historyLenRef는
-      // 렌더마다 갱신되므로 이 시점에 store가 반영한 최신 길이를 읽는다 (리뷰 가드 — E7i)
-      if (index >= historyLenRef.current) return
-    }
-    virtualizer.scrollToIndex(index, { align: 'center' })
-  }
+  }, [findOpen, findQuery, historyRef, history.length, firstHash, onSearch])
 
   const moveFind = (delta: number) => {
     if (findHits.length === 0) return
@@ -285,18 +294,19 @@ export function HistoryPanel({
   //  불리언 전이만 보므로 이미 보이는 상태의 단순 더 불러오기로는 튀지 않는다)
   const headIndex = headHash === null ? -1 : history.findIndex((commit) => commit.hash === headHash)
   const headFound = headIndex >= 0
+  // E14c — headIndex는 "값은 읽되 재실행 트리거로는 삼지 않는다": 더 불러오기로 목록이 늘 때마다
+  // HEAD의 인덱스가 바뀌므로, deps에 넣으면 사용자가 스크롤하는 도중에도 화면이 HEAD 행으로
+  // 되감긴다(위 주석의 "불리언 전이만 본다"가 그 방어다). ref로 최신 판만 읽는다
+  const headIndexRef = useRef(headIndex)
+  headIndexRef.current = headIndex
   useEffect(() => {
-    if (headIndex >= 0) virtualizer.scrollToIndex(headIndex, { align: 'center' })
-    // 빠진 의존성은 `headIndex`·`virtualizer`. 진짜 이유는 headIndex 하나다 — 더 불러오기로
-    // 목록이 늘 때마다 HEAD의 인덱스가 바뀌므로, 넣으면 사용자가 스크롤하는 도중에도 화면이
-    // HEAD 행으로 되감긴다(위 주석의 "불리언 전이만 본다"가 그 방어다).
-    // virtualizer는 **안정 참조다** — TanStack v3는 useState(() => new Virtualizer(...))로 만든
-    // 인스턴스를 계속 재사용하고 setOptions로 갱신할 뿐이다(react-virtual dist/esm/index.js:82).
-    // 플랜의 "가상화 인스턴스가 매 렌더 새 참조"는 사실이 아니다 — 넣어도 무해하다.
-    // E14c: headIndex를 ref로 읽거나 "전이 신호"를 상태로 승격하면 지울 수 있다 — 참조 안정화가
-    // 아니라 설계 변경이 필요한 자리다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [headHash, headFound])
+    const index = headIndexRef.current
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' })
+    // virtualizer는 안정 참조라 deps에 있어도 재발화가 없다 — TanStack v3는
+    // useState(() => new Virtualizer(...))로 만든 인스턴스를 계속 재사용하고 setOptions로
+    // 갱신할 뿐이다(react-virtual dist/esm/index.js:82, 실측). 이 이펙트는 여전히
+    // headHash 변경·headFound 전이에만 돈다
+  }, [headHash, headFound, virtualizer])
 
   // 마지막 행이 렌더 범위에 들어오면 다음 페이지를 불러온다 (⑩) — 상한은 store가 이중 방어한다.
   //
