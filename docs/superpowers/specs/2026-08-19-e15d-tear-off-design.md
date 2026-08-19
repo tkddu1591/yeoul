@@ -57,3 +57,12 @@ E15c 스펙이 "창 밖 `pointerup` 수신 여부"를 미지수로 남겼다. **
 - **캡처는 CDP 합성에서 창 밖 좌표까지 전달된다**(-50,-40 · 2000,17 → 캡처 요소로 재타게팅). 잔여 위험은 실 OS 확인 1회뿐(§1 명시대로 병합 후 실사용 몫).
 - **드래그 뒤 click이 캡처 요소에서 여전히 발화한다** — 잔여 클릭 억제(`suppressClickRef`)가 필수(실측으로 확인).
 - **`tab-drag:end`는 4-인자다**: `(tabId, screenX, screenY, toIndex)` — 탭 픽셀 배치는 DOM 몫이라 main이 toIndex를 계산할 수 없다. 렌더러가 삽입선용으로 이미 계산하는 값이고, main은 자기 창 탭바 영역일 때만 쓰며 레지스트리가 클램프한다.
+
+## 실행 중 실측 정정 (Task 2)
+
+- **순서: 장부 이적 → 뷰 실물 이동 → 원 창 close** (`adoptTabInto`). 창 closed 훅이 "레지스트리의 그 창 탭 목록"을 돌며 close하므로, 이적이 먼저면 그 목록에 이적 뷰가 이미 없어 죽일 길이 구조적으로 없다.
+- **잠복 버그 수리**: `createTab`의 destroyed 훅이 생성 시점 `window`/`windowId`를 클로저로 붙들었다 — 이적 후 자멸하면 헌 창을 정리하거나 새 창 정리를 건너뛴다. 현재 소속(`windowOfView`)을 삭제 전에 읽는다.
+- **`BaseWindow.getAllWindows()`는 z-순서가 아니다**(실측: focus·moveTop 후에도 생성 역순 고정) — 자체 `windowStack`(생성·focus 시 맨 앞, closed 제거)으로 맨 위 창을 찾고 그 창의 상단 34px 띠만 대상. 가려진 뒤 창 탭바는 대상 아님(사용자 눈 그대로).
+- **숨김 창 `focus()`는 macOS에서 창을 visible로 만든다**(실측) — `bringWindowForward` E2E 게이트가 필수인 이유. 게이트 없는 focus 금지.
+- **창 간 이동의 삽입 자리는 끝(append)** — 다른 창 탭바의 픽셀 배치는 DOM 몫이라 main이 틈을 계산할 수 없다. 이적 탭이 활성이 되므로 충분.
+- 새 창 경로는 `createWindowShell(layout, position?)` 추출(빈 셸 + 이식) — `createWindow` 씨앗 흐름은 새 뷰를 만들어 복제가 된다.
