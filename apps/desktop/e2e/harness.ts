@@ -42,8 +42,28 @@ export const electron = {
       env = { ...env, GIT_GUI_E2E: '1' }
     }
     const app = await _electron.launch({ ...options, env })
+    const launchEnv = env
     const close = app.close.bind(app)
     app.close = async () => {
+      // E2E는 사용자 화면에 아무것도 띄우지 않는다(사용자 불만 2회 — reveal의 show()가 마지막
+      // 구멍이었다). 어떤 테스트든 창을 보이게 만들면 여기서 잡힌다. GIT_GUI_E2E_SHOW=1 디버깅
+      // 실행은 예외. app.evaluate 실패(이미 죽은 앱)는 삼킨다 — 아래 진단 스크린샷과 같은 이유
+      // (보조 장치가 닫기를 인질 잡으면 안 된다)
+      if (launchEnv['GIT_GUI_E2E_SHOW'] !== '1') {
+        const visibleWindows = await app
+          .evaluate(({ BaseWindow }) =>
+            BaseWindow.getAllWindows()
+              .filter((w) => w.isVisible())
+              .map((w) => w.getTitle()),
+          )
+          .catch(() => [])
+        if (visibleWindows.length > 0) {
+          throw new Error(
+            `E2E 불변식 위반 — 닫기 시점에 사용자 화면에 보이는 창이 있다: [${visibleWindows.join(', ')}] ` +
+              '(E2E 창은 항상 숨김이어야 한다. 디버깅으로 창을 봐야 하면 GIT_GUI_E2E_SHOW=1로 실행)',
+          )
+        }
+      }
       captureIndex += 1
       const path = test.info().outputPath(`last-screen-${captureIndex}.png`)
       // 창이 이미 죽었어도 닫기는 계속한다 — 진단 보조일 뿐 테스트를 실패시키지 않는다.

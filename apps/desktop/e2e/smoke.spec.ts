@@ -6370,8 +6370,12 @@ test('E15c — "새 탭에서 열기" 중복은 탭을 안 만들고 그 탭을 
  * 뒤에도 탭 활성화는 없었다(탭이 창마다 하나라 티가 안 났다) — 이 테스트가 그 나머지를 문다.
  *
  * 그래서 대상 저장소(B)는 **두 탭짜리 창(W1)의 비활성 탭**이어야 한다 — 활성 탭이면 활성화
- * 단언이 공허하다. "창을 앞으로"는 E2E 숨김 창에서 show()가 실제로 돌았는지로 잰다 —
- * 사전 조건(숨김)을 먼저 못박아 이 단언도 공허하지 않게 한다.
+ * 단언이 공허하다. "창을 앞으로"의 프로덕션 절반(show+focus)은 여기서 **재지 않는다** —
+ * E2E는 사용자 화면에 아무것도 띄우지 않는다(harness 불변식, 사용자 불만 2회)가 우선이라
+ * main의 bringWindowForward가 E2E에서 show를 게이트한다. 그 절반은 게이트 안 3줄이고
+ * index.ts의 첫 show 게이트(did-finish-load)와 같은 관용구라 코드 리뷰로 지킨다. 대신
+ * 여기서는 (a) 탭 활성 전환이 일어났고 (b) **창은 여전히 숨김**(게이트가 실제로 막았다 —
+ * 사용자 요구 그 자체가 회귀 그물이다)을 문다.
  */
 test('E15c — ⌥클릭 중복은 그 창을 앞으로 가져오고 그 탭을 활성화한다', async () => {
   const repoA = await createRepoWithChange()
@@ -6431,7 +6435,8 @@ test('E15c — ⌥클릭 중복은 그 창을 앞으로 가져오고 그 탭을 
     const third = await pendingWindow
     await expect(third.getByTestId('repo-path')).toHaveText(pathC)
 
-    // 사전 조건 — E2E 창은 숨어 있다(E6a). 아래 "앞으로 가져온다(show)" 단언의 공허 방지.
+    // 사전 조건 — E2E 창은 숨어 있다(E6a). 아래 "reveal 뒤에도 여전히 숨김" 단언의 공허 방지
+    // (처음부터 안 보였던 것과 게이트가 막은 것을 구분할 수는 없지만, 보였다면 즉시 잡힌다).
     // GIT_GUI_E2E_SHOW=1(로컬 디버깅)은 처음부터 보이므로 이 켤레 단언만 건너뛴다 (기존 관례)
     const w1Hidden = await app.evaluate(({ BaseWindow }, wanted: number) => {
       const w1 = BaseWindow.getAllWindows().find((w) =>
@@ -6464,8 +6469,9 @@ test('E15c — ⌥클릭 중복은 그 창을 앞으로 가져오고 그 탭을 
         }
       }, tabB.id)
       expect(state.visibleTabs).toEqual([tabB.id])
-      // 그 창을 앞으로 — 숨어 있던 W1에 show()가 실제로 돌았다 (위 사전 조건과 켤레)
-      if (process.env.GIT_GUI_E2E_SHOW !== '1') expect(state.windowVisible).toBe(true)
+      // 창은 여전히 숨김 — E2E는 사용자 화면에 아무것도 띄우지 않는다(위 사전 조건과 켤레,
+      // harness 불변식과 같은 요구). reveal이 show()를 무조건 부르던 회귀가 여기서 잡힌다
+      if (process.env.GIT_GUI_E2E_SHOW !== '1') expect(state.windowVisible).toBe(false)
     }).toPass({ timeout: 5000 })
 
     // 창도 탭도 안 늘었다 — 새 창 대신 데려갔다
