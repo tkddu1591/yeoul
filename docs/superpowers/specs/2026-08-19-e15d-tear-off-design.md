@@ -48,3 +48,12 @@ E15c 스펙이 "창 밖 `pointerup` 수신 여부"를 미지수로 남겼다. **
 - 이동한 탭의 감시·터미널이 계속 살아 있다(webContents 유지의 실증)
 - 기존 클릭·⌥클릭·우클릭이 그대로다(임계값 미만 무변)
 - 게이트: lint 0 · 6/6 · 713 이상 · e2e 168 이상 · **E2E 중 창 절대 안 보임**(하네스 불변식)
+
+---
+
+## 실행 중 실측 정정 (Task 1 관문)
+
+- **합성 이벤트의 `screenX/screenY`는 창 상대 좌표다**(CDP 실측 — 창 bounds (360,84)에서 `event.screenX === clientX`). §1의 "이벤트의 screenX/screenY를 중계"는 그대로 쓰면 안 되고, 렌더러가 **`clientX + window.screenX`로 절대 좌표를 계산해 중계**한다. 실 OS 입력에서는 두 식이 같은 값(뷰가 창 원점 전체 크기)이라 프로덕션 의도는 불변. macOS hidden 타이틀바에서 `contentBounds == bounds` 실측.
+- **캡처는 CDP 합성에서 창 밖 좌표까지 전달된다**(-50,-40 · 2000,17 → 캡처 요소로 재타게팅). 잔여 위험은 실 OS 확인 1회뿐(§1 명시대로 병합 후 실사용 몫).
+- **드래그 뒤 click이 캡처 요소에서 여전히 발화한다** — 잔여 클릭 억제(`suppressClickRef`)가 필수(실측으로 확인).
+- **`tab-drag:end`는 4-인자다**: `(tabId, screenX, screenY, toIndex)` — 탭 픽셀 배치는 DOM 몫이라 main이 toIndex를 계산할 수 없다. 렌더러가 삽입선용으로 이미 계산하는 값이고, main은 자기 창 탭바 영역일 때만 쓰며 레지스트리가 클램프한다.
