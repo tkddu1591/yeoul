@@ -100,35 +100,33 @@ export function ConflictPanel({
     pendingScrollRef.current = blockIndex
     onChooseBlock(blockIndex, choice)
   }
+  // E14c — items는 매 렌더 buildConflictView(content)가 새로 만드는 배열이라(:68) deps에
+  // 넣으면 곧 "매 렌더"다. 아래 두 이펙트는 items를 "값은 읽되 재실행 트리거로는 삼지 않는다"
+  // (트리거는 content 변화·마운트) — 렌더마다 ref에 반영해 최신 판만 읽는다. content가 items의
+  // 정본이라 이펙트 실행 시점의 itemsRef는 언제나 그 content로 만든 배열이다.
+  // virtualizer는 안정 참조라 deps에 있어도 재발화가 없다 — TanStack v3는
+  // useState(() => new Virtualizer(...))로 인스턴스를 한 번만 만들고 setOptions로 갱신할
+  // 뿐이다(react-virtual dist/esm/index.js:82, 실측)
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   useEffect(() => {
     const from = pendingScrollRef.current
     if (from === null) return
     pendingScrollRef.current = null
-    const after = items.findIndex((item) => item.type === 'block' && item.block.index >= from)
-    const nextIndex = after >= 0 ? after : items.findIndex((item) => item.type === 'block')
+    // 선택이 반영된 content 변화 시점에만 — 이 effect는 pendingScrollRef를 1회 소비하는 계약이라,
+    // content가 반영되기 전 렌더에 끼어들면 낡은 items로 엉뚱한 위치에 스크롤한 뒤 ref를 비워버린다
+    const list = itemsRef.current
+    const after = list.findIndex((item) => item.type === 'block' && item.block.index >= from)
+    const nextIndex = after >= 0 ? after : list.findIndex((item) => item.type === 'block')
     if (nextIndex >= 0) virtualizer.scrollToIndex(nextIndex, { align: 'center' })
-    // 선택이 반영된 content 변화 시점에만. 빠진 의존성은 `items`·`virtualizer`.
-    // items는 매 렌더 buildConflictView(content)가 새로 만드는 배열이라(:68) 넣으면 곧 "매 렌더"다 —
-    // 이 effect는 pendingScrollRef를 1회 소비하는 계약이라, content가 반영되기 전 렌더에 끼어들면
-    // 낡은 items로 엉뚱한 위치에 스크롤한 뒤 ref를 비워버린다. content가 items의 정본이라 [content]가
-    // 옳은 표현이다.
-    // virtualizer는 안정 참조다 — TanStack v3는 인스턴스를 useState로 한 번만 만든다
-    // (react-virtual dist/esm/index.js:82). 플랜의 "매 렌더 새 참조"는 사실이 아니다.
-    // E14c: 참조 안정화로는 안 풀린다 — items를 ref로 읽도록 바꿔야 지울 수 있는 자리다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content])
+  }, [content, virtualizer])
   // 열 때 첫 겹침으로 — 진행 표시("1번째")와 화면이 어긋나지 않게 한다 (품질 리뷰).
-  // key={path}로 파일마다 리마운트되므로 mount 1회면 충분하다
+  // key={path}로 파일마다 리마운트되므로 mount 1회면 충분하다 — virtualizer는 인스턴스당
+  // 참조가 고정이라(위 주석) deps에 있어도 이 이펙트는 마운트 1회 그대로다
   useEffect(() => {
-    const first = items.findIndex((item) => item.type === 'block')
+    const first = itemsRef.current.findIndex((item) => item.type === 'block')
     if (first >= 0) virtualizer.scrollToIndex(first, { align: 'center' })
-    // 빠진 의존성은 `items`·`virtualizer`. items는 매 렌더 새 배열이라(:68) 넣으면 매 렌더
-    // 실행이고, 그러면 "열 때 1회"가 "볼 때마다 첫 겹침으로 되감기"가 돼 사용자가 스크롤을
-    // 할 수 없게 된다. virtualizer는 안정 참조라 무관하다(위 effect 주석 참조).
-    // E14c: 마운트 1회라는 의도를 deps 배열로는 표현할 수 없다 — 참조 안정화로 풀리지 않고,
-    // 초기 스크롤을 콜백 ref 같은 다른 자리로 옮겨야 지울 수 있다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [virtualizer])
   const markResolved = () => {
     void (async () => {
       // 외부 편집기에서 마커를 지웠을 수 있다 — 열 때 읽은 내용이 아니라 최신 내용으로 검사한다 (거짓 경고 방지)

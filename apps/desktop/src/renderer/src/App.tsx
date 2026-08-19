@@ -96,6 +96,14 @@ const OP_BAR = {
 
 export function App() {
   const store = useRepositoryStore()
+  // E14c — 이펙트 deps에 들어갈 액션만 셀렉터로 따로 받는다. App은 위에서 스토어 전체를
+  // 구독하므로(set마다 새 상태 객체) `store`를 deps에 넣으면 아무 변경에나 이펙트가 재발화한다.
+  // zustand 액션은 create 초기화 때 1회 정의돼 참조가 안정 — 셀렉터로 골라 받으면 deps에
+  // 넣어도 발화가 늘지 않는다(v7 lint의 수신자 규칙도 `store.액션()` 대신 직접 호출로 피한다)
+  const init = useRepositoryStore((s) => s.init)
+  const clearNotice = useRepositoryStore((s) => s.clearNotice)
+  const autoFetchRemotes = useRepositoryStore((s) => s.autoFetchRemotes)
+  const searchHistory = useRepositoryStore((s) => s.searchHistory)
 
   // 첫 렌더에서 문서에 테마를 새긴다 — 저장값 우선, 없으면 시스템 설정 (⑥)
   const [theme, setTheme] = useState<Theme>(() => initTheme())
@@ -128,6 +136,10 @@ export function App() {
   // E7h ④ 워크트리 지우기 성공 직후 그 경로를 1회성으로 담아 TerminalDock에 내려보낸다 —
   // 도크가 closeGroup 후 onPurged로 비운다(세션 훅을 App으로 끌어올리는 큰 리팩터 없이 배선)
   const [purgeTerminalGroup, setPurgeTerminalGroup] = useState<string | null>(null)
+  // 위 1회성 신호를 비우는 **안정 콜백** — TerminalDock의 purge 이펙트가 deps에 넣는다(E14c).
+  // 인라인 화살표면 렌더마다 새 참조라 이펙트가 헛돌므로, 안정 참조인 세터만 캡처한 함수를
+  // 상태 lazy init으로 1회만 만든다(useCallback 지양 지침 — 성능 훅 대신 구조로 해결)
+  const [clearPurgedTerminalGroup] = useState(() => () => setPurgeTerminalGroup(null))
   // E7a 실험 공간 우클릭 다이얼로그 — 재배치 확인·이름 바꾸기·지우기(needsForce 2단)·원격 지우기
   const [confirmingRebase, setConfirmingRebase] = useState<{ name: string } | null>(null)
   const [renamePrompt, setRenamePrompt] = useState<{ name: string } | null>(null)
@@ -372,14 +384,10 @@ export function App() {
   const dockGridRow = MAIN_DOCK_GRID_ROW
 
   useEffect(() => {
-    void store.init()
-    // 마운트 시 1회만 실행. 빠진 의존성은 `store`인데 넣을 수 없다 — App은 셀렉터 없이 스토어
-    // 전체를 구독하고(:95 `useRepositoryStore()`) zustand 상태 객체는 set마다 새 참조라,
-    // 넣으면 아무 스토어 변경에나 init()이 다시 돌아 무한 루프다.
-    // E14c: 이 자리를 `useRepositoryStore((s) => s.init)`로 바꾸면(액션은 create 초기화 때
-    // 1회만 정의돼 참조가 안정) 의존성에 그대로 넣고 이 억제를 지울 수 있다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    void init()
+    // 마운트 시 1회만 실행 — init은 셀렉터로 받은 zustand 액션이라(상단, E14c) 참조가 안정해
+    // deps에 넣어도 재발화하지 않는다(예전엔 store 전체 구독분을 써서 억제가 필요했다)
+  }, [init])
 
   useEffect(() => {
     // 실패해도 빈 문자열 유지 — 축약 없이 전체 경로가 보일 뿐 기능은 죽지 않는다 (E7j)
@@ -393,15 +401,11 @@ export function App() {
   // 작업 시작마다 notice를 null로 비우므로 null→값 전이로 반드시 리셋된다
   useEffect(() => {
     if (store.notice === null) return
-    const timer = window.setTimeout(() => store.clearNotice(), NOTICE_TTL_MS)
+    const timer = window.setTimeout(() => clearNotice(), NOTICE_TTL_MS)
     return () => window.clearTimeout(timer)
-    // 빠진 의존성은 `store`. 스토어 상태 객체는 set마다 새 참조라(App은 셀렉터 없이 전체 구독 — :95)
-    // 넣으면 스토어가 갱신될 때마다 정리 함수가 타이머를 지우고 다시 걸어 10초가 처음부터 다시
-    // 시작된다 — "notice 10초 자동 소멸"이 사실상 무한 연장된다.
-    // E14c: 여기서 실제로 쓰는 건 clearNotice 하나뿐이고 zustand 액션이라 이미 참조가 안정하다 —
-    // 셀렉터로 그것만 골라 받으면 의존성에 넣고 이 억제를 지울 수 있다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.notice])
+    // clearNotice는 셀렉터로 받은 안정 액션(상단, E14c) — deps에 있어도 타이머는 notice 전이
+    // 때만 다시 걸린다(예전엔 store.clearNotice()가 store 전체를 deps로 요구해 억제가 필요했다)
+  }, [store.notice, clearNotice])
 
   // E7h ⑥ — ⌘F 검색 대상 패널(마우스 위치의 data-find-scope, 없으면 diff)
   const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
@@ -656,16 +660,13 @@ export function App() {
   const repoPathForFetch = store.repoPath
   useEffect(() => {
     if (!autoFetch || repoPathForFetch === null) return
-    void store.autoFetchRemotes()
-    const timer = window.setInterval(() => void store.autoFetchRemotes(), 600_000)
+    void autoFetchRemotes()
+    const timer = window.setInterval(() => void autoFetchRemotes(), 600_000)
     return () => window.clearInterval(timer)
-    // 빠진 의존성은 `store`. repoPath·autoFetch 전이에만 재구독해야 한다 — 스토어 상태 객체는
-    // set마다 새 참조라(전체 구독 — :95) 넣으면 스토어가 갱신될 때마다 정리 함수가 10분
-    // interval을 지우고 다시 걸어, 주기 새로고침이 영영 안 돈다(마운트 직후 1회 fetch만 반복).
-    // E14c: 정작 쓰는 store.autoFetchRemotes는 zustand 액션이라 이미 안정 참조다 — 셀렉터로
-    // 그 액션만 골라 받으면 의존성에 넣고 이 억제를 지울 수 있다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFetch, repoPathForFetch])
+    // autoFetchRemotes는 셀렉터로 받은 안정 액션(상단, E14c) — 10분 interval은 여전히
+    // repoPath·autoFetch 전이에만 다시 걸린다(예전엔 store.autoFetchRemotes()가 store 전체를
+    // deps로 요구해 억제가 필요했다 — 넣으면 매 set마다 interval이 리셋돼 주기 새로고침이 죽는다)
+  }, [autoFetch, repoPathForFetch, autoFetchRemotes])
 
   // E7f 전체화면 전환 — 신호등이 숨는 동안 헤더의 신호등 패딩을 접는다 (body 클래스 — CSS 몫)
   useEffect(() => {
@@ -1354,7 +1355,9 @@ export function App() {
                   expandRightIfCollapsed()
                 }}
                 onLoadMore={() => void store.loadMoreHistory()}
-                onSearch={(query) => store.searchHistory(query)}
+                // 인라인 화살표가 아니라 셀렉터로 받은 액션 그대로 — HistoryPanel의 검색 이펙트가
+                // onSearch를 deps에 넣으므로, 매 렌더 새 함수를 내리면 App 렌더마다 재검색이다 (E14c)
+                onSearch={searchHistory}
                 onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
                 onLocateHead={() => void store.revealHead()}
                 onAction={(action) => {
@@ -1473,7 +1476,7 @@ export function App() {
               open={dockOpen}
               height={dockHeight}
               purgeGroup={purgeTerminalGroup}
-              onPurged={() => setPurgeTerminalGroup(null)}
+              onPurged={clearPurgedTerminalGroup}
               onResizeStart={startDockResize}
               onClose={toggleDock}
             />

@@ -13,7 +13,13 @@ export default [
       parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
     },
     plugins: { 'react-hooks': reactHooks },
-    rules: reactHooks.configs.recommended.rules,
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      // E14c로 억제 12곳이 전부 해소돼 위반 0 — 지금 error로 올리는 것은 무비용이고,
+      // warn인 채로 두면 --max-warnings 5의 TanStack 몸이 줄 때 새 위반이 그 여유에 숨는다
+      // (E14c 리뷰 I-1). 래칫은 incompatible-library 수량 감시로만 남는다
+      'react-hooks/exhaustive-deps': 'error',
+    },
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },
   {
