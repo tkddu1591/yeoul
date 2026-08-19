@@ -657,6 +657,10 @@ const TEAR_OFF_OFFSET_Y = 17
 function windowAtPoint(x: number, y: number): { windowId: number; window: BaseWindow } | undefined {
   return windowStack.find(({ window }) => {
     if (window.isDestroyed()) return false
+    // 최소화된 창은 getBounds()가 화면상 옛 자리를 그대로 돌려준다(macOS) — 그 잔상 띠에
+    // 드롭하면 Dock에 들어간 창으로 탭이 이적돼 사용자 눈에는 탭이 증발한다 (E15d 리뷰 I-1).
+    // isVisible() 필터는 안 된다: 숨김 E2E의 모든 창이 걸러져 드롭 판정이 전멸한다
+    if (window.isMinimized()) return false
     const bounds = window.getBounds()
     return (
       x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
