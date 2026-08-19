@@ -39,10 +39,15 @@ export const electron = {
     app.close = async () => {
       captureIndex += 1
       const path = test.info().outputPath(`last-screen-${captureIndex}.png`)
-      // 창이 이미 죽었어도 닫기는 계속한다 — 진단 보조일 뿐 테스트를 실패시키지 않는다
+      // 창이 이미 죽었어도 닫기는 계속한다 — 진단 보조일 뿐 테스트를 실패시키지 않는다.
+      // timeout 5초 (E15e 실측): firstWindow가 끝 상태에서 **숨은 뷰**면 페인트하지 않아
+      // (E15c 스펙 §2 실측) 새 프레임이 영영 안 올 수 있다 — 캐시 프레임이 있으면 즉시 오지만
+      // 없으면(형제 탭 크래시+reload를 지난 세션에서 실측) 기본 30초를 다 기다려 그런 끝
+      // 상태의 테스트마다 close가 30초씩 인질이다(크래시 복구 테스트 31.5s→6.8s). 진단
+      // 보조가 테스트 시간을 잡아먹으면 안 된다 — 못 찍으면 못 찍은 대로 닫는다
       await app
         .firstWindow()
-        .then((window) => window.screenshot({ path }))
+        .then((window) => window.screenshot({ path, timeout: 5000 }))
         .catch(() => {})
       captured.push(path)
       try {

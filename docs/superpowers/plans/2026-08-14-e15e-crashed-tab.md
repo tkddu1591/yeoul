@@ -75,10 +75,10 @@
 
 **Files:** `TabBar.tsx`+css · `index.ts`(`tabs:activate`·`revealExistingTab`) · `smoke.spec.ts`
 
-- [ ] **Step 1: `tabs:activate`가 크래시 탭이면 reload 후 활성화.** reload는 비동기 재시동이므로 활성화는 즉시 하되 화면은 `did-finish-load`가 채운다(배경색이 흰 프레임을 막는다 — E15c Task 1 실측). `revealExistingTab`(`:388`)도 같은 분기 — **한 곳으로 모은다**(reveal과 activate가 다른 복구를 하면 안 된다).
-- [ ] **Step 2: TabBar 죽음 표시.** `crashed`면 라벨 흐림 + 경고 글리프(기존 토큰 톤 — E7g의 흐림 관례를 먼저 읽는다). 툴팁/접근 이름에 "응답 없음 — 누르면 다시 열어요". testid `tab-crashed-<id>`.
-- [ ] **Step 3: E2E 1건** — 탭 둘·비활성 크래시 → 산 탭바에 죽음 표시(`tab-crashed-<id>` 가시) → 클릭 → 되살아나 활성(`getVisible()` + `repo-path`) + 표시 걷힘(`toHaveCount(0)`).
-- [ ] **Step 4: 반증** — 표시 렌더 제거→표시 단언만 빨강 · activate의 reload 분기 제거→복구 단언만 빨강. 게이트(e2e 165) 후 커밋.
+- [x] **Step 1: `tabs:activate`가 크래시 탭이면 reload 후 활성화.** reload는 비동기 재시동이므로 활성화는 즉시 하되 화면은 `did-finish-load`가 채운다(배경색이 흰 프레임을 막는다 — E15c Task 1 실측). `revealExistingTab`(`:388`)도 같은 분기 — **한 곳으로 모은다**(reveal과 activate가 다른 복구를 하면 안 된다).
+- [x] **Step 2: TabBar 죽음 표시.** `crashed`면 라벨 흐림 + 경고 글리프(기존 토큰 톤 — E7g의 흐림 관례를 먼저 읽는다). 툴팁/접근 이름에 "응답 없음 — 누르면 다시 열어요". testid `tab-crashed-<id>`.
+- [x] **Step 3: E2E 1건** — 탭 둘·비활성 크래시 → 산 탭바에 죽음 표시(`tab-crashed-<id>` 가시) → 클릭 → 되살아나 활성(`getVisible()` + `repo-path`) + 표시 걷힘(`toHaveCount(0)`).
+- [x] **Step 4: 반증** — 표시 렌더 제거→표시 단언만 빨강 · activate의 reload 분기 제거→복구 단언만 빨강. 게이트(e2e 165) 후 커밋.
 
 ### Task 3: 최종 게이트 + 실행 기록
 
@@ -98,3 +98,12 @@ Expected 최종: lint 0/5w · 6/6 · **697+신규** · 성공 · **165 / 0**
 - `snapshot`에 crashed를 싣지 않는다(플랜과 편차) — 영속 경계인데 크래시는 재시작하면 무의미하고 sanitize까지 파급된다. "crashed는 snapshot 무변"을 단위로 못박음.
 - 훅 앵커는 `createRepoView`가 아니라 **`createTab`**(수명 배선이 사는 자리).
 - **Task 2로 넘기는 경계**: 마지막 산 탭을 닫아 **전부 크래시만 남으면** reload가 없다 — removeTab 경로에는 "전부 죽었으면 재시동" 분기가 아직 없다.
+
+### Task 2
+
+- **복구 분기의 "한 곳"은 `tabs:activate`가 아니라 `showActiveTab`이다** (플랜과 편차 — 옳은 재배치). "화면에 세울 활성 탭이 크래시 상태면 reload" 한 분기가, 활성을 크래시 탭에 놓을 수 있는 경로 **전부**를 지나는 길목에 산다: 클릭 복구(tabs:activate)·reveal(revealExistingTab)·유일 탭 크래시(render-process-gone)·**마지막 산 탭 닫힘(closeTab — Task 1이 넘긴 경계, 별도 분기 없이 여기서 공짜로 덮인다)**·렌더러 자멸 정리(destroyed 훅). Task 1이 크래시 훅에 두었던 "전부 죽음이면 reload" 특례도 이 분기로 접었다 — 반증 ②에서 훅 경로 테스트(유일 탭 재시동)까지 같이 빨개지는 것이 통합의 켤레 증거다.
+- **E2E는 1건이 아니라 2건** — 플랜의 표시+클릭 복구 1건에, 경계(마지막 산 탭을 닫아 크래시 탭만 남음 → 재시동) 1건을 더했다(e2e 164→166). 경계를 E2E로 문 이유: closeTab의 승계·reload는 electron 실물(webContents.close·reload) 없이는 안 돌고, 레지스트리 승계는 단위 11건이 이미 문다.
+- **라벨 흐림은 opacity가 아니라 `--color-text-faint`다** — 경고 글리프가 이름 버튼 **안**에 살아서(표시를 보고 누르는 자리가 곧 복구 버튼) opacity면 글리프까지 같이 바랜다. 색 상속은 글리프의 자기 색(`--color-danger`)이 덮는다. E7g의 흐림도 대부분 faint 색이다(opacity-disabled는 disabled 전용).
+- **harness 스크린샷 30초 인질 발견·수리** — close 직전 진단 스크린샷(firstWindow)이 끝 상태에서 숨은 뷰면 페인트하지 않아(E15c 스펙 §2) 캐시 프레임이 없을 때 30초를 다 기다렸다(표시·복구 테스트 31.5s 실측 — 형제 크래시+reload를 지난 세션은 캐시 프레임이 없더라). **제품 버그 아님을 프로브로 확인**: 숨은 A는 스크린샷 timeout이지만 다시 켜면 정상 페인트(129KB). `timeout: 5000`으로 상한(31.5s→6.5s).
+- 반증 실측: ① 글리프 렌더 무력화 → `tab-crashed` 가시 단언 2곳(표시 테스트 :7132·경계 테스트 :7222)만 빨강, Task 1 두 건 초록. ② showActiveTab reload 분기 무력화 → 복구(repo-path 재등장) 단언 3곳(:7067 유일 탭·:7168 클릭 복구·:7257 경계)만 빨강, 승계만 무는 Task 1 ① 초록 — 죽은 뷰가 활성으로 서기만 하는 것(가시성 단언 통과)까지 설계대로.
+- 게이트: lint 0/5w · typecheck 6/6 · `pnpm test` 708 · e2e **166 / 0**.

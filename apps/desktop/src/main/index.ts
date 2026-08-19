@@ -276,17 +276,10 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
     registry.setCrashed(tabId, true)
     const where = registry.windowOfTab(tabId)
     if (where === undefined) return
-    const state = registry.getWindow(where)
-    if (state === undefined) return
-    if (!state.tabs.some((id) => !registry.isTabCrashed(id))) {
-      // 유일한(또는 전부 죽은) 탭 — 옮겨 갈 산 이웃이 없고 죽은 뷰엔 안내도 그릴 수 없다
-      // (스펙 §1) — 재시동이 유일한 복구다. 자동 재시도 루프가 아니다: 크래시 1회당 reload
-      // 1회고, reload가 또 죽으면 다음 crash 이벤트가 또 한 번 시도할 뿐이다 (스펙 §3)
-      view.webContents.reload()
-      return
-    }
-    // 실물 절반 — setCrashed가 옮긴 활성(산 이웃)을 화면에 반영한다. 비활성 탭 크래시면
-    // 활성이 안 변했고 이 호출은 무해한 재확인이다
+    // 실물 절반 — showActiveTab이 승계를 화면에 반영한다. 산 이웃이 없어 활성이 크래시 탭에
+    // 남았으면(유일 탭·전부 죽음) showActiveTab의 복구 분기가 reload로 재시동한다 — 죽은 뷰엔
+    // 안내도 그릴 수 없어 재시동이 유일한 복구다 (스펙 §1). Task 1이 여기 두었던 reload 특례는
+    // Task 2가 복구 분기를 showActiveTab 한 곳으로 모으면서 접었다
     showActiveTab(where)
   })
 
@@ -333,7 +326,17 @@ function pushLayoutToSiblings(senderTabId: number, layout: WindowLayout): void {
  * 활성 탭 하나만 보인다 (E15c Task 3 — 이 태스크의 실물). 모든 뷰가 전체 크기로 겹쳐 있고
  * setVisible로만 갈아탄다 — 숨은 뷰는 페인트하지 않는다(스펙 §2 실측). 활성 뷰는 보이기 전에
  * 창 크기에 다시 맞춘다(숨어 있는 동안의 리사이즈를 resize 훅이 맞춰 주지만, 훅 등록 전
- * 경합·창 이동 직후 등 어긋날 길을 여기서 한 번 더 닫는다)
+ * 경합·창 이동 직후 등 어긋날 길을 여기서 한 번 더 닫는다).
+ *
+ * **크래시 복구 분기는 여기 한 곳이다** (E15e Task 2) — 화면에 세울 활성 탭이 크래시 상태면
+ * reload로 재시동한다. 활성을 크래시 탭에 놓을 수 있는 경로 전부가 이 함수를 지난다: 클릭
+ * 복구(tabs:activate)·중복 판정의 reveal(revealExistingTab)·유일 탭 크래시(render-process-gone
+ * 훅)·마지막 산 탭 닫힘(closeTab — 남는 활성이 크래시 탭뿐인 경계)·렌더러 자멸 정리(destroyed
+ * 훅). 경로마다 분기를 흩으면 reveal과 activate가 다른 복구를 하는 종류의 어긋남이 생긴다.
+ * 활성화·표시는 즉시고 화면은 did-finish-load가 채운다 — 뷰 배경색(createRepoView)이 그동안의
+ * 흰 프레임을 막고(E15c Task 1 실측), 같은 이벤트(createTab의 on)가 setCrashed(false)로 죽음
+ * 표시를 걷는다. 자동 재시도 루프가 아니다: 크래시 탭을 화면에 세우는 시도 1회당 reload 1회다
+ * (스펙 §3 — reload가 또 죽으면 다음 crash 이벤트가 또 한 번 여기로 올 뿐이다)
  */
 function showActiveTab(windowId: number): void {
   const state = registry.getWindow(windowId)
@@ -343,7 +346,12 @@ function showActiveTab(windowId: number): void {
     const window = windowOfView.get(tabId)
     if (view === undefined || window === undefined) continue
     const visible = tabId === state.activeTab
-    if (visible) fitViewToWindow(window, view)
+    if (visible) {
+      fitViewToWindow(window, view)
+      if (registry.isTabCrashed(tabId) && !view.webContents.isDestroyed()) {
+        view.webContents.reload()
+      }
+    }
     view.setVisible(visible)
   }
 }
@@ -409,7 +417,9 @@ function closeTab(tabId: number): void {
   // 실측 (Task 1): BaseWindow 세계에서 webContents는 아무도 대신 닫아 주지 않는다 — 명시적
   // close()가 있어야 git-handlers·terminal-handlers의 once('destroyed') 정리(감시·pty)가 돈다
   if (!view.webContents.isDestroyed()) view.webContents.close()
-  // 닫힌 탭이 활성이었으면 승계된 이웃을 실제로 보인다 — 아니었으면 이 호출은 무해한 재확인이다
+  // 닫힌 탭이 활성이었으면 승계된 이웃을 실제로 보인다 — 아니었으면 이 호출은 무해한 재확인이다.
+  // 마지막 산 탭을 닫아 남은 활성이 크래시 탭뿐이면(E15e Task 1이 넘긴 경계) showActiveTab의
+  // 복구 분기가 그 탭을 reload로 재시동한다 — 안 하면 죽은 뷰가 활성으로 서서 창이 도로 인질이다
   showActiveTab(windowId)
 }
 
@@ -419,7 +429,11 @@ function closeTab(tabId: number): void {
  *
  * 세 진입점(tabs:open·window:open·tabs:show-existing)이 **이 한 함수**를 공유한다 — 규칙
  * 하나(스펙 §3)의 "데려간다"가 진입점마다 다르게 굳는 것을 막는다. E15b는 window:open에서
- * show+focus만 하고 탭 활성화가 없었는데, 탭이 창마다 하나라 동작이 같았을 뿐이었다
+ * show+focus만 하고 탭 활성화가 없었는데, 탭이 창마다 하나라 동작이 같았을 뿐이었다.
+ *
+ * 크래시 탭으로의 reveal도 손대지 않는다 (E15e — 스펙 §1 "죽은 뷰로 데려가지 않는다"):
+ * 복구는 showActiveTab의 분기가 한다 — tabs:activate의 클릭 복구와 **같은 한 곳**이라
+ * reveal과 activate가 다른 복구를 할 길이 없다
  */
 function revealExistingTab(existing: { windowId: number; tabId: number }): void {
   registry.setActiveTab(existing.windowId, existing.tabId)
@@ -586,6 +600,9 @@ function registerTabHandlers(): void {
     return true
   })
 
+  // 크래시 탭 클릭이 곧 복구다 (E15e — 새 IPC 없음, 스펙 §2): showActiveTab의 분기가 크래시
+  // 탭이면 reload 후 세운다. 이미 활성인 크래시 탭도 setActiveTab은 무변화로 스치지만
+  // showActiveTab은 돌므로 복구가 된다
   ipcMain.handle(TAB_CHANNELS.activate, (event, tabId: unknown) => {
     const id = assertTabId(tabId)
     const windowId = registry.windowOfTab(event.sender.id)
