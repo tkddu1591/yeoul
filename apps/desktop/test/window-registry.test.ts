@@ -228,6 +228,93 @@ describe('탭 (E15c)', () => {
 })
 
 /**
+ * 탭 순서 변경 (E15d Task 1 — 같은 탭바 안 드래그 드롭의 장부 절반).
+ * tabId·toIndex는 드래그 드롭에서 온 렌더러 입력이다 — 없는 탭 무해·범위 클램프가 경계다.
+ * 활성은 건드리지 않는다: 드래그로 옮긴 탭이 활성이든 아니든 "누가 보이는가"는 무변이어야 한다
+ * (스펙 §2 "순서 변경 + 뷰 무변").
+ */
+describe('탭 순서 변경 moveTab (E15d)', () => {
+  it('탭을 지정한 자리로 옮긴다 — 나머지 순서는 보존된다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.moveTab(1, 10, 2)
+    expect(r.getWindow(1)?.tabs).toEqual([11, 12, 10])
+    r.moveTab(1, 12, 0)
+    expect(r.getWindow(1)?.tabs).toEqual([12, 11, 10])
+  })
+
+  it('활성 탭은 그대로다 — 옮긴 탭이 활성이어도, 아니어도', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.setActiveTab(1, 11)
+    r.moveTab(1, 11, 0) // 활성 탭 자신을 옮긴다
+    expect(r.getWindow(1)?.activeTab).toBe(11)
+    r.moveTab(1, 12, 0) // 다른 탭을 옮겨도 활성은 그대로
+    expect(r.getWindow(1)?.activeTab).toBe(11)
+    expect(r.getWindow(1)?.tabs).toEqual([12, 11, 10])
+  })
+
+  it('범위 밖 toIndex는 끝·처음으로 클램프한다 — 드롭 좌표는 렌더러 입력이다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.moveTab(1, 10, 99)
+    expect(r.getWindow(1)?.tabs).toEqual([11, 12, 10])
+    r.moveTab(1, 10, -5)
+    expect(r.getWindow(1)?.tabs).toEqual([10, 11, 12])
+  })
+
+  it('없는 창·없는 탭·다른 창의 탭은 무해하다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(2, 20, '/c')
+    expect(() => r.moveTab(99, 10, 0)).not.toThrow()
+    expect(() => r.moveTab(1, 99, 0)).not.toThrow()
+    // 다른 창의 탭 id로 이 창의 순서를 바꾸는 통로가 되면 안 된다 (setActiveTab 가드와 같은 결)
+    expect(() => r.moveTab(1, 20, 0)).not.toThrow()
+    expect(r.getWindow(1)?.tabs).toEqual([10, 11])
+    expect(r.getWindow(2)?.tabs).toEqual([20])
+  })
+
+  it('변화가 있을 때만 windows로 알린다 — 제자리 드롭마다 디스크를 쓰면 안 된다', () => {
+    const kinds: string[] = []
+    const r = createWindowRegistry((kind) => kinds.push(kind))
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    kinds.length = 0
+    r.moveTab(1, 10, 0) // 제자리 — 변화가 아니다
+    r.moveTab(99, 10, 1) // 없는 창 — 변화가 아니다
+    r.moveTab(1, 99, 1) // 없는 탭 — 변화가 아니다
+    expect(kinds).toEqual([])
+    r.moveTab(1, 10, 1)
+    expect(kinds).toEqual(['windows'])
+  })
+
+  it('순서 변경이 snapshot(영속 형상)에 실린다 — 재시작 복원이 새 순서를 따른다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.moveTab(1, 10, 1)
+    expect(r.snapshot()).toEqual([
+      { tabs: [{ repoPath: '/b' }, { repoPath: '/a' }], activeTab: 1, layout: {} },
+    ])
+  })
+})
+
+/**
  * 크래시 표시 (E15e — E15c 리뷰 I-2). 크래시한 렌더러는 destroyed가 아니라 레지스트리에
  * 잔류한다 — main의 render-process-gone 훅이 여기 표시하고, did-finish-load(reload 완료)가
  * 걷는다. **활성 승계는 레지스트리 몫이다**: "activeTab은 쓸 수 있는 탭을 가리킨다"는 불변식의

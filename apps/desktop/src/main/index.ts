@@ -583,13 +583,28 @@ function registerWindowHandlers(): void {
   )
 }
 
-/** 탭 id는 정수다 — 렌더러 입력이라 형식부터 막는다 (git-handlers의 assertString 관례) */
+/** 탭 id는 정수다 — 렌더러 입력이라 형식부터 막는다 (git-handlers의 assertString 관례).
+ * 드롭 자리(toIndex)도 같은 형식(정수)을 요구해 이 함수를 같이 쓴다 — 범위는 레지스트리가 클램프한다 */
 function assertTabId(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     throw new Error('잘못된 요청 형식이에요.')
   }
   return value
 }
+
+/** 드래그 드롭 좌표는 유한 수면 된다 — 이것도 렌더러 입력이라 형식부터 막는다 (E15d).
+ * 정수가 아닐 수 있다 — CDP·서브픽셀 입력의 clientX는 소수로 온다(관문 실측: 312.43…) */
+function assertFiniteNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return value
+}
+
+/** 탭바의 실높이 (E15d) — createWindow의 신호등 y 계산이 실측한 34px(getBoundingClientRect)과
+ * 같은 값이다. 드롭 좌표가 "제 창의 탭바 영역인가" 판정에 쓴다. tab-bar.css가 바뀌면 손으로
+ * 맞춘다 (APP_BACKGROUND와 같은 관례) */
+const TAB_BAR_HEIGHT = 34
 
 /**
  * 탭 IPC (E15c Task 3). 탭의 실물(뷰 생성·가시성·닫기)은 전부 여기 — 레지스트리는 장부만 든다.
@@ -683,6 +698,38 @@ function registerTabHandlers(): void {
     if (registry.windowOfTab(id) !== windowId) return
     closeTab(id)
   })
+
+  // 탭 드래그 드롭 (E15d Task 1 — 같은 탭바 안 순서 변경까지만). 드롭 대상 판정은 main이
+  // 레지스트리+getBounds()로 한다 — 렌더러가 창을 지정하지 않는다(스펙 §3). 지금은 "제 창의
+  // 탭바 영역"만 알아보고 그 밖(창 밖·다른 창·탭바 아래)은 조용히 무시한다 — 떼어내기·창 간
+  // 이동이 다음 단계에 정확히 이 no-op 자리에 얹힌다
+  ipcMain.handle(
+    TAB_CHANNELS.dragEnd,
+    (event, tabId: unknown, screenX: unknown, screenY: unknown, toIndex: unknown) => {
+      const id = assertTabId(tabId)
+      const x = assertFiniteNumber(screenX)
+      const y = assertFiniteNumber(screenY)
+      const to = assertTabId(toIndex)
+      const windowId = registry.windowOfTab(event.sender.id)
+      if (windowId === undefined) return
+      // tabId는 렌더러 입력 — 자기 창의 탭만 (tabs:activate·tabs:close와 같은 가드)
+      if (registry.windowOfTab(id) !== windowId) return
+      const window = windowOfView.get(id)
+      if (window === undefined || window.isDestroyed()) return
+      // 제 창의 탭바 영역인가 — 탭바가 창 콘텐츠 맨 위 띠라서 bounds 상단 34px이 곧 그 영역이다
+      // (macOS hidden 타이틀바는 contentBounds==bounds — 관문 실측 (360,84) 일치)
+      const bounds = window.getBounds()
+      const inOwnTabBar =
+        x >= bounds.x &&
+        x <= bounds.x + bounds.width &&
+        y >= bounds.y &&
+        y <= bounds.y + TAB_BAR_HEIGHT
+      if (!inOwnTabBar) return
+      // 순서만 바뀐다 — 활성·가시성 무변(스펙 §2)이라 showActiveTab을 부를 일도 없다.
+      // 탭바 갱신은 moveTab의 onChange('windows') → pushAllTabs가 한다
+      registry.moveTab(windowId, id, to)
+    },
+  )
 }
 
 /**

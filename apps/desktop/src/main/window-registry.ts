@@ -42,6 +42,13 @@ export interface WindowRegistry {
   removeTab(tabId: number): void
   setActiveTab(windowId: number, tabId: number): void
   /**
+   * 탭 순서 변경 (E15d — 같은 탭바 안 드래그 드롭). toIndex는 옮긴 뒤 배열에서의 자리다.
+   * tabId·toIndex는 드래그 드롭에서 온 렌더러 입력 — 없는 창·없는 탭·그 창에 없는 탭은 무해,
+   * 범위 밖 toIndex는 처음·끝으로 클램프. 활성은 건드리지 않는다(순서만 바뀌고 뷰는 무변 —
+   * 스펙 §2). 실제로 순서가 바뀔 때만 onChange('windows') — 제자리 드롭마다 쓰기가 나가면 안 된다
+   */
+  moveTab(windowId: number, tabId: number, toIndex: number): void
+  /**
    * 탭 렌더러의 크래시 표시 (E15e — E15c 리뷰 I-2). main의 render-process-gone이 true로,
    * did-finish-load(reload 완료)가 false로 부른다. 없는 탭·같은 값은 무해·무발화.
    *
@@ -169,6 +176,19 @@ export function createWindowRegistry(
       // 이미 활성인 탭의 재활성화는 변화가 아니다 — 탭 클릭마다 즉시 쓰기('windows')가 나가면 안 된다
       if (state.activeTab === tabId) return
       state.activeTab = tabId
+      onChange('windows')
+    },
+    moveTab(windowId, tabId, toIndex) {
+      const state = windows.get(windowId)
+      if (state === undefined) return
+      // indexOf가 그 창 소속 검증을 겸한다 — 다른 창의 탭 id는 여기서 -1이라 조용히 무시된다
+      const fromIndex = state.tabs.indexOf(tabId)
+      if (fromIndex === -1) return
+      const clamped = Math.min(Math.max(toIndex, 0), state.tabs.length - 1)
+      if (clamped === fromIndex) return
+      state.tabs.splice(fromIndex, 1)
+      state.tabs.splice(clamped, 0, tabId)
+      // activeTab은 탭 id라 순서가 바뀌어도 그대로 유효하다 — 손대지 않는다
       onChange('windows')
     },
     setCrashed(tabId, crashed) {

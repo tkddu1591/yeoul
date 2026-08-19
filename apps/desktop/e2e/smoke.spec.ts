@@ -7438,3 +7438,130 @@ test('E15e — 수동 클릭 복구는 자동 재시동 상한 너머에서도 �
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15d Task 1 관문 — 탭 드래그가 CDP 합성으로 배선 전체(렌더러 캡처→IPC→main 좌표 판정→
+ * moveTab→push)를 지나 같은 탭바 안 순서를 바꾼다. 임계값 미만은 클릭으로 남는다(같은 건).
+ *
+ * 관문 실측 (프로브 — 이 테스트가 선 자리):
+ * - Playwright `mouse.down/move/up`(CDP Input.dispatchMouseEvent)은 렌더러에 pointerdown/
+ *   pointermove/pointerup + click으로 실린다 (pointerId=1, pointerType='mouse').
+ * - `setPointerCapture`가 합성 입력에서도 동작한다 — gotpointercapture 발화, 이후 move·up이
+ *   캡처 요소로 재타게팅되고 **창 밖 좌표(-50,-40·2000,17)에서도 전달**된다(스펙 §1의 토대).
+ * - 합성 이벤트의 event.screenX/Y는 **창 상대**다(창 (360,84)에서 screenX===clientX) —
+ *   그래서 렌더러가 clientX+window.screenX로 절대 좌표를 만들어 중계한다(TabBar 주석).
+ *   이 테스트의 순서 단언은 main의 getBounds() 탭바 영역 판정을 **실제로 통과**해야만
+ *   초록이다 — 좌표 보정이 틀리면 dragEnd가 no-op라 순서가 안 바뀐다.
+ */
+test('E15d — 탭을 끌어 같은 탭바 안 순서를 바꾸고, 4px 미만 드래그는 클릭으로 남는다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const first = await app.firstWindow()
+    await expect(first.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pending = nextWindow(app)
+    await first.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const second = await pending
+    await expect(second.getByTestId('repo-path')).toHaveText(pathB)
+
+    // 탭 id·시작 순서 (구독 스냅샷 관용구) — [A, B], 활성은 B(방금 연 탭)
+    const tabs = await second.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+    expect(tabs.map((tab) => tab.id)).toEqual([tabA.id, tabB.id])
+    expect(tabB.active).toBe(true)
+
+    // 보이는 뷰(B)의 탭바에서 B 탭을 A의 왼쪽 절반까지 끈다 — 4px 초과 move를 거쳐 up
+    const boxB = (await second.getByTestId(`tab-${tabB.id}`).boundingBox())!
+    const boxA = (await second.getByTestId(`tab-${tabA.id}`).boundingBox())!
+    await second.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2)
+    await second.mouse.down()
+    await second.mouse.move(boxB.x + boxB.width / 2 - 12, boxB.y + boxB.height / 2)
+    await second.mouse.move(boxA.x + 2, boxA.y + boxA.height / 2)
+    // 드래그 중 드롭 예상 위치 삽입선이 정확히 하나 떠 있다 (렌더러 로컬 — 스펙 §2)
+    await expect(
+      second.locator('.tab-bar__tab--insert-before, .tab-bar__tab--insert-after'),
+    ).toHaveCount(1)
+    await second.mouse.up()
+
+    // 순서의 정본이 [B, A]가 된다 — 렌더러 좌표 보정→main 탭바 영역 판정→moveTab을 다 지난 실물
+    await expect(async () => {
+      const after = await second.evaluate(
+        () =>
+          new Promise<{ id: number; repoPath: string | null; active: boolean }[]>((resolve) => {
+            const off = window.gitApi.tabs.onChanged((list) => {
+              off()
+              resolve(list)
+            })
+          }),
+      )
+      expect(after.map((tab) => tab.repoPath)).toEqual([pathB, pathA])
+      // 활성은 그대로 B — 순서 변경은 뷰 무변이다 (스펙 §2 "가시성만 유지")
+      expect(after.find((tab) => tab.active)!.id).toBe(tabB.id)
+    }).toPass({ timeout: 5000 })
+    // 탭바 DOM 순서도 [B, A] — push가 렌더러 목록까지 닿았다. poll인 이유: 위 단언은 main의
+    // 장부(pull)라 즉답이지만 DOM은 push 수신 → React 재렌더 뒤에야 바뀐다(실측 — 한 박자 늦다)
+    await expect
+      .poll(
+        () =>
+          second.evaluate(() =>
+            [...document.querySelectorAll('.tab-bar__name')].map((el) =>
+              el.getAttribute('data-testid'),
+            ),
+          ),
+        { timeout: 5000 },
+      )
+      .toEqual([`tab-${tabB.id}`, `tab-${tabA.id}`])
+    // 드롭이 끝나면 삽입선은 걷힌다
+    await expect(
+      second.locator('.tab-bar__tab--insert-before, .tab-bar__tab--insert-after'),
+    ).toHaveCount(0)
+
+    // ── 같은 건의 반쪽: 임계값(4px) 미만 이동은 드래그가 아니라 클릭이다 — A로 전환된다.
+    // 순서가 바뀌었으니 좌표는 다시 잰다 (A가 이제 오른쪽 알약이다)
+    const boxA2 = (await second.getByTestId(`tab-${tabA.id}`).boundingBox())!
+    await second.mouse.move(boxA2.x + boxA2.width / 2, boxA2.y + boxA2.height / 2)
+    await second.mouse.down()
+    await second.mouse.move(boxA2.x + boxA2.width / 2 + 2, boxA2.y + boxA2.height / 2)
+    await second.mouse.up()
+    // 실물 가시성 — 보이는 뷰가 A 하나가 된다 (E15c Task 5 ② 관용구: 가시성 단언은 main에서)
+    await expect(async () => {
+      const visible = await app.evaluate(({ BaseWindow }) =>
+        BaseWindow.getAllWindows()[0]!.contentView.children
+          .filter((child) => child.getVisible())
+          .map((child) => (child as Electron.WebContentsView).webContents.id),
+      )
+      expect(visible).toEqual([tabA.id])
+    }).toPass({ timeout: 5000 })
+    // 클릭은 순서를 건드리지 않는다 — 여전히 [B, A]
+    const final = await first.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    expect(final.map((tab) => tab.repoPath)).toEqual([pathB, pathA])
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})

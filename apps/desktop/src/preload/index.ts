@@ -53,6 +53,8 @@ const api: GitApi = {
     showExisting: (repoPath) => ipcRenderer.invoke(TAB_CHANNELS.showExisting, repoPath),
     activate: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.activate, tabId),
     close: (tabId) => ipcRenderer.invoke(TAB_CHANNELS.close, tabId),
+    dragEnd: (tabId, screenX, screenY, toIndex) =>
+      ipcRenderer.invoke(TAB_CHANNELS.dragEnd, tabId, screenX, screenY, toIndex),
     onChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, tabs: TabInfo[]) => listener(tabs)
       ipcRenderer.on(TAB_CHANNELS.changed, wrapped)
