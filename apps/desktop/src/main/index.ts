@@ -490,9 +490,22 @@ function revealExistingTab(existing: { windowId: number; tabId: number }): void 
   showActiveTab(existing.windowId, 'user')
   // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
   // 뷰(탭) id → 창 역방향 맵으로 찾는다 (E15c)
-  const window = windowOfView.get(existing.tabId)
-  window?.show()
-  window?.focus()
+  bringWindowForward(windowOfView.get(existing.tabId))
+}
+
+/**
+ * 창을 사용자 앞으로 가져온다 (show+focus) — 단, E2E에서는 안 한다.
+ *
+ * 이게 E2E 중 사용자 화면에 창을 띄우던 **잔여 경로**였다(사용자 불만 2회 — 첫 번째는 복원
+ * 2회차 launch의 isE2E 판정 누락, 두 번째가 여기: 중복 차단 테스트가 돌 때마다 reveal의
+ * 무조건 show()+focus()가 숨김 창을 화면에 띄우고 포커스를 뺏었다). :204의 첫 show 게이트와
+ * 같은 관용구다. 프로덕션(비E2E) 동작은 무변 — GIT_GUI_E2E_SHOW=1 디버깅 실행도 그대로 온다
+ */
+function bringWindowForward(window: BaseWindow | undefined): void {
+  if (!isE2E || isE2EShow) {
+    window?.show()
+    window?.focus()
+  }
 }
 
 /** 뷰 하나가 창 콘텐츠 전체를 덮는다 — 탭이 늘어도 이 함수는 그대로다(전부 전체 크기,
