@@ -152,7 +152,9 @@ export interface GitApi {
      * 원점 전체 크기라(contentBounds==bounds 실측) 두 식이 같은 값이 된다. toIndex는 같은
      * 탭바 안 드롭일 때 옮겨 갈 자리(삽입선과 같은 계산) — main이 드롭 좌표가 제 창 탭바
      * 영역일 때만 쓰고 범위는 레지스트리가 클램프한다. 자기 창의 탭만 유효(main 검증).
-     * 탭바 밖 드롭은 이번 단계에선 무시된다 — 떼어내기·창 간 이동이 다음 단계에 얹힌다
+     * 다른 창의 탭바 드롭은 그 창으로 이동(끝 삽입·이동한 탭이 활성), 어느 탭바도 아니면
+     * 커서 위치의 새 창으로 떼어내기 — 판정은 전부 main의 z-순서 장부+getBounds() 몫이다.
+     * 드래그 중 그 탭이 크래시했으면(E15e) 드롭은 통째로 취소된다
      */
     dragEnd(tabId: number, screenX: number, screenY: number, toIndex: number): Promise<void>
     /** 구독 — 등록 즉시 현재 목록이 한 번 오고, 이후 이 창의 탭이 바뀔 때마다 push가 온다 */

@@ -315,6 +315,124 @@ describe('탭 순서 변경 moveTab (E15d)', () => {
 })
 
 /**
+ * 탭 이적 (E15d Task 2 — 창 간 이동·떼어내기의 장부 절반).
+ * 원 창에서 떼는 쪽은 removeTab과 같은 규칙(산 이웃 승계·마지막 탭이면 창 항목 제거)이되
+ * 색인은 남는다(이적이지 소멸이 아니다). 대상 창에서는 이적한 탭이 활성이 된다 —
+ * 사용자가 방금 끌어다 놓은 탭이 안 보이면 이상하다.
+ */
+describe('탭 이적 transferTab (E15d)', () => {
+  it('다른 창의 지정 자리로 옮기고 활성이 된다 — 색인도 새 창을 가리킨다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(2, 20, '/c')
+    r.addTab(2, 21, '/d')
+    r.transferTab(11, 2, 1)
+    expect(r.getWindow(1)?.tabs).toEqual([10])
+    expect(r.getWindow(2)?.tabs).toEqual([20, 11, 21])
+    expect(r.getWindow(2)?.activeTab).toBe(11)
+    expect(r.windowOfTab(11)).toBe(2)
+    expect(r.findTabByRepoPath('/b')).toEqual({ windowId: 2, tabId: 11 })
+  })
+
+  it('활성 탭이 떠나면 원 창은 산 이웃이 잇는다 — removeTab과 같은 오른쪽 우선·크래시 건너뜀', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(1, 12, '/c')
+    r.addTab(2, 20, '/d')
+    r.setCrashed(11, true)
+    r.setActiveTab(1, 10)
+    // 활성 10이 떠난다 — 오른쪽 11은 크래시라 건너뛰고 산 12가 잇는다
+    r.transferTab(10, 2, 0)
+    expect(r.getWindow(1)?.activeTab).toBe(12)
+    expect(r.getWindow(1)?.tabs).toEqual([11, 12])
+  })
+
+  it('비활성 탭이 떠나면 원 창의 활성은 그대로다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(2, 20, '/c')
+    r.transferTab(11, 2, 99)
+    expect(r.getWindow(1)?.activeTab).toBe(10)
+  })
+
+  it('마지막 탭이 떠나면 원 창 항목이 사라진다 — 탭 없는 창은 없다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(2, 20, '/b')
+    r.transferTab(10, 2, 1)
+    expect(r.getWindow(1)).toBeUndefined()
+    expect(r.getWindow(2)?.tabs).toEqual([20, 10])
+    expect(r.snapshot()).toEqual([
+      { tabs: [{ repoPath: '/b' }, { repoPath: '/a' }], activeTab: 1, layout: {} },
+    ])
+  })
+
+  it('범위 밖 toIndex는 처음·끝으로 클램프한다 — 끝 삽입(길이)이 유효하다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(2, 20, '/c')
+    r.transferTab(10, 2, 99)
+    expect(r.getWindow(2)?.tabs).toEqual([20, 10])
+    r.transferTab(11, 2, -5)
+    expect(r.getWindow(2)?.tabs).toEqual([11, 20, 10])
+  })
+
+  it('없는 탭·없는 대상 창·같은 창은 무해하고 알리지 않는다', () => {
+    const kinds: string[] = []
+    const r = createWindowRegistry((kind) => kinds.push(kind))
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    kinds.length = 0
+    expect(() => r.transferTab(99, 2, 0)).not.toThrow() // 없는 탭
+    expect(() => r.transferTab(10, 99, 0)).not.toThrow() // 없는 대상 창
+    expect(() => r.transferTab(10, 1, 1)).not.toThrow() // 같은 창 — moveTab 몫
+    expect(kinds).toEqual([])
+    expect(r.getWindow(1)?.tabs).toEqual([10, 11])
+  })
+
+  it('실제 이적은 windows로 정확히 1회 알린다 — 떼기·넣기가 두 번 울리면 이중 저장이다', () => {
+    const kinds: string[] = []
+    const r = createWindowRegistry((kind) => kinds.push(kind))
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(2, 20, '/b')
+    kinds.length = 0
+    r.transferTab(10, 2, 0)
+    expect(kinds).toEqual(['windows'])
+  })
+
+  it('크래시 표시가 이적을 따라간다 — 색인은 소멸이 아니라 이사다', () => {
+    const r = createWindowRegistry()
+    r.addWindow(1, {})
+    r.addWindow(2, {})
+    r.addTab(1, 10, '/a')
+    r.addTab(1, 11, '/b')
+    r.addTab(2, 20, '/c')
+    r.setCrashed(11, true)
+    r.transferTab(11, 2, 1)
+    expect(r.isTabCrashed(11)).toBe(true)
+    expect(r.getTabRepoPath(11)).toBe('/b')
+  })
+})
+
+/**
  * 크래시 표시 (E15e — E15c 리뷰 I-2). 크래시한 렌더러는 destroyed가 아니라 레지스트리에
  * 잔류한다 — main의 render-process-gone 훅이 여기 표시하고, did-finish-load(reload 완료)가
  * 걷는다. **활성 승계는 레지스트리 몫이다**: "activeTab은 쓸 수 있는 탭을 가리킨다"는 불변식의

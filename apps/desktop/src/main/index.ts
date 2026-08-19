@@ -149,7 +149,22 @@ const crashLedgerOfTab = new Map<number, { streak: number; loadedAt: number }>()
  * E15b 리뷰가 실측했고, 여기도 같은 성질만 필요하다 */
 let nextWindowId = 1
 
-function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): CreatedWindow {
+/**
+ * 창 z-순서 장부 (E15d) — 앞 원소가 위 창. 드롭 대상 판정이 "겹치면 앞 창 우선"(스펙 §2)이라
+ * 순서 있는 배열이 필요한데, **BaseWindow.getAllWindows()는 z-순서가 아니다** (실측: 생성
+ * 역순 고정 — 두 창을 만들고 오래된 창을 focus()+moveTop() 해도 [2,1] 그대로). 그래서 직접
+ * 든다: 생성 시 맨 앞(새 창은 위에 뜬다), 'focus'마다 맨 앞으로(사용자가 든 창이 위다),
+ * 'closed'에서 제거. 숨김 E2E에서는 focus 이벤트가 없어 생성 역순으로 남는다 — 결정적이다
+ */
+const windowStack: Array<{ windowId: number; window: BaseWindow }> = []
+
+/** 창 셸 (E15d) — BaseWindow 실물 + 레지스트리 등록 + 창 수명 배선까지, **탭은 없이**.
+ * createWindow(씨앗 탭 생성)와 tearOffTab(이미 있는 탭 이식 — 씨앗으로 새 탭을 만들면 복제다)이
+ * 이 한 함수를 공유한다. position은 떼어내기의 "커서 위치에 창 생성"용 */
+function createWindowShell(
+  layout: WindowLayout,
+  position?: { x: number; y: number },
+): { window: BaseWindow; windowId: number } {
   const window = new BaseWindow({
     width: 1200,
     height: 800,
@@ -171,21 +186,25 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
     // E13 — 창이 뜨는 순간부터 이 색으로 칠해져 있다(콘텐츠가 없는 흰 배경 대신). 저장된
     // 테마를 못 읽는 극단적 실패에도 폴백값이 있어 undefined가 되지 않는다
     backgroundColor: resolveBackgroundColor(),
-    // E13 — 페인트 전에 보여주지 않는다: 뷰가 로드를 마친 뒤에야 드러난다(아래 did-finish-load)
+    // E13 — 페인트 전에 보여주지 않는다: 뷰가 로드를 마친 뒤에야 드러난다(호출자의 show 경로)
     show: false,
+    // 떼어내기(E15d)는 커서 위치에 창을 만든다 — 없으면 OS 기본(가운데)
+    ...(position !== undefined ? { x: position.x, y: position.y } : {}),
   })
 
   // 레지스트리 등록은 **여기서 동기적으로** 한다 (E15b). preload의 settings:get-sync가 이보다
   // 늦게 돌고(동기 IPC도 이 틱이 끝나야 처리된다), 그때 이 창의 layout 씨앗을 읽어야 새 창이
-  // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 여기(createTab) 등록된 repoPath를 읽는다.
+  // 열어준 창을 닮는다. repo:initial-path도 같은 이유로 (createTab) 등록된 repoPath를 읽는다.
   // 탭 키는 view.webContents.id — E15b의 sender.id 배선(git-handlers·terminal-handlers·settings)이
   // 전부 그대로 산다(sender가 곧 이 뷰의 webContents다). 창 키만 새 이름 공간이다 (E15c)
   const windowId = nextWindowId++
-  registry.addWindow(windowId, seed.layout)
-  const view = createTab(window, windowId, seed.repoPath)
+  registry.addWindow(windowId, layout)
+  // z-순서 장부 — 새 창은 맨 앞(위)이다
+  windowStack.unshift({ windowId, window })
 
   // 창 리사이즈마다 **모든** 탭 뷰를 창 크기에 맞춘다 — BrowserWindow 시절엔 공짜였던 것.
-  // 숨은 뷰도 같이 맞춰 두어야 전환하는 순간 헌 크기 레이아웃이 한 프레임도 안 보인다
+  // 숨은 뷰도 같이 맞춰 두어야 전환하는 순간 헌 크기 레이아웃이 한 프레임도 안 보인다.
+  // 레지스트리를 매번 읽으므로 이적해 온 탭(E15d)도 자동으로 맞는다
   window.on('resize', () => {
     for (const tabId of registry.getWindow(windowId)?.tabs ?? []) {
       const tabView = viewOfTab.get(tabId)
@@ -193,18 +212,10 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
     }
   })
 
-  // ready-to-show는 BrowserWindow의 이벤트다 — BaseWindow에는 없다 (첫 페인트 신호가
-  // WebContentsView에는 노출되지 않는다: webContents의 'paint'는 오프스크린 전용).
-  // did-finish-load는 페인트 이전일 수 있지만, 뷰 배경색을 창 배경색과 같게 칠해 두므로
-  // (createRepoView의 setBackgroundColor) 페인트 전 프레임도 흰색이 아니라 테마색이다 —
-  // E13의 판정 기준(창이 드러날 때 흰 배경이 한 프레임도 안 보인다)을 배경색으로 만족한다.
-  // E2E 숨김 규칙(E6a)과의 합성은 그대로: isE2E && !isE2EShow는 계속 숨긴 채로 둔다.
-  // 첫 탭에만 건다 — 이후 탭은 이미 보이는 창에 생기므로 show 신호가 필요 없다
-  view.webContents.once('did-finish-load', () => {
-    if (!isE2E || isE2EShow) window.show()
-  })
-
   window.on('closed', () => {
+    // z-순서 장부에서 제거 — 닫힌 창이 드롭 대상 판정에 걸리면 안 된다
+    const stackIndex = windowStack.findIndex((entry) => entry.windowId === windowId)
+    if (stackIndex !== -1) windowStack.splice(stackIndex, 1)
     // 창이 닫히면 그 안의 **모든** 탭 뷰를 닫는다 (Task 1 배선의 탭 일반화).
     // removeWindow를 먼저 — 각 뷰의 destroyed 훅이 "레지스트리에 내 탭이 없다"로 이 경로임을
     // 알아보고 창을 또 닫으려 들지 않는다. removeTab이 창 항목을 이미 지운 경우(마지막 탭=창
@@ -236,7 +247,28 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
   // 메운다 (E10). 숨은 뷰에도 보낸다 — 감시 사각지대는 숨은 탭에도 똑같이 생기고, 여기서 안
   // 메우면 그 탭은 켜지는 순간까지 낡은 화면을 들고 있다
   window.on('focus', () => {
+    // z-순서 장부 — 사용자가 든 창이 위다 (E15d 드롭 대상 판정의 근거)
+    const focusedIndex = windowStack.findIndex((entry) => entry.windowId === windowId)
+    if (focusedIndex > 0) windowStack.unshift(windowStack.splice(focusedIndex, 1)[0]!)
     sendToWindowTabs(windowId, WINDOW_CHANNELS.focused)
+  })
+
+  return { window, windowId }
+}
+
+function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): CreatedWindow {
+  const { window, windowId } = createWindowShell(seed.layout)
+  const view = createTab(window, windowId, seed.repoPath)
+
+  // ready-to-show는 BrowserWindow의 이벤트다 — BaseWindow에는 없다 (첫 페인트 신호가
+  // WebContentsView에는 노출되지 않는다: webContents의 'paint'는 오프스크린 전용).
+  // did-finish-load는 페인트 이전일 수 있지만, 뷰 배경색을 창 배경색과 같게 칠해 두므로
+  // (createRepoView의 setBackgroundColor) 페인트 전 프레임도 흰색이 아니라 테마색이다 —
+  // E13의 판정 기준(창이 드러날 때 흰 배경이 한 프레임도 안 보인다)을 배경색으로 만족한다.
+  // E2E 숨김 규칙(E6a)과의 합성은 그대로: isE2E && !isE2EShow는 계속 숨긴 채로 둔다.
+  // 첫 탭에만 건다 — 이후 탭은 이미 보이는 창에 생기므로 show 신호가 필요 없다
+  view.webContents.once('did-finish-load', () => {
+    if (!isE2E || isE2EShow) window.show()
   })
 
   return { window, view, windowId }
@@ -269,23 +301,29 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // Task 1에서 E2E 2건이 정확히 이 모양으로 빨갰다). registry.removeTab의 "마지막 탭이면 창
   // 항목도 지움"과 같은 판정을 실물(창·뷰)에도 적용한다
   view.webContents.once('destroyed', () => {
+    // 소속은 **지금** 장부에서 읽는다 — 이적(E15d transferTab) 뒤에는 생성 시점의
+    // window/windowId(클로저 인자)가 헌 창이라, 붙들면 이적한 뷰의 자멸이 엉뚱한 창을
+    // 정리하거나(removeChildView·showActiveTab) 이미 닫힌 원 창의 isDestroyed에 막혀
+    // 새 창 정리를 건너뛴다. 삭제보다 먼저 잡아 둔다
+    const currentWindow = windowOfView.get(tabId)
+    const currentWindowId = registry.windowOfTab(tabId)
     windowOfView.delete(tabId)
     viewOfTab.delete(tabId)
     crashLedgerOfTab.delete(tabId)
     // 이미 레지스트리에 없다 — tabs:close(closeTab)나 창 closed 훅이 먼저 정리한 정상 경로다
-    if (registry.windowOfTab(tabId) === undefined) return
+    if (currentWindowId === undefined) return
     // 여기 도달했으면 렌더러가 스스로 죽은 경우다 — 레지스트리 정리는 이 훅 몫이다
     registry.removeTab(tabId)
-    if (window.isDestroyed()) return
-    if (registry.getWindow(windowId) === undefined) {
+    if (currentWindow === undefined || currentWindow.isDestroyed()) return
+    if (registry.getWindow(currentWindowId) === undefined) {
       // 마지막 탭이 죽었다 — 창 닫힘과 동치 (removeTab이 창 항목을 지운 것과 정합).
       // isDestroyed 가드(위)가 closed 훅과의 상호 재귀를 끊는다
-      window.close()
+      currentWindow.close()
       return
     }
-    window.contentView.removeChildView(view)
+    currentWindow.contentView.removeChildView(view)
     // 활성 탭이 죽었으면 removeTab의 승계(오른쪽 우선)를 화면에도 반영한다
-    showActiveTab(windowId)
+    showActiveTab(currentWindowId)
   })
 
   // 크래시한 렌더러는 destroyed가 **아니다** (E15c 리뷰 I-2 실측) — 위 destroyed 훅이 안 돌고
@@ -602,9 +640,88 @@ function assertFiniteNumber(value: unknown): number {
 }
 
 /** 탭바의 실높이 (E15d) — createWindow의 신호등 y 계산이 실측한 34px(getBoundingClientRect)과
- * 같은 값이다. 드롭 좌표가 "제 창의 탭바 영역인가" 판정에 쓴다. tab-bar.css가 바뀌면 손으로
+ * 같은 값이다. 드롭 좌표가 "탭바 영역인가" 판정에 쓴다. tab-bar.css가 바뀌면 손으로
  * 맞춘다 (APP_BACKGROUND와 같은 관례) */
 const TAB_BAR_HEIGHT = 34
+
+/** 떼어내기(E15d)의 새 창 위치 보정 — 커서가 새 창 탭바의 첫 탭 알약 위쯤에 오게. x는 탭 하나
+ * 폭의 절반쯤 왼쪽, y는 탭바 높이의 절반 위. 정밀할 필요가 없다 — "커서 위치에 창"이면 된다 */
+const TEAR_OFF_OFFSET_X = 80
+const TEAR_OFF_OFFSET_Y = 17
+
+/**
+ * 스크린 좌표 아래 맨 위 창 (E15d) — 겹치면 z-순서 장부의 앞 창이 이긴다. **전체 bounds**로
+ * 찾는 이유: 앞 창의 본문(탭바 아래)에 가려진 뒤 창의 탭바는 드롭 대상이 아니어야 한다 —
+ * 사용자 눈에 보이는 그대로가 판정이다. 탭바 띠인지는 호출자가 이 창의 상단 34px로 가른다
+ */
+function windowAtPoint(x: number, y: number): { windowId: number; window: BaseWindow } | undefined {
+  return windowStack.find(({ window }) => {
+    if (window.isDestroyed()) return false
+    const bounds = window.getBounds()
+    return (
+      x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
+    )
+  })
+}
+
+/**
+ * 탭 실물(뷰)을 다른 창으로 이식한다 (E15d) — 창 간 이동·떼어내기가 공유하는 실행부.
+ * webContents는 그대로다: 감시·터미널·설정이 전부 webContents.id 키라 자동으로 따라간다(스펙 §3).
+ *
+ * **순서가 곧 수명 안전이다**: ① 장부 이적(transferTab — 원 창이 비면 레지스트리에서 창
+ * 항목이 먼저 사라진다) ② 뷰 실물 이동 + 맵 갱신 ③ 원 창이 비었으면 실물 창 close.
+ * ③이 마지막이어야 하는 이유: 창 closed 훅은 "레지스트리의 그 창 탭 목록"을 순회하며 뷰를
+ * close하는데, ①에서 이적한 탭은 이미 그 목록에 없으므로 **이적한 뷰를 죽일 길이 없다**
+ * (E15c "레지스트리 먼저, 실물은 따라간다"의 이적판)
+ */
+function adoptTabInto(toWindowId: number, toWindow: BaseWindow, tabId: number): void {
+  const view = viewOfTab.get(tabId)
+  const fromWindow = windowOfView.get(tabId)
+  const fromWindowId = registry.windowOfTab(tabId)
+  if (view === undefined || fromWindow === undefined || fromWindowId === undefined) return
+  // 삽입 자리는 대상 창의 끝이다 — 탭 픽셀 배치는 DOM 몫이라(스펙 정정절의 toIndex 근거)
+  // main은 다른 창 탭바 안의 정확한 틈을 모른다. 1차 범위는 "맨 뒤에 붙는다"로 충분하다
+  registry.transferTab(tabId, toWindowId, registry.getWindow(toWindowId)?.tabs.length ?? 0)
+  // 이적이 무산됐으면(늦은 IPC로 사라진 창 등) 실물도 안 움직인다 — 장부가 정본이다
+  if (registry.windowOfTab(tabId) !== toWindowId) return
+  fromWindow.contentView.removeChildView(view)
+  toWindow.contentView.addChildView(view)
+  windowOfView.set(tabId, toWindow)
+  fitViewToWindow(toWindow, view)
+  // 레이아웃은 창 단위(E15c 스펙 §4) — 이동한 탭은 새 창의 layout을 받아야 한다(push 1회).
+  // pushLayoutToSiblings는 "보낸 탭만 뺀다"라 모양이 반대다 — 같은 채널로 이 탭에만 보낸다
+  if (!view.webContents.isDestroyed()) {
+    view.webContents.send(SETTINGS_CHANNELS.layoutChanged, registry.getWindow(toWindowId)?.layout ?? {})
+  }
+  // 가시성 갱신 양쪽 — 대상 창은 이적한 탭이 활성(transferTab), 원 창은 승계된 이웃
+  showActiveTab(toWindowId)
+  if (registry.getWindow(fromWindowId) === undefined) {
+    // 마지막 탭이 이적했다 — 빈 창은 없다(removeTab 관례). 뷰·맵은 이미 새 창 소속이라
+    // closed 훅이 이 뷰를 건드리지 않는다 (함수 주석의 순서 ③)
+    if (!fromWindow.isDestroyed()) fromWindow.close()
+  } else {
+    showActiveTab(fromWindowId)
+  }
+}
+
+/**
+ * 탭을 떼어내 커서 위치의 새 창으로 (E15d — 스펙 §2 셋째 행). createWindow를 못 쓰는 이유:
+ * 그 흐름은 씨앗으로 **새 탭(뷰)을 만든다** — 떼어낸 탭은 이미 레지스트리와 실물이 있으므로
+ * 새로 만들면 복제다. 빈 셸을 만들고 기존 탭을 이식한다
+ */
+function tearOffTab(tabId: number, screenX: number, screenY: number): void {
+  const fromWindowId = registry.windowOfTab(tabId)
+  if (fromWindowId === undefined || viewOfTab.get(tabId) === undefined) return
+  // 새 창의 레이아웃 씨앗은 떠나는 창의 것 — 새 창(window:open)의 seedLayoutFrom과 같은 판단
+  const shell = createWindowShell({ ...(registry.getWindow(fromWindowId)?.layout ?? {}) }, {
+    x: Math.round(screenX - TEAR_OFF_OFFSET_X),
+    y: Math.round(screenY - TEAR_OFF_OFFSET_Y),
+  })
+  adoptTabInto(shell.windowId, shell.window, tabId)
+  // 새 창을 드러낸다 — createWindow의 did-finish-load 신호가 여기엔 없다(뷰는 이미 로드돼
+  // 있고 배경도 칠해져 있다). E2E 게이트는 bringWindowForward가 그대로 지킨다(숨김 유지)
+  bringWindowForward(shell.window)
+}
 
 /**
  * 탭 IPC (E15c Task 3). 탭의 실물(뷰 생성·가시성·닫기)은 전부 여기 — 레지스트리는 장부만 든다.
@@ -699,10 +816,9 @@ function registerTabHandlers(): void {
     closeTab(id)
   })
 
-  // 탭 드래그 드롭 (E15d Task 1 — 같은 탭바 안 순서 변경까지만). 드롭 대상 판정은 main이
-  // 레지스트리+getBounds()로 한다 — 렌더러가 창을 지정하지 않는다(스펙 §3). 지금은 "제 창의
-  // 탭바 영역"만 알아보고 그 밖(창 밖·다른 창·탭바 아래)은 조용히 무시한다 — 떼어내기·창 간
-  // 이동이 다음 단계에 정확히 이 no-op 자리에 얹힌다
+  // 탭 드래그 드롭 (E15d — 스펙 §2의 세 갈래 전부). 드롭 대상 판정은 main이 z-순서 장부 +
+  // getBounds()로 한다 — 렌더러가 창을 지정하지 않는다(스펙 §3). 탭바 영역은 창 상단 34px 띠다
+  // (macOS hidden 타이틀바는 contentBounds==bounds — 관문 실측 (360,84) 일치)
   ipcMain.handle(
     TAB_CHANNELS.dragEnd,
     (event, tabId: unknown, screenX: unknown, screenY: unknown, toIndex: unknown) => {
@@ -714,20 +830,31 @@ function registerTabHandlers(): void {
       if (windowId === undefined) return
       // tabId는 렌더러 입력 — 자기 창의 탭만 (tabs:activate·tabs:close와 같은 가드)
       if (registry.windowOfTab(id) !== windowId) return
+      // 드래그 중 그 탭이 크래시했으면 드롭 전체를 취소한다 (스펙 §3 — E15e 연동): 죽은 탭을
+      // 옮기거나 새 창에 세우면 transferTab의 "이적 탭이 활성"이 죽은 뷰를 화면에 세운다
+      if (registry.isTabCrashed(id)) return
       const window = windowOfView.get(id)
       if (window === undefined || window.isDestroyed()) return
-      // 제 창의 탭바 영역인가 — 탭바가 창 콘텐츠 맨 위 띠라서 bounds 상단 34px이 곧 그 영역이다
-      // (macOS hidden 타이틀바는 contentBounds==bounds — 관문 실측 (360,84) 일치)
-      const bounds = window.getBounds()
-      const inOwnTabBar =
-        x >= bounds.x &&
-        x <= bounds.x + bounds.width &&
-        y >= bounds.y &&
-        y <= bounds.y + TAB_BAR_HEIGHT
-      if (!inOwnTabBar) return
-      // 순서만 바뀐다 — 활성·가시성 무변(스펙 §2)이라 showActiveTab을 부를 일도 없다.
-      // 탭바 갱신은 moveTab의 onChange('windows') → pushAllTabs가 한다
-      registry.moveTab(windowId, id, to)
+      // 드롭 지점의 맨 위 창 — 겹치면 z-순서상 앞 창 우선(스펙 §2). 그 창의 탭바 띠 안이어야
+      // 탭바 드롭이다: 앞 창의 본문에 가려진 뒤 창 탭바는 대상이 아니다(windowAtPoint 주석)
+      const hit = windowAtPoint(x, y)
+      const inTabBar = hit !== undefined && y <= hit.window.getBounds().y + TAB_BAR_HEIGHT
+      if (inTabBar && hit.windowId === windowId) {
+        // 같은 탭바 안 — 순서만 바뀐다. 활성·가시성 무변(스펙 §2)이라 showActiveTab도 없다.
+        // 탭바 갱신은 moveTab의 onChange('windows') → pushAllTabs가 한다
+        registry.moveTab(windowId, id, to)
+        return
+      }
+      if (inTabBar) {
+        // 다른 창의 탭바 — 그 창으로 이적. toIndex는 제 탭바 기준이라 여기선 안 쓴다(끝 삽입)
+        adoptTabInto(hit.windowId, hit.window, id)
+        // 받은 창을 앞으로 — 사용자의 시선은 방금 놓은 탭을 따라간다 (E2E 게이트는 함수가 지킨다)
+        bringWindowForward(hit.window)
+        return
+      }
+      // 어느 탭바도 아니다(창 밖·창 본문) — 커서 위치에 새 창 (스펙 §2 셋째 행).
+      // 마지막 탭이었으면 원 창은 adoptTabInto의 순서 ③이 닫는다
+      tearOffTab(id, x, y)
     },
   )
 }
