@@ -11,6 +11,7 @@ import {
 import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
+import { canAutoRestart, nextCrashStreak } from './restart-policy'
 import { readTheme, readWindows, registerSettingsHandlers, saveWindows } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
 import { createTrailingDebounce } from './watch-filter'
@@ -124,6 +125,20 @@ const windowOfView = new Map<number, BaseWindow>()
  * windowOfView와 항상 같은 키 집합이다(createTab이 함께 넣고 정리 경로들이 함께 지운다) */
 const viewOfTab = new Map<number, WebContentsView>()
 
+/**
+ * 탭 id → 연속 크래시 장부 (E15e 리뷰 I-1) — showActiveTab의 자동 재시동 상한 판정용.
+ * streak는 연속 크래시 수(restart-policy의 산수), loadedAt은 직전 로드 완료 시각(로드 전엔
+ * 생성 시각 — 첫 로드 중의 크래시도 연속으로 세어져야 크래시-온-로드가 잡힌다).
+ *
+ * 레지스트리가 아니라 여기(main)에 있는 이유: "자동 재시동"은 reload라는 main의 실행 개념이고
+ * (레지스트리의 소비처인 탭바·영속은 crashed 불리언이면 족하다 — 카운트를 쓸 곳이 없다),
+ * 레지스트리의 onChange('windows')는 즉시 디스크 쓰기+push라 크래시마다 카운트 갱신으로 그걸
+ * 울리면 루프를 끊으려다 쓰기를 더 만든다. 단위 테스트는 판정을 restart-policy의 순수 함수로
+ * 빼서 얻었다 — 여기는 시계(Date.now)와 장부만 든다. 정리는 viewOfTab과 같은 세 곳
+ * (창 closed 훅·destroyed 훅·closeTab)이다
+ */
+const crashLedgerOfTab = new Map<number, { streak: number; loadedAt: number }>()
+
 /** 창 id 발급 (E15c) — 창 id와 탭 id는 다른 이름 공간이다. 뷰가 여럿이라 webContents.id를 창
  * 키로 못 쓴다. 단조 증가면 충분하다 — webContents.id도 단조 증가라 재사용 걱정이 없는 것을
  * E15b 리뷰가 실측했고, 여기도 같은 성질만 필요하다 */
@@ -198,6 +213,7 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
       const tabView = viewOfTab.get(tabId)
       windowOfView.delete(tabId)
       viewOfTab.delete(tabId)
+      crashLedgerOfTab.delete(tabId)
       if (tabView !== undefined && !tabView.webContents.isDestroyed()) tabView.webContents.close()
     }
   })
@@ -235,6 +251,9 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // 비어 있으면 같은 창 다른 뷰들이 새 탭이 실린 목록을 못 받는다
   windowOfView.set(tabId, window)
   viewOfTab.set(tabId, view)
+  // 크래시 장부의 시작점 — loadedAt의 초기값은 생성 시각이다: 첫 로드를 끝내지 못하고 죽는
+  // 렌더러도 (긴 로드가 아니라면) 연속으로 세어져야 크래시-온-로드 상한이 잡는다
+  crashLedgerOfTab.set(tabId, { streak: 0, loadedAt: Date.now() })
   registry.addTab(windowId, tabId, repoPath)
 
   // 뷰→창 방향 수명 (E15c Task 1 실측의 탭 일반화): webContents가 먼저 파괴돼도(Playwright
@@ -247,6 +266,7 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   view.webContents.once('destroyed', () => {
     windowOfView.delete(tabId)
     viewOfTab.delete(tabId)
+    crashLedgerOfTab.delete(tabId)
     // 이미 레지스트리에 없다 — tabs:close(closeTab)나 창 closed 훅이 먼저 정리한 정상 경로다
     if (registry.windowOfTab(tabId) === undefined) return
     // 여기 도달했으면 렌더러가 스스로 죽은 경우다 — 레지스트리 정리는 이 훅 몫이다
@@ -271,6 +291,13 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // 그 뒤에 이 이벤트가 와도 setCrashed는 없는 탭으로 무해하다
   view.webContents.on('render-process-gone', (_event, details) => {
     console.error(`탭 렌더러 크래시 (tab ${tabId}): ${details.reason}`)
+    // 연속 크래시 장부 (E15e 리뷰 I-1) — 직전 로드 완료에서 얼마 만의 크래시인가로 "연속"을
+    // 가른다(살 만큼 살았으면 1로 리셋 — restart-policy). 아래 showActiveTab의 자동 재시동
+    // 분기가 이 값으로 상한을 판정하므로 **반드시 그보다 먼저** 적는다
+    const ledger = crashLedgerOfTab.get(tabId)
+    if (ledger !== undefined) {
+      ledger.streak = nextCrashStreak(ledger.streak, Date.now() - ledger.loadedAt)
+    }
     // 장부 절반 — 크래시 표시 + (활성이었으면) 산 이웃 승계(레지스트리가 removeTab과 같은
     // 오른쪽 우선으로 잇는다). onChange가 push를 돌려 산 형제의 탭바에 죽음 표시가 실린다
     registry.setCrashed(tabId, true)
@@ -278,8 +305,8 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
     if (where === undefined) return
     // 실물 절반 — showActiveTab이 승계를 화면에 반영한다. 산 이웃이 없어 활성이 크래시 탭에
     // 남았으면(유일 탭·전부 죽음) showActiveTab의 복구 분기가 reload로 재시동한다 — 죽은 뷰엔
-    // 안내도 그릴 수 없어 재시동이 유일한 복구다 (스펙 §1). Task 1이 여기 두었던 reload 특례는
-    // Task 2가 복구 분기를 showActiveTab 한 곳으로 모으면서 접었다
+    // 안내도 그릴 수 없어 재시동이 유일한 복구다 (스펙 §1 — 단 연속 상한까지만, 리뷰 I-1).
+    // Task 1이 여기 두었던 reload 특례는 Task 2가 복구 분기를 showActiveTab 한 곳으로 모으면서 접었다
     showActiveTab(where)
   })
 
@@ -287,6 +314,10 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // once가 아니라 **on**이다 (createWindow의 once('did-finish-load')는 첫 show용 1회 — 역할이
   // 다르다). 산 탭의 정상 로드에서는 setCrashed(false)가 무변화 무발화라 아무 일도 없다
   view.webContents.on('did-finish-load', () => {
+    // 시각만 적는다 — streak 리셋은 타이머가 아니라 **다음 크래시에서** 경과 시간으로 판정한다
+    // (restart-policy 주석 — 탭마다 타이머·해제 배선을 두는 것보다 값싸고 판정이 순수하다)
+    const ledger = crashLedgerOfTab.get(tabId)
+    if (ledger !== undefined) ledger.loadedAt = Date.now()
     registry.setCrashed(tabId, false)
   })
   return view
@@ -335,10 +366,18 @@ function pushLayoutToSiblings(senderTabId: number, layout: WindowLayout): void {
  * 훅). 경로마다 분기를 흩으면 reveal과 activate가 다른 복구를 하는 종류의 어긋남이 생긴다.
  * 활성화·표시는 즉시고 화면은 did-finish-load가 채운다 — 뷰 배경색(createRepoView)이 그동안의
  * 흰 프레임을 막고(E15c Task 1 실측), 같은 이벤트(createTab의 on)가 setCrashed(false)로 죽음
- * 표시를 걷는다. 자동 재시도 루프가 아니다: 크래시 탭을 화면에 세우는 시도 1회당 reload 1회다
- * (스펙 §3 — reload가 또 죽으면 다음 crash 이벤트가 또 한 번 여기로 올 뿐이다)
+ * 표시를 걷는다.
+ *
+ * **자동 재시동은 연속 상한까지만이다** (E15e 리뷰 I-1) — "시도 1회당 reload 1회"는 크래시-온-
+ * 로드 렌더러 앞에서 루프가 된다: reload 완료(did-finish-load)가 곧장 다음 크래시를 부르고,
+ * 그 크래시 훅이 또 여기로 온다(수정 전 실측: 15초에 크래시 157회·reload 156회 + 크래시마다
+ * setCrashed의 즉시 디스크 쓰기). `cause`가 가른다 — 'user'(클릭 복구 tabs:activate·reveal)는
+ * 사용자의 의지라 상한과 무관하게 언제나 reload(스펙 §2·§3), 'auto'(크래시 훅·닫기 승계·자멸
+ * 정리)는 앱의 추측이라 연속 상한(restart-policy)까지만. 상한을 넘기면 크래시 표시를 남긴 채
+ * 정지한다 — 다탭이면 산 탭바의 클릭 복구가 남아 있고, 유일 탭이면 죽은 뷰가 선 채 남는다
+ * (스펙 §3이 감수한 "수동 클릭 복구만"의 극단 — 표시할 탭바도 없지만 최소한 루프는 없다)
  */
-function showActiveTab(windowId: number): void {
+function showActiveTab(windowId: number, cause: 'auto' | 'user' = 'auto'): void {
   const state = registry.getWindow(windowId)
   if (state === undefined) return
   for (const tabId of state.tabs) {
@@ -349,7 +388,9 @@ function showActiveTab(windowId: number): void {
     if (visible) {
       fitViewToWindow(window, view)
       if (registry.isTabCrashed(tabId) && !view.webContents.isDestroyed()) {
-        view.webContents.reload()
+        if (cause === 'user' || canAutoRestart(crashLedgerOfTab.get(tabId)?.streak ?? 0)) {
+          view.webContents.reload()
+        }
       }
     }
     view.setVisible(visible)
@@ -413,13 +454,16 @@ function closeTab(tabId: number): void {
   registry.removeTab(tabId)
   windowOfView.delete(tabId)
   viewOfTab.delete(tabId)
+  crashLedgerOfTab.delete(tabId)
   window.contentView.removeChildView(view)
   // 실측 (Task 1): BaseWindow 세계에서 webContents는 아무도 대신 닫아 주지 않는다 — 명시적
   // close()가 있어야 git-handlers·terminal-handlers의 once('destroyed') 정리(감시·pty)가 돈다
   if (!view.webContents.isDestroyed()) view.webContents.close()
   // 닫힌 탭이 활성이었으면 승계된 이웃을 실제로 보인다 — 아니었으면 이 호출은 무해한 재확인이다.
   // 마지막 산 탭을 닫아 남은 활성이 크래시 탭뿐이면(E15e Task 1이 넘긴 경계) showActiveTab의
-  // 복구 분기가 그 탭을 reload로 재시동한다 — 안 하면 죽은 뷰가 활성으로 서서 창이 도로 인질이다
+  // 복구 분기가 그 탭을 reload로 재시동한다 — 안 하면 죽은 뷰가 활성으로 서서 창이 도로 인질이다.
+  // cause는 'auto'다 — 사용자가 시킨 것은 "닫기"지 "저 탭을 되살려라"가 아니고, 크래시-온-로드면
+  // 이 reload도 곧장 크래시 훅의 루프 입구가 되므로 연속 상한의 지배를 받아야 한다(리뷰 I-1)
   showActiveTab(windowId)
 }
 
@@ -433,11 +477,12 @@ function closeTab(tabId: number): void {
  *
  * 크래시 탭으로의 reveal도 손대지 않는다 (E15e — 스펙 §1 "죽은 뷰로 데려가지 않는다"):
  * 복구는 showActiveTab의 분기가 한다 — tabs:activate의 클릭 복구와 **같은 한 곳**이라
- * reveal과 activate가 다른 복구를 할 길이 없다
+ * reveal과 activate가 다른 복구를 할 길이 없다. cause도 같은 'user'다 — "이 저장소를 보여
+ * 달라"는 사용자의 의지라 자동 재시동 상한(리뷰 I-1)과 무관하게 복구한다
  */
 function revealExistingTab(existing: { windowId: number; tabId: number }): void {
   registry.setActiveTab(existing.windowId, existing.tabId)
-  showActiveTab(existing.windowId)
+  showActiveTab(existing.windowId, 'user')
   // BaseWindow에는 webContents가 없어 getAllWindows().find(webContents.id)가 불가능하다 —
   // 뷰(탭) id → 창 역방향 맵으로 찾는다 (E15c)
   const window = windowOfView.get(existing.tabId)
@@ -602,14 +647,15 @@ function registerTabHandlers(): void {
 
   // 크래시 탭 클릭이 곧 복구다 (E15e — 새 IPC 없음, 스펙 §2): showActiveTab의 분기가 크래시
   // 탭이면 reload 후 세운다. 이미 활성인 크래시 탭도 setActiveTab은 무변화로 스치지만
-  // showActiveTab은 돌므로 복구가 된다
+  // showActiveTab은 돌므로 복구가 된다. cause는 'user' — 클릭 복구는 자동 재시동 상한(리뷰
+  // I-1)과 무관하게 **언제나** reload다(스펙 §3: 유한해야 하는 것은 앱의 추측뿐이다)
   ipcMain.handle(TAB_CHANNELS.activate, (event, tabId: unknown) => {
     const id = assertTabId(tabId)
     const windowId = registry.windowOfTab(event.sender.id)
     if (windowId === undefined) return
     if (registry.windowOfTab(id) !== windowId) return
     registry.setActiveTab(windowId, id)
-    showActiveTab(windowId)
+    showActiveTab(windowId, 'user')
   })
 
   ipcMain.handle(TAB_CHANNELS.close, (event, tabId: unknown) => {

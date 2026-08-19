@@ -7261,3 +7261,168 @@ test('E15e — 마지막 산 탭을 닫아 크래시 탭만 남으면 재시동�
     await rm(repoB, { recursive: true, force: true })
   }
 })
+
+/**
+ * E15e 리뷰 I-1 ① — "로드하면 반드시 죽는" 유일 탭은 자동 재시동이 연속 상한(3회)에서 멈춘다.
+ *
+ * 수정 전 실측: crash → showActiveTab의 자동 reload → did-finish-load → 또 crash가 무한히
+ * 돌아 15초에 크래시 157회·reload 156회(~10회/초) + 크래시마다 setCrashed의 즉시 디스크
+ * 쓰기 — 스펙 §3("자동 재시도 루프 없음") 위반이었다.
+ *
+ * 크래시-온-로드는 **런타임 주입**으로 만든다 — main 코드 수정 없이 app.evaluate에서 그 탭의
+ * webContents에 did-finish-load→즉시 forcefullyCrashRenderer 리스너를 얹는다(리뷰 프로브 A
+ * 방식). 같은 자리에서 로드·크래시 횟수를 계수해 "몇 번 돌고 멈췄나"를 결정론으로 잰다:
+ * 자동 reload 상한 3회 → 로드 3회, 크래시는 최초 1회 + 로드마다 1회 = 4회에서 정지.
+ */
+test('E15e — 로드하면 죽는 유일 탭은 자동 재시동이 상한에서 멈춘다 (무한 루프 없음)', async () => {
+  const repo = await createRepoWithChange()
+  const path = realpathSync(repo)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByTestId('repo-path')).toHaveText(path)
+    const tabId = await app.evaluate(
+      ({ BaseWindow }) =>
+        (BaseWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView)
+          .webContents.id,
+    )
+    await app.evaluate(({ webContents }, id: number) => {
+      const contents = webContents.fromId(id)!
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      g.__e2eLoads = 0
+      g.__e2eCrashes = 0
+      contents.on('did-finish-load', () => {
+        g.__e2eLoads += 1
+        contents.forcefullyCrashRenderer()
+      })
+      contents.on('render-process-gone', () => {
+        g.__e2eCrashes += 1
+      })
+    }, tabId)
+    // 최초 크래시 — 이후는 앱의 자동 재시동 경로만 돈다(수정 전에는 여기서부터 무한 루프였다)
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabId)
+    // 상한 도달 — 정확히 이 숫자에서 선다. 상한 판정을 지우면(항상 reload) loads가 3을 지나쳐
+    // 계속 자라 여기서 빨갛다
+    await expect
+      .poll(
+        () =>
+          app.evaluate(() => {
+            const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+            return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+          }),
+        { timeout: 30_000 },
+      )
+      .toEqual({ loads: 3, crashes: 4 })
+    // 정지의 확인 — 루프라면(수정 전 ~10회/초) 2초면 스무 번을 더 돌았다. 숫자가 그대로여야 한다
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    const settled = await app.evaluate(() => {
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+    })
+    expect(settled).toEqual({ loads: 3, crashes: 4 })
+    // 크래시 표시를 남긴 채 죽어 있다 — 스펙 §3이 감수한 끝 상태(수동 복구 대기, 루프 없음)
+    const crashed = await app.evaluate(
+      ({ webContents }, id: number) => webContents.fromId(id)!.isCrashed(),
+      tabId,
+    )
+    expect(crashed).toBe(true)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+/**
+ * E15e 리뷰 I-1 ② — 수동 클릭 복구(tabs:activate)는 자동 재시동 상한과 무관하다.
+ *
+ * 상한은 앱의 추측(자동 reload)만 유한하게 만든다 — 사용자가 산 탭바에서 죽은 탭을 누르는
+ * 것은 의지라 상한 너머에서도 언제나 reload여야 한다(스펙 §2·§3). 다탭에선 크래시 승계가
+ * 활성을 산 이웃으로 옮기므로 자동 reload는 애초에 없다 — 클릭마다 reload → (주입 리스너로)
+ * 곧장 크래시가 반복되며 연속 카운트만 쌓인다. 4번째 클릭은 카운트가 상한(3)을 넘긴 뒤인데도
+ * reload가 나가야 한다 — 상한이 수동 경로까지 물면 loads가 3에 멈춰 4번째 poll이 빨갛다.
+ */
+test('E15e — 수동 클릭 복구는 자동 재시동 상한 너머에서도 언제나 reload다', async () => {
+  const repoA = await createRepoWithChange()
+  const repoB = await createRepoWithFile('beta.txt')
+  const pathA = realpathSync(repoA)
+  const pathB = realpathSync(repoB)
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repoA },
+  })
+  try {
+    const pageA = await app.firstWindow()
+    await expect(pageA.getByTestId('repo-path')).toHaveText(pathA)
+
+    const pendingB = nextWindow(app)
+    await pageA.evaluate((path: string) => window.gitApi.tabs.open(path), pathB)
+    const pageB = await pendingB
+    await expect(pageB.getByTestId('repo-path')).toHaveText(pathB)
+
+    const tabs = await pageA.evaluate(
+      () =>
+        new Promise<{ id: number; repoPath: string | null }[]>((resolve) => {
+          const off = window.gitApi.tabs.onChanged((list) => {
+            off()
+            resolve(list)
+          })
+        }),
+    )
+    const tabA = tabs.find((tab) => tab.repoPath === pathA)!
+    const tabB = tabs.find((tab) => tab.repoPath === pathB)!
+
+    // B를 크래시-온-로드로 만든다 (런타임 주입 — 위 ① 테스트와 같은 방식·같은 계수)
+    await app.evaluate(({ webContents }, id: number) => {
+      const contents = webContents.fromId(id)!
+      const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+      g.__e2eLoads = 0
+      g.__e2eCrashes = 0
+      contents.on('did-finish-load', () => {
+        g.__e2eLoads += 1
+        contents.forcefullyCrashRenderer()
+      })
+      contents.on('render-process-gone', () => {
+        g.__e2eCrashes += 1
+      })
+    }, tabB.id)
+    // 최초 크래시 — 활성이던 B가 죽으면 승계가 A를 세운다(자동 reload는 다탭이라 없다).
+    // 이 줄부터 pageB는 죽었다: 이후 단언은 pageA와 app.evaluate로만
+    await app.evaluate(({ webContents }, id: number) => {
+      webContents.fromId(id)!.forcefullyCrashRenderer()
+    }, tabB.id)
+    await expect(pageA.getByTestId(`tab-crashed-${tabB.id}`)).toBeVisible()
+
+    // 클릭 4회 — 연속 카운트는 클릭마다 crash로 쌓여(2→3→4→5) 3번째 클릭부터는 상한 너머다.
+    // 매 클릭: reload(loads +1) → 주입 크래시(crashes +1) → 승계로 활성이 A로 복귀(다음 클릭 준비)
+    for (let click = 1; click <= 4; click++) {
+      await expect(async () => {
+        const visible = await app.evaluate(({ BaseWindow }) =>
+          BaseWindow.getAllWindows()[0]!.contentView.children
+            .filter((child) => child.getVisible())
+            .map((child) => (child as Electron.WebContentsView).webContents.id),
+        )
+        expect(visible).toEqual([tabA.id])
+      }).toPass({ timeout: 5000 })
+      await pageA.getByTestId(`tab-${tabB.id}`).click()
+      await expect
+        .poll(
+          () =>
+            app.evaluate(() => {
+              const g = globalThis as unknown as { __e2eLoads: number; __e2eCrashes: number }
+              return { loads: g.__e2eLoads, crashes: g.__e2eCrashes }
+            }),
+          { timeout: 15_000 },
+        )
+        .toEqual({ loads: click, crashes: click + 1 })
+    }
+  } finally {
+    await app.close()
+    await rm(repoA, { recursive: true, force: true })
+    await rm(repoB, { recursive: true, force: true })
+  }
+})
