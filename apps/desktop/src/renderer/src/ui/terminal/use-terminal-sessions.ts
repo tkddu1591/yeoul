@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { silentExitNotice } from './silent-exit'
 import { nextTabNumber } from './tab-number'
 import { terminalPalette } from './terminal-theme'
+import type { Dispatch, SetStateAction } from 'react'
 import type { Theme } from '../theme'
 
 export interface TerminalTab {
@@ -26,6 +27,20 @@ interface SessionView {
   fit: FitAddon
 }
 
+/** 액션이 렌더 클로저 대신 읽는 최신 스냅숏 — 훅이 매 렌더 미러한다 (E14c 참조 안정화) */
+interface LatestSnapshot {
+  repoPath: string | null
+  theme: Theme
+  tabs: TerminalTab[]
+  activeId: string | null
+}
+
+interface CoreSetters {
+  setTabs: Dispatch<SetStateAction<TerminalTab[]>>
+  setActiveId: Dispatch<SetStateAction<string | null>>
+  setError: Dispatch<SetStateAction<string | null>>
+}
+
 // 팔레트는 terminal-theme.ts (E7d ③ 테마 연동). 기본 DOM 렌더러 유지 — E2E가 출력을 읽는다
 
 /**
@@ -42,72 +57,81 @@ function stripIpcPrefix(message: string): string {
 }
 
 /**
- * 터미널 세션 로직 (E7b) — 세션 생성·xterm 인스턴스 수명·push 라우팅을 소유한다.
- * TerminalDock(프레젠테이션)은 이 훅의 값·콜백만 렌더한다 (레이어 분리)
+ * 세션 코어 — 훅 인스턴스당 1회만 생성된다(useState lazy init). 모든 액션이 렌더 간 같은
+ * 참조를 유지하므로 소비자(TerminalDock) 이펙트의 deps에 정직하게 넣어도 재실행을 만들지
+ * 않는다 — E14b가 남긴 exhaustive-deps 억제 5곳과, `[]`로 굳은 클로저가 refitActive를
+ * 항상 activeId=null로 부르던 잠복 버그(사이드 접기 refit 불능, E12부터)의 공통 해법이다.
+ * 렌더에 묶인 값(repoPath·theme·tabs·activeId)은 클로저가 아니라 `latest` 스냅숏으로 읽는다
+ * (훅이 매 렌더 이펙트에서 미러 — 액션은 이벤트·이펙트에서만 불리므로 미러가 항상 앞선다).
+ * useMemo/useCallback 없이 참조가 안정되는 구조라 지침(성능 훅 지양)과도 어긋나지 않는다
  */
-export function useTerminalSessions(repoPath: string | null, theme: Theme) {
-  const [tabs, setTabs] = useState<TerminalTab[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const viewsRef = useRef(new Map<string, SessionView>())
+function createTerminalCore(initial: LatestSnapshot, set: CoreSetters) {
+  /**
+   * 코어 소유의 최신 스냅숏 — 훅이 매 렌더 syncLatest로 갈아 끼운다. useRef가 아니라 모듈
+   * 클로저 변수인 이유: ref 객체를 렌더 중(useState 초기화) 함수에 넘기는 것 자체가
+   * react-hooks/refs 위반이다(실측 — "Passing a ref to a function may read its value
+   * during render"). 액션은 렌더 클로저 대신 latest()로 호출 시점 값을 읽는다
+   */
+  let snapshot = initial
+  const latest = () => snapshot
+  /** 훅의 미러 이펙트 전용 — 렌더 값(스냅숏)을 통째로 교체한다 */
+  const syncLatest = (next: LatestSnapshot) => {
+    snapshot = next
+  }
+  const views = new Map<string, SessionView>()
   /** create 응답이 돌아오기 전 도착한 청크(로그인 쉘 프롬프트가 invoke 왕복을 이길 수 있다 — Task 3 리뷰) */
-  const pendingRef = useRef(new Map<string, string[]>())
+  const pending = new Map<string, string[]>()
   /** 출력을 한 번이라도 보낸 세션 — 무출력 exit(깨진 쉘) 판정용 (E7d ②) */
-  const receivedRef = useRef(new Set<string>())
+  const received = new Set<string>()
   /** 사용자가 닫아서(kill) 죽는 세션 — 프롬프트 도착 전 닫기가 깨진 쉘 오경보가 되는 것 방지 (E7d ② 보완) */
-  const closingRef = useRef(new Set<string>())
+  const closing = new Set<string>()
   /** 그룹별 마지막 활성 탭 — 그룹 전환 시 복원한다 (E7h ④) */
-  const lastActiveRef = useRef(new Map<string, string>())
+  const lastActive = new Map<string, string>()
   /** 빈 상태 안내를 이미 껐던 세션 — 반복 입력마다 setTabs를 다시 부르지 않기 위한 가드 (E12) */
-  const hintGoneRef = useRef(new Set<string>())
+  const hintGone = new Set<string>()
+  /**
+   * 자동 생성이 진행 중인 그룹 — activateGroup의 이중 생성 가드. create의 invoke 왕복이
+   * 끝나기 전(setTabs 반영 전) activateGroup이 또 불리면 "탭 0개" 스냅숏을 다시 보고 세션을
+   * 하나 더 만들던 함정(E7h 실측, 구 TerminalDock 주석)을 호출부 사정과 무관하게 여기서 막는다.
+   * "+" 버튼의 create 직접 호출에는 가드를 걸지 않는다 — 빠른 연타로 탭 여러 개는 의도된 동작
+   */
+  const activating = new Set<string>()
 
   /** 빈 상태 안내를 끈다 — 첫 입력·첫 출력 중 먼저 온 쪽이 부른다. 한 세션당 1회만 렌더에 반영 */
   const dismissHint = (sessionId: string) => {
-    if (hintGoneRef.current.has(sessionId)) return
-    hintGoneRef.current.add(sessionId)
-    setTabs((prev) =>
+    if (hintGone.has(sessionId)) return
+    hintGone.add(sessionId)
+    set.setTabs((prev) =>
       prev.map((tab) => (tab.sessionId === sessionId ? { ...tab, hintVisible: false } : tab)),
     )
   }
 
-  // push 구독은 훅 수명 1회 — sessionId로 해당 xterm에 라우팅한다
-  useEffect(() => {
-    const offData = window.terminalApi.onData((sessionId, chunk) => {
-      receivedRef.current.add(sessionId)
-      dismissHint(sessionId)
-      const view = viewsRef.current.get(sessionId)
-      if (view === undefined) {
-        const pending = pendingRef.current.get(sessionId) ?? []
-        pending.push(chunk)
-        pendingRef.current.set(sessionId, pending)
-        return
-      }
-      view.terminal.write(chunk)
-    })
-    const offExit = window.terminalApi.onExit((sessionId) => {
-      // 출력 없이 죽은 세션 = 깨진 쉘 — 단, 사용자가 닫은 세션은 제외 (E7d ② 보완: 빠른 닫기 오탐)
-      const userClosed = closingRef.current.delete(sessionId)
-      const notice = userClosed ? null : silentExitNotice(receivedRef.current.has(sessionId))
-      if (notice !== null) setError(notice)
-      setTabs((prev) =>
-        prev.map((tab) => (tab.sessionId === sessionId ? { ...tab, exited: true } : tab)),
-      )
-    })
-    return () => {
-      offData()
-      offExit()
+  /** push 데이터 수신 — sessionId로 해당 xterm에 라우팅한다 (구독은 훅의 이펙트가 담당) */
+  const handleData = (sessionId: string, chunk: string) => {
+    received.add(sessionId)
+    dismissHint(sessionId)
+    const view = views.get(sessionId)
+    if (view === undefined) {
+      const queue = pending.get(sessionId) ?? []
+      queue.push(chunk)
+      pending.set(sessionId, queue)
+      return
     }
-  }, [])
+    view.terminal.write(chunk)
+  }
 
-  // 테마 전환 시 열린 세션 전부 즉시 교체 — options.theme는 "객체 재할당"이어야 반영된다 (실측 3)
-  useEffect(() => {
-    for (const view of viewsRef.current.values()) {
-      view.terminal.options.theme = { ...terminalPalette(theme) }
-    }
-  }, [theme])
+  /** 세션 종료 — 출력 없이 죽은 세션 = 깨진 쉘. 단, 사용자가 닫은 세션은 제외 (E7d ② 보완: 빠른 닫기 오탐) */
+  const handleExit = (sessionId: string) => {
+    const userClosed = closing.delete(sessionId)
+    const notice = userClosed ? null : silentExitNotice(received.has(sessionId))
+    if (notice !== null) set.setError(notice)
+    set.setTabs((prev) =>
+      prev.map((tab) => (tab.sessionId === sessionId ? { ...tab, exited: true } : tab)),
+    )
+  }
 
   const refit = (sessionId: string) => {
-    const view = viewsRef.current.get(sessionId)
+    const view = views.get(sessionId)
     if (view === undefined || view.terminal.element === undefined) return
     view.fit.fit()
     void window.terminalApi.resize(sessionId, view.terminal.cols, view.terminal.rows)
@@ -120,6 +144,7 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
    * 필요가 없다(오히려 "다른 그룹의 번호가 여기 붙어온다"는 착시를 만들었다)
    */
   const create = async (options?: { cwd?: string; label?: string }) => {
+    const { repoPath, theme } = latest()
     if (repoPath === null) return
     try {
       const { sessionId } = await window.terminalApi.create(repoPath, options?.cwd)
@@ -138,17 +163,17 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
         dismissHint(sessionId)
         void window.terminalApi.input(sessionId, data)
       })
-      viewsRef.current.set(sessionId, { terminal, fit })
+      views.set(sessionId, { terminal, fit })
       // 먼저 도착해 대기 중인 청크 재생 — 첫 프롬프트 유실 방지 (Task 3 리뷰)
-      const pending = pendingRef.current.get(sessionId)
-      if (pending !== undefined) {
-        pendingRef.current.delete(sessionId)
-        for (const chunk of pending) terminal.write(chunk)
+      const queued = pending.get(sessionId)
+      if (queued !== undefined) {
+        pending.delete(sessionId)
+        for (const chunk of queued) terminal.write(chunk)
       }
       const groupKey = options?.cwd ?? repoPath
-      // 함수형 업데이터 필수 — 바깥 tabs 클로저를 읽으면 같은 렌더 안에서 연속 생성될 때
-      // 번호가 중복된다(:133-137의 close/closeGroup 트랩과 같은 이유)
-      setTabs((prev) => {
+      // 함수형 업데이터 필수 — 스냅숏 tabs를 읽으면 같은 렌더 안에서 연속 생성될 때
+      // 번호가 중복된다(close/closeGroup 트랩과 같은 이유)
+      set.setTabs((prev) => {
         const usedNumbers = prev.filter((tab) => tab.groupKey === groupKey).map((tab) => tab.number)
         const number = nextTabNumber(usedNumbers)
         return [
@@ -156,42 +181,42 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
           { sessionId, number, title: String(number), exited: false, groupKey, hintVisible: true },
         ]
       })
-      setActiveId(sessionId)
-      lastActiveRef.current.set(groupKey, sessionId)
-      setError(null)
+      set.setActiveId(sessionId)
+      lastActive.set(groupKey, sessionId)
+      set.setError(null)
     } catch (cause) {
-      setError(stripIpcPrefix(cause instanceof Error ? cause.message : String(cause)))
+      set.setError(stripIpcPrefix(cause instanceof Error ? cause.message : String(cause)))
     }
   }
 
   /** 탭 선택 — 그 그룹의 마지막 활성으로 기억한다 (E7h ④) */
   const select = (sessionId: string) => {
-    setActiveId(sessionId)
-    const tab = tabs.find((t) => t.sessionId === sessionId)
-    if (tab !== undefined) lastActiveRef.current.set(tab.groupKey, sessionId)
+    set.setActiveId(sessionId)
+    const tab = latest().tabs.find((t) => t.sessionId === sessionId)
+    if (tab !== undefined) lastActive.set(tab.groupKey, sessionId)
   }
 
-  // close는 closeGroup에서 같은 렌더 안에 연속 호출된다 — setTabs(next)처럼 바깥 tabs 클로저로
+  // close는 closeGroup에서 같은 렌더 안에 연속 호출된다 — setTabs(next)처럼 스냅숏 tabs로
   // "다음 상태"를 미리 계산하면 두 번째 호출이 첫 번째 호출의 아직 반영 안 된 결과를 못 보고 되살려버린다
   // (React가 이벤트 핸들러 내 setState를 배치하기 때문). setTabs/setActiveId 둘 다 함수형 업데이터로 써서
   // 연속 호출이 서로의 결과 위에 누적되게 한다 (E7h ④ 실측 — closeGroup 2세션 정리 검증으로 확인)
   const close = (sessionId: string) => {
-    closingRef.current.add(sessionId)
+    closing.add(sessionId)
     void window.terminalApi.kill(sessionId)
-    const view = viewsRef.current.get(sessionId)
-    viewsRef.current.delete(sessionId)
+    const view = views.get(sessionId)
+    views.delete(sessionId)
     view?.terminal.dispose()
-    hintGoneRef.current.delete(sessionId)
-    setTabs((prev) => {
+    hintGone.delete(sessionId)
+    set.setTabs((prev) => {
       const closedGroup = prev.find((tab) => tab.sessionId === sessionId)?.groupKey
       const next = prev.filter((tab) => tab.sessionId !== sessionId)
-      setActiveId((prevActive) => {
+      set.setActiveId((prevActive) => {
         if (prevActive !== sessionId) return prevActive
         const sameGroup = next.filter((tab) => tab.groupKey === closedGroup)
         const fallback = sameGroup[sameGroup.length - 1]?.sessionId ?? null
         if (closedGroup !== undefined) {
-          if (fallback !== null) lastActiveRef.current.set(closedGroup, fallback)
-          else lastActiveRef.current.delete(closedGroup)
+          if (fallback !== null) lastActive.set(closedGroup, fallback)
+          else lastActive.delete(closedGroup)
         }
         return fallback
       })
@@ -199,30 +224,45 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
     })
   }
 
-  /** 그룹 전환 (E7h ④) — 그 그룹의 기억된(없으면 마지막) 탭을 활성, 탭이 없으면 자동 1개 생성 */
+  /**
+   * 그룹 활성화 (E7h ④) — 탭이 없으면 자동 1개 생성, 활성 탭이 이미 이 그룹이면(재열림 등)
+   * refit만, 아니면 기억된(없으면 마지막) 탭을 활성. 재열림 refit 분기는 원래 TerminalDock의
+   * open/groupKey 이펙트가 들고 있었는데 로직 레이어인 이쪽으로 내렸다 (E14c — 레이어 분리)
+   */
   const activateGroup = async (
     groupKey: string,
     createOptions?: { cwd?: string; label?: string },
   ) => {
+    const { tabs, activeId } = latest()
     const group = tabs.filter((tab) => tab.groupKey === groupKey)
     if (group.length === 0) {
-      await create(createOptions)
+      if (activating.has(groupKey)) return // 자동 생성 진행 중 — 이중 생성 가드 (위 주석)
+      activating.add(groupKey)
+      try {
+        await create(createOptions)
+      } finally {
+        activating.delete(groupKey)
+      }
       return
     }
-    const remembered = lastActiveRef.current.get(groupKey)
+    if (activeId !== null && group.some((tab) => tab.sessionId === activeId)) {
+      refit(activeId)
+      return
+    }
+    const remembered = lastActive.get(groupKey)
     const target = group.find((tab) => tab.sessionId === remembered) ?? group[group.length - 1]!
-    setActiveId(target.sessionId)
+    set.setActiveId(target.sessionId)
   }
 
   /** 그룹 세션 전부 정리 — 워크트리 지우기 성공 시 (E7h ④). close가 함수형이라 연속 호출도 안전하다 */
   const closeGroup = (groupKey: string) => {
-    for (const tab of tabs.filter((t) => t.groupKey === groupKey)) close(tab.sessionId)
+    for (const tab of latest().tabs.filter((t) => t.groupKey === groupKey)) close(tab.sessionId)
   }
 
   /** 세션 뷰를 DOM에 붙인다 — 숨김 탭에서 붙으면 크기가 0이라, 보이는 시점의 refit이 바로잡는다 */
   const attach = (sessionId: string, element: HTMLDivElement | null) => {
     if (element === null) return
-    const view = viewsRef.current.get(sessionId)
+    const view = views.get(sessionId)
     if (view === undefined) return
     if (view.terminal.element !== undefined) {
       refit(sessionId)
@@ -232,14 +272,17 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
     refit(sessionId)
   }
 
+  /** 활성 세션 refit — activeId를 스냅숏에서 읽으므로 오래된 클로저에서 불려도 최신 탭을 맞춘다 */
   const refitActive = () => {
+    const { activeId } = latest()
     if (activeId !== null) refit(activeId)
   }
 
   return {
-    tabs,
-    activeId,
-    error,
+    views,
+    syncLatest,
+    handleData,
+    handleExit,
     create,
     close,
     select,
@@ -247,5 +290,61 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
     closeGroup,
     attach,
     refitActive,
+  }
+}
+
+/**
+ * 터미널 세션 로직 (E7b) — 세션 생성·xterm 인스턴스 수명·push 라우팅을 소유한다.
+ * TerminalDock(프레젠테이션)은 이 훅의 값·콜백만 렌더한다 (레이어 분리).
+ * E14c — 액션은 createTerminalCore가 1회만 만들어 렌더 간 참조가 안정적이다: 소비자 이펙트가
+ * `sessions.refitActive` 등을 deps에 정직하게 넣을 수 있다(넣어도 재실행 없음)
+ */
+export function useTerminalSessions(repoPath: string | null, theme: Theme) {
+  const [tabs, setTabs] = useState<TerminalTab[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // 코어는 첫 렌더에 1회 생성 — 안정 참조인 세터만 캡처하므로 낡지 않는다. 스냅숏은 코어가
+  // 소유한다(useState에 담아 필드를 고쳐 쓰면 immutability, ref를 렌더 중 넘기면 refs 규칙
+  // 위반 — 둘 다 실측 lint 에러라 모듈 클로저 소유로 정리했다. createTerminalCore 주석)
+  const [core] = useState(() =>
+    createTerminalCore({ repoPath, theme, tabs: [], activeId: null }, { setTabs, setActiveId, setError }),
+  )
+
+  // 최신 스냅숏 미러(매 렌더, deps 없음) — 액션은 이벤트·이펙트에서만 불리고, 이 이펙트는 훅
+  // 안에 있어 소비자 컴포넌트의 어떤 이펙트보다 먼저 돈다(등록 순서) — 액션이 읽는 스냅숏이
+  // 항상 그 커밋의 값임이 보장된다. 유일한 예외인 attach(ref 콜백, 이펙트보다 앞선 커밋 단계)는
+  // 스냅숏을 읽지 않는다(views와 인자 sessionId만 쓴다)
+  useEffect(() => {
+    core.syncLatest({ repoPath, theme, tabs, activeId })
+  })
+
+  // push 구독 — core가 안정 참조라 실질 마운트 1회다
+  useEffect(() => {
+    const offData = window.terminalApi.onData(core.handleData)
+    const offExit = window.terminalApi.onExit(core.handleExit)
+    return () => {
+      offData()
+      offExit()
+    }
+  }, [core])
+
+  // 테마 전환 시 열린 세션 전부 즉시 교체 — options.theme는 "객체 재할당"이어야 반영된다 (실측 3)
+  useEffect(() => {
+    for (const view of core.views.values()) {
+      view.terminal.options.theme = { ...terminalPalette(theme) }
+    }
+  }, [core, theme])
+
+  return {
+    tabs,
+    activeId,
+    error,
+    create: core.create,
+    close: core.close,
+    select: core.select,
+    activateGroup: core.activateGroup,
+    closeGroup: core.closeGroup,
+    attach: core.attach,
+    refitActive: core.refitActive,
   }
 }

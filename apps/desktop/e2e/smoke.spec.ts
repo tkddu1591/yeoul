@@ -3463,6 +3463,63 @@ test('E12 — 좌측 접기 버튼으로 좌측 폭이 0이 되고 펼치면 복
 })
 
 /**
+ * E14c — 사이드 접기 후 xterm이 새 도크 폭으로 refit된다 (E12부터의 잠복 버그 회귀 방지).
+ * TerminalDock의 'resize' 리스너·ResizeObserver 이펙트가 `[]` deps로 마운트 시점 sessions를
+ * 굳혀 refitActive가 항상 activeId=null로 불리던 문제 — 창 리사이즈는 attach ref 콜백의
+ * 부수효과가 가려 주지만(TerminalDock.tsx 주석), 접기는 240ms 전환이 끝나는 시점에 리렌더가
+ * 없어 xterm이 옛 폭에 남았다(E14b 실측: dock 1160 / view 1136 / xterm 737 — 오른쪽 35% 공백).
+ * **검증은 반드시 접기로 한다** — 창 리사이즈로는 고치기 전에도 통과해 버려 아무것도 증명 못 한다.
+ */
+test('E14c — 좌측을 접으면 터미널(xterm)이 넓어진 도크 폭으로 refit된다', async () => {
+  const repo = await createRepoWithChange()
+  await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  // dockOpen 영속 격리 — 터미널 테스트 공통 사유 (E7b 테스트의 주석과 동일)
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByTestId('terminal-toggle').click()
+    const view = window.locator('.terminal-dock__view').first()
+    const screen = window.locator('.terminal-dock__view .xterm-screen')
+    await expect(screen).toBeVisible()
+    // 첫 프롬프트 출력(빈 상태 힌트 소멸)까지 기다린다 — 첫 출력은 dismissHint→setTabs로
+    // 리렌더를 일으키고, 그 리렌더의 attach ref 콜백이 refit을 **우연히** 다시 돌린다.
+    // 이 구제가 접기 이후에 도착하면 버그가 있어도 초록이 되는 레이스가 생기므로(실측),
+    // 힌트가 꺼진 "조용한" 상태를 만든 뒤에 접는다 — E14b 실측과 같은 조건이다
+    await expect(window.getByTestId('terminal-empty-hint')).toBeHidden({ timeout: 10_000 })
+    // 기준 폭 — attach 직후 refit이 돌아 xterm이 뷰 폭을 채운 상태여야 한다
+    const viewBefore = (await view.boundingBox())!.width
+    const xtermBefore = (await screen.boundingBox())!.width
+    expect(xtermBefore).toBeGreaterThan(0)
+    expect(xtermBefore).toBeGreaterThan(viewBefore - 20)
+
+    await window.getByTestId('left-collapse-toggle').click()
+    // 240ms 전환 정착 대기 — 좌측 폭 0(E12 관용구)까지 기다린 뒤에 최종 뷰 폭을 읽는다.
+    // 전환 중간 폭으로 단언하면 fit의 셀 반올림 슬랙과 겹쳐 오탐·과탐이 생긴다
+    await window.waitForTimeout(320)
+    await expect
+      .poll(async () => (await window.locator('.app__left').boundingBox())!.width)
+      .toBe(0)
+    const viewAfter = (await view.boundingBox())!.width
+    expect(viewAfter).toBeGreaterThan(viewBefore + 50)
+
+    // 핵심 단언 — xterm 폭이 새 뷰 폭을 따라온다. 여유 35px = 뷰 안쪽 패딩(실측 17px) +
+    // fit의 셀 단위 내림(최대 1셀 ≈ 7.2px) + 안전 마진. 버그 상태에선 xterm이 옛 폭(≈737)에
+    // 남아 250px 이상 모자라므로(실측) 이 여유로는 절대 통과하지 못한다
+    await expect
+      .poll(async () => (await screen.boundingBox())!.width, { timeout: 5_000 })
+      .toBeGreaterThan(viewAfter - 35)
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+/**
  * E12 Task 6 ② — ⌘⌥1이 좌측 접기 버튼과 같은 토글을 한다. macOS는 Option을 누른 채면
  * event.key가 '1'이 아닌 특수문자로 바뀌므로(App.tsx 실측 주석), 구현은 event.code(물리 키)를
  * 본다 — Playwright의 'Digit1' 키 이름은 정확히 그 물리 코드를 만든다.

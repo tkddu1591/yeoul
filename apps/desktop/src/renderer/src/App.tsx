@@ -128,6 +128,10 @@ export function App() {
   // E7h ④ 워크트리 지우기 성공 직후 그 경로를 1회성으로 담아 TerminalDock에 내려보낸다 —
   // 도크가 closeGroup 후 onPurged로 비운다(세션 훅을 App으로 끌어올리는 큰 리팩터 없이 배선)
   const [purgeTerminalGroup, setPurgeTerminalGroup] = useState<string | null>(null)
+  // 위 1회성 신호를 비우는 **안정 콜백** — TerminalDock의 purge 이펙트가 deps에 넣는다(E14c).
+  // 인라인 화살표면 렌더마다 새 참조라 이펙트가 헛돌므로, 안정 참조인 세터만 캡처한 함수를
+  // 상태 lazy init으로 1회만 만든다(useCallback 지양 지침 — 성능 훅 대신 구조로 해결)
+  const [clearPurgedTerminalGroup] = useState(() => () => setPurgeTerminalGroup(null))
   // E7a 실험 공간 우클릭 다이얼로그 — 재배치 확인·이름 바꾸기·지우기(needsForce 2단)·원격 지우기
   const [confirmingRebase, setConfirmingRebase] = useState<{ name: string } | null>(null)
   const [renamePrompt, setRenamePrompt] = useState<{ name: string } | null>(null)
@@ -1473,7 +1477,7 @@ export function App() {
               open={dockOpen}
               height={dockHeight}
               purgeGroup={purgeTerminalGroup}
-              onPurged={() => setPurgeTerminalGroup(null)}
+              onPurged={clearPurgedTerminalGroup}
               onResizeStart={startDockResize}
               onClose={toggleDock}
             />
