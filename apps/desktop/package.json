@@ -14,7 +14,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "e2e": "electron-vite build && playwright test",
-    "package": "electron-vite build && electron-builder --mac --universal --config electron-builder.local.yml",
+    "package": "electron-vite build && electron-builder --mac --universal --config electron-builder.local.yml --publish never",
     "package:signed": "electron-vite build && electron-builder --mac --universal --config electron-builder.yml --publish never",
     "release:adhoc": "electron-vite build && electron-builder --mac --universal --config electron-builder.local.yml --publish always",
     "release": "electron-vite build && electron-builder --mac --universal --config electron-builder.yml --publish always",
