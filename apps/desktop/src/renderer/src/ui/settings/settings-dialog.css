@@ -60,3 +60,43 @@
   font-size: var(--text-sm);
   color: var(--color-text-faint);
 }
+.settings-dialog__remote-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+.settings-dialog__remote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.settings-dialog__remote span,
+.settings-dialog__remote-form label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-1);
+}
+.settings-dialog__remote small {
+  overflow: hidden;
+  color: var(--color-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-dialog__remote-form {
+  display: grid;
+  gap: var(--space-2);
+}
+.settings-dialog__remote-form input {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.settings-dialog__error {
+  color: var(--concept-conflict);
+}

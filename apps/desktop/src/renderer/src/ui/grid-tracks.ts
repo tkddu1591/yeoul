@@ -4,6 +4,8 @@ import type { ColumnCollapse } from './column-resize'
 export const MAIN_GAP = 16
 /** 우측 폭 조절 손잡이 */
 export const RESIZER_WIDTH = 6
+/** 손잡이를 포함한 중앙↔우측 간격을 MAIN_GAP 하나로 맞추기 위한 양쪽 여백 */
+export const RESIZER_GUTTER = (MAIN_GAP - RESIZER_WIDTH) / 2
 
 /**
  * .app__main의 열 트랙 문자열 (E13) — 접힌 열도 **트랙을 유지하고 0px로** 둔다.
@@ -17,7 +19,8 @@ export function buildMainColumns(
   collapse: ColumnCollapse,
 ): string {
   const leftGap = collapse.left === true ? 0 : MAIN_GAP
-  const rightSide = collapse.right === true ? [0, 0, 0] : [MAIN_GAP, RESIZER_WIDTH, MAIN_GAP]
+  const rightSide =
+    collapse.right === true ? [0, 0, 0] : [RESIZER_GUTTER, RESIZER_WIDTH, RESIZER_GUTTER]
   return [
     `${columns.left}px`,
     `${leftGap}px`,

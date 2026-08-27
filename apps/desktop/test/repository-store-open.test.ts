@@ -68,6 +68,7 @@ function makeGitApi() {
     tabs: { showExisting: async () => false },
     rebase: { progress: async () => null },
     remotes: {
+      list: async () => [],
       fetch: async () => {
         await sleep(fetchDelay)
       },

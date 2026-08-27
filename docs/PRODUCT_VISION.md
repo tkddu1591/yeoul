@@ -1,8 +1,8 @@
-# Git GUI 제품 목적과 범위
+# Yeoul 제품 목적과 범위
 
 ## 1. 제품 한 문장
 
-Git GUI는 Git의 복잡한 상태를 정확히 해석해 보여 주고, 사용자가 작업의 결과와 복구 방법을 이해한 상태에서 안전하게 명령을 실행하도록 돕는 데스크톱 클라이언트다.
+여울은 브랜치와 여러 워크트리를 한곳에서 편하게 살펴보고, 변경 검토부터 커밋·통합까지 안전하게 이어가도록 돕는 macOS Git GUI다.
 
 ## 2. 해결하려는 문제
 
@@ -20,8 +20,8 @@ Git GUI는 Git의 복잡한 상태를 정확히 해석해 보여 주고, 사용�
 
 - IntelliJ 계열 IDE의 Git 도구에 익숙하지만 IDE와 독립된 클라이언트를 원하는 개발자
 - CLI를 함께 사용하면서도 변경 검토, 충돌 해결, commit graph 탐색은 시각적으로 하고 싶은 개발자
-- 여러 조직·호스팅 서비스·인증 방식을 오가는 개발자
-- monorepo, 대형 저장소, LFS, submodule, worktree를 사용하는 팀
+- monorepo, 대형 저장소, 여러 worktree를 사용하는 개인·소규모 팀
+- IDE·CLI·자동화 도구를 오가며 여러 워크트리의 변경을 한곳에서 관리하려는 개발자
 
 ## 4. 제품 원칙
 
@@ -45,39 +45,42 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 
 프레젠테이션, Git 상태 해석, 작업 정책, 프로세스 실행, 호스팅 서비스 연동, 인증 저장을 분리한다. UI가 Git 프로세스를 직접 실행하거나 원시 CLI 출력을 직접 해석하지 않는다.
 
-## 5. 핵심 기능 범위
+## 5. 현재 지원 범위
+
+- 저장소 열기·복제·초기화와 Git 원격 추가·제거
+- 파일·hunk·줄 단위 stage/unstage, 커밋, 스태시
+- 브랜치·워크트리·터미널, 워크트리별 dirty/staged/untracked/ahead/behind 요약
+- merge/rebase/cherry-pick/revert 충돌 해결과 중단
+- 첫 푸시 대상 확인, GitHub 풀 리퀘스트 검토·병합
+- 취소·5분 제한이 있는 Git 작업과 민감한 인자를 제외한 로컬 실행 로그
+- Universal macOS 패키지, 로컬 진단 로그와 크래시 덤프
+
+아래 항목은 제품 방향과 로드맵이다. 현재 지원으로 오해하지 않도록 구현 완료 전에는 배포 설명에 포함하지 않는다.
+
+## 6. 로드맵 범위
 
 ### 변경 작업
 
-- 변경 파일과 hunk 단위 diff 보기
-- stage/unstage 및 일부 hunk stage
 - IntelliJ의 changelist와 유사한 보류 그룹
-- stash 생성, 목록, 적용, pop, 삭제, 충돌 처리
-- commit 생성, amend, 서명, 메시지 기록
+- 커밋 서명과 메시지 템플릿·기록 고도화
 - 파일 복원과 untracked 파일 정리 전 미리보기
 
 ### 브랜치와 동기화
 
-- 로컬·원격 브랜치 생성, 전환, 이름 변경, 삭제
-- fetch, pull, push 및 upstream 설정
-- merge, rebase, cherry-pick
 - force-with-lease 중심의 force push
 - tag 생성, 조회, push, 삭제
 - 삭제된 브랜치와 유실 commit의 reflog 기반 복구
 
 ### 이력과 탐색
 
-- commit graph, ref, tag, HEAD, upstream 시각화
 - 파일 이력, blame, commit 상세 diff
-- 여러 브랜치 비교와 ahead/behind 표시
-- 검색·필터·경로 범위 지정
-- 대형 graph의 가상화 및 점진 로딩
+- 브랜치 간 파일 단위 통합 diff와 워크트리 통합 큐
+- 경로 범위·작성자·기간을 조합한 고급 검색
 
 ### 충돌과 중단 상태
 
-- merge, rebase, cherry-pick 충돌을 서로 다른 작업 상태로 표시
 - base/ours/theirs 및 결과를 구분하는 충돌 편집기
-- 파일별 해결 표시, continue, skip, abort
+- rebase skip과 커밋별 진행 편집
 - rename/delete, add/add, binary, submodule, permission 충돌 처리
 - 앱 종료·재실행 뒤에도 진행 중인 작업 복원
 - 외부 CLI에서 시작한 작업도 감지하여 이어서 처리
@@ -85,8 +88,8 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 ### 저장소 구조
 
 - submodule과 중첩 submodule 탐색, 초기화, 동기화, 업데이트
-- 여러 worktree의 경로, 브랜치 점유, 잠금, prune 상태 관리
-- bare repository와 detached HEAD 읽기 및 제한된 작업 지원
+- worktree 잠금·prune 고급 관리
+- bare repository 작업 지원 확대
 - Git LFS 객체 상태와 pull/push 진행 상태 표시
 - sparse checkout 패턴 조회와 변경
 - partial clone의 누락 객체 요청과 네트워크 진행 상태 표시
@@ -101,7 +104,7 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 - 저장소별 계정·인증 프로필 선택
 - 비밀 정보는 운영체제 보안 저장소에 보관하고 로그에서 제거
 
-## 6. 반드시 다룰 엣지 케이스
+## 7. 반드시 다룰 엣지 케이스
 
 - detached HEAD에서 commit 후 새 브랜치로 보존
 - merge 또는 cherry-pick 중단 상태에서 continue/abort
@@ -124,7 +127,7 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 
 세부 시나리오와 기대 동작은 [Git 시나리오 카탈로그](GIT_SCENARIOS.md)에서 관리한다.
 
-## 7. UX 요구사항
+## 8. UX 요구사항
 
 모든 작업 화면은 최소한 다음 질문에 답해야 한다.
 
@@ -136,7 +139,7 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 
 긴 작업은 진행률, 현재 단계, 취소 가능 여부를 표시한다. 작업 로그에는 실행한 Git 명령과 정제된 출력을 남기되 token, passphrase, credential URL 같은 비밀 정보는 절대 기록하지 않는다.
 
-## 8. 기술 경계 초안
+## 9. 기술 경계 초안
 
 구현 스택과 무관하게 아래 책임은 분리한다.
 
@@ -150,7 +153,7 @@ GUI 용어는 실제 Git 개념과 연결되어야 한다. 편의를 위해 동�
 
 Git process 계층은 원시 결과만 반환한다. 변환은 adapter에서, 작업 가능 여부와 복구 정책은 domain에서, 사용자 메시지와 시각 표현은 UI에서 담당한다.
 
-## 9. 단계별 출시 기준
+## 10. 단계별 출시 기준
 
 ### 0단계: 기반
 
@@ -182,7 +185,7 @@ Git process 계층은 원시 결과만 반환한다. 변환은 adapter에서, �
 - SSH/HTTPS/SSO 인증 진단
 - 고급 충돌 유형과 외부 변경 복원
 
-## 10. 완료의 정의
+## 11. 완료의 정의
 
 기능이 존재한다는 것은 버튼이 있다는 뜻이 아니다. 각 기능은 다음 조건을 모두 만족해야 한다.
 
@@ -193,7 +196,7 @@ Git process 계층은 원시 결과만 반환한다. 변환은 adapter에서, �
 - 비밀 정보가 화면, 로그, 오류 보고에 노출되지 않는다.
 - CLI나 다른 Git 클라이언트가 만든 동일 상태를 인식한다.
 
-## 11. 현재 비목표
+## 12. 현재 비목표
 
 - Git 서버 자체를 구현하는 것
 - Git의 객체 저장 방식이나 전송 프로토콜을 재구현하는 것
@@ -201,4 +204,3 @@ Git process 계층은 원시 결과만 반환한다. 변환은 adapter에서, �
 - 충돌 결과를 사용자 확인 없이 자동 선택하는 것
 
 이 비목표는 제품 범위를 통제하기 위한 것이며, Git 작업에 필요한 호스팅 메타데이터와 pull/merge request 연동은 추후 별도 범위로 정의할 수 있다.
-

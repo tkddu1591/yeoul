@@ -393,7 +393,10 @@ export function HistoryPanel({
         <>
           {historyRef !== null && (
             <span className="history-view-pill" data-testid="history-view-pill">
-              조회 중: {historyRef}
+              <span className="history-view-pill__label">조회 중:</span>
+              <span className="history-view-pill__name" title={historyRef}>
+                {historyRef}
+              </span>
               <button
                 type="button"
                 className="history-view-pill__clear"
@@ -401,7 +404,7 @@ export function HistoryPanel({
                 onClick={onClearView}
                 data-testid="history-view-clear"
               >
-                ✕
+                전체 보기
               </button>
             </span>
           )}

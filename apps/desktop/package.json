@@ -1,14 +1,23 @@
 {
   "name": "@git-gui/desktop",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "description": "복잡한 Git 작업을 안전하게 이해하고 수행하는 macOS 데스크톱 클라이언트",
+  "author": "tkddu1591",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tkddu1591/git-gui.git"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "e2e": "electron-vite build && playwright test",
-    "package": "electron-vite build && electron-builder --mac --config electron-builder.yml",
+    "package": "electron-vite build && electron-builder --mac --universal --config electron-builder.local.yml",
+    "package:signed": "electron-vite build && electron-builder --mac --universal --config electron-builder.yml --publish never",
+    "release:adhoc": "electron-vite build && electron-builder --mac --universal --config electron-builder.local.yml --publish always",
+    "release": "electron-vite build && electron-builder --mac --universal --config electron-builder.yml --publish always",
     "postinstall": "node -e \"const fs=require('fs');const path=require('path');for(const d of ['darwin-arm64','darwin-x64']){const p=path.join(__dirname,'node_modules/node-pty/prebuilds',d,'spawn-helper');if(fs.existsSync(p))fs.chmodSync(p,0o755);}\""
   },
   "dependencies": {
@@ -17,12 +26,12 @@
     "@git-gui/git-process": "workspace:*",
     "@git-gui/hosting": "workspace:*",
     "@git-gui/ipc-contract": "workspace:*",
+    "@sun-typeface/suit": "2.0.5",
     "@tanstack/react-virtual": "^3.14.6",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "lucide-react": "^1.24.0",
     "node-pty": "^1.1.0",
-    "pretendard": "^1.3.9",
     "react": "^19.0.0",
     "react-aria-components": "^1.19.0",
     "react-dom": "^19.0.0",

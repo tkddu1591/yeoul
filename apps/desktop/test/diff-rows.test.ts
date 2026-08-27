@@ -15,8 +15,13 @@ describe('buildDiffRows', () => {
   it('unified — hunk 헤더 행과 라인 행을 순서대로 평탄화한다', () => {
     const rows = buildDiffRows(hunks, 'unified')
     expect(rows.map((r) => r.kind)).toEqual(['hunk', 'line', 'line', 'line', 'hunk', 'line'])
-    expect(rows[0]).toEqual({ kind: 'hunk', header: '@@ -1,2 +1,2 @@' })
-    expect(rows[1]).toEqual({ kind: 'line', line: hunks[0]!.lines[0]! })
+    expect(rows[0]).toEqual({ kind: 'hunk', hunk: hunks[0] })
+    expect(rows[1]).toEqual({
+      kind: 'line',
+      hunk: hunks[0],
+      line: hunks[0]!.lines[0],
+      lineIndex: 0,
+    })
   })
 
   it('split — pairHunkLines 결과를 행으로 평탄화한다 (del|add가 한 행)', () => {

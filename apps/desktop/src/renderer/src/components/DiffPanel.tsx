@@ -1,15 +1,25 @@
 import { Columns2, Rows3, X } from 'lucide-react'
 import { useState } from 'react'
-import type { FileDiff } from '@git-gui/domain'
+import type {
+  DiffHunk,
+  DiffOptions,
+  FileDiff,
+  HunkStageRequest,
+  LineStageRequest,
+} from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
+import { ProductIcon } from '../ui/ProductIcon'
 import { DiffView } from './DiffView'
 import { T } from '../terms'
 import './diff-panel.css'
 
 interface DiffPanelProps {
-  path: string | null
-  diff: FileDiff | null
+  document: {
+    path: string
+    diff: FileDiff
+    change: { path: string; options: DiffOptions } | null
+  } | null
   /**
    * 쓰기(커밋·병합 등)가 도는 동안 닫기를 잠근다 — 그게 전부다.
    * 예전엔 "in-flight selectFile이 clear를 덮어쓰는 레이스 방지"도 겸했지만, 조회가 더는 busy를
@@ -25,27 +35,38 @@ interface DiffPanelProps {
   onClose(): void
   /** 이 패널로 떨어질 조회(가운데)가 진행 중인가 (E14a) */
   pending: boolean
+  onStageHunk(request: HunkStageRequest): void
+  onUnstageHunk(request: HunkStageRequest): void
+  onStageLine(request: LineStageRequest): void
+  onUnstageLine(request: LineStageRequest): void
 }
 
 export function DiffPanel({
-  path,
-  diff,
+  document,
   busy,
   findOpen,
   findNonce,
   onFindClose,
   onClose,
   pending,
+  onStageHunk,
+  onUnstageHunk,
+  onStageLine,
+  onUnstageLine,
 }: DiffPanelProps) {
   const [view, setView] = useState<'unified' | 'split'>('unified')
 
-  if (!path || diff === null) {
+  if (document === null) {
     return (
       <Panel title={T.diff} testId="diff-panel" pending={pending}>
-        <p className="diff-panel__empty">파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
+        <div className="diff-panel__empty">
+          <ProductIcon size={56} />
+          <p>파일을 선택하면 무엇이 바뀌었는지 보여드려요</p>
+        </div>
       </Panel>
     )
   }
+  const { path, diff } = document
   return (
     <Panel
       title={path}
@@ -82,6 +103,23 @@ export function DiffPanel({
         findOpen={findOpen}
         findNonce={findNonce}
         onFindClose={onFindClose}
+        hunkMode={
+          document.change === null ? null : document.change.options.staged ? 'unstage' : 'stage'
+        }
+        onHunkAction={(hunk: DiffHunk) => {
+          const change = document.change
+          if (change === null) return
+          const request = { path: change.path, options: change.options, hunk }
+          if (change.options.staged) onUnstageHunk(request)
+          else onStageHunk(request)
+        }}
+        onLineAction={(hunk: DiffHunk, lineIndex: number) => {
+          const change = document.change
+          if (change === null) return
+          const request = { path: change.path, options: change.options, hunk, lineIndex }
+          if (change.options.staged) onUnstageLine(request)
+          else onStageLine(request)
+        }}
       />
     </Panel>
   )

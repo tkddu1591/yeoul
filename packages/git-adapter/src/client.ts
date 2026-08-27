@@ -9,10 +9,18 @@ import {
   type CommitSummary,
   type DiffOptions,
   type FileDiff,
+  type FileMutationGuard,
   type ForkPoint,
   type HistorySearchResult,
+  type HunkStageRequest,
+  type LineStageRequest,
   type MergeResult,
   type PullResult,
+  type PushConfirmation,
+  type PushPreview,
+  type DiscardChangesRequest,
+  type RemoveFileRequest,
+  type RemoteInfo,
   type RebaseContinueResult,
   type RebaseProgress,
   type RebaseResult,
@@ -25,9 +33,11 @@ import {
   type SyncBranchStatus,
   type WorktreeHeadInfo,
   type WorktreeInfo,
+  type WorktreeRemoveResult,
 } from '@git-gui/domain'
 import { execGit, execGitOrThrow, GitError, type GitResult } from '@git-gui/git-process'
-import { lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { lstat, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { parseCommitMeta, parseNameStatus } from './commit-detail-parser'
 import { parseLog } from './log-parser'
@@ -102,7 +112,7 @@ export interface GitClient {
     /** 새 워크트리 — path에 branch를 체크아웃해 만든다. createBranch면 지금 위치(HEAD)에서 새 브랜치를 만들며 펼친다(-b — E7d). 거부는 전부 친절 매핑 */
     add(path: string, branch: string, options?: { createBranch?: boolean }): Promise<void>
     /** 지우기 — 미저장 변경이 있으면 needsForce로 알린다(확인창은 UI). prunable도 그대로 정리된다(실측 F) */
-    remove(path: string, force: boolean): Promise<RemoveBranchResult>
+    remove(path: string, force: boolean, guard?: string): Promise<WorktreeRemoveResult>
     /**
      * 워크트리 HEAD 요약 (E7k) — 제목·시각·포함 브랜치·분기점을 한 번에.
      * 계산 비용이 있어 호출부(호버)가 필요할 때만 부른다
@@ -115,16 +125,16 @@ export interface GitClient {
   }
   conflicts: {
     /** 충돌 파일을 한쪽으로 확정한다 — ours=내 것 유지, theirs=가져온 것 사용. 해소(staged)로 표시된다 */
-    resolve(path: string, choice: 'ours' | 'theirs'): Promise<void>
+    resolve(path: string, choice: 'ours' | 'theirs', expectedContent: string): Promise<void>
     /** 직접 수정을 마쳤다고 표시한다(git add) — 마커가 남았는지는 UI가 확인창으로 경고한다 */
     markResolved(path: string): Promise<void>
     /**
      * 충돌 파일의 워크트리 내용을 통째로 바꾼다(블록 선택·자세히 보기 저장) — add하지 않는다.
      * 확정은 markResolved가 담당한다. 비충돌 파일은 resolve와 동일 문구로 거부한다(조용한 유실 차단)
      */
-    saveText(path: string, content: string): Promise<void>
+    saveText(path: string, content: string, expectedContent: string): Promise<void>
     /** 처음부터 다시 — 부분 해소를 버리고 겹침 표시를 되살린다(git checkout -m). index는 UU 그대로다 */
-    reset(path: string): Promise<void>
+    reset(path: string, expectedContent: string): Promise<void>
   }
   files: {
     /** 워크트리 텍스트 파일 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
@@ -141,20 +151,32 @@ export interface GitClient {
     drop(ref: string): Promise<void>
   }
   changes: {
+    guard: {
+      /** 확인창을 열 때의 워킹트리·index 상태를 기록한다. 파괴 작업 직전에 같은지 재검증한다. */
+      capture(paths: string[]): Promise<FileMutationGuard>
+    }
     stage(paths: string[]): Promise<void>
     unstage(paths: string[]): Promise<void>
+    hunk: {
+      stage(request: HunkStageRequest): Promise<void>
+      unstage(request: HunkStageRequest): Promise<void>
+    }
+    line: {
+      stage(request: LineStageRequest): Promise<void>
+      unstage(request: LineStageRequest): Promise<void>
+    }
     /**
      * 선택 파일의 아직 올리지 않은(unstaged) 변경 취소 — tracked는 index 상태로 복원(staged 보존),
      * untracked는 삭제. 되돌릴 수 없다. 경로는 파일 단위여야 한다(-uall status가 공급) —
      * 디렉터리 pathspec을 주면 clean이 그 아래 미추적 전체를 지운다(실측).
      */
-    discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+    discard(request: DiscardChangesRequest): Promise<void>
     diff(path: string, options: DiffOptions): Promise<FileDiff>
     /**
      * 파일 하나를 디스크에서 삭제한다 — tracked는 status가 삭제 변경으로 잡고 untracked는 그대로 사라진다.
      * 되돌릴 수 없다(확인창은 UI 책임). 부재 파일·디렉터리·심볼릭 링크·충돌 파일은 친절 에러로 거부
      */
-    removeFile(path: string): Promise<void>
+    removeFile(request: RemoveFileRequest): Promise<void>
   }
   history: {
     /** 최신순 커밋 요약. limit은 1~50000으로 잘린다. ref를 주면 그 계보만(조회 모드 — E7g), 없으면 전체 그래프(--all) */
@@ -166,8 +188,10 @@ export interface GitClient {
     search(query: string, ref?: string): Promise<HistorySearchResult>
   }
   sync: {
-    /** 현재 브랜치를 원격으로 백업한다. upstream이 없으면 첫 remote에 연결하며 올린다 — linked로 알린다 (E7e) */
-    push(): Promise<BackupResult>
+    /** 현재 push 대상·커밋 수를 실행 전에 보여 준다. upstream이 없으면 확인이 필요하다. */
+    previewPush(): Promise<PushPreview>
+    /** 현재 브랜치를 원격으로 백업한다. 첫 push는 preview의 확인값을 요구한다. */
+    push(confirmation?: PushConfirmation): Promise<BackupResult>
     /**
      * 원격의 최신 저장을 받아온다. 막히면 자동 보관 후 재시도.
      * merge 모드(기본): conflict면 MERGE_HEAD가 남아 기존 합치기 충돌 흐름을 그대로 쓴다.
@@ -185,6 +209,9 @@ export interface GitClient {
      * 원격 0개면 no-op 성공(실측 2). 화면 갱신은 감시(refs/remotes 변화)가 담당한다 (E7e)
      */
     fetch(): Promise<void>
+    list(): Promise<RemoteInfo[]>
+    add(name: string, url: string): Promise<void>
+    remove(name: string): Promise<void>
   }
   commits: {
     create(message: string): Promise<void>
@@ -242,10 +269,170 @@ function toPathspecs(paths: string[]): string[] {
   return paths.map((path) => `:(literal)${path}`)
 }
 
+async function getWorktreeFingerprint(cwd: string, path: string): Promise<string> {
+  const filePath = join(cwd, path)
+  const stats = await lstat(filePath).catch(() => null)
+  if (stats === null) return 'missing'
+  if (stats.isSymbolicLink()) return `link:${await readlink(filePath)}`
+  if (!stats.isFile()) return `other:${stats.mode}:${stats.size}`
+  const content = await readFile(filePath)
+  return `file:${stats.mode}:${createHash('sha256').update(content).digest('hex')}`
+}
+
+async function captureFileMutationGuard(cwd: string, paths: string[]): Promise<FileMutationGuard> {
+  const pathspecs = toPathspecs(paths)
+  for (const path of paths) assertRepoRelative(path)
+  const files = await Promise.all(
+    paths.map(async (path, index) => {
+      const indexEntry = await execGitOrThrow(
+        ['ls-files', '--stage', '-z', '--', pathspecs[index]!],
+        { cwd },
+      )
+      return {
+        path,
+        worktree: await getWorktreeFingerprint(cwd, path),
+        index: indexEntry.stdout,
+      }
+    }),
+  )
+  return { files }
+}
+
+async function assertFileMutationGuard(cwd: string, guard: FileMutationGuard): Promise<void> {
+  const latest = await captureFileMutationGuard(
+    cwd,
+    guard.files.map((file) => file.path),
+  )
+  const expectedByPath = new Map(guard.files.map((file) => [file.path, file]))
+  const changed = latest.files.find((file) => {
+    const expected = expectedByPath.get(file.path)
+    return expected === undefined || expected.worktree !== file.worktree || expected.index !== file.index
+  })
+  if (changed !== undefined) {
+    throw new Error(
+      `"${changed.path}"이 확인창을 연 뒤 바뀌었어요. 최신 변경을 지우지 않도록 작업을 멈췄어요. 다시 확인해 주세요.`,
+    )
+  }
+}
+
+async function assertWorktreeTextUnchanged(
+  cwd: string,
+  path: string,
+  expectedContent: string,
+): Promise<void> {
+  const latest = await readFile(join(cwd, path), 'utf8').catch(() => null)
+  if (latest !== expectedContent) {
+    throw new Error(
+      `"${path}"이 화면을 연 뒤 밖에서 바뀌었어요. 최신 내용을 덮지 않도록 작업을 멈췄어요. 다시 불러와 주세요.`,
+    )
+  }
+}
+
 /** 저장소 루트 상대 경로만 허용한다 — 빈 경로, 절대 경로, 상위 탈출(..)을 거부한다 */
 function assertRepoRelative(path: string): void {
   if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
     throw new Error(`저장소 밖 경로는 다룰 수 없다: ${path}`)
+  }
+}
+
+async function getChangeDiff(cwd: string, path: string, options: DiffOptions): Promise<FileDiff> {
+  assertRepoRelative(path)
+  if (options.untracked) {
+    const args = ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', NULL_DEVICE, path]
+    const result = await execGit(args, { cwd })
+    if (
+      result.exitCode > 1 ||
+      (result.exitCode === 1 && result.stdout === '' && result.stderr !== '')
+    ) {
+      throw new GitError(args, result)
+    }
+    return parsePatch(result.stdout)
+  }
+  const pathspecs = [`:(literal)${path}`]
+  if (options.staged && options.origPath != null) {
+    assertRepoRelative(options.origPath)
+    pathspecs.push(`:(literal)${options.origPath}`)
+  }
+  const args = options.staged
+    ? ['diff', '--cached', '-M', '--no-color', '--no-ext-diff', '--', ...pathspecs]
+    : ['diff', '--no-color', '--no-ext-diff', '--', ...pathspecs]
+  return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
+}
+
+function createHunkPatch(diff: FileDiff, request: HunkStageRequest): string {
+  const hunk = diff.hunks.find((candidate) => JSON.stringify(candidate) === JSON.stringify(request.hunk))
+  if (hunk === undefined) {
+    throw new Error('Diff가 바뀌었어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.')
+  }
+  const lines = hunk.lines.map((line) => {
+    if (line.kind === 'add') return `+${line.text}`
+    if (line.kind === 'del') return `-${line.text}`
+    if (line.kind === 'note') return line.text
+    return ` ${line.text}`
+  })
+  return [...diff.meta, hunk.header, ...lines, ''].join('\n')
+}
+
+async function getWorktreeRemovalGuard(path: string): Promise<string> {
+  const [head, status] = await Promise.all([
+    execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd: path }),
+    execGitOrThrow(['status', '--porcelain=v2', '-z', '--untracked-files=all'], { cwd: path }),
+  ])
+  return createHash('sha256')
+    .update(head.exitCode === 0 ? head.stdout.trim() : 'unborn')
+    .update('\0')
+    .update(status.stdout)
+    .digest('hex')
+}
+
+function createLinePatch(
+  diff: FileDiff,
+  request: LineStageRequest,
+  mode: 'stage' | 'unstage',
+): string {
+  const hunk = diff.hunks.find((candidate) => JSON.stringify(candidate) === JSON.stringify(request.hunk))
+  if (hunk === undefined) {
+    throw new Error('Diff가 바뀌었어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.')
+  }
+  const selected = hunk.lines[request.lineIndex]
+  if (selected === undefined || (selected.kind !== 'add' && selected.kind !== 'del')) {
+    throw new Error('추가하거나 삭제한 줄만 따로 올릴 수 있어요.')
+  }
+  const lines = hunk.lines.flatMap((line, index) => {
+    if (line.kind === 'note') return [line.text]
+    if (line.kind === 'context') return [` ${line.text}`]
+    if (index === request.lineIndex) return [line.kind === 'add' ? `+${line.text}` : `-${line.text}`]
+    if (mode === 'stage') return line.kind === 'del' ? [` ${line.text}`] : []
+    return line.kind === 'add' ? [` ${line.text}`] : []
+  })
+  const oldCount = lines.filter((line) => !line.startsWith('+') && !line.startsWith('\\')).length
+  const newCount = lines.filter((line) => !line.startsWith('-') && !line.startsWith('\\')).length
+  const header = hunk.header.replace(
+    /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/,
+    `@@ -$1,${oldCount} +$2,${newCount} @@`,
+  )
+  return [...diff.meta, header, ...lines, ''].join('\n')
+}
+
+async function applyCachedPatch(
+  cwd: string,
+  patch: string,
+  mode: 'stage' | 'unstage',
+  subject: 'hunk' | 'line',
+): Promise<void> {
+  const args = [
+    'apply',
+    '--cached',
+    ...(mode === 'unstage' ? ['--reverse'] : []),
+    '--recount',
+    '--whitespace=nowarn',
+    '-',
+  ]
+  const result = await execGit(args, { cwd, stdin: patch })
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `이 ${subject === 'hunk' ? 'hunk' : '줄'}을 ${mode === 'stage' ? '올리는' : '내리는'} 사이 파일이 바뀌었어요. Diff를 새로 확인해 주세요.`,
+    )
   }
 }
 
@@ -279,6 +466,29 @@ const CHERRY_PICK_SHELF_MESSAGE = '커밋 체리픽 자동 스태시'
 
 /** 재배치가 막혀 자동 보관할 때의 보관함 메시지 (E7a) */
 const REBASE_SHELF_MESSAGE = '커밋 리베이스 자동 스태시'
+
+/**
+ * 자동 보관 뒤 Git 작업 자체가 실패해도 변경이 사라진 것처럼 보이지 않게 보관 지점을 남긴다.
+ * stash@{n}은 새 항목이 생기면 밀릴 수 있으므로 사용자 안내에는 불변 커밋 해시를 쓴다.
+ */
+async function createAutoShelf(cwd: string, message: string): Promise<string> {
+  await execGitOrThrow(['stash', 'push', '-u', '-m', message], { cwd })
+  const revision = await execGitOrThrow(['rev-parse', '--verify', 'stash@{0}'], { cwd })
+  return revision.stdout.trim()
+}
+
+function createAutoShelfRetryError(
+  action: string,
+  shelfHash: string,
+  args: string[],
+  result: GitResult,
+): Error {
+  const shortHash = shelfHash.slice(0, 7)
+  return new Error(
+    `${action}에 실패했지만 커밋하지 않은 변경은 보관함(${shortHash})에 안전하게 남아 있어요. 보관함에서 해당 항목을 꺼내 복원해 주세요.`,
+    { cause: new GitError(args, result) },
+  )
+}
 
 /** "지금과 비교" 한 방향 상한 — 초과분은 overflow 플래그로만 알린다 (E7a) */
 const COMPARE_LIMIT = 100
@@ -361,6 +571,48 @@ export function createGitClient(repoPath: string): GitClient {
     const ahead = Number(right)
     if (!Number.isFinite(behind) || !Number.isFinite(ahead)) return null
     return { base, ahead, behind }
+  }
+
+  async function getPushPreview(cwd: string): Promise<PushPreview> {
+    const remotes = await execGitOrThrow(['remote'], { cwd })
+    const remoteNames = remotes.stdout
+      .trim()
+      .split('\n')
+      .filter((name) => name !== '')
+    if (remoteNames.length === 0) {
+      throw new Error('푸시할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+    }
+    const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
+    if (head.exitCode !== 0) throw new Error('아직 커밋이 없어요. 먼저 커밋한 뒤 푸시해 주세요.')
+    const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+    if (branch.exitCode !== 0) {
+      throw new Error('지금은 브랜치가 아닌 시점에 있어요. 새 브랜치를 만든 뒤 푸시해 주세요.')
+    }
+    const branchName = branch.stdout.trim()
+    const upstream = await execGit(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      { cwd },
+    )
+    const upstreamName = upstream.exitCode === 0 ? upstream.stdout.trim() : null
+    const matchingUpstream = upstreamName?.endsWith(`/${branchName}`) === true
+    const remote = matchingUpstream
+      ? upstreamName!.slice(0, -(branchName.length + 1))
+      : remoteNames.includes('origin')
+        ? 'origin'
+        : remoteNames[0]!
+    const remoteUrl = await execGitOrThrow(['remote', 'get-url', remote], { cwd })
+    const count = matchingUpstream
+      ? await execGitOrThrow(['rev-list', '--count', `${upstreamName}..HEAD`], { cwd })
+      : await execGitOrThrow(['rev-list', '--count', 'HEAD'], { cwd })
+    return {
+      remote,
+      remoteUrl: remoteUrl.stdout.trim(),
+      branch: branchName,
+      destination: `${remote}/${branchName}`,
+      commitCount: Number(count.stdout.trim()) || 0,
+      expectedHead: head.stdout.trim(),
+      needsConfirmation: !matchingUpstream,
+    }
   }
 
   return {
@@ -495,8 +747,11 @@ export function createGitClient(repoPath: string): GitClient {
         if (first.exitCode === 0) return { autoShelved: false }
         if (!first.stderr.includes('would be overwritten')) throw new GitError(args, first)
         // 겹쳐서 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch 관례)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', AUTO_SHELF_MESSAGE], { cwd })
-        await execGitOrThrow(args, { cwd })
+        const shelfHash = await createAutoShelf(cwd, AUTO_SHELF_MESSAGE)
+        const second = await execGit(args, { cwd })
+        if (second.exitCode !== 0) {
+          throw createAutoShelfRetryError('원격 브랜치로 이동', shelfHash, args, second)
+        }
         return { autoShelved: true }
       },
       async removeRemote(name) {
@@ -589,8 +844,12 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(['switch', '--end-of-options', name], first)
         }
         // 겹쳐서 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다
-        await execGitOrThrow(['stash', 'push', '-u', '-m', AUTO_SHELF_MESSAGE], { cwd })
-        await execGitOrThrow(['switch', '--end-of-options', name], { cwd })
+        const shelfHash = await createAutoShelf(cwd, AUTO_SHELF_MESSAGE)
+        const args = ['switch', '--end-of-options', name]
+        const second = await execGit(args, { cwd })
+        if (second.exitCode !== 0) {
+          throw createAutoShelfRetryError('브랜치 이동', shelfHash, args, second)
+        }
         return { autoShelved: true }
       },
       async merge(name) {
@@ -614,14 +873,19 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(['merge', '--no-edit', '--end-of-options', name], first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (E1a switch와 동일 패턴)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', MERGE_SHELF_MESSAGE], { cwd })
+        const shelfHash = await createAutoShelf(cwd, MERGE_SHELF_MESSAGE)
         const second = await run()
         const secondOut = second.stdout + second.stderr
         if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
         if (secondOut.includes('CONFLICT') || secondOut.includes('Automatic merge failed')) {
           return { outcome: 'conflict', autoShelved: true }
         }
-        throw new GitError(['merge', '--no-edit', '--end-of-options', name], second)
+        throw createAutoShelfRetryError(
+          '브랜치 합치기',
+          shelfHash,
+          ['merge', '--no-edit', '--end-of-options', name],
+          second,
+        )
       },
       async remove(name, force) {
         const cwd = await topLevel()
@@ -696,11 +960,11 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 재시도한다 (merge 관례, 실측 2 dirty 판정)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', REBASE_SHELF_MESSAGE], { cwd })
+        const shelfHash = await createAutoShelf(cwd, REBASE_SHELF_MESSAGE)
         const second = await execGit(args, { cwd })
         const secondOutcome = classify(second)
         if (secondOutcome !== null) return { outcome: secondOutcome, autoShelved: true }
-        throw new GitError(args, second)
+        throw createAutoShelfRetryError('커밋 재배치', shelfHash, args, second)
       },
       async continue() {
         const cwd = await topLevel()
@@ -754,7 +1018,41 @@ export function createGitClient(repoPath: string): GitClient {
       async list() {
         const cwd = await topLevel()
         const raw = await execGitOrThrow(['worktree', 'list', '--porcelain', '-z'], { cwd })
-        return parseWorktrees(raw.stdout)
+        const worktrees = parseWorktrees(raw.stdout)
+        return Promise.all(
+          worktrees.map(async (worktree) => {
+            if (worktree.prunable) return { ...worktree, summary: null }
+            try {
+              const [statusRaw, committedRaw] = await Promise.all([
+                execGitOrThrow(
+                  ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'],
+                  { cwd: worktree.path },
+                ),
+                execGit(['log', '-1', '--format=%ct'], { cwd: worktree.path }),
+              ])
+              const status = parseStatusV2(statusRaw.stdout)
+              return {
+                ...worktree,
+                summary: {
+                  staged: status.changes.filter((change) => change.staged !== null).length,
+                  unstaged: status.changes.filter(
+                    (change) => change.unstaged !== null && change.unstaged !== 'untracked',
+                  ).length,
+                  untracked: status.changes.filter((change) => change.unstaged === 'untracked').length,
+                  conflicted: status.changes.filter((change) => change.unstaged === 'conflicted').length,
+                  ahead: status.branch.ahead,
+                  behind: status.branch.behind,
+                  lastCommittedAt:
+                    committedRaw.exitCode === 0 && Number.isFinite(Number(committedRaw.stdout.trim()))
+                      ? Number(committedRaw.stdout.trim())
+                      : null,
+                },
+              }
+            } catch {
+              return { ...worktree, summary: null }
+            }
+          }),
+        )
       },
       async add(path, branch, options) {
         const cwd = await topLevel()
@@ -784,16 +1082,27 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, result)
         }
       },
-      async remove(path, force) {
+      async remove(path, force, guard) {
         const cwd = await topLevel()
+        if (force) {
+          if (guard === undefined || guard !== (await getWorktreeRemovalGuard(path))) {
+            throw new Error(
+              '삭제 확인을 연 뒤 워크트리가 바뀌었어요. 최신 변경을 지우지 않도록 멈췄어요. 다시 확인해 주세요.',
+            )
+          }
+        }
         const args = force
           ? ['worktree', 'remove', '--force', '--end-of-options', path]
           : ['worktree', 'remove', '--end-of-options', path]
         const result = await execGit(args, { cwd })
-        if (result.exitCode === 0) return { removed: true, needsForce: false, usedByWorktree: null }
+        if (result.exitCode === 0) return { removed: true, needsForce: false, guard: null }
         // 실측 E: 미저장 변경 거부 — 강제 확인은 UI 책임 (branches.remove 관례)
         if (result.stderr.includes('contains modified or untracked files')) {
-          return { removed: false, needsForce: true, usedByWorktree: null }
+          return {
+            removed: false,
+            needsForce: true,
+            guard: await getWorktreeRemovalGuard(path),
+          }
         }
         throw new GitError(args, result)
       },
@@ -844,7 +1153,7 @@ export function createGitClient(repoPath: string): GitClient {
       },
     },
     conflicts: {
-      async resolve(path, choice) {
+      async resolve(path, choice, expectedContent) {
         const cwd = await topLevel()
         assertRepoRelative(path)
         // checkout --ours/--theirs는 충돌이 아닌 파일에서도 조용히 성공하며(exit 0, 실측)
@@ -853,6 +1162,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (unmerged.stdout.trim() === '') {
           throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
+        await assertWorktreeTextUnchanged(cwd, path, expectedContent)
         const side = choice === 'ours' ? '--ours' : '--theirs'
         await execGitOrThrow(['checkout', side, '--', `:(literal)${path}`], { cwd })
         await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
@@ -862,7 +1172,7 @@ export function createGitClient(repoPath: string): GitClient {
         assertRepoRelative(path)
         await execGitOrThrow(['add', '--', `:(literal)${path}`], { cwd })
       },
-      async saveText(path, content) {
+      async saveText(path, content, expectedContent) {
         const cwd = await topLevel()
         assertRepoRelative(path)
         // resolve와 동일 가드·동일 문구 — 비충돌 파일 쓰기는 미저장 편집의 조용한 유실 경로다
@@ -870,6 +1180,7 @@ export function createGitClient(repoPath: string): GitClient {
         if (unmerged.stdout.trim() === '') {
           throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
+        await assertWorktreeTextUnchanged(cwd, path, expectedContent)
         // readText와 대칭 상한 — 이보다 큰 파일은 애초에 뷰로 열리지 않는다 (심층 방어)
         if (Buffer.byteLength(content, 'utf8') > 1_000_000) {
           throw new Error('파일이 너무 커요. 외부 편집기로 열어 주세요.')
@@ -883,13 +1194,14 @@ export function createGitClient(repoPath: string): GitClient {
         }
         await writeFile(filePath, content, 'utf8')
       },
-      async reset(path) {
+      async reset(path, expectedContent) {
         const cwd = await topLevel()
         assertRepoRelative(path)
         const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
         if (unmerged.stdout.trim() === '') {
           throw new Error('지금은 충돌 상태가 아닌 파일이에요. 새로고침 후 다시 확인해 주세요.')
         }
+        await assertWorktreeTextUnchanged(cwd, path, expectedContent)
         // 실측: 부분 해소(일부 블록만 고쳐 쓴) 상태에서도 exit 0으로 전체 마커를 재생성한다.
         // 라벨은 브랜치명 대신 ours/theirs로 바뀌지만 파서는 접두사 기반이라 무관. index는 UU 유지
         await execGitOrThrow(['checkout', '-m', '--', `:(literal)${path}`], { cwd })
@@ -956,6 +1268,12 @@ export function createGitClient(repoPath: string): GitClient {
       },
     },
     changes: {
+      guard: {
+        async capture(paths) {
+          const cwd = await topLevel()
+          return captureFileMutationGuard(cwd, paths)
+        },
+      },
       async stage(paths) {
         const cwd = await topLevel()
         await execGitOrThrow(['add', '-A', '--', ...toPathspecs(paths)], { cwd })
@@ -964,11 +1282,43 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         await execGitOrThrow(['restore', '--staged', '--', ...toPathspecs(paths)], { cwd })
       },
-      async discard(trackedPaths, untrackedPaths) {
+      hunk: {
+        async stage(request) {
+          const cwd = await topLevel()
+          if (request.options.staged) throw new Error('이미 스테이지된 hunk는 다시 올릴 수 없어요.')
+          const latest = await getChangeDiff(cwd, request.path, request.options)
+          const patch = createHunkPatch(latest, request)
+          await applyCachedPatch(cwd, patch, 'stage', 'hunk')
+        },
+        async unstage(request) {
+          const cwd = await topLevel()
+          if (!request.options.staged) throw new Error('스테이지되지 않은 hunk는 내릴 수 없어요.')
+          const latest = await getChangeDiff(cwd, request.path, request.options)
+          const patch = createHunkPatch(latest, request)
+          await applyCachedPatch(cwd, patch, 'unstage', 'hunk')
+        },
+      },
+      line: {
+        async stage(request) {
+          const cwd = await topLevel()
+          if (request.options.staged) throw new Error('이미 스테이지된 줄은 다시 올릴 수 없어요.')
+          const latest = await getChangeDiff(cwd, request.path, request.options)
+          await applyCachedPatch(cwd, createLinePatch(latest, request, 'stage'), 'stage', 'line')
+        },
+        async unstage(request) {
+          const cwd = await topLevel()
+          if (!request.options.staged) throw new Error('스테이지되지 않은 줄은 내릴 수 없어요.')
+          const latest = await getChangeDiff(cwd, request.path, request.options)
+          await applyCachedPatch(cwd, createLinePatch(latest, request, 'unstage'), 'unstage', 'line')
+        },
+      },
+      async discard(request) {
+        const { trackedPaths, untrackedPaths, guard } = request
         if (trackedPaths.length === 0 && untrackedPaths.length === 0) {
           throw new Error('빈 경로 — 전체 작업으로 확대되는 것을 막기 위해 거부한다')
         }
         const cwd = await topLevel()
+        await assertFileMutationGuard(cwd, guard)
         // restore는 untracked에 pathspec 불일치 에러를 내므로 tracked/untracked를 나눠 실행한다
         if (trackedPaths.length > 0) {
           const restoreArgs = ['restore', '--', ...toPathspecs(trackedPaths)]
@@ -987,9 +1337,11 @@ export function createGitClient(repoPath: string): GitClient {
           await execGitOrThrow(['clean', '-f', '--', ...toPathspecs(untrackedPaths)], { cwd })
         }
       },
-      async removeFile(path) {
+      async removeFile(request) {
+        const { path, guard } = request
         const cwd = await topLevel()
         assertRepoRelative(path)
+        await assertFileMutationGuard(cwd, guard)
         // 충돌(unmerged) 파일 가드 — 삭제는 충돌 정리 흐름을 우회한다 (discard 가드와 동일 계열)
         const unmerged = await execGitOrThrow(['ls-files', '-u', '--', `:(literal)${path}`], { cwd })
         if (unmerged.stdout.trim() !== '') {
@@ -1013,41 +1365,7 @@ export function createGitClient(repoPath: string): GitClient {
       },
       async diff(path, options) {
         const cwd = await topLevel()
-        assertRepoRelative(path)
-        if (options.untracked) {
-          // --no-index는 차이가 있으면 exit 1이 정상이지만 접근 실패도 exit 1이다 —
-          // stdout 유무로 진짜 diff와 에러를 구분한다 (빈 결과로 위장하지 않는다)
-          const args = [
-            'diff',
-            '--no-color',
-            '--no-ext-diff',
-            '--no-index',
-            '--',
-            NULL_DEVICE,
-            path,
-          ]
-          const result = await execGit(args, { cwd })
-          if (
-            result.exitCode > 1 ||
-            (result.exitCode === 1 && result.stdout === '' && result.stderr !== '')
-          ) {
-            throw new GitError(args, result)
-          }
-          return parsePatch(result.stdout)
-        }
-        const pathspecs = [`:(literal)${path}`]
-        // staged rename은 원래 경로도 pathspec에 있어야 rename으로 감지된다(실측) —
-        // 없으면 similarity 계산이 깨져 "새 파일 추가"로 위장된다
-        if (options.staged && options.origPath != null) {
-          assertRepoRelative(options.origPath)
-          pathspecs.push(`:(literal)${options.origPath}`)
-        }
-        // -M: 사용자 전역 diff.renames=false여도 rename 감지를 고정한다 —
-        // rename이 del+add 2파일 patch로 갈라지면 단일 파일 전용 parsePatch가 오분류한다(실측)
-        const args = options.staged
-          ? ['diff', '--cached', '-M', '--no-color', '--no-ext-diff', '--', ...pathspecs]
-          : ['diff', '--no-color', '--no-ext-diff', '--', ...pathspecs]
-        return parsePatch((await execGitOrThrow(args, { cwd })).stdout)
+        return getChangeDiff(cwd, path, options)
       },
     },
     history: {
@@ -1135,30 +1453,26 @@ export function createGitClient(repoPath: string): GitClient {
       },
     },
     sync: {
-      async push() {
+      async previewPush() {
+        return getPushPreview(await topLevel())
+      },
+      async push(confirmation) {
         const cwd = await topLevel()
-        const remotes = await execGitOrThrow(['remote'], { cwd })
-        const remoteNames = remotes.stdout
-          .trim()
-          .split('\n')
-          .filter((name) => name !== '')
-        if (remoteNames.length === 0) {
-          throw new Error('푸시할 원격 저장소가 없어요. 먼저 원격 저장소를 연결해 주세요.')
+        const preview = await getPushPreview(cwd)
+        if (preview.needsConfirmation && confirmation !== undefined) {
+          if (
+            confirmation.remote !== preview.remote ||
+            confirmation.branch !== preview.branch ||
+            confirmation.expectedHead !== preview.expectedHead
+          ) {
+            throw new Error('푸시 대상이나 커밋이 바뀌었어요. 대상을 다시 확인해 주세요.')
+          }
         }
-        // 사용자 직관대로 origin을 우선하고, 없으면 (git remote 출력 = 알파벳순) 첫 remote
-        const targetRemote = remoteNames.includes('origin') ? 'origin' : remoteNames[0]!
-        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
-        const upstream = await execGit(
-          ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
-          { cwd },
-        )
         // upstream이 "현재 이름과 같은" 원격 브랜치일 때만 평범한 push —
         // rename 뒤에는 옛 이름의 upstream이 남아(git branch -m이 merge ref 유지 — 통합 리뷰 실측)
         // 평범한 push가 원어 에러로 죽는다. 그 경우 아래의 -u 재연결 경로로 태운다
         if (
-          upstream.exitCode === 0 &&
-          branch.exitCode === 0 &&
-          upstream.stdout.trim().endsWith(`/${branch.stdout.trim()}`)
+          !preview.needsConfirmation
         ) {
           // push.default=matching 같은 사용자 전역 설정이 다른 브랜치까지 올리지 않게 고정한다
           const plain = await execGit(['-c', 'push.default=simple', 'push'], { cwd })
@@ -1169,22 +1483,14 @@ export function createGitClient(repoPath: string): GitClient {
           return { linked: false }
         }
         // 아직 커밋이 없으면 올릴 것이 없다 — 원문 git 에러 대신 읽히는 메시지로
-        const head = await execGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd })
-        if (head.exitCode !== 0) {
-          throw new Error('아직 커밋이 없어요. 먼저 커밋한 뒤 푸시해 주세요.')
-        }
-        // detached HEAD에서는 올릴 브랜치가 없다 — 원문 git 에러 대신 읽히는 메시지로
-        if (branch.exitCode !== 0) {
-          throw new Error('지금은 브랜치가 아닌 시점에 있어요. 브랜치로 이동한 뒤 푸시해 주세요.')
-        }
         // 첫 백업(또는 이름이 어긋난 upstream 재연결) — 현재 브랜치를 remote에 연결하며 올린다.
         // --end-of-options: 대시로 시작하는 remote 이름이 플래그로 해석되는 것을 차단
-        const linked = await execGit(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], {
+        const linked = await execGit(['push', '-u', '--end-of-options', preview.remote, 'HEAD'], {
           cwd,
         })
         if (linked.exitCode !== 0) {
           rejectIfRemoteAhead(linked)
-          throw new GitError(['push', '-u', '--end-of-options', targetRemote, 'HEAD'], linked)
+          throw new GitError(['push', '-u', '--end-of-options', preview.remote, 'HEAD'], linked)
         }
         return { linked: true }
       },
@@ -1231,14 +1537,14 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(args, first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (merge·switch와 동일 패턴)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', PULL_SHELF_MESSAGE], { cwd })
+        const shelfHash = await createAutoShelf(cwd, PULL_SHELF_MESSAGE)
         const second = await run()
         const secondOut = second.stdout + second.stderr
         if (second.exitCode === 0) return { outcome: classify(secondOut), autoShelved: true }
         if (isConflict(secondOut)) {
           return { outcome: 'conflict', autoShelved: true }
         }
-        throw new GitError(args, second)
+        throw createAutoShelfRetryError('원격 변경 가져오기', shelfHash, args, second)
       },
       async branchStatus() {
         const cwd = await topLevel()
@@ -1276,10 +1582,47 @@ export function createGitClient(repoPath: string): GitClient {
         const cwd = await topLevel()
         await execGitOrThrow(['fetch', '--all', '--prune'], { cwd })
       },
+      async list() {
+        const cwd = await topLevel()
+        const names = (await execGitOrThrow(['remote'], { cwd })).stdout
+          .split('\n')
+          .filter((name) => name !== '')
+        return Promise.all(
+          names.map(async (name) => {
+            const [fetchUrl, pushUrl] = await Promise.all([
+              execGitOrThrow(['remote', 'get-url', name], { cwd }),
+              execGitOrThrow(['remote', 'get-url', '--push', name], { cwd }),
+            ])
+            return { name, fetchUrl: fetchUrl.stdout.trim(), pushUrl: pushUrl.stdout.trim() }
+          }),
+        )
+      },
+      async add(name, url) {
+        const cwd = await topLevel()
+        if (name.trim() === '' || url.trim() === '' || name.length > 200 || url.length > 4096) {
+          throw new Error('원격 이름과 주소를 확인해 주세요.')
+        }
+        const result = await execGit(['remote', 'add', '--', name, url], { cwd })
+        if (result.exitCode !== 0) {
+          if (result.stderr.includes('already exists')) throw new Error(`"${name}" 원격은 이미 있어요.`)
+          throw new Error('원격을 추가하지 못했어요. 이름과 주소를 확인해 주세요.')
+        }
+      },
+      async remove(name) {
+        const cwd = await topLevel()
+        const result = await execGit(['remote', 'remove', '--', name], { cwd })
+        if (result.exitCode !== 0) throw new Error(`"${name}" 원격을 찾지 못했어요.`)
+      },
     },
     commits: {
       async create(message) {
         const cwd = await topLevel()
+        const branch = await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd })
+        if (branch.exitCode !== 0) {
+          throw new Error(
+            '분리 HEAD에서는 커밋하지 않아요. 먼저 왼쪽 브랜치 탭에서 새 브랜치를 만들어 현재 작업을 보존해 주세요.',
+          )
+        }
         // 메시지는 stdin으로 전달해 따옴표·개행 이스케이프 문제를 피한다.
         // 빈 메시지는 git이 거부한다 — GitError로 전파된다.
         const result = await execGit(['commit', '-F', '-'], { cwd, stdin: message })
@@ -1481,11 +1824,16 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(['cherry-pick', '--no-edit', '--end-of-options', hash], first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch·merge·pull·revert와 동일 패턴)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', CHERRY_PICK_SHELF_MESSAGE], { cwd })
+        const shelfHash = await createAutoShelf(cwd, CHERRY_PICK_SHELF_MESSAGE)
         const second = await runOnce()
         const secondClassified = await classify(second, true)
         if (secondClassified !== null) return secondClassified
-        throw new GitError(['cherry-pick', '--no-edit', '--end-of-options', hash], second)
+        throw createAutoShelfRetryError(
+          '커밋 체리픽',
+          shelfHash,
+          ['cherry-pick', '--no-edit', '--end-of-options', hash],
+          second,
+        )
       },
       async cherryPickAbort() {
         const cwd = await topLevel()
@@ -1537,8 +1885,15 @@ export function createGitClient(repoPath: string): GitClient {
         if (parent.exitCode !== 0) {
           throw new Error('맨 처음 커밋은 취소할 수 없어요.')
         }
-        // --mixed: 커밋만 물리고 내용은 작업 폴더에 그대로 남긴다 — 유실 없음 (스펙 §6 계열)
-        await execGitOrThrow(['reset', '--mixed', 'HEAD~1'], { cwd })
+        // HEAD는 기대한 hash일 때만 원자적으로 이동한다. 외부 커밋이 끼면 update-ref가 거부한다.
+        const moved = await execGit(['update-ref', '-m', 'Yeoul: undo last commit', 'HEAD', parent.stdout.trim(), hash], {
+          cwd,
+        })
+        if (moved.exitCode !== 0) {
+          throw new Error('가장 최근 커밋이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+        }
+        // 브랜치를 다시 움직이는 reset 대신 index만 부모 tree로 맞춘다. 워크트리는 그대로라 변경이 남는다.
+        await execGitOrThrow(['read-tree', '--reset', parent.stdout.trim()], { cwd })
       },
       async reword(hash, message) {
         const cwd = await topLevel()
@@ -1556,9 +1911,33 @@ export function createGitClient(repoPath: string): GitClient {
         if (staged.exitCode !== 0) {
           throw new Error('스테이지에 올린 파일이 있어요 — 함께 들어가지 않게 먼저 비워 주세요.')
         }
-        // 메시지만 교체(실측 7: staged 없음 + amend -F - → tree 불변) — stdin으로 개행·따옴표 안전.
-        // --allow-empty: 빈 커밋의 메시지 고치기가 "would make it empty" 원어로 죽지 않게 (품질 리뷰)
-        await execGitOrThrow(['commit', '--amend', '--allow-empty', '-F', '-'], { cwd, stdin: message })
+        // amend는 검사와 실행 사이에 외부 stage를 흡수할 수 있다. 기존 tree/부모/작성자를 사용해
+        // 새 commit 객체만 만든 뒤, HEAD가 여전히 hash일 때만 update-ref로 교체한다.
+        const meta = await execGitOrThrow(
+          ['show', '-s', '--format=%T%x00%P%x00%an%x00%ae%x00%aI', '--end-of-options', hash],
+          { cwd },
+        )
+        const [tree, parents, authorName, authorEmail, authorDate] = meta.stdout.trimEnd().split('\0')
+        if (!tree || parents === undefined || !authorName || !authorEmail || !authorDate) {
+          throw new Error('커밋 정보를 읽지 못했어요. 새로고침 후 다시 시도해 주세요.')
+        }
+        const parentArgs = parents === '' ? [] : parents.split(' ').flatMap((parent) => ['-p', parent])
+        const created = await execGitOrThrow(['commit-tree', tree, ...parentArgs, '-F', '-'], {
+          cwd,
+          stdin: message,
+          env: {
+            GIT_AUTHOR_NAME: authorName,
+            GIT_AUTHOR_EMAIL: authorEmail,
+            GIT_AUTHOR_DATE: authorDate,
+          },
+        })
+        const updated = await execGit(
+          ['update-ref', '-m', 'Yeoul: reword commit', 'HEAD', created.stdout.trim(), hash],
+          { cwd },
+        )
+        if (updated.exitCode !== 0) {
+          throw new Error('가장 최근 커밋이 바뀌었어요. 새로고침 후 다시 확인해 주세요.')
+        }
       },
       async revert(hash) {
         const cwd = await topLevel()
@@ -1602,11 +1981,16 @@ export function createGitClient(repoPath: string): GitClient {
           throw new GitError(['revert', '--no-edit', '--end-of-options', hash], first)
         }
         // 막혔다 — 스펙 원칙: 변경을 보관함에 자동 저장하고 진행한다 (switch·merge·pull과 동일 패턴)
-        await execGitOrThrow(['stash', 'push', '-u', '-m', REVERT_SHELF_MESSAGE], { cwd })
+        const shelfHash = await createAutoShelf(cwd, REVERT_SHELF_MESSAGE)
         const second = await runOnce()
         const secondClassified = classify(second, true)
         if (secondClassified !== null) return secondClassified
-        throw new GitError(['revert', '--no-edit', '--end-of-options', hash], second)
+        throw createAutoShelfRetryError(
+          '커밋 되돌리기',
+          shelfHash,
+          ['revert', '--no-edit', '--end-of-options', hash],
+          second,
+        )
       },
       async revertAbort() {
         const cwd = await topLevel()

@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
@@ -367,6 +367,12 @@ export function BranchesPanel({
   const searchRemotes = flatSearch(remotes, query)
   const localRows = flattenBranchTree(buildBranchTree(locals), collapsed)
   const remoteRows = flattenBranchTree(buildBranchTree(remotes), collapsed)
+  const selectedTarget: MenuState['target'] | null =
+    locals.find((branch) => branch.name === selectedName) != null
+      ? { kind: 'local', branch: locals.find((branch) => branch.name === selectedName)! }
+      : remotes.some((remote) => remote.name === selectedName) && selectedName !== null
+        ? { kind: 'remote', name: selectedName }
+        : null
 
   return (
     <Panel title={T.branch} titleHint="branch" testId="branches-panel" pending={pending}>
@@ -418,6 +424,14 @@ export function BranchesPanel({
             </>
           )}
         </div>
+        {selectedTarget !== null && (
+          <div className="branches-panel__selection-actions" data-testid="branch-selection-actions">
+            <span>더블클릭하면 이 브랜치 히스토리를 조회해요.</span>
+            <button type="button" onClick={(event) => openMenu(event, selectedTarget)}>
+              <MoreHorizontal size={15} aria-hidden="true" /> 작업
+            </button>
+          </div>
+        )}
       </div>
       {menu !== null && (
         <ContextMenu

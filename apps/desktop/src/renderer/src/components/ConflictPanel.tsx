@@ -63,6 +63,7 @@ export function ConflictPanel({
   const mineLabel = mode === 'rebasing' ? '새 기반' : '내 것'
   const [confirmingMark, setConfirmingMark] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
+  const [confirmingWholeFile, setConfirmingWholeFile] = useState<'ours' | 'theirs' | null>(null)
   const [view, setView] = useState<'cards' | 'edit'>('cards')
   const [draft, setDraft] = useState('')
   const items = buildConflictView(content)
@@ -191,20 +192,20 @@ export function ConflictPanel({
               className="conflict-panel__btn--mine"
               size="sm"
               isDisabled={busy}
-              onPress={() => onResolve('ours')}
+              onPress={() => setConfirmingWholeFile('ours')}
               testId="conflict-ours"
             >
-              <User size={13} aria-hidden="true" /> {mineLabel} 유지
+              <User size={13} aria-hidden="true" /> 파일 전체: {mineLabel} 사용
             </Button>
             <Button
               variant="neutral"
               className="conflict-panel__btn--branch"
               size="sm"
               isDisabled={busy}
-              onPress={() => onResolve('theirs')}
+              onPress={() => setConfirmingWholeFile('theirs')}
               testId="conflict-theirs"
             >
-              <Download size={13} aria-hidden="true" /> {takenLabel} 사용
+              <Download size={13} aria-hidden="true" /> 파일 전체: {takenLabel} 사용
             </Button>
             <Button
               variant="ghost"
@@ -355,6 +356,21 @@ export function ConflictPanel({
           />
         </>
       )}
+      <ConfirmDialog
+        isOpen={confirmingWholeFile !== null}
+        title="파일 전체의 충돌 선택을 바꿀까요?"
+        confirmLabel="파일 전체 적용"
+        onConfirm={() => {
+          const choice = confirmingWholeFile
+          setConfirmingWholeFile(null)
+          if (choice !== null) onResolve(choice)
+        }}
+        onCancel={() => setConfirmingWholeFile(null)}
+      >
+        이 파일의 모든 충돌 블록을{' '}
+        {confirmingWholeFile === 'ours' ? mineLabel : takenLabel} 내용으로 한 번에 바꾸고 해결 표시해요.
+        지금까지 블록별로 고른 조합은 덮어써져요.
+      </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingMark}
         title={`${T.conflict} 표시가 아직 남아 있어요`}

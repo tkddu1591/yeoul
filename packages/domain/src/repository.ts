@@ -179,6 +179,26 @@ export interface WorktreeInfo {
   /** 폴더가 사라진 등록 — remove로 그대로 정리된다 (실측 F) */
   prunable: boolean
   locked: boolean
+  /** 관제판용 현재 작업 요약. 폴더가 없거나 조회 실패면 null/생략된다. */
+  summary?: WorktreeSummary | null
+}
+
+export interface WorktreeSummary {
+  staged: number
+  unstaged: number
+  untracked: number
+  conflicted: number
+  ahead: number | null
+  behind: number | null
+  /** HEAD 커밋 시각(epoch 초). 아직 커밋이 없으면 null. */
+  lastCommittedAt: number | null
+}
+
+export interface WorktreeRemoveResult {
+  removed: boolean
+  needsForce: boolean
+  /** 강제 삭제 확인을 연 시점의 HEAD/index/worktree fingerprint. */
+  guard: string | null
 }
 
 /** 워크트리가 어느 브랜치에서 갈라졌는지 (E7j) — git이 기록하지 않아 merge-base로 계산한다 */

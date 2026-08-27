@@ -12,22 +12,20 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-8) 56px;
-  max-width: 420px; /* 긴 에러 메시지가 카드를 무한 확장시키지 않게 */
+  padding: 40px 56px;
+  width: min(520px, calc(100vw - 48px));
+  max-width: 520px; /* 긴 에러 메시지가 카드를 무한 확장시키지 않게 */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-container);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-1);
   text-align: center;
 }
-.repo-picker__marks {
-  display: flex;
-  gap: var(--space-2);
-}
 .repo-picker__card h1 {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-2xl);
-  letter-spacing: -0.01em;
+  margin: var(--space-1) 0 0;
+  font-size: 26px;
+  font-weight: 760;
+  letter-spacing: -0.035em;
 }
 /* 설명문은 전용 클래스로 — 요소 셀렉터(p)는 특이도로 __error를 덮어쓴다 */
 .repo-picker__desc {
@@ -82,7 +80,7 @@
 }
 .repo-picker__recent-item:hover,
 .repo-picker__recent-item:focus-visible {
-  background: var(--color-surface-sunken);
+  background: var(--color-hover-bg);
 }
 .repo-picker__recent-name {
   max-width: 100%;
@@ -99,4 +97,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.repo-picker__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
 }

@@ -8,8 +8,16 @@ import type {
   CommitSummary,
   FileChange,
   FileDiff,
+  FileMutationGuard,
+  DiscardChangesRequest,
+  RemoveFileRequest,
+  PushConfirmation,
+  PushPreview,
   HistorySearchResult,
+  HunkStageRequest,
+  LineStageRequest,
   RebaseProgress,
+  RemoteInfo,
   RepositoryStatus,
   ShelfEntry,
   WorktreeHeadInfo,
@@ -24,8 +32,8 @@ import type {
 import { applyBlockChoice } from '../components/conflict-markers'
 import {
   createEmptyReads,
+  getSuppressRemainingMs,
   invalidateReads,
-  isWithinSuppressWindow,
   resetSuppression,
   runRead,
   runWrite,
@@ -37,11 +45,17 @@ import { findRevivableChange } from './selection-revive'
 import { pushRecentRepo, removeRecentRepo } from '../components/recent-repos'
 import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
-import { loadRecentRepos, saveRecentRepos } from '../ui/settings/recent-repos-settings'
+import {
+  loadRecentRepos,
+  onRecentReposChanged,
+  saveRecentRepos,
+} from '../ui/settings/recent-repos-settings'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
 const windowApi = () => window.windowApi
+let trailingExternalRefresh: number | null = null
+const worktreeRemovalGuards = new Map<string, string>()
 
 /** 히스토리 첫 페이지 크기 — 스크롤 끝에서 HISTORY_PAGE씩 상한을 늘려 다시 불러온다 (⑩) */
 export const HISTORY_LIMIT = 50
@@ -79,6 +93,7 @@ interface RepositoryStore {
   pullMode: PullMode
   /** 최근 연 저장소 — 최신이 앞. 성공한 열기만 들어간다. 설정 영속 (E15a) */
   recentRepos: string[]
+  remotes: RemoteInfo[]
   shelf: ShelfEntry[]
   history: CommitSummary[]
   /** 현재 히스토리 조회 상한 — history.length >= historyLimit이면 뒤가 더 있을 수 있다 */
@@ -116,6 +131,8 @@ interface RepositoryStore {
    * 이미 열려 있으면 이 탭이 갈아타지 않고 main이 그 탭으로 데려간다
    */
   openRepository(path?: string): Promise<boolean>
+  cloneRepository(url: string): Promise<boolean>
+  initRepository(): Promise<boolean>
   /**
    * 저장소를 **새 창**에서 연다 — 이 창은 그대로 둔다 (E15b: 전환기 ⌥클릭·우클릭·워크트리 행).
    * 실패는 `openRepository`와 같은 자리(배너)에 같은 문구로 뜨고, 원인이 확실하면 최근 목록에서도 빠진다
@@ -219,10 +236,20 @@ interface RepositoryStore {
   shelfDrop(ref: string): Promise<void>
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
+  hunk: {
+    stage(request: HunkStageRequest): Promise<void>
+    unstage(request: HunkStageRequest): Promise<void>
+  }
+  line: {
+    stage(request: LineStageRequest): Promise<void>
+    unstage(request: LineStageRequest): Promise<void>
+  }
+  /** 파괴 작업 확인창을 열 때 파일·index 상태를 캡처한다. */
+  captureChangeGuard(paths: string[]): Promise<FileMutationGuard | null>
   /** 선택 파일 변경 취소 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 (⑪) */
-  discard(trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+  discard(request: DiscardChangesRequest): Promise<void>
   /** 파일 하나를 디스크에서 삭제한다 — 확인창(UI 책임)을 통과한 뒤에만 호출된다. 되돌릴 수 없다 */
-  removeFile(path: string): Promise<void>
+  removeFile(request: RemoveFileRequest): Promise<void>
   selectFile(selected: SelectedFile): Promise<void>
   /** diff 선택 해제 — 동기 상태 변경이라 잠금 불필요 */
   clearSelection(): void
@@ -261,7 +288,15 @@ interface RepositoryStore {
   revealHead(): Promise<void>
   /** 성공 여부를 반환한다 — 실패 시 입력 메시지를 보존하기 위해 */
   commit(message: string): Promise<boolean>
-  backup(): Promise<void>
+  previewBackup(): Promise<PushPreview | null>
+  backup(confirmation?: PushConfirmation): Promise<void>
+  remote: {
+    add(name: string, url: string): Promise<boolean>
+    remove(name: string): Promise<void>
+  }
+  job: {
+    cancel(): Promise<void>
+  }
   /** 열린 리뷰 요청 목록 갱신 — 팝오버를 열 때. 미연결·비GitHub이면 조용히 무시 */
   refreshPulls(): Promise<void>
   /** gh CLI 토큰으로 연결 — 성공 여부 반환 */
@@ -293,7 +328,14 @@ async function fetchSnapshot(
 ): Promise<
   Pick<
     RepositoryStore,
-    'status' | 'history' | 'branches' | 'shelf' | 'branchOverview' | 'rebaseProgress' | 'worktrees'
+    | 'status'
+    | 'history'
+    | 'branches'
+    | 'shelf'
+    | 'branchOverview'
+    | 'rebaseProgress'
+    | 'worktrees'
+    | 'remotes'
   >
 > {
   // 조회 모드(E7g) — 호출부 39곳을 바꾸지 않도록 스냅샷이 store에서 직접 읽는다.
@@ -308,18 +350,19 @@ async function fetchSnapshot(
       return git().history.list(repoPath, limit)
     }
   }
-  const [status, history, branches, shelf, branchOverview, worktrees] = await Promise.all([
+  const [status, history, branches, shelf, branchOverview, worktrees, remotes] = await Promise.all([
     git().repo.status(repoPath),
     loadHistory(),
     git().branches.list(repoPath),
     git().shelf.list(repoPath),
     git().branches.overview(repoPath),
     git().worktrees.list(repoPath),
+    git().remotes.list(repoPath),
   ])
   // 재배치 중일 때만 진행 위치를 읽는다 — 상태 바 "M/N번째" (E7a)
   const rebaseProgress =
     status.state === 'rebasing' ? await git().rebase.progress(repoPath) : null
-  return { status, history, branches, shelf, branchOverview, rebaseProgress, worktrees }
+  return { status, history, branches, shelf, branchOverview, rebaseProgress, worktrees, remotes }
 }
 
 /**
@@ -521,6 +564,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   historyRef: null,
   pullMode: loadPullMode(),
   recentRepos: loadRecentRepos(),
+  remotes: [],
   pulls: [],
   pullDetail: null,
 
@@ -543,6 +587,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     git().repo.onChanged((changedPath) => {
       if (get().repoPath === changedPath) void get().externalRefresh()
     })
+    onRecentReposChanged((recentRepos) => set({ recentRepos }))
     // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
     windowApi().onFocused(() => {
       if (get().repoPath !== null) void get().refresh()
@@ -617,6 +662,34 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
+  async cloneRepository(url) {
+    if (get().busy) return false
+    set({ busy: true, error: null, notice: null })
+    try {
+      const path = await git().repo.clone(url)
+      set({ busy: false })
+      if (path === null) return false
+      return get().openRepository(path)
+    } catch (cause) {
+      set({ busy: false, error: toErrorMessage(cause) })
+      return false
+    }
+  },
+
+  async initRepository() {
+    if (get().busy) return false
+    set({ busy: true, error: null, notice: null })
+    try {
+      const path = await git().repo.init()
+      set({ busy: false })
+      if (path === null) return false
+      return get().openRepository(path)
+    } catch (cause) {
+      set({ busy: false, error: toErrorMessage(cause) })
+      return false
+    }
+  },
+
   async openInNewWindow(path) {
     // `runWrite`를 쓰지 않는다 — 이 저장소를 아무것도 바꾸지 않는다(전역 busy로 이 창을 잠그거나
     // 진행 중인 조회를 무효화할 이유가 없다). 대신 실패 처리만 openRepository와 합류시킨다
@@ -679,7 +752,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 자기 작업 꼬리 이벤트 억제 — 작업(쓰기) 직후의 감시발 재조회는 방금 갱신한 화면을 다시 지울 뿐이다.
     // 이 억제는 마지막 "쓰기" 작업 기준으로만 걸린다(runWrite만 창을 무장한다) — 읽기 전용 재조회는
     // 여기 걸리지 않으므로, 연속된 외부 변경이 서로를 삼키지 않는다 (E10)
-    if (isWithinSuppressWindow()) return
+    const remaining = getSuppressRemainingMs()
+    if (remaining > 0) {
+      if (trailingExternalRefresh !== null) window.clearTimeout(trailingExternalRefresh)
+      trailingExternalRefresh = window.setTimeout(() => {
+        trailingExternalRefresh = null
+        void get().externalRefresh()
+      }, remaining + 1)
+      return
+    }
     // 읽기 전용 조회 — 전역 busy를 켜지 않는다. 이 경로는 워킹트리 감시가 붙잡은 **모든 외부
     // 저장마다** 도니, 켜면 에디터에서 파일을 저장하기만 해도 앱 전체가 깜빡인다
     // (E14a 실측: 외부 저장 1회에 헤더 속성 변형 20건). 억제 창도 무장하지 않는다 —
@@ -814,27 +895,88 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
-  async discard(trackedPaths, untrackedPaths) {
+  hunk: {
+    async stage(request) {
+      const { repoPath } = get()
+      if (!repoPath) return
+      await runWrite(set, get, async () => {
+        const previous = get()
+        await git().changes.hunk.stage(repoPath, request)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        const revived = await reviveSelections(repoPath, previous, snapshot.status)
+        set({ ...CLEAR_SELECTIONS, ...snapshot, ...revived })
+      })
+    },
+    async unstage(request) {
+      const { repoPath } = get()
+      if (!repoPath) return
+      await runWrite(set, get, async () => {
+        const previous = get()
+        await git().changes.hunk.unstage(repoPath, request)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        const revived = await reviveSelections(repoPath, previous, snapshot.status)
+        set({ ...CLEAR_SELECTIONS, ...snapshot, ...revived })
+      })
+    },
+  },
+
+  line: {
+    async stage(request) {
+      const { repoPath } = get()
+      if (!repoPath) return
+      await runWrite(set, get, async () => {
+        const previous = get()
+        await git().changes.line.stage(repoPath, request)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        const revived = await reviveSelections(repoPath, previous, snapshot.status)
+        set({ ...CLEAR_SELECTIONS, ...snapshot, ...revived })
+      })
+    },
+    async unstage(request) {
+      const { repoPath } = get()
+      if (!repoPath) return
+      await runWrite(set, get, async () => {
+        const previous = get()
+        await git().changes.line.unstage(repoPath, request)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        const revived = await reviveSelections(repoPath, previous, snapshot.status)
+        set({ ...CLEAR_SELECTIONS, ...snapshot, ...revived })
+      })
+    },
+  },
+
+  async captureChangeGuard(paths) {
+    const { repoPath } = get()
+    if (!repoPath) return null
+    try {
+      return await git().changes.guard.capture(repoPath, paths)
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+      return null
+    }
+  },
+
+  async discard(request) {
     const { repoPath } = get()
     if (!repoPath) return
     await runWrite(set, get, async () => {
       // 파괴적 작업 — 부분 실행으로 실패해도 이미 지워진 것이 있다.
       // finally로 스냅샷을 갱신해 stale한 "수정됨" 표시를 남기지 않는다 (리뷰 실측 반영)
       try {
-        await git().changes.discard(repoPath, trackedPaths, untrackedPaths)
+        await git().changes.discard(repoPath, request)
       } finally {
         set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
       }
     })
   },
 
-  async removeFile(path) {
+  async removeFile(request) {
     const { repoPath } = get()
     if (!repoPath) return
     await runWrite(set, get, async () => {
       // 파괴적 작업 — 실패해도 디스크가 이미 바뀌었을 수 있다. finally로 실제 상태를 다시 읽는다 (discard 관례)
       try {
-        await git().changes.removeFile(repoPath, path)
+        await git().changes.removeFile(repoPath, request)
       } finally {
         set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
       }
@@ -1322,16 +1464,24 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath } = get()
     if (!repoPath) return false
     let needsForce = false
-    await runWrite(set, get, async () => {
-      const result = await git().worktrees.remove(repoPath, path, force)
+    const completed = await runWrite(set, get, async () => {
+      const result = await git().worktrees.remove(
+        repoPath,
+        path,
+        force,
+        force ? worktreeRemovalGuards.get(path) : undefined,
+      )
       needsForce = result.needsForce
+      if (result.guard !== null) worktreeRemovalGuards.set(path, result.guard)
       if (result.removed) {
+        worktreeRemovalGuards.delete(path)
         set({
           ...(await fetchSnapshot(repoPath, get().historyLimit)),
           notice: `${T.worktree}를 지웠어요.`,
         })
       }
     })
+    if (!completed && force) worktreeRemovalGuards.delete(path)
     return needsForce
   },
 
@@ -1499,10 +1649,10 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   },
 
   async resolveConflict(path, choice) {
-    const { repoPath } = get()
-    if (!repoPath) return
+    const { repoPath, conflictFile } = get()
+    if (!repoPath || conflictFile === null || conflictFile.path !== path) return
     await runWrite(set, get, async () => {
-      await git().conflicts.resolve(repoPath, path, choice)
+      await git().conflicts.resolve(repoPath, path, choice, conflictFile.content)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
   },
@@ -1531,7 +1681,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         })
         return
       }
-      await git().conflicts.saveText(repoPath, conflictFile.path, next)
+      await git().conflicts.saveText(repoPath, conflictFile.path, next, fresh)
       // 충돌 뷰는 연 채로 내용·상태만 갱신한다 — CLEAR_SELECTIONS를 쓰면 뷰가 닫힌다
       set({
         conflictFile: { path: conflictFile.path, content: next },
@@ -1544,7 +1694,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, conflictFile } = get()
     if (!repoPath || !conflictFile) return false
     return await runWrite(set, get, async () => {
-      await git().conflicts.saveText(repoPath, conflictFile.path, content)
+      await git().conflicts.saveText(repoPath, conflictFile.path, content, conflictFile.content)
       set({
         conflictFile: { path: conflictFile.path, content },
         status: await git().repo.status(repoPath),
@@ -1556,7 +1706,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     const { repoPath, conflictFile } = get()
     if (!repoPath || !conflictFile) return
     await runWrite(set, get, async () => {
-      await git().conflicts.reset(repoPath, conflictFile.path)
+      await git().conflicts.reset(repoPath, conflictFile.path, conflictFile.content)
       const content = await git().files.readText(repoPath, conflictFile.path)
       set({
         conflictFile: { path: conflictFile.path, content },
@@ -1682,11 +1832,22 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
-  async backup() {
+  async previewBackup() {
+    const { repoPath } = get()
+    if (!repoPath) return null
+    try {
+      return await git().sync.previewPush(repoPath)
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+      return null
+    }
+  },
+
+  async backup(confirmation) {
     const { repoPath } = get()
     if (!repoPath) return
     await runWrite(set, get, async () => {
-      const result = await git().sync.push(repoPath)
+      const result = await git().sync.push(repoPath, confirmation)
       // 백업 후 upstream/ahead/behind가 바뀐다 — 스냅샷 갱신. 첫 연결이면 알린다 (E7e ③)
       set({
         ...(await fetchSnapshot(repoPath, get().historyLimit)),
@@ -1696,6 +1857,34 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           : null,
       })
     })
+  },
+
+  remote: {
+    async add(name, url) {
+      const { repoPath } = get()
+      if (!repoPath) return false
+      return runWrite(set, get, async () => {
+        await git().remotes.add(repoPath, name, url)
+        set({ remotes: await git().remotes.list(repoPath), notice: `"${name}" 원격을 추가했어요.` })
+      })
+    },
+    async remove(name) {
+      const { repoPath } = get()
+      if (!repoPath) return
+      await runWrite(set, get, async () => {
+        await git().remotes.remove(repoPath, name)
+        set({ remotes: await git().remotes.list(repoPath), notice: `"${name}" 원격을 지웠어요.` })
+      })
+    },
+  },
+
+  job: {
+    async cancel() {
+      const { repoPath } = get()
+      if (!repoPath) return
+      const canceled = await git().jobs.cancel(repoPath)
+      if (canceled === 0) set({ notice: '중단할 Git 프로세스가 없어요.' })
+    },
   },
 
   async refreshPulls() {

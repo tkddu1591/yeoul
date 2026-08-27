@@ -8,10 +8,18 @@ import type {
   CommitSummary,
   DiffOptions,
   FileDiff,
+  FileMutationGuard,
+  DiscardChangesRequest,
+  RemoveFileRequest,
+  RemoteInfo,
   ForkPoint,
   HistorySearchResult,
+  HunkStageRequest,
+  LineStageRequest,
   MergeResult,
   PullResult,
+  PushConfirmation,
+  PushPreview,
   RebaseContinueResult,
   RebaseProgress,
   RebaseResult,
@@ -23,6 +31,7 @@ import type {
   SwitchResult,
   WorktreeHeadInfo,
   WorktreeInfo,
+  WorktreeRemoveResult,
 } from '@git-gui/domain'
 
 export type { DiffOptions, ForkPoint, WorktreeHeadInfo } from '@git-gui/domain'
@@ -78,9 +87,17 @@ export type WindowOpenResult =
  * 파일 `path`는 저장소 루트 상대 경로만 허용된다 (절대 경로·`..`·빈 문자열 거부).
  */
 export interface GitApi {
+  jobs: {
+    /** 현재 저장소에서 실행 중인 Git 프로세스를 중단한다. */
+    cancel(repoPath: string): Promise<number>
+  }
   repo: {
     /** 폴더 선택 다이얼로그. 취소하면 null. 반환 경로는 저장소 루트로 정규화된다 */
     select(): Promise<string | null>
+    /** 원격 URL을 사용자가 고른 빈 폴더에 복제한다. 취소하면 null. */
+    clone(url: string): Promise<string | null>
+    /** 사용자가 고른 폴더를 새 Git 저장소로 초기화한다. 취소하면 null. */
+    init(): Promise<string | null>
     /** E2E 등에서 환경 변수로 주입한 초기 저장소 경로. 반환 경로는 저장소 루트로 정규화된다 */
     initialPath(): Promise<string | null>
     /**
@@ -166,7 +183,12 @@ export interface GitApi {
     /** 새 워크트리 — path에 branch 체크아웃. createBranch면 HEAD에서 새 브랜치를 만들며(-b) (E7d) */
     add(repoPath: string, path: string, branch: string, createBranch: boolean): Promise<void>
     /** 지우기 — 미저장 변경이면 needsForce (branches.remove 관례) */
-    remove(repoPath: string, path: string, force: boolean): Promise<RemoveBranchResult>
+    remove(
+      repoPath: string,
+      path: string,
+      force: boolean,
+      guard?: string,
+    ): Promise<WorktreeRemoveResult>
     /** Finder에서 보기 — 경로는 워크트리 목록 검증 경유 (E7c) */
     reveal(repoPath: string, path: string): Promise<void>
     /** 워크트리 HEAD 요약 (E7k) — 호버 카드용. 실패·정보 없음은 null */
@@ -208,12 +230,17 @@ export interface GitApi {
   }
   conflicts: {
     /** choice는 'ours'(내 것 유지) | 'theirs'(가져온 것 사용)만 허용된다 */
-    resolve(repoPath: string, path: string, choice: 'ours' | 'theirs'): Promise<void>
+    resolve(
+      repoPath: string,
+      path: string,
+      choice: 'ours' | 'theirs',
+      expectedContent: string,
+    ): Promise<void>
     markResolved(repoPath: string, path: string): Promise<void>
     /** 충돌 파일 내용 통째 저장(블록 선택·자세히 보기 직접 수정) — add하지 않는다. 비충돌 파일은 거부된다 */
-    saveText(repoPath: string, path: string, content: string): Promise<void>
+    saveText(repoPath: string, path: string, content: string, expectedContent: string): Promise<void>
     /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m) */
-    reset(repoPath: string, path: string): Promise<void>
+    reset(repoPath: string, path: string, expectedContent: string): Promise<void>
   }
   files: {
     /** 워크트리 텍스트 읽기(충돌 뷰용) — 1MB 상한, 바이너리 거부 */
@@ -226,13 +253,24 @@ export interface GitApi {
     drop(repoPath: string, ref: string): Promise<void>
   }
   changes: {
+    guard: {
+      capture(repoPath: string, paths: string[]): Promise<FileMutationGuard>
+    }
     stage(repoPath: string, paths: string[]): Promise<void>
     unstage(repoPath: string, paths: string[]): Promise<void>
+    hunk: {
+      stage(repoPath: string, request: HunkStageRequest): Promise<void>
+      unstage(repoPath: string, request: HunkStageRequest): Promise<void>
+    }
+    line: {
+      stage(repoPath: string, request: LineStageRequest): Promise<void>
+      unstage(repoPath: string, request: LineStageRequest): Promise<void>
+    }
     /** 선택 파일 변경 취소 — tracked는 복원, untracked는 삭제. 되돌릴 수 없다 (확인창은 renderer 책임) */
-    discard(repoPath: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void>
+    discard(repoPath: string, request: DiscardChangesRequest): Promise<void>
     diff(repoPath: string, path: string, options: DiffOptions): Promise<FileDiff>
     /** 파일 하나를 디스크에서 삭제 — 되돌릴 수 없다 (확인창은 renderer 책임) */
-    removeFile(repoPath: string, path: string): Promise<void>
+    removeFile(repoPath: string, request: RemoveFileRequest): Promise<void>
   }
   commits: {
     create(repoPath: string, message: string): Promise<void>
@@ -263,14 +301,18 @@ export interface GitApi {
     search(repoPath: string, query: string, ref?: string): Promise<HistorySearchResult>
   }
   sync: {
+    previewPush(repoPath: string): Promise<PushPreview>
     /** 현재 브랜치를 원격으로 백업(push) — 첫 연결이면 linked (E7e). 원격이 없으면 에러 */
-    push(repoPath: string): Promise<BackupResult>
+    push(repoPath: string, confirmation?: PushConfirmation): Promise<BackupResult>
     /** 원격의 최신 저장을 받아온다 — merge는 기존 충돌 흐름, rebase는 rebasing 흐름 (E7e) */
     pull(repoPath: string, mode: 'merge' | 'rebase'): Promise<PullResult>
   }
   remotes: {
     /** 원격 최신 가져오기(fetch --all --prune) — 갱신은 감시가 담당 (E7e) */
     fetch(repoPath: string): Promise<void>
+    list(repoPath: string): Promise<RemoteInfo[]>
+    add(repoPath: string, name: string, url: string): Promise<void>
+    remove(repoPath: string, name: string): Promise<void>
   }
 }
 
@@ -278,6 +320,9 @@ export const GIT_API_KEY = 'gitApi' as const
 
 export const CHANNELS = {
   repoSelect: 'repo:select',
+  jobsCancel: 'jobs:cancel',
+  repoClone: 'repo:clone',
+  repoInit: 'repo:init',
   repoInitialPath: 'repo:initial-path',
   repoStatus: 'repo:status',
   repoWatch: 'repo:watch',
@@ -287,6 +332,9 @@ export const CHANNELS = {
   repoOpenPath: 'repo:open-path',
   repoHome: 'repo:home',
   remotesFetch: 'remotes:fetch',
+  remotesList: 'remotes:list',
+  remotesAdd: 'remotes:add',
+  remotesRemove: 'remotes:remove',
   worktreesList: 'worktrees:list',
   worktreesAdd: 'worktrees:add',
   worktreesRemove: 'worktrees:remove',
@@ -320,6 +368,11 @@ export const CHANNELS = {
   shelfDrop: 'shelf:drop',
   changesStage: 'changes:stage',
   changesUnstage: 'changes:unstage',
+  changesHunkStage: 'changes:hunk:stage',
+  changesHunkUnstage: 'changes:hunk:unstage',
+  changesLineStage: 'changes:line:stage',
+  changesLineUnstage: 'changes:line:unstage',
+  changesGuardCapture: 'changes:guard:capture',
   changesDiscard: 'changes:discard',
   changesDiff: 'changes:diff',
   changesRemoveFile: 'changes:remove-file',
@@ -338,6 +391,7 @@ export const CHANNELS = {
   historyList: 'history:list',
   historySearch: 'history:search',
   syncPush: 'sync:push',
+  syncPushPreview: 'sync:push-preview',
   syncPull: 'sync:pull',
 } as const
 
@@ -693,6 +747,8 @@ export const TERMINAL_CHANNELS = {
 
 /** 창 상태 표면 (E7f) — 전체화면 여부 push. 신호등 패딩 접기에 쓴다(실측 2: CSS 신호 불가) */
 export interface WindowApi {
+  /** 로컬 진단 로그·크래시 덤프 폴더를 Finder에서 연다. */
+  revealDiagnostics(): Promise<void>
   /** 전체화면 전환 push 구독 — 해제 함수를 반환한다 */
   onFullScreen(listener: (isFullScreen: boolean) => void): () => void
   /** 창 포커스 복귀 push 구독 — 해제 함수를 반환한다. 감시 사각지대(watch 조용히 죽음·놓친 이벤트)를
@@ -709,6 +765,7 @@ export const WINDOW_CHANNELS = {
   focused: 'window:focused',
   /** 새 창에서 연다 — 경로가 null이면 빈 창 (E15b) */
   open: 'window:open',
+  revealDiagnostics: 'window:reveal-diagnostics',
 } as const
 
 /** 탭바가 그리는 한 탭 (E15c) — main이 그 창의 **모든 뷰**(숨은 뷰 포함)에 push한다 */

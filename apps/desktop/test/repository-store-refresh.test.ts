@@ -47,6 +47,7 @@ function makeGitApi(diffDelay: number) {
     shelf: { list: async () => [] },
     worktrees: { list: async () => [] },
     rebase: { progress: async () => null },
+    remotes: { list: async () => [] },
     changes: {
       diff: async (_repoPath: string, path: string) => {
         await sleep(diffDelay)

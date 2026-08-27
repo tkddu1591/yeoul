@@ -23,3 +23,20 @@ export interface FileDiff {
   /** 텍스트 diff가 없는 바이너리 변경 */
   isBinary: boolean
 }
+
+/** 화면에 표시한 한 hunk를 현재 index/worktree에 그대로 적용하기 위한 요청. */
+export interface HunkStageRequest {
+  path: string
+  options: {
+    staged: boolean
+    untracked: boolean
+    origPath?: string | null
+  }
+  /** 실행 시 최신 diff에 완전히 같은 hunk가 있는지 다시 확인해 stale 적용을 막는다. */
+  hunk: DiffHunk
+}
+
+/** hunk 안의 한 추가/삭제 줄만 부분 적용한다. lineIndex는 hunk.lines 기준이다. */
+export interface LineStageRequest extends HunkStageRequest {
+  lineIndex: number
+}

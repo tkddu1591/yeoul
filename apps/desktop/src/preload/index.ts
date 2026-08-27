@@ -29,8 +29,13 @@ import {
 import { resolveInitialTheme } from '../renderer/src/ui/theme'
 
 const api: GitApi = {
+  jobs: {
+    cancel: (repoPath) => ipcRenderer.invoke(CHANNELS.jobsCancel, repoPath),
+  },
   repo: {
     select: () => ipcRenderer.invoke(CHANNELS.repoSelect),
+    clone: (url) => ipcRenderer.invoke(CHANNELS.repoClone, url),
+    init: () => ipcRenderer.invoke(CHANNELS.repoInit),
     initialPath: () => ipcRenderer.invoke(CHANNELS.repoInitialPath),
     open: (path) => ipcRenderer.invoke(CHANNELS.repoOpen, path),
     status: (repoPath) => ipcRenderer.invoke(CHANNELS.repoStatus, repoPath),
@@ -69,8 +74,8 @@ const api: GitApi = {
     list: (repoPath) => ipcRenderer.invoke(CHANNELS.worktreesList, repoPath),
     add: (repoPath, path, branch, createBranch) =>
       ipcRenderer.invoke(CHANNELS.worktreesAdd, repoPath, path, branch, createBranch),
-    remove: (repoPath, path, force) =>
-      ipcRenderer.invoke(CHANNELS.worktreesRemove, repoPath, path, force),
+    remove: (repoPath, path, force, guard) =>
+      ipcRenderer.invoke(CHANNELS.worktreesRemove, repoPath, path, force, guard),
     reveal: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreesReveal, repoPath, path),
     headInfo: (repoPath, path) => ipcRenderer.invoke(CHANNELS.worktreeHeadInfo, repoPath, path),
   },
@@ -103,13 +108,14 @@ const api: GitApi = {
     abort: (repoPath) => ipcRenderer.invoke(CHANNELS.mergeAbort, repoPath),
   },
   conflicts: {
-    resolve: (repoPath, path, choice) =>
-      ipcRenderer.invoke(CHANNELS.conflictsResolve, repoPath, path, choice),
+    resolve: (repoPath, path, choice, expectedContent) =>
+      ipcRenderer.invoke(CHANNELS.conflictsResolve, repoPath, path, choice, expectedContent),
     markResolved: (repoPath, path) =>
       ipcRenderer.invoke(CHANNELS.conflictsMarkResolved, repoPath, path),
-    saveText: (repoPath, path, content) =>
-      ipcRenderer.invoke(CHANNELS.conflictsSaveText, repoPath, path, content),
-    reset: (repoPath, path) => ipcRenderer.invoke(CHANNELS.conflictsReset, repoPath, path),
+    saveText: (repoPath, path, content, expectedContent) =>
+      ipcRenderer.invoke(CHANNELS.conflictsSaveText, repoPath, path, content, expectedContent),
+    reset: (repoPath, path, expectedContent) =>
+      ipcRenderer.invoke(CHANNELS.conflictsReset, repoPath, path, expectedContent),
   },
   files: {
     readText: (repoPath, path) => ipcRenderer.invoke(CHANNELS.filesReadText, repoPath, path),
@@ -121,11 +127,28 @@ const api: GitApi = {
     drop: (repoPath, ref) => ipcRenderer.invoke(CHANNELS.shelfDrop, repoPath, ref),
   },
   changes: {
+    guard: {
+      capture: (repoPath, paths) =>
+        ipcRenderer.invoke(CHANNELS.changesGuardCapture, repoPath, paths),
+    },
     stage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesStage, repoPath, paths),
     unstage: (repoPath, paths) => ipcRenderer.invoke(CHANNELS.changesUnstage, repoPath, paths),
-    discard: (repoPath, trackedPaths, untrackedPaths) =>
-      ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, trackedPaths, untrackedPaths),
-    removeFile: (repoPath, path) => ipcRenderer.invoke(CHANNELS.changesRemoveFile, repoPath, path),
+    hunk: {
+      stage: (repoPath, request) =>
+        ipcRenderer.invoke(CHANNELS.changesHunkStage, repoPath, request),
+      unstage: (repoPath, request) =>
+        ipcRenderer.invoke(CHANNELS.changesHunkUnstage, repoPath, request),
+    },
+    line: {
+      stage: (repoPath, request) =>
+        ipcRenderer.invoke(CHANNELS.changesLineStage, repoPath, request),
+      unstage: (repoPath, request) =>
+        ipcRenderer.invoke(CHANNELS.changesLineUnstage, repoPath, request),
+    },
+    discard: (repoPath, request) =>
+      ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, request),
+    removeFile: (repoPath, request) =>
+      ipcRenderer.invoke(CHANNELS.changesRemoveFile, repoPath, request),
     diff: (repoPath, path, options: DiffOptions) =>
       ipcRenderer.invoke(CHANNELS.changesDiff, repoPath, path, options),
   },
@@ -154,11 +177,15 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.historySearch, repoPath, query, ref),
   },
   sync: {
-    push: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath),
+    previewPush: (repoPath) => ipcRenderer.invoke(CHANNELS.syncPushPreview, repoPath),
+    push: (repoPath, confirmation) => ipcRenderer.invoke(CHANNELS.syncPush, repoPath, confirmation),
     pull: (repoPath, mode) => ipcRenderer.invoke(CHANNELS.syncPull, repoPath, mode),
   },
   remotes: {
     fetch: (repoPath) => ipcRenderer.invoke(CHANNELS.remotesFetch, repoPath),
+    list: (repoPath) => ipcRenderer.invoke(CHANNELS.remotesList, repoPath),
+    add: (repoPath, name, url) => ipcRenderer.invoke(CHANNELS.remotesAdd, repoPath, name, url),
+    remove: (repoPath, name) => ipcRenderer.invoke(CHANNELS.remotesRemove, repoPath, name),
   },
 }
 
@@ -258,6 +285,7 @@ const terminalApi: TerminalApi = {
 contextBridge.exposeInMainWorld(TERMINAL_API_KEY, terminalApi)
 
 const windowApi: WindowApi = {
+  revealDiagnostics: () => ipcRenderer.invoke(WINDOW_CHANNELS.revealDiagnostics),
   onFullScreen: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, isFullScreen: boolean) =>
       listener(isFullScreen)

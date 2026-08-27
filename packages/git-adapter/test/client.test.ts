@@ -8,6 +8,22 @@ import { execGit, execGitOrThrow, GitError } from '@git-gui/git-process'
 import { createGitClient } from '../src/client'
 import { createFixtureRepo, createFixtureRepoWithRemote, FIXTURE_IDENT, writeFixtureFile } from './fixture'
 
+type TestGitClient = ReturnType<typeof createGitClient>
+
+async function discardChanges(client: TestGitClient, trackedPaths: string[], untrackedPaths: string[]) {
+  const guard = await client.changes.guard.capture([...trackedPaths, ...untrackedPaths])
+  return client.changes.discard({ trackedPaths, untrackedPaths, guard })
+}
+
+async function removeFile(client: TestGitClient, path: string) {
+  const guard = await client.changes.guard.capture([path])
+  return client.changes.removeFile({ path, guard })
+}
+
+async function currentText(client: TestGitClient, path: string) {
+  return client.files.readText(path)
+}
+
 describe('GitClient', () => {
   it('깨끗한 저장소의 status — normal 상태, main 브랜치, 변경 없음', async () => {
     const repo = await createFixtureRepo()
@@ -38,6 +54,18 @@ describe('GitClient', () => {
     expect(status.changes.find((c) => c.path === 'new.txt')?.unstaged).toBe('untracked')
   })
 
+  it('commit — 분리 HEAD에서는 이름 없는 커밋을 만들지 않고 새 브랜치를 안내한다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+    await execGitOrThrow(['checkout', '--detach', head], { cwd: repo })
+    await writeFixtureFile(repo, 'README.md', '# detached edit\n')
+    await client.changes.stage(['README.md'])
+
+    await expect(client.commits.create('detached commit')).rejects.toThrow(/새 브랜치/)
+    expect((await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()).toBe(head)
+  })
+
   it('diff — unstaged, staged, untracked 각각 구조화된 diff를 반환한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
@@ -55,6 +83,73 @@ describe('GitClient', () => {
 
     const untracked = await client.changes.diff('new.txt', { staged: false, untracked: true })
     expect(untracked.hunks.flatMap((h) => h.lines).some((l) => l.kind === 'add' && l.text === 'hello')).toBe(true)
+  })
+
+  it('hunk stage/unstage — 파일의 선택한 변경 묶음만 index에 올리고 다시 내린다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    const original = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n') + '\n'
+    await writeFixtureFile(repo, 'parts.txt', original)
+    await execGitOrThrow(['add', 'parts.txt'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'parts'], { cwd: repo })
+    const changed = original.replace('line 1\n', 'first changed\n').replace('line 20\n', 'last changed\n')
+    await writeFixtureFile(repo, 'parts.txt', changed)
+
+    const options = { staged: false, untracked: false }
+    const diff = await client.changes.diff('parts.txt', options)
+    expect(diff.hunks).toHaveLength(2)
+    await client.changes.hunk.stage({ path: 'parts.txt', options, hunk: diff.hunks[0]! })
+
+    const cached = await client.changes.diff('parts.txt', { staged: true, untracked: false })
+    expect(cached.hunks.flatMap((hunk) => hunk.lines).some((line) => line.text === 'first changed')).toBe(
+      true,
+    )
+    expect(cached.hunks.flatMap((hunk) => hunk.lines).some((line) => line.text === 'last changed')).toBe(
+      false,
+    )
+
+    await client.changes.hunk.unstage({
+      path: 'parts.txt',
+      options: { staged: true, untracked: false },
+      hunk: cached.hunks[0]!,
+    })
+    expect((await client.changes.diff('parts.txt', { staged: true, untracked: false })).hunks).toEqual(
+      [],
+    )
+  })
+
+  it('hunk stage — 화면을 연 뒤 diff가 바뀌면 오래된 patch를 적용하지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# first edit\n')
+    const options = { staged: false, untracked: false }
+    const diff = await client.changes.diff('README.md', options)
+    await writeFixtureFile(repo, 'README.md', '# external edit\n')
+
+    await expect(
+      client.changes.hunk.stage({ path: 'README.md', options, hunk: diff.hunks[0]! }),
+    ).rejects.toThrow(/Diff가 바뀌었어요/)
+    expect((await execGitOrThrow(['diff', '--cached'], { cwd: repo })).stdout).toBe('')
+  })
+
+  it('line stage — 같은 hunk 안에서도 고른 추가 줄만 index에 올린다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'lines.txt', 'a\nb\nc\n')
+    await execGitOrThrow(['add', 'lines.txt'], { cwd: repo })
+    await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'lines'], { cwd: repo })
+    await writeFixtureFile(repo, 'lines.txt', 'a\nselected\nb\nc\nremain\n')
+    const options = { staged: false, untracked: false }
+    const diff = await client.changes.diff('lines.txt', options)
+    const hunk = diff.hunks[0]!
+    const lineIndex = hunk.lines.findIndex((line) => line.kind === 'add' && line.text === 'selected')
+
+    await client.changes.line.stage({ path: 'lines.txt', options, hunk, lineIndex })
+    const cached = (await execGitOrThrow(['diff', '--cached'], { cwd: repo })).stdout
+    expect(cached).toContain('+selected')
+    expect(cached).not.toContain('+remain')
+    const unstaged = (await execGitOrThrow(['diff'], { cwd: repo })).stdout
+    expect(unstaged).toContain('+remain')
   })
 
   it('diff — staged rename은 origPath를 함께 주면 rename으로 표시된다 (전체 내용 추가로 위장하지 않는다)', async () => {
@@ -176,7 +271,7 @@ describe('GitClient', () => {
     await writeFixtureFile(repo, 'README.md', '# changed\n')
     await writeFixtureFile(repo, 'new.txt', 'n\n')
 
-    await client.changes.discard(['README.md'], ['new.txt'])
+    await discardChanges(client, ['README.md'], ['new.txt'])
     const status = await client.repo.status()
     expect(status.changes).toEqual([])
     expect(existsSync(join(repo, 'new.txt'))).toBe(false)
@@ -191,11 +286,24 @@ describe('GitClient', () => {
     await client.changes.stage(['README.md'])
     await writeFixtureFile(repo, 'README.md', '# worktree\n')
 
-    await client.changes.discard(['README.md'], [])
+    await discardChanges(client, ['README.md'], [])
     const status = await client.repo.status()
     // staged 변경은 그대로, unstaged 변경만 사라진다 (worktree = index)
     expect(status.changes.find((c) => c.path === 'README.md')?.staged).toBe('modified')
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBeNull()
+  })
+
+  it('discard — 확인 뒤 외부에서 파일이 바뀌면 최신 내용을 지우지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'README.md', '# before confirm\n')
+    const guard = await client.changes.guard.capture(['README.md'])
+    await writeFixtureFile(repo, 'README.md', '# agent wrote later\n')
+
+    await expect(
+      client.changes.discard({ trackedPaths: ['README.md'], untrackedPaths: [], guard }),
+    ).rejects.toThrow(/확인창을 연 뒤 바뀌었어요/)
+    expect(await client.files.readText('README.md')).toBe('# agent wrote later\n')
   })
 
   it('discard — 글롭·매직 파일명을 리터럴로 처리해 다른 파일을 지우지 않는다', async () => {
@@ -203,7 +311,7 @@ describe('GitClient', () => {
     const client = createGitClient(repo)
     await writeFixtureFile(repo, '*.txt', 'glob\n')
     await writeFixtureFile(repo, 'victim.txt', 'v\n')
-    await client.changes.discard([], ['*.txt'])
+    await discardChanges(client, [], ['*.txt'])
     expect(existsSync(join(repo, '*.txt'))).toBe(false)
     expect(existsSync(join(repo, 'victim.txt'))).toBe(true)
   })
@@ -211,14 +319,14 @@ describe('GitClient', () => {
   it('discard — 둘 다 빈 배열이면 거부한다 (전체 확대 방지)', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.changes.discard([], [])).rejects.toThrow()
+    await expect(discardChanges(client, [], [])).rejects.toThrow()
   })
 
   it('discard — 빈 문자열 경로를 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.changes.discard([''], [])).rejects.toThrow()
-    await expect(client.changes.discard([], [''])).rejects.toThrow()
+    await expect(discardChanges(client, [''], [])).rejects.toThrow()
+    await expect(discardChanges(client, [], [''])).rejects.toThrow()
   })
 
   it('stage/unstage에 빈 배열을 넘기면 전체 작업으로 확대되지 않고 거부한다', async () => {
@@ -752,7 +860,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await client.conflicts.resolve('README.md', 'theirs')
+    await client.conflicts.resolve('README.md', 'theirs', await currentText(client, 'README.md'))
     let status = await client.repo.status()
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).not.toBe('conflicted')
     expect(await client.files.readText('README.md')).toBe('# rival\n')
@@ -973,7 +1081,7 @@ describe('GitClient', () => {
   it('removeFile — tracked 파일을 디스크에서 지우고 삭제 변경으로 잡힌다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await client.changes.removeFile('README.md')
+    await removeFile(client, 'README.md')
     expect(existsSync(join(repo, 'README.md'))).toBe(false)
     const status = await client.repo.status()
     expect(status.changes.find((c) => c.path === 'README.md')?.unstaged).toBe('deleted')
@@ -983,22 +1091,35 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'junk.txt', 'j\n')
-    await client.changes.removeFile('junk.txt')
+    await removeFile(client, 'junk.txt')
     expect(existsSync(join(repo, 'junk.txt'))).toBe(false)
     expect((await client.repo.status()).changes).toEqual([])
+  })
+
+  it('removeFile — 확인 뒤 외부에서 파일이 바뀌면 삭제하지 않는다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await writeFixtureFile(repo, 'keep.txt', 'before\n')
+    const guard = await client.changes.guard.capture(['keep.txt'])
+    await writeFixtureFile(repo, 'keep.txt', 'agent result\n')
+
+    await expect(client.changes.removeFile({ path: 'keep.txt', guard })).rejects.toThrow(
+      /확인창을 연 뒤 바뀌었어요/,
+    )
+    expect(await client.files.readText('keep.txt')).toBe('agent result\n')
   })
 
   it('removeFile — 없는 파일·디렉터리·심볼릭 링크·밖 경로를 거부한다', async () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
-    await expect(client.changes.removeFile('ghost.txt')).rejects.toThrow(/이미 없는 파일이에요/)
+    await expect(removeFile(client, 'ghost.txt')).rejects.toThrow(/이미 없는 파일이에요/)
     await mkdir(join(repo, 'sub'))
-    await expect(client.changes.removeFile('sub')).rejects.toThrow(/폴더는/)
+    await expect(removeFile(client, 'sub')).rejects.toThrow(/폴더는/)
     // 저장소 밖을 가리키는(끊어진 것 포함) 링크 — readText와 동일 계열로 거부한다
     await symlink(join(tmpdir(), 'no-such-target'), join(repo, 'link'))
-    await expect(client.changes.removeFile('link')).rejects.toThrow(/링크 파일/)
-    await expect(client.changes.removeFile('../outside')).rejects.toThrow(/저장소 밖 경로/)
-    await expect(client.changes.removeFile('')).rejects.toThrow(/저장소 밖 경로/)
+    await expect(removeFile(client, 'link')).rejects.toThrow(/링크 파일/)
+    await expect(removeFile(client, '../outside')).rejects.toThrow(/저장소 밖 경로/)
+    await expect(removeFile(client, '')).rejects.toThrow(/빈 경로|저장소 밖 경로/)
   })
 
   it('removeFile — 충돌 중인 파일은 읽히는 메시지로 거부한다', async () => {
@@ -1015,7 +1136,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await expect(client.changes.removeFile('README.md')).rejects.toThrow(/충돌 화면에서/)
+    await expect(removeFile(client, 'README.md')).rejects.toThrow(/충돌 화면에서/)
   })
 
   it('discard — 충돌 중인 파일은 읽히는 메시지로 거부한다 (이관)', async () => {
@@ -1032,7 +1153,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await expect(client.changes.discard(['README.md'], [])).rejects.toThrow(/충돌 화면에서/)
+    await expect(discardChanges(client, ['README.md'], [])).rejects.toThrow(/충돌 화면에서/)
   })
 
   it('files.readText — 저장소 상대 텍스트만, 상한 초과·바이너리·밖 경로 거부', async () => {
@@ -1051,7 +1172,9 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
-    await expect(client.conflicts.resolve('README.md', 'ours')).rejects.toThrow(/충돌 상태가 아닌/)
+    await expect(
+      client.conflicts.resolve('README.md', 'ours', await currentText(client, 'README.md')),
+    ).rejects.toThrow(/충돌 상태가 아닌/)
     // 미저장 편집이 살아 있어야 한다
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
@@ -1070,7 +1193,11 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await client.conflicts.saveText('README.md', '# mine\n')
+    await client.conflicts.saveText(
+      'README.md',
+      '# mine\n',
+      await currentText(client, 'README.md'),
+    )
     expect(await client.files.readText('README.md')).toBe('# mine\n')
     // add하지 않았다 — 여전히 충돌(unmerged)이어야 확정 전 전환 유지·복원이 성립한다
     const status = await client.repo.status()
@@ -1081,7 +1208,13 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
-    await expect(client.conflicts.saveText('README.md', '덮어쓰기')).rejects.toThrow(
+    await expect(
+      client.conflicts.saveText(
+        'README.md',
+        '덮어쓰기',
+        await currentText(client, 'README.md'),
+      ),
+    ).rejects.toThrow(
       /충돌 상태가 아닌/,
     )
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
@@ -1102,12 +1235,18 @@ describe('GitClient', () => {
     await client.branches.merge('rival')
 
     await expect(
-      client.conflicts.saveText('README.md', 'x'.repeat(1_000_001)),
+      client.conflicts.saveText(
+        'README.md',
+        'x'.repeat(1_000_001),
+        await currentText(client, 'README.md'),
+      ),
     ).rejects.toThrow(/너무 커요/)
     // 워크트리 파일을 링크로 바꿔치기해도(index는 여전히 UU) 링크 너머로 쓰지 않는다
     await unlink(join(repo, 'README.md'))
     await symlink('/etc/hosts', join(repo, 'README.md'))
-    await expect(client.conflicts.saveText('README.md', '덮어쓰기')).rejects.toThrow(/링크 파일/)
+    await expect(client.conflicts.saveText('README.md', '덮어쓰기', '')).rejects.toThrow(
+      /밖에서 바뀌었어요|링크 파일/,
+    )
   })
 
   it('conflicts.reset — 부분 해소를 버리고 겹침 표시를 되살린다 (index는 UU 유지)', async () => {
@@ -1124,10 +1263,14 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
     // 블록 선택을 흉내 — 마커 없이 한쪽으로 고쳐 쓴다 (add는 하지 않는다)
-    await client.conflicts.saveText('README.md', '# mine\n')
+    await client.conflicts.saveText(
+      'README.md',
+      '# mine\n',
+      await currentText(client, 'README.md'),
+    )
     expect(await client.files.readText('README.md')).not.toContain('<<<<<<<')
 
-    await client.conflicts.reset('README.md')
+    await client.conflicts.reset('README.md', await currentText(client, 'README.md'))
     // 실측: 라벨은 ours/theirs로 재생성된다 — 접두사(<<<<<<<) 기준으로 확인한다
     expect(await client.files.readText('README.md')).toContain('<<<<<<<')
     const status = await client.repo.status()
@@ -1138,7 +1281,9 @@ describe('GitClient', () => {
     const repo = await createFixtureRepo()
     const client = createGitClient(repo)
     await writeFixtureFile(repo, 'README.md', '# precious edit\n')
-    await expect(client.conflicts.reset('README.md')).rejects.toThrow(/충돌 상태가 아닌/)
+    await expect(
+      client.conflicts.reset('README.md', await currentText(client, 'README.md')),
+    ).rejects.toThrow(/충돌 상태가 아닌/)
     expect(await client.files.readText('README.md')).toBe('# precious edit\n')
   })
 
@@ -1163,7 +1308,7 @@ describe('GitClient', () => {
     await execGitOrThrow([...FIXTURE_IDENT, 'commit', '-m', 'mine'], { cwd: repo })
     await client.branches.merge('rival')
 
-    await client.conflicts.resolve('README.md', 'ours')
+    await client.conflicts.resolve('README.md', 'ours', await currentText(client, 'README.md'))
     // index == HEAD — porcelain 변경 0이지만, 병합 커밋 자체가 의미 있는 저장이다
     const status = await client.repo.status()
     expect(status.state).toBe('merging')
@@ -2307,15 +2452,14 @@ describe('GitClient', () => {
     await client.branches.create('feat', null)
     await client.worktrees.add(`${repo}-feat`, 'feat')
     await writeFixtureFile(`${repo}-feat`, 'dirty.txt', 'd\n')
-    expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
-      removed: false,
-      needsForce: true,
-      usedByWorktree: null,
-    })
-    expect(await client.worktrees.remove(`${repo}-feat`, true)).toEqual({
+    const preview = await client.worktrees.remove(`${repo}-feat`, false)
+    expect(preview.removed).toBe(false)
+    expect(preview.needsForce).toBe(true)
+    expect(preview.guard).toMatch(/^[0-9a-f]{64}$/)
+    expect(await client.worktrees.remove(`${repo}-feat`, true, preview.guard!)).toEqual({
       removed: true,
       needsForce: false,
-      usedByWorktree: null,
+      guard: null,
     })
     expect((await client.worktrees.list()).length).toBe(1)
   })
@@ -2329,9 +2473,24 @@ describe('GitClient', () => {
     expect(await client.worktrees.remove(`${repo}-feat`, false)).toEqual({
       removed: true,
       needsForce: false,
-      usedByWorktree: null,
+      guard: null,
     })
     expect((await client.worktrees.list()).length).toBe(1)
+  })
+
+  it('worktrees.remove — 강제 삭제 확인 뒤 새 파일이 생기면 삭제를 멈춘다', async () => {
+    const repo = await createFixtureRepo()
+    const client = createGitClient(repo)
+    await client.branches.create('feat', null)
+    await client.worktrees.add(`${repo}-feat`, 'feat')
+    await writeFixtureFile(`${repo}-feat`, 'dirty.txt', 'before\n')
+    const preview = await client.worktrees.remove(`${repo}-feat`, false)
+    await writeFixtureFile(`${repo}-feat`, 'new-work.txt', 'new result\n')
+
+    await expect(client.worktrees.remove(`${repo}-feat`, true, preview.guard!)).rejects.toThrow(
+      /워크트리가 바뀌었어요/,
+    )
+    expect(existsSync(`${repo}-feat/new-work.txt`)).toBe(true)
   })
 
   it('worktrees.add — createBranch면 새 실험 공간을 만들며 펼친다 (E7d 실측 1)', async () => {

@@ -41,10 +41,9 @@ export const CENTER_MIN = 380
 const RIGHT_COLUMN_FLOOR = 200
 /** main 좌우 패딩 20×2 — 열이 몇 개 접히든 항상 남는다 (MAIN_CHROME 분해 성분) */
 const MAIN_PADDING = 40
-/** 그리드 고정 소모 폭 — main 좌우 패딩 20×2 + 열 간 gap 16×3 + 리사이저 6 (layout.css와 짝).
- * E13 후속 — 하드코딩 94를 성분식으로 바꿨다. 아래 computeColumns의 검산 주석이 이 값을
- * 기준으로 쓰는데, 간격이 바뀌면 그 검산도 같이 따라와야 맞다 */
-const MAIN_CHROME = MAIN_PADDING + 3 * MAIN_GAP + RESIZER_WIDTH
+/** 그리드 고정 소모 폭 — main 좌우 패딩 20×2 + 세 열 사이 간격 16×2.
+ * 우측 리사이저는 중앙↔우측 간격 안에 포함돼 별도 폭을 더하지 않는다. */
+const MAIN_CHROME = MAIN_PADDING + 2 * MAIN_GAP
 
 /** 접힌 열 상태 — 없으면(undefined) 둘 다 펼쳐진 것으로 본다 */
 export interface ColumnCollapse {
@@ -61,9 +60,8 @@ export interface ColumnCollapse {
  * 접힘(E12) — 접힌 열은 폭이 0일 뿐 아니라 그 열의 grid gap도 함께 없어진다(레이아웃이 트랙
  * 자체를 뺀다). 우측이 접히면 우측 전용 리사이저(6px)도 같이 사라진다. 그래서 MAIN_CHROME(94)를
  * 그대로 쓰지 않고 "지금 보이는 트랙이 몇 개인가"로 매번 다시 유도한다:
- * 트랙 = [좌?, 중앙, 리사이저?, 우?] → gap 개수 = 트랙 수 - 1.
- * 둘 다 펼쳐지면 트랙 4개·gap 3개·리사이저 6 = 94(MAIN_CHROME과 정확히 일치, 회귀 없음).
- * 좌측만 접히면 트랙 3개·gap 2개·리사이저 6 = 78. 우측만 접히면 트랙 2개·gap 1개·리사이저 0 = 56.
+ * 보이는 열 사이마다 MAIN_GAP 하나만 둔다. 우측 리사이저는 그 간격 안에 포함된다.
+ * 둘 다 펼치면 간격 2개, 한쪽만 펼치면 간격 1개, 둘 다 접으면 간격이 없다.
  * 좌측이 접히면 좌측 최소폭(LEFT_COLUMN_MIN)을 지킬 이유도 사라지므로, 우측을 그 최소폭 대신
  * 지켜주는 옛 스퀴즈(budget - right < LEFT_COLUMN_MIN)는 좌측이 접힌 동안 적용하지 않는다 —
  * 960px 최소 창에서 좌측을 접었는데 그 자리를 지켜주려고 우측까지 깎이면 접은 의미가 없다(테스트로 고정).
@@ -78,8 +76,8 @@ export function computeColumns(
 
   if (leftCollapsed && rightCollapsed) return { left: 0, right: 0 }
 
-  const trackCount = (leftCollapsed ? 0 : 1) + 1 + (rightCollapsed ? 0 : 2)
-  const chrome = MAIN_PADDING + (trackCount - 1) * MAIN_GAP + (rightCollapsed ? 0 : RESIZER_WIDTH)
+  const sideCount = (leftCollapsed ? 0 : 1) + (rightCollapsed ? 0 : 1)
+  const chrome = MAIN_PADDING + sideCount * MAIN_GAP
   const budget = viewportWidth - chrome - CENTER_MIN
 
   if (leftCollapsed) {

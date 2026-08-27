@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { execGit, execGitOrThrow, GitError } from '../src/exec'
+import { execGit, execGitOrThrow, gitExecutionEvents, GitError } from '../src/exec'
 
 async function tempDir() {
   return mkdtemp(join(tmpdir(), 'git-gui-proc-'))
@@ -14,6 +14,20 @@ describe('execGit', () => {
     const result = await execGit(['version'], { cwd })
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain('git version')
+  })
+
+  it('민감한 명령 인자 없이 실행 결과를 관찰자에게 알린다', async () => {
+    const cwd = await tempDir()
+    const events: Parameters<Parameters<typeof gitExecutionEvents.subscribe>[0]>[0][] = []
+    const unsubscribe = gitExecutionEvents.subscribe((event) => events.push(event))
+    try {
+      await execGit(['version', '--secret-value'], { cwd })
+    } finally {
+      unsubscribe()
+    }
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ operation: 'version', cwd })
+    expect(events[0]).not.toHaveProperty('args')
   })
 
   it('실패한 명령은 0이 아닌 exitCode와 stderr를 반환한다', async () => {

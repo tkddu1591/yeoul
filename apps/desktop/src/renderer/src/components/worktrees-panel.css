@@ -15,6 +15,30 @@
   font-size: var(--text-sm);
   color: var(--color-text-faint);
 }
+.worktree-row-shell {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.worktree-row-shell > .worktree-row {
+  min-width: 0;
+  flex: 1;
+}
+.worktree-row__menu {
+  flex: none;
+  align-self: center;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+}
+.worktree-row__menu:hover,
+.worktree-row__menu:focus-visible {
+  color: var(--color-text);
+  background: var(--color-hover-bg, rgba(127, 127, 127, 0.08));
+}
 /* E7j — 두 줄 행: 1줄 브랜치(주 식별자)+출처, 2줄 이름+경로. 잘리는 쪽을 뒤가 아니라 앞으로 */
 .worktree-row {
   display: flex;
@@ -63,6 +87,18 @@
   color: var(--color-text-faint);
   /* E7j 보완 M-5 — 글리프(15px) + gap(8px)만큼 들여써 브랜치와 같은 x에서 시작 */
   padding-left: 23px;
+}
+.worktree-row__line--status {
+  flex-wrap: wrap;
+  min-height: 16px;
+  padding-left: 23px;
+  gap: var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+.worktree-row__alert {
+  color: var(--concept-conflict);
+  font-weight: 600;
 }
 .worktree-row__glyph {
   width: 15px;

@@ -12,7 +12,7 @@
 .app__header {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
@@ -121,6 +121,12 @@
   /* E11 — 등장 페이드. 퇴장은 만들지 않는다(의도된 비대칭) */
   animation: ui-enter var(--motion-base) var(--ease-out);
 }
+.app__job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
 /* 상단 바(머지 바·알림)는 전부 흐름 밖 오버레이 스택 — 무엇이 떠도 본문이 밀리지 않는다 (피드백).
    스택 안에서는 머지 바가 위, 알림이 아래로 쌓여 서로 가리지 않는다(E1c 가림 문제의 구조적 해소) */
 .app__top-layer {
@@ -165,7 +171,7 @@
   display: grid;
   /* 열 폭은 App이 inline style로 관리한다 (buildMainColumns — 중앙 380px 보장) — 여기 값은 초기
      페인트 폴백. 트랙 7개(좌·간격·중앙·간격·리사이저·간격·우)로 grid-tracks.ts와 짝을 맞춘다 (E13) */
-  grid-template-columns: 380px 16px minmax(0, 1fr) 16px 6px 16px 360px;
+  grid-template-columns: 380px 16px minmax(0, 1fr) 5px 6px 5px 360px;
   /* 행도 열과 같은 원리 (E13 Task 3) — 콘텐츠·간격·도크 3트랙, App이 inline style로 관리한다
      (buildMainRows) — 여기 값은 초기 페인트 폴백(도크 기본은 닫힘이라 간격·도크 모두 0) */
   grid-template-rows: minmax(0, 1fr) 0px 0px;
@@ -252,9 +258,13 @@
 .app__left-inner {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 0;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
 }
 /* E8 — 반반 고정이라 파일 2~3개일 때 좌측에 수백 px가 비었다. 이 레벨(.changes-panel)은
    원래대로 flex:1(뷰포트 기준 확정 높이)을 유지한다. "내용만큼만 차지"는 대신
@@ -278,10 +288,14 @@
    탭바를 그 위로 올려 상태 바가 떠 있어도 항상 눌린다 */
 .app__left-tabs {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   flex: none;
   position: relative;
   z-index: 41;
+  min-height: 48px;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
 }
 .app__left-tab {
   appearance: none;
@@ -298,20 +312,27 @@
 }
 .app__left-tab[aria-selected='true'] {
   color: inherit;
-  background: var(--color-surface);
-  border-color: var(--color-border-strong);
+  background: var(--color-selection-bg);
+  border-color: transparent;
+  box-shadow: inset 0 -2px var(--color-accent);
   font-weight: 600;
 }
 .app__left-inner > .branches-panel,
 .app__left-inner > .ui-panel {
   flex: 1;
   min-height: 0;
+  border: 0;
+  border-radius: 0;
 }
 .app__center {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 0;
   min-height: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
   /* 중앙 열을 컨테이너로 — 충돌 카드가 창 폭이 아니라 실제 열 폭에 반응한다 (품질 리뷰) */
   container-type: inline-size;
   container-name: center;
@@ -322,6 +343,11 @@
 }
 .app__center > .ui-panel {
   flex: 1;
+  border: 0;
+  border-radius: 0;
+}
+.app__center > .ui-panel + .ui-panel {
+  border-top: 1px solid var(--color-border);
 }
 /* 우측 열 — 트리(11fr)가 기본 전체, 커밋 클릭 시에만 하단 상세 슬롯이 9fr(=45%)을 차지한다 (E6a).
    리뷰 상세(단독 자식)는 상세 행이 0인 상태 그대로라 전체 높이를 쓴다.
@@ -370,6 +396,10 @@
   grid-template-rows: minmax(0, 11fr) minmax(0px, 0fr);
   min-height: 0;
   flex-shrink: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
   transition: grid-template-rows var(--motion-slow) var(--ease-in-out);
 }
 .app__right-inner--detail-open {
@@ -377,9 +407,11 @@
 }
 .app__right-inner > .ui-panel {
   min-height: 0;
+  border: 0;
+  border-radius: 0;
 }
 .app__right-inner--detail-open > .ui-panel {
-  margin-bottom: var(--space-4);
+  margin-bottom: 0;
 }
 .app__right-detail {
   display: flex;
@@ -391,4 +423,7 @@
 .app__right-detail > .ui-panel {
   flex: 1;
   min-height: 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
 }

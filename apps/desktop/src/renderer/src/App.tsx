@@ -11,7 +11,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { suggestCommitMessage, type RepositoryStateKind } from '@git-gui/domain'
+import { suggestCommitMessage, type PushPreview, type RepositoryStateKind } from '@git-gui/domain'
 import type { TabInfo } from '@git-gui/ipc-contract'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
@@ -206,6 +206,20 @@ export function App() {
   // 리뷰(호스팅) 다이얼로그 — 토큰 붙여넣기·리뷰 요청 제목 (팝오버는 닫고 연다)
   const [tokenPrompt, setTokenPrompt] = useState(false)
   const [pullPrompt, setPullPrompt] = useState(false)
+  const [clonePrompt, setClonePrompt] = useState(false)
+  const [pushPreview, setPushPreview] = useState<PushPreview | null>(null)
+
+  const requestPush = () => {
+    void (async () => {
+      const preview = await store.previewBackup()
+      if (preview === null) return
+      if (preview.needsConfirmation) {
+        setPushPreview(preview)
+        return
+      }
+      void store.backup()
+    })()
+  }
 
   // 리뷰 상세의 병합 확인과 병합 후 "기본 공간 이동+받아오기" 제안(base 이름 보관)
   const [confirmingMerge, setConfirmingMerge] = useState(false)
@@ -677,27 +691,49 @@ export function App() {
 
   if (!store.repoPath) {
     return (
-      // E15c — 빈 탭에도 탭바는 있다: 탭바가 곧 타이틀바라(드래그·신호등 자리) 없으면 창을
-      // 움직일 수 없고, 다른 탭으로 돌아갈 길도 없다. .app으로 감싸 탭바+RepoPicker 두 층이
-      // 저장소 화면과 같은 세로 구조(flex column, 100vh)를 갖는다
-      <div className="app">
-        <TabBar
-          tabs={tabs}
-          onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
-          onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
-          onAdd={() => void window.gitApi.tabs.open(null)}
-          onDragEnd={(tabId, screenX, screenY, toIndex) =>
-            void window.gitApi.tabs.dragEnd(tabId, screenX, screenY, toIndex)
-          }
+      <>
+        {/* E15c — 빈 탭에도 탭바는 있다: 탭바가 곧 타이틀바라(드래그·신호등 자리) 없으면 창을
+            움직일 수 없고, 다른 탭으로 돌아갈 길도 없다. .app으로 감싸 탭바+RepoPicker 두 층이
+            저장소 화면과 같은 세로 구조(flex column, 100vh)를 갖는다 */}
+        <div className="app">
+          <TabBar
+            tabs={tabs}
+            onActivate={(tabId) => void window.gitApi.tabs.activate(tabId)}
+            onClose={(tabId) => void window.gitApi.tabs.close(tabId)}
+            onAdd={() => void window.gitApi.tabs.open(null)}
+            onDragEnd={(tabId, screenX, screenY, toIndex) =>
+              void window.gitApi.tabs.dragEnd(tabId, screenX, screenY, toIndex)
+            }
+          />
+          <RepoPicker
+            onOpen={() => void store.openRepository()}
+            onClone={() => {
+              store.clearError()
+              setClonePrompt(true)
+            }}
+            onInit={() => void store.initRepository()}
+            recent={store.recentRepos}
+            home={home}
+            onOpenRecent={(path) => void store.openRepository(path)}
+            error={store.error}
+          />
+        </div>
+        <PromptDialog
+          isOpen={clonePrompt}
+          title="원격 저장소 복제"
+          description="Git 원격 주소를 입력한 뒤, 내용을 받을 빈 폴더를 선택해요. GitHub API 연결과 Git 원격 인증은 서로 별개예요."
+          label="원격 주소"
+          placeholder="git@github.com:owner/repository.git"
+          submitLabel="폴더 선택 후 복제"
+          errorText={clonePrompt ? store.error : null}
+          onSubmit={(url) => {
+            void (async () => {
+              if (await store.cloneRepository(url)) setClonePrompt(false)
+            })()
+          }}
+          onCancel={() => setClonePrompt(false)}
         />
-        <RepoPicker
-          onOpen={() => void store.openRepository()}
-          recent={store.recentRepos}
-          home={home}
-          onOpenRecent={(path) => void store.openRepository(path)}
-          error={store.error}
-        />
-      </div>
+      </>
     )
   }
 
@@ -855,7 +891,7 @@ export function App() {
               variant="ghost"
               size="sm"
               isDisabled={store.busy}
-              onPress={() => void store.backup()}
+              onPress={requestPush}
               testId="backup"
               aria-label={T.push}
             >
@@ -906,9 +942,17 @@ export function App() {
               )}
             </Button>
           </Tooltip>
-          <Button variant="ghost" size="sm" onPress={() => setSettingsOpen(true)} testId="settings-open">
-            <Settings size={13} aria-hidden="true" />
-          </Button>
+          <Tooltip content="설정" summary="설정" describedBy={false}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={() => setSettingsOpen(true)}
+              testId="settings-open"
+              aria-label="설정"
+            >
+              <Settings size={13} aria-hidden="true" />
+            </Button>
+          </Tooltip>
         </div>
       </header>
       <SettingsDialog
@@ -921,6 +965,12 @@ export function App() {
         onChangePullMode={(mode) => store.setPullMode(mode)}
         autoFetch={autoFetch}
         onChangeAutoFetch={changeAutoFetch}
+        remotes={store.remotes}
+        busy={store.busy}
+        error={store.error}
+        onAddRemote={(name, url) => store.remote.add(name, url)}
+        onRemoveRemote={(name) => void store.remote.remove(name)}
+        onRevealDiagnostics={() => void window.windowApi.revealDiagnostics()}
         onClose={() => setSettingsOpen(false)}
       />
       <AddWorktreeDialog
@@ -977,11 +1027,21 @@ export function App() {
         status?.state === 'reverting' ||
         status?.state === 'cherry-picking' ||
         status?.state === 'rebasing' ||
+        status?.branch.name === null ||
+        store.busy ||
         store.error !== null ||
         store.notice !== null) && (
         <div className="app__top-layer">
           {/* E7h ① — 좌측 탭바(z-41)와 아예 안 겹치게 스택을 좌측 열 오른쪽부터(패딩 20 + 열 폭 + gap 16) */}
           <div className="app__top-stack" style={{ left: columns.left + 36 }}>
+            {store.busy && (
+              <div className="app__notice app__job" role="status" data-testid="git-job-status">
+                <span>Git 작업 실행 중이에요. 5분을 넘기면 자동 중단돼요.</span>
+                <Button variant="ghost" size="sm" onPress={() => void store.job.cancel()}>
+                  중단
+                </Button>
+              </div>
+            )}
             {(status?.state === 'merging' ||
               status?.state === 'reverting' ||
               status?.state === 'cherry-picking' ||
@@ -1033,6 +1093,24 @@ export function App() {
               <p className="app__error" role="alert" data-testid="error">
                 {store.error}
               </p>
+            )}
+            {status?.branch.name === null && status.headHash !== null && (
+              <div className="app__merge-bar" role="status" data-testid="detached-head-warning">
+                <span>
+                  분리 HEAD예요. 커밋이 이름 없이 남지 않도록 먼저 새 브랜치에 현재 작업을 보존해 주세요.
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  isDisabled={store.busy}
+                  onPress={() => {
+                    store.clearError()
+                    setBranchPrompt({ fromHash: status.headHash })
+                  }}
+                >
+                  새 브랜치 만들기
+                </Button>
+              </div>
             )}
             {store.notice && (
               <p className="app__notice" role="status" data-testid="notice">
@@ -1099,10 +1177,9 @@ export function App() {
                 onFindClose={() => setFindScope(null)}
                 onStage={(paths) => void store.stage(paths)}
                 onUnstage={(paths) => void store.unstage(paths)}
-                onDiscard={(trackedPaths, untrackedPaths) =>
-                  void store.discard(trackedPaths, untrackedPaths)
-                }
-                onRemoveFile={(path) => void store.removeFile(path)}
+                onCaptureGuard={(paths) => store.captureChangeGuard(paths)}
+                onDiscard={(request) => void store.discard(request)}
+                onRemoveFile={(request) => void store.removeFile(request)}
                 onSelect={(selected) => {
                   // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
                   if (findScope === 'diff') setFindScope(null)
@@ -1153,7 +1230,7 @@ export function App() {
                     else void store.updateBranch(action.name)
                     break
                   case 'backup':
-                    if (action.name === status?.branch.name) void store.backup()
+                    if (action.name === status?.branch.name) requestPush()
                     else void store.backupBranch(action.name)
                     break
                   case 'rename':
@@ -1267,13 +1344,33 @@ export function App() {
             />
           ) : (
             <DiffPanel
-              path={
-                store.diffLabel ??
-                (store.commitFile !== null && store.commitDetail !== null
-                  ? `${store.commitFile.path} — ${T.commit} ${store.commitDetail.shortHash}`
-                  : store.selected?.change.path ?? null)
+              document={
+                store.diff === null
+                  ? null
+                  : {
+                      path:
+                        store.diffLabel ??
+                        (store.commitFile !== null && store.commitDetail !== null
+                          ? `${store.commitFile.path} — ${T.commit} ${store.commitDetail.shortHash}`
+                          : store.selected?.change.path ?? T.diff),
+                      diff: store.diff,
+                      change:
+                        store.selected !== null &&
+                        store.commitFile === null &&
+                        store.diffLabel === null
+                          ? {
+                              path: store.selected.change.path,
+                              options: {
+                                staged: store.selected.staged,
+                                untracked: store.selected.change.unstaged === 'untracked',
+                                origPath: store.selected.staged
+                                  ? store.selected.change.origPath
+                                  : null,
+                              },
+                            }
+                          : null,
+                    }
               }
-              diff={store.diff}
               busy={store.busy}
               findOpen={findScope === 'diff'}
               findNonce={findNonce}
@@ -1282,6 +1379,10 @@ export function App() {
                 store.commitFile !== null ? store.clearCommitFile() : store.clearSelection()
               }
               pending={store.reads.center > 0}
+              onStageHunk={(request) => void store.hunk.stage(request)}
+              onUnstageHunk={(request) => void store.hunk.unstage(request)}
+              onStageLine={(request) => void store.line.stage(request)}
+              onUnstageLine={(request) => void store.line.unstage(request)}
             />
           )}
         </div>
@@ -1569,6 +1670,26 @@ export function App() {
         }}
         onCancel={() => setPullPrompt(false)}
       />
+      <ConfirmDialog
+        isOpen={pushPreview !== null}
+        title="처음 푸시할 위치를 확인해 주세요"
+        confirmLabel={T.push}
+        onConfirm={() => {
+          const preview = pushPreview
+          setPushPreview(null)
+          if (preview === null) return
+          void store.backup({
+            remote: preview.remote,
+            branch: preview.branch,
+            expectedHead: preview.expectedHead,
+          })
+        }}
+        onCancel={() => setPushPreview(null)}
+      >
+        {pushPreview === null
+          ? ''
+          : `${pushPreview.commitCount}개 커밋을 ${pushPreview.destination}에 올려요. 원격 주소: ${pushPreview.remoteUrl}`}
+      </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingAbort}
         title={

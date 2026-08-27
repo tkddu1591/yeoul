@@ -157,6 +157,8 @@ test('열기 → stage → commit → 역사 반영 → 백업', async () => {
 
     // 백업 — 원격(bare)에 실제로 올라갔는지 + upstream 연결로 ahead/behind 표시
     await window.getByTestId('backup').click()
+    await expect(window.getByText('처음 푸시할 위치를 확인해 주세요')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     await expect(window.getByText('↑0 ↓0')).toBeVisible()
     const remoteLog = await execGitOrThrow(['log', '-1', '--format=%s'], { cwd: remote })
     expect(remoteLog.stdout.trim()).toBe('e2e: 첫 저장')
@@ -677,6 +679,8 @@ test('겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무�
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-view')).toContainText('rival')
     await window.getByTestId('conflict-theirs').click()
+    await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     // 해소 — 머지 바 0개, staged로 이동
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await expect(window.getByTestId('staged-count')).toHaveText('1')
@@ -713,6 +717,8 @@ test('겹침을 전부 내 것으로 정리해도 저장하기로 합치기를 �
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-ours').click()
+    await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     // 전량 내 것 — 변경 0개지만 병합 커밋으로 마무리할 수 있어야 한다 (데드엔드 방지)
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await expect(window.getByTestId('commit-button')).toContainText(`${T.merge} 마무리`)
@@ -856,6 +862,8 @@ test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async ()
     // 전부 내 것을 유지하면 바뀌는 내용이 없다 — 저장하기 대신 취소로 마무리하도록 안내한다
     await window.getByTestId('file-unstaged-app.txt').click()
     await window.getByTestId('conflict-ours').click()
+    await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.revert} 취소를 눌러 마무리해요`)
     // 되돌리는 중에는 우클릭 되돌리기가 비활성 — 이중 실행을 막는다 (통합 리뷰)
     await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
@@ -1463,8 +1471,10 @@ test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속�
     await window.getByTestId('left-tab-changes').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-panel')).toBeVisible()
-    await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 유지')
+    await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 사용')
     await window.getByTestId('conflict-theirs').click()
+    await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 0개 남음`)
     await window.getByTestId('rebase-continue').click()
     await expect(window.getByTestId('notice')).toContainText(`${T.rebase}를 마쳤어요`)
@@ -1731,6 +1741,7 @@ test('워크트리 탭 — 클릭하면 새 터미널이 그 폴더에서 열린
   await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1770,6 +1781,7 @@ test('설정 — 앱 전체 전환으로 바꾸면 클릭 시 헤더·역사가 
   await execGitOrThrow(['add', '-A'], { cwd: `${repo}-feature-login` })
   await execGitOrThrow(['commit', '-m', '워크트리 전용 저장'], { cwd: `${repo}-feature-login` })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1802,6 +1814,7 @@ test('워크트리 탭 — 미저장 변경이 있으면 지우기가 2단 확�
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   await writeFile(join(`${repo}-feature-login`, 'dirty.txt'), 'd\n')
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1833,6 +1846,7 @@ test('감시 — 링크드 워크트리를 앱에서 열면 그 안의 외부 �
   await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -2106,6 +2120,8 @@ test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E
   try {
     const window = await app.firstWindow()
     await window.getByTestId('backup').click()
+    await expect(window.getByText('처음 푸시할 위치를 확인해 주세요')).toBeVisible()
+    await window.getByTestId('confirm-accept').click()
     await expect(window.getByTestId('notice')).toContainText(`연결하며 ${T.push}했어요`, { timeout: 10_000 })
     await window.getByTestId('left-tab-branches').click()
     // E7g: "동기화됨" 칩 대신 침묵(인라인 ↑↓ 배지가 없음)이 신호
@@ -2147,7 +2163,7 @@ test('설정 — 받아오기 방식·자동 새로고침이 재시작 후에도
   }
 })
 
-test('창 제목이 "Git GUI"다 — 한 줄 타이틀바에서도 창 전환 UI에 쓰인다 (E7f)', async () => {
+test('창 제목이 "여울"이다 — 한 줄 타이틀바에서도 창 전환 UI에 쓰인다 (E7f)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
   const app = await electron.launch({
@@ -2160,7 +2176,7 @@ test('창 제목이 "Git GUI"다 — 한 줄 타이틀바에서도 창 전환 UI
     const title = await app.evaluate(({ BaseWindow }) =>
       BaseWindow.getAllWindows()[0]?.getTitle(),
     )
-    expect(title).toBe('Git GUI')
+    expect(title).toBe('여울')
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -2189,11 +2205,12 @@ test('실험 공간 — 한 번 클릭은 선택만, 역사는 그대로다 (E7g
   }
 })
 
-test('실험 공간 — 더블클릭 조회로 역사가 그 계보로 바뀌고 ✕로 복귀한다 (E7g)', async () => {
+test('실험 공간 — 더블클릭 조회 후 긴 이름은 칩 안에서 줄고 전체 보기로 복귀한다 (E7g)', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
+  const sideBranch = 'side-line-with-a-very-long-name-that-must-not-hide-the-clear-action'
   // 다른 계보 — side에만 있는 저장
-  await execGitOrThrow(['checkout', '-b', 'side-line'], { cwd: repo })
+  await execGitOrThrow(['checkout', '-b', sideBranch], { cwd: repo })
   await writeFile(join(repo, 'side.txt'), 's\n')
   await execGitOrThrow(['add', '-A'], { cwd: repo })
   await execGitOrThrow(['commit', '-m', '옆줄 저장'], { cwd: repo })
@@ -2211,14 +2228,22 @@ test('실험 공간 — 더블클릭 조회로 역사가 그 계보로 바뀌고
     await expect(window.getByTestId('history-list')).toContainText('옆줄 저장')
     await expect(window.getByTestId('history-list')).toContainText('본줄 저장')
     await window.getByTestId('left-tab-branches').click()
-    await window.getByTestId('branch-row-side-line').dblclick()
+    await window.getByTestId(`branch-row-${sideBranch}`).dblclick()
     // 조회 모드 — side 계보만
-    await expect(window.getByTestId('history-view-pill')).toContainText('side-line')
+    const viewPill = window.getByTestId('history-view-pill')
+    const clearView = window.getByTestId('history-view-clear')
+    await expect(viewPill).toContainText(sideBranch)
+    await expect(clearView).toHaveText('전체 보기')
+    await expect(clearView).toBeVisible()
+    const [pillBox, clearBox] = await Promise.all([viewPill.boundingBox(), clearView.boundingBox()])
+    expect(pillBox).not.toBeNull()
+    expect(clearBox).not.toBeNull()
+    expect(clearBox!.x + clearBox!.width).toBeLessThanOrEqual(pillBox!.x + pillBox!.width)
     await expect(window.getByTestId('history-list')).toContainText('옆줄 저장')
     await expect(window.getByTestId('history-list')).not.toContainText('본줄 저장')
-    await expect(window.getByTestId('branch-row-side-line')).toHaveClass(/branch-row--viewing/)
-    // ✕ 복귀
-    await window.getByTestId('history-view-clear').click()
+    await expect(window.getByTestId(`branch-row-${sideBranch}`)).toHaveClass(/branch-row--viewing/)
+    // 명시적인 "전체 보기"로 복귀
+    await clearView.click()
     await expect(window.getByTestId('history-view-pill')).toHaveCount(0)
     await expect(window.getByTestId('history-list')).toContainText('본줄 저장')
   } finally {
@@ -2356,6 +2381,7 @@ test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다
   await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'grp-side'], { cwd: repo })
   // dockOpen 영속 격리 — 이전 터미널 테스트의 열림 상태를 물려받지 않게 (E7b 관례)
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -2372,7 +2398,7 @@ test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다
     await window.getByTestId('terminal-new-tab').click()
     await expect(window.locator('.terminal-dock__tab-name')).toHaveCount(2)
     await expect(window.locator('.terminal-dock__tab-name').nth(1)).toHaveText('2')
-    // 워크트리로 터미널 대상 전환(기본 설정 = 터미널만) → 그 그룹의 새 탭만 보인다 — 번호는
+    // 워크트리로 터미널 대상 전환(이 시나리오에서 명시한 터미널 모드) → 그 그룹의 새 탭만 보인다 — 번호는
     // 이 그룹 안에서 다시 1부터(전역 카운터였다면 3이 됐을 자리)
     await window.getByTestId('left-tab-worktrees').click()
     await window.getByTestId(`worktree-row-${sideName}`).click()
@@ -2399,6 +2425,7 @@ test('E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다', a
   const wtPath = `${repo}-purge`
   await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'purge-side'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -3596,6 +3623,7 @@ test('E12 — 워크트리 A에 탭 2개, B로 전환하면 B의 첫 탭은 1이
     cwd: repo,
   })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },

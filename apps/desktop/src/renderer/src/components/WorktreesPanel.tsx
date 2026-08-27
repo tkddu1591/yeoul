@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react'
+import { MoreHorizontal } from 'lucide-react'
 import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
 import { formatRelativeTime } from './relative-time'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
@@ -139,8 +140,8 @@ export function WorktreesPanel({
             const head = headInfos[headKey] ?? null
             const fork = head?.fork ?? null
             return (
-              <Tooltip
-                key={worktree.path}
+              <div className="worktree-row-shell" key={worktree.path}>
+                <Tooltip
                 summary={worktree.path}
                 content={
                   <>
@@ -174,8 +175,8 @@ export function WorktreesPanel({
                     )}
                   </>
                 }
-              >
-                <button
+                >
+                  <button
                   type="button"
                   className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
                   onClick={(event) =>
@@ -190,8 +191,8 @@ export function WorktreesPanel({
                   onContextMenu={(event) => openMenu(event, worktree)}
                   onMouseEnter={() => onHoverWorktree(worktree.path, worktree.headHash)}
                   data-testid={`worktree-row-${folderName(worktree.path)}`}
-                >
-                  <span className="worktree-row__lines">
+                  >
+                    <span className="worktree-row__lines">
                     <span className="worktree-row__line">
                       <span
                         className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
@@ -226,9 +227,45 @@ export function WorktreesPanel({
                         )}
                       </span>
                     </span>
-                  </span>
+                    {worktree.summary != null && (
+                      <span className="worktree-row__line worktree-row__line--status">
+                        {worktree.summary.conflicted > 0 && (
+                          <span className="worktree-row__alert">
+                            충돌 {worktree.summary.conflicted}
+                          </span>
+                        )}
+                        {worktree.summary.staged > 0 && <span>스테이지 {worktree.summary.staged}</span>}
+                        {worktree.summary.unstaged > 0 && <span>변경 {worktree.summary.unstaged}</span>}
+                        {worktree.summary.untracked > 0 && <span>새 파일 {worktree.summary.untracked}</span>}
+                        {worktree.summary.ahead !== null && worktree.summary.ahead > 0 && (
+                          <span>↑{worktree.summary.ahead}</span>
+                        )}
+                        {worktree.summary.behind !== null && worktree.summary.behind > 0 && (
+                          <span>↓{worktree.summary.behind}</span>
+                        )}
+                        {worktree.summary.staged === 0 &&
+                          worktree.summary.unstaged === 0 &&
+                          worktree.summary.untracked === 0 &&
+                          worktree.summary.conflicted === 0 && <span>깨끗함</span>}
+                        {worktree.summary.lastCommittedAt !== null && (
+                          <span>{formatRelativeTime(worktree.summary.lastCommittedAt, now)}</span>
+                        )}
+                      </span>
+                    )}
+                    </span>
+                  </button>
+                </Tooltip>
+                <button
+                  type="button"
+                  className="worktree-row__menu"
+                  aria-label={`${branchLabel(worktree)} 작업 메뉴`}
+                  disabled={busy}
+                  onClick={(event) => openMenu(event, worktree)}
+                  data-testid={`worktree-menu-${folderName(worktree.path)}`}
+                >
+                  <MoreHorizontal size={16} aria-hidden="true" />
                 </button>
-              </Tooltip>
+              </div>
             )
           })}
           <button

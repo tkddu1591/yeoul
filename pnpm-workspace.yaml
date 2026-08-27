@@ -7,3 +7,7 @@ onlyBuiltDependencies:
   - electron
   - esbuild
   - node-pty
+
+# electron-updater의 ^4.1.0 범위가 취약한 4.3.0으로 잠기지 않게 패치 버전을 강제한다.
+overrides:
+  js-yaml: 4.3.1

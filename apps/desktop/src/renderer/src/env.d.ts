@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { GitApi, HostingApi, SettingsApi, TerminalApi, WindowApi } from '@git-gui/ipc-contract'
 
 declare global {

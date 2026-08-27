@@ -1,4 +1,5 @@
-import { app, BaseWindow, ipcMain, nativeTheme, WebContentsView } from 'electron'
+import { app, BaseWindow, ipcMain, nativeTheme, shell, WebContentsView } from 'electron'
+import { gitExecutionEvents } from '@git-gui/git-process'
 import { isAbsolute, join } from 'node:path'
 import {
   SETTINGS_CHANNELS,
@@ -8,6 +9,8 @@ import {
   type WindowLayout,
   type WindowOpenResult,
 } from '@git-gui/ipc-contract'
+import { applicationUpdate } from './application-update'
+import { diagnostics } from './diagnostics'
 import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
@@ -65,7 +68,7 @@ const registry = createWindowRegistry((kind) => {
  * 배경을 지정하지 않아(layout.css) body 배경이 창 전체에 그대로 비친다. --color-surface를
  * 썼다면 body 배경과 미묘하게 어긋나는 색이 창 생성 직후 잠깐 보였을 것이다.
  * 값이 바뀌면 여기도 손으로 맞춘다 (use-terminal-sessions.ts TERMINAL_FONT_FAMILY와 같은 관례) */
-const APP_BACKGROUND = { light: '#f4f5f7', dark: '#16181d' } as const
+const APP_BACKGROUND = { light: '#f3f5f3', dark: '#141916' } as const
 
 /** 창 배경색을 저장된 테마로 정한다 — 저장값이 없으면(첫 실행) renderer의 resolveInitialTheme과
  * 같은 폴백(OS 다크모드 설정)을 쓴다. 이 색은 창(BaseWindow)과 뷰(WebContentsView) 둘 다에
@@ -77,8 +80,8 @@ function resolveBackgroundColor(): string {
 }
 
 // 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),
-// 패키징 산출물(electron-builder productName)에서 완전히 "Git GUI"가 된다
-app.setName('Git GUI')
+// 패키징 산출물(electron-builder productName)에서 완전히 "Yeoul"이 된다
+app.setName('Yeoul')
 // dev에서도 독에 Electron 아이콘 대신 앱 아이콘 (macOS — 패키징 전에도 정체성 유지).
 // !app.isPackaged가 반드시 필요하다: 이 png는 electron-builder의 files 목록에 없어 asar에 안 들어가고
 // (패키징 앱은 Info.plist가 가리키는 icon.icns로 이미 아이콘을 받는다), 패키징 앱에서 부르면
@@ -93,6 +96,19 @@ if (process.platform === 'darwin' && !app.isPackaged) {
 if (process.env.GIT_GUI_USER_DATA) {
   app.setPath('userData', process.env.GIT_GUI_USER_DATA)
 }
+
+// 렌더러가 생기기 전에 Crashpad를 시작해야 main·renderer·child process를 모두 수집한다.
+// 외부 전송 동의와 수집 서버가 없으므로 덤프와 진단 로그는 userData/diagnostics에만 저장한다.
+diagnostics.collection.start()
+gitExecutionEvents.subscribe((event) => {
+  diagnostics.entry.write({
+    area: 'git',
+    message: `${event.operation} ${event.exitCode === 0 ? '완료' : '실패'}`,
+    detail: `저장소: ${event.cwd}\n소요: ${event.durationMs}ms\n종료 코드: ${event.exitCode}${
+      event.signal === null ? '' : `\n신호: ${event.signal}`
+    }`,
+  })
+})
 
 // E2E 창 비간섭 — Playwright 실행 중 창이 사용자 화면을 가리거나 포커스를 뺏지 않게 숨긴 채 띄운다.
 // CDP 입력·렌더·스크린샷은 숨김 창에서도 전부 동작한다(플랜 실측: isVisible false에서
@@ -170,7 +186,7 @@ function createWindowShell(
     height: 800,
     minWidth: 960,
     minHeight: 600,
-    title: 'Git GUI',
+    title: '여울',
     // E7f 한 줄 타이틀바(macOS) → E7h ⑦: hiddenInset은 신호등 y가 OS 고정이라 헤더와 안 맞았다 —
     // hidden + trafficLightPosition으로 세로 중앙에 맞춘다.
     // E15c — 타이틀바 구실이 헤더에서 탭바로 옮겨가(스펙 §3 "두 줄") 기준 높이도 바뀌었다:
@@ -334,6 +350,11 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // 그 뒤에 이 이벤트가 와도 setCrashed는 없는 탭으로 무해하다
   view.webContents.on('render-process-gone', (_event, details) => {
     console.error(`탭 렌더러 크래시 (tab ${tabId}): ${details.reason}`)
+    diagnostics.entry.write({
+      area: 'renderer',
+      message: `탭 ${tabId} 렌더러 종료: ${details.reason}`,
+      detail: `exitCode=${details.exitCode}`,
+    })
     // 연속 크래시 장부 (E15e 리뷰 I-1) — 직전 로드 완료에서 얼마 만의 크래시인가로 "연속"을
     // 가른다(살 만큼 살았으면 1로 리셋 — restart-policy). 아래 showActiveTab의 자동 재시동
     // 분기가 이 값으로 상한을 판정하므로 **반드시 그보다 먼저** 적는다
@@ -593,6 +614,10 @@ function seedLayoutFrom(openerId: number): WindowLayout {
 
 /** 새 창에서 연다 (E15b). 창을 만드는 것은 index.ts 책임이라 이 핸들러만 여기 있다 */
 function registerWindowHandlers(): void {
+  ipcMain.handle(WINDOW_CHANNELS.revealDiagnostics, async () => {
+    const error = await shell.openPath(diagnostics.directory.getPath())
+    if (error !== '') throw new Error('진단 자료 폴더를 열지 못했어요.')
+  })
   ipcMain.handle(
     WINDOW_CHANNELS.open,
     async (event, repoPath: unknown): Promise<WindowOpenResult> => {
@@ -960,9 +985,19 @@ app
     // E2E에서만 조용히 그 저장소를 열었다 — 빈 창(RepoPicker) 경로가 E2E로 검증 불가능해진다
     // (E15b Task 5 실측: 최근 목록 테스트가 여기서 빨갛게 났다). 씨앗은 첫 창에만 준다
     await createStartupWindows()
+    applicationUpdate.start({
+      // E2E에서는 외부 네트워크·다이얼로그가 테스트를 방해하지 않게 끈다. 패키지 앱은
+      // 공개 바이너리 저장소만 읽으므로 소스 저장소를 공개하거나 인증 토큰을 내장하지 않는다.
+      disabled: process.env.GIT_GUI_DISABLE_AUTO_UPDATE === '1',
+    })
   })
   .catch((error) => {
     console.error('앱 초기화 실패:', error)
+    diagnostics.entry.write({
+      area: 'application',
+      message: '앱 초기화 실패',
+      detail: error instanceof Error ? error.stack : String(error),
+    })
     app.quit()
   })
 

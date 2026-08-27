@@ -10,16 +10,30 @@
   background: var(--concept-branch-bg);
   color: var(--concept-branch);
   max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.history-view-pill__label {
+  flex: none;
+}
+.history-view-pill__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .history-view-pill__clear {
+  flex: none;
   border: none;
+  border-left: 1px solid currentColor;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  padding: 0;
+  padding: 0 0 0 var(--space-1);
+  font: inherit;
+  font-weight: 700;
 }
 .history-panel__empty {
   display: flex;

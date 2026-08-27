@@ -7,25 +7,19 @@
 }
 .ui-pictogram--mine {
   color: var(--concept-mine);
-  background: var(--concept-mine-bg);
 }
 .ui-pictogram--branch {
   color: var(--concept-branch);
-  background: var(--concept-branch-bg);
 }
 .ui-pictogram--commit {
   color: var(--concept-commit);
-  background: var(--concept-commit-bg);
 }
 .ui-pictogram--shelf {
   color: var(--concept-shelf);
-  background: var(--concept-shelf-bg);
 }
 .ui-pictogram--backup {
   color: var(--concept-backup);
-  background: var(--concept-backup-bg);
 }
 .ui-pictogram--conflict {
   color: var(--concept-conflict);
-  background: var(--concept-conflict-bg);
 }

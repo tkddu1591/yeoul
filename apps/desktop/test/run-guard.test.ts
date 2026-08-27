@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   createEmptyReads,
+  getSuppressRemainingMs,
   invalidateReads,
   isWithinSuppressWindow,
   resetSuppression,
@@ -558,6 +559,13 @@ describe('억제 창', () => {
     expect(isWithinSuppressWindow()).toBe(true)
     resetSuppression()
     expect(isWithinSuppressWindow()).toBe(false)
+  })
+
+  it('꼬리 재조회가 실행될 때까지 남은 시간을 계산한다', async () => {
+    const store = createFakeStore()
+    await runWrite(store.set, store.get, async () => {})
+    expect(getSuppressRemainingMs()).toBeGreaterThan(0)
+    expect(getSuppressRemainingMs(Date.now() + WATCH_SUPPRESS_MS + 1)).toBe(0)
   })
 
   it('createEmptyReads는 5개 대상을 전부 0으로 준다', () => {

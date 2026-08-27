@@ -1,6 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useRef, useState } from 'react'
-import type { DiffLine, FileDiff } from '@git-gui/domain'
+import type { DiffHunk, DiffLine, FileDiff } from '@git-gui/domain'
 import { buildDiffRows, type DiffRow } from './diff-rows'
 import { FindBar } from './FindBar'
 import { cycleIndex, matchIndices } from './find-matches'
@@ -16,16 +16,27 @@ interface DiffViewProps {
   /** 재⌘F마다 증가 — 같은 스코프 재검색 시 입력 재포커스 신호 (E7h ⑥ 보완) */
   findNonce: number
   onFindClose(): void
+  hunkMode: 'stage' | 'unstage' | null
+  onHunkAction(hunk: DiffHunk): void
+  onLineAction(hunk: DiffHunk, lineIndex: number): void
 }
 
 /** 행 하나의 검색 대상 텍스트 — split은 좌우를 이어붙인다(가상 행 하나가 화면 한 줄이라 좌우 모두 검색된다) */
 function rowText(row: DiffRow): string {
-  if (row.kind === 'hunk') return row.header
+  if (row.kind === 'hunk') return row.hunk.header
   if (row.kind === 'line') return row.line.text
   return `${row.left?.text ?? ''} ${row.right?.text ?? ''}`
 }
 
-function UnifiedLine({ line }: { line: DiffLine }) {
+function UnifiedLine({
+  line,
+  actionLabel,
+  onAction,
+}: {
+  line: DiffLine
+  actionLabel: string | null
+  onAction(): void
+}) {
   return (
     <div className={`diff-line diff-line--${line.kind}`}>
       <span className="diff-line__no" aria-hidden="true">
@@ -35,6 +46,11 @@ function UnifiedLine({ line }: { line: DiffLine }) {
         {line.newLine ?? ''}
       </span>
       <span className="diff-line__text">{line.text || ' '}</span>
+      {actionLabel !== null && (
+        <button type="button" className="diff-line__action" onClick={onAction}>
+          {actionLabel}
+        </button>
+      )}
     </div>
   )
 }
@@ -67,7 +83,16 @@ function SplitCell({
  * 구조화된 diff의 본문 렌더 — DiffPanel(작업 diff)과 CommitDetailPanel(커밋 diff)이 공유한다.
  * 행을 평탄화해 가상화한다 (#4) — 수십만 줄 diff에서도 DOM은 가시 범위만 유지된다.
  */
-export function DiffView({ diff, view, findOpen, findNonce, onFindClose }: DiffViewProps) {
+export function DiffView({
+  diff,
+  view,
+  findOpen,
+  findNonce,
+  onFindClose,
+  hunkMode,
+  onHunkAction,
+  onLineAction,
+}: DiffViewProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const rows = buildDiffRows(diff.hunks, view)
   const virtualizer = useVirtualizer({
@@ -146,9 +171,31 @@ export function DiffView({ diff, view, findOpen, findNonce, onFindClose }: DiffV
                 style={{ transform: `translateY(${item.start}px)` }}
               >
                 {row.kind === 'hunk' ? (
-                  <div className="diff-line diff-line--hunk">{row.header}</div>
+                  <div className="diff-line diff-line--hunk">
+                    <span>{row.hunk.header}</span>
+                    {hunkMode !== null && (
+                      <button
+                        type="button"
+                        className="diff-hunk__action"
+                        onClick={() => onHunkAction(row.hunk)}
+                        data-testid={`diff-hunk-${hunkMode}`}
+                      >
+                        {hunkMode === 'stage' ? '이 hunk 올리기' : '이 hunk 내리기'}
+                      </button>
+                    )}
+                  </div>
                 ) : row.kind === 'line' ? (
-                  <UnifiedLine line={row.line} />
+                  <UnifiedLine
+                    line={row.line}
+                    actionLabel={
+                      hunkMode !== null && (row.line.kind === 'add' || row.line.kind === 'del')
+                        ? hunkMode === 'stage'
+                          ? '이 줄 올리기'
+                          : '이 줄 내리기'
+                        : null
+                    }
+                    onAction={() => onLineAction(row.hunk, row.lineIndex)}
+                  />
                 ) : (
                   <div className="diff-split-row">
                     <SplitCell line={row.left} side="left" />

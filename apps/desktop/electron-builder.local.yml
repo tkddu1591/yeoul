@@ -1,0 +1,10 @@
+# 인증서가 없는 개발 Mac용 패키징. 산출 구조는 배포본과 같되 Gatekeeper 배포용 신뢰만 제외한다.
+extends: electron-builder.yml
+mac:
+  target:
+    - dir
+    - dmg
+    - zip
+  identity: "-"
+  hardenedRuntime: false
+  notarize: false

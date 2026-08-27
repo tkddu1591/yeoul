@@ -1,12 +1,14 @@
-import { FolderOpen } from 'lucide-react'
+import { FolderGit2, FolderOpen, GitFork } from 'lucide-react'
 import { Button } from '../ui/Button'
-import { Pictogram } from '../ui/Pictogram'
+import { ProductIcon } from '../ui/ProductIcon'
 import { T } from '../terms'
 import { shortenParent } from './worktree-label'
 import './repo-picker.css'
 
 interface RepoPickerProps {
   onOpen(): void
+  onClone(): void
+  onInit(): void
   /** 최근 연 저장소 — 최신이 앞 (E15a). 누르면 그 저장소를 이 창에서 연다 */
   recent: string[]
   /** `~` 축약용 홈 경로 — 못 구했으면 빈 문자열(순수 함수가 축약 없이 처리) */
@@ -22,24 +24,28 @@ const folderName = (path: string) => path.split('/').filter(Boolean).pop() ?? pa
  * 그 선재 결함을 처음으로 아프게 했다 — "새 창 = 항상 OS 다이얼로그부터"라 최근 10개(E15a)가
  * 무의미해진다. 행 표기는 헤더 전환기와 같은 규칙이다(이름 굵게 + 그 아래 경로 흐리게).
  */
-export function RepoPicker({ onOpen, recent, home, onOpenRecent, error }: RepoPickerProps) {
+export function RepoPicker({ onOpen, onClone, onInit, recent, home, onOpenRecent, error }: RepoPickerProps) {
   return (
     <div className="repo-picker">
       <div className="repo-picker__card">
-        <div className="repo-picker__marks" aria-hidden="true">
-          <Pictogram kind="commit" size={20} />
-          <Pictogram kind="branch" size={20} />
-          <Pictogram kind="shelf" size={20} />
-        </div>
-        <h1>Git GUI</h1>
+        <ProductIcon size={80} label="여울" />
+        <h1>여울</h1>
         <p className="repo-picker__desc">
-          프로젝트 폴더를 열면 바뀐 파일을 확인하고
+          브랜치와 여러 워크트리를 한곳에서 편하게 살펴보고
           <br />
-          안전하게 {T.commit}할 수 있어요.
+          변경 검토부터 안전한 {T.commit}과 통합까지 이어가요.
         </p>
-        <Button variant="primary" onPress={onOpen} testId="open-repo">
-          <FolderOpen size={16} aria-hidden="true" /> 저장소 열기
-        </Button>
+        <div className="repo-picker__actions">
+          <Button variant="primary" onPress={onOpen} testId="open-repo">
+            <FolderOpen size={16} aria-hidden="true" /> 저장소 열기
+          </Button>
+          <Button variant="ghost" onPress={onClone} testId="clone-repo">
+            <GitFork size={16} aria-hidden="true" /> 원격 저장소 복제
+          </Button>
+          <Button variant="ghost" onPress={onInit} testId="init-repo">
+            <FolderGit2 size={16} aria-hidden="true" /> 새 저장소 만들기
+          </Button>
+        </div>
         {recent.length > 0 && (
           <div className="repo-picker__recent">
             <h2 className="repo-picker__recent-title">최근 연 저장소</h2>

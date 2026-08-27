@@ -23,7 +23,7 @@ export const T = {
   detached: '분리 HEAD',
   tag: '태그',
   // 원격
-  pull: '가져오기',
+  pull: '가져와 반영',
   push: '푸시',
   fetch: '페치',
   noUpstream: '업스트림 없음',

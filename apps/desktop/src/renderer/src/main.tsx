@@ -1,4 +1,4 @@
-import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css'
+import '@sun-typeface/suit/fonts/variable/woff2/SUIT-Variable.css'
 import './ui/tokens.css'
 import './ui/base.css'
 import './layout.css'

@@ -35,20 +35,20 @@ describe('computeColumns (E6a 반응형)', () => {
   })
 
   it('960px 최소 창 — 좌·우가 함께 줄어 중앙 380px이 정확히 남는다', () => {
-    // 검산: 960 - 94(패딩 40 + gap 48 + 리사이저 6) - 260 - 226 = 380
-    expect(computeColumns(960, 360)).toEqual({ left: 260, right: 226 })
+    // 검산: 960 - 72(패딩 40 + gap 32) - 260 - 248 = 380
+    expect(computeColumns(960, 360)).toEqual({ left: 260, right: 248 })
   })
 
-  it('중간 폭(1200)은 좌측부터 줄어든다 — 우측(사용자 폭)은 그대로', () => {
-    expect(computeColumns(1200, 360)).toEqual({ left: 366, right: 360 })
+  it('중간 폭(1200)에서도 세 열과 동일 간격을 유지한다', () => {
+    expect(computeColumns(1200, 360)).toEqual({ left: 380, right: 360 })
   })
 
   it('우측을 크게 넓혀도 중앙 보장이 이긴다 — 좌측 하한 뒤 우측 상한', () => {
-    expect(computeColumns(1200, 480)).toEqual({ left: 260, right: 466 })
+    expect(computeColumns(1200, 480)).toEqual({ left: 268, right: 480 })
   })
 
   it('과대 저장값은 기존 45% 클램프가 먼저 자르고, 남으면 좌측이 줄어든다', () => {
-    expect(computeColumns(1440, 2000)).toEqual({ left: 318, right: 648 })
+    expect(computeColumns(1440, 2000)).toEqual({ left: 340, right: 648 })
   })
 })
 

@@ -5,7 +5,7 @@
   color-scheme: light dark;
 
   /* 타이포 */
-  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'SUIT Variable', SUIT, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --text-xs: 11px;
   --text-sm: 12.5px;
@@ -40,31 +40,37 @@
                                     평범한 조회는 전부 이 안에서 끝나 한 프레임도 보이지 않는다 (E14a) */
   --ease-out: cubic-bezier(0.2, 0, 0, 1); /* 등장·사용자가 시작한 동작 */
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 양방향으로 오가는 상태 */
-  --shadow-1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
-  --shadow-2: 0 6px 16px rgb(16 24 40 / 0.1);
+  --shadow-1: 0 1px 2px rgb(19 28 24 / 0.035);
+  --shadow-2: 0 8px 24px rgb(19 28 24 / 0.09);
 
   /* 중립 */
-  --color-bg: #f4f5f7;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #f8f9fb;
-  --color-border: #e4e7ec;
-  --color-border-strong: #d0d5dd;
-  --color-text: #1c2230;
-  --color-text-muted: #5f6673;
-  --color-text-faint: #6b7484; /* 정보 텍스트에도 쓰인다 — surface 대비 4.5:1 이상 유지 필수 */
+  --color-bg: #f3f5f3;
+  --color-surface: #fbfcfb;
+  --color-surface-sunken: #eef2ef;
+  --color-border: #dde3df;
+  --color-border-strong: #c7d0ca;
+  --color-text: #202622;
+  --color-text-muted: #59635d;
+  --color-text-faint: #65706a; /* 정보 텍스트에도 쓰인다 — surface 대비 4.5:1 이상 유지 필수 */
+  --color-hover-bg: #e8eeea;
 
   /* 주 액션·상태 */
-  --color-accent: #2e5ce6;
-  --color-accent-hover: #244fd0;
-  --color-accent-active: #1e44bd; /* 눌림(pressed) 피드백 */
+  --color-accent: #2f6670;
+  --color-accent-hover: #285963;
+  --color-accent-active: #214d56; /* 눌림(pressed) 피드백 */
   --color-accent-text: #ffffff;
   --color-danger: #d92d20;
   /* E7g 인라인 ↑↓ — 올릴 것(ahead)·받을 것(behind). 서피스 대비 4.5:1 이상(대비 회귀 테스트) */
   --color-ahead: #067647;
   --color-behind: #b54708;
-  --color-focus: #2e5ce6; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
-  --color-selection-bg: #e9eefc; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
+  --color-focus: #2f6670; /* 전역 포커스 링 — 비텍스트 3:1 이상 유지 필수 */
+  --color-selection-bg: #e8efee; /* 선택 상태 — 개념색(commit 파랑)과 분리된 전용 토큰 */
   --opacity-disabled: 0.45;
+
+  /* 제품 심볼 — 앱 아이콘의 흐름을 작은 UI 크기에 맞게 평면화한 세 선 */
+  --brand-mark-upper: #5757b8;
+  --brand-mark-middle: #3d718e;
+  --brand-mark-lower: #2b7b75;
 
   /* Git 원어 병기 배지 — "파란 모노 pill = Git 원어"를 별도 정체성으로 고정 (개념색과 디커플링) */
   --term-badge: #2563eb;
@@ -75,14 +81,14 @@
      이 개념들의 아이콘 단독(라벨 없는) 사용은 금지, 항상 라벨·형태를 병행한다 */
   --concept-mine: #0e7a4e;
   --concept-mine-bg: #e6f5ec;
-  --concept-branch: #6d4fc4;
-  --concept-branch-bg: #efe9fb;
-  --concept-commit: #2563eb;
-  --concept-commit-bg: #e8f0fe;
+  --concept-branch: #5856a7;
+  --concept-branch-bg: #ececf7;
+  --concept-commit: #2f6670;
+  --concept-commit-bg: #e2ecec;
   --concept-shelf: #9a6119;
   --concept-shelf-bg: #fdf1e2;
-  --concept-backup: #0e7490;
-  --concept-backup-bg: #e7f6f8;
+  --concept-backup: #246b73;
+  --concept-backup-bg: #e4f0f0;
   --concept-conflict: #b53c0c;
   --concept-conflict-bg: #fdeaea;
 
@@ -98,29 +104,33 @@
   --diff-add-text: #14663d;
   --diff-del-bg: #fdeeee;
   --diff-del-text: #b42318;
-  --diff-hunk-bg: #eef2ff;
-  --diff-hunk-text: #4f5ec0;
+  --diff-hunk-bg: #e8eeee;
+  --diff-hunk-text: #3e6066;
 }
 
 :root[data-theme='dark'] {
-    --color-bg: #16181d;
-    --color-surface: #1e2128;
-    --color-surface-sunken: #191c22;
-    --color-border: #2c313b;
-    --color-border-strong: #3a4150;
-    --color-text: #e8eaf0;
-    --color-text-muted: #a3abba;
-    --color-text-faint: #828da0;
+    --color-bg: #141916;
+    --color-surface: #1b211e;
+    --color-surface-sunken: #171d1a;
+    --color-border: #2b332f;
+    --color-border-strong: #3b4640;
+    --color-text: #e6ebe7;
+    --color-text-muted: #a2aca6;
+    --color-text-faint: #8d9891;
+    --color-hover-bg: #252d29;
 
-    --color-accent: #7c97fb;
-    --color-accent-hover: #93a9fc;
-    --color-accent-active: #a8b9fd;
-    --color-accent-text: #10131a;
+    --color-accent: #7daeb5;
+    --color-accent-hover: #91bec4;
+    --color-accent-active: #a4cbd0;
+    --color-accent-text: #101715;
     --color-danger: #f97066;
     --color-ahead: #4ade80;
     --color-behind: #fdb022;
-    --color-focus: #4d69c9;
-    --color-selection-bg: #222c47;
+    --color-focus: #79aeb6;
+    --color-selection-bg: #223330;
+    --brand-mark-upper: #9a98e6;
+    --brand-mark-middle: #75a5c2;
+    --brand-mark-lower: #63b7a9;
     --term-badge: #7aa2ff;
     --term-badge-bg: #1c2a4a;
 
@@ -150,6 +160,6 @@
     --diff-hunk-bg: #232a4a;
     --diff-hunk-text: #a5b4fc;
 
-    --shadow-1: 0 1px 3px rgb(0 0 0 / 0.4);
-    --shadow-2: 0 6px 16px rgb(0 0 0 / 0.5);
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.28);
+    --shadow-2: 0 8px 24px rgb(0 0 0 / 0.4);
 }

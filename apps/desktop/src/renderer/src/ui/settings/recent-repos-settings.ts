@@ -11,4 +11,20 @@ export function loadRecentRepos(): string[] {
 
 export function saveRecentRepos(recent: string[]): void {
   void window.settingsApi.set({ recentRepos: recent })
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel('yeoul-recent-repositories')
+    channel.postMessage(recent)
+    channel.close()
+  }
+}
+
+export function onRecentReposChanged(listener: (recent: string[]) => void): () => void {
+  if (typeof BroadcastChannel === 'undefined') return () => {}
+  const channel = new BroadcastChannel('yeoul-recent-repositories')
+  channel.onmessage = (event) => {
+    if (Array.isArray(event.data) && event.data.every((path) => typeof path === 'string')) {
+      listener([...event.data])
+    }
+  }
+  return () => channel.close()
 }

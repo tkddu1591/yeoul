@@ -1,12 +1,20 @@
 .diff-panel__empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
   padding: var(--space-6);
-  margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-faint);
   text-align: center;
   /* E11 — 내용 교체 페이드(DiffView가 key=path로 재마운트할 때 재생). 성공 결과에만 걸린다 —
      diff는 조회가 끝나야 selected·diff가 함께 갱신되므로(로딩 중엔 이 트리 자체가 없다) */
   animation: ui-enter var(--motion-base) var(--ease-out);
+}
+.diff-panel__empty p {
+  margin: 0;
 }
 .diff-panel__code {
   padding: 0;
@@ -78,4 +86,42 @@
     var(--color-bg) 4px,
     var(--color-bg) 8px
   );
+}
+.diff-line--hunk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.diff-hunk__action {
+  flex: none;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+}
+.diff-hunk__action:hover,
+.diff-hunk__action:focus-visible {
+  background: var(--color-hover-bg);
+}
+.diff-line__action {
+  flex: none;
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  font: inherit;
+  opacity: 0;
+}
+.diff-line:hover .diff-line__action,
+.diff-line__action:focus-visible {
+  opacity: 1;
+  color: var(--color-text);
+  background: var(--color-hover-bg);
 }

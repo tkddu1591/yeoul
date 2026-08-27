@@ -7,6 +7,7 @@ import { T } from '../../terms'
 import type { Theme } from '../theme'
 import type { WorktreeSelectAction } from './worktree-select-action'
 import type { PullMode } from './sync-settings'
+import type { RemoteInfo } from '@git-gui/domain'
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -18,10 +19,16 @@ interface SettingsDialogProps {
   onChangePullMode(mode: PullMode): void
   autoFetch: boolean
   onChangeAutoFetch(enabled: boolean): void
+  remotes: RemoteInfo[]
+  busy: boolean
+  error: string | null
+  onAddRemote(name: string, url: string): Promise<boolean>
+  onRemoveRemote(name: string): void
+  onRevealDiagnostics(): void
   onClose(): void
 }
 
-type SettingsCategory = 'general' | 'theme'
+type SettingsCategory = 'general' | 'remotes' | 'theme'
 
 /**
  * 설정 모달 (E7c) — 카테고리 사이드바 + 즉시 저장(확인 버튼 없음 — rightWidth·테마 관례).
@@ -37,9 +44,17 @@ export function SettingsDialog({
   onChangePullMode,
   autoFetch,
   onChangeAutoFetch,
+  remotes,
+  busy,
+  error,
+  onAddRemote,
+  onRemoveRemote,
+  onRevealDiagnostics,
   onClose,
 }: SettingsDialogProps) {
   const [category, setCategory] = useState<SettingsCategory>('general')
+  const [remoteName, setRemoteName] = useState('origin')
+  const [remoteUrl, setRemoteUrl] = useState('')
   return (
     <ModalOverlay
       className="ui-modal-overlay"
@@ -63,6 +78,14 @@ export function SettingsDialog({
                 data-testid="settings-cat-general"
               >
                 일반
+              </button>
+              <button
+                type="button"
+                className={`settings-dialog__cat${category === 'remotes' ? ' settings-dialog__cat--on' : ''}`}
+                onClick={() => setCategory('remotes')}
+                data-testid="settings-cat-remotes"
+              >
+                원격
               </button>
               <button
                 type="button"
@@ -101,6 +124,15 @@ export function SettingsDialog({
                     <p className="settings-dialog__desc">
                       우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.
                     </p>
+                  </fieldset>
+                  <fieldset className="settings-dialog__field">
+                    <legend className="settings-dialog__label">진단 자료</legend>
+                    <p className="settings-dialog__desc">
+                      런타임 로그와 크래시 덤프는 외부로 전송하지 않고 이 Mac에만 보관해요.
+                    </p>
+                    <Button variant="ghost" size="sm" onPress={onRevealDiagnostics}>
+                      Finder에서 진단 자료 보기
+                    </Button>
                   </fieldset>
                   <fieldset className="settings-dialog__field">
                     <legend className="settings-dialog__label">{T.pull} 방식</legend>
@@ -142,6 +174,60 @@ export function SettingsDialog({
                     </p>
                   </fieldset>
                 </>
+              ) : category === 'remotes' ? (
+                <section className="settings-dialog__field" aria-labelledby="remote-settings-title">
+                  <h2 id="remote-settings-title" className="settings-dialog__label">
+                    Git 원격
+                  </h2>
+                  <p className="settings-dialog__desc">
+                    푸시·Pull에 쓰는 Git 인증은 GitHub API 연결과 별개예요. HTTPS는 macOS Keychain,
+                    SSH는 등록된 키를 사용해요.
+                  </p>
+                  <ul className="settings-dialog__remote-list">
+                    {remotes.map((remote) => (
+                      <li key={remote.name} className="settings-dialog__remote">
+                        <span>
+                          <strong>{remote.name}</strong>
+                          <small>{remote.fetchUrl}</small>
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          isDisabled={busy}
+                          onPress={() => onRemoveRemote(remote.name)}
+                        >
+                          제거
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <form
+                    className="settings-dialog__remote-form"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void onAddRemote(remoteName, remoteUrl).then((added) => {
+                        if (added) setRemoteUrl('')
+                      })
+                    }}
+                  >
+                    <label>
+                      이름
+                      <input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} />
+                    </label>
+                    <label>
+                      주소
+                      <input
+                        value={remoteUrl}
+                        onChange={(event) => setRemoteUrl(event.target.value)}
+                        placeholder="git@github.com:owner/repository.git"
+                      />
+                    </label>
+                    <Button variant="primary" size="sm" type="submit" isDisabled={busy}>
+                      원격 추가
+                    </Button>
+                  </form>
+                  {error !== null && <p className="settings-dialog__error">{error}</p>}
+                </section>
               ) : (
                 <fieldset className="settings-dialog__field">
                   <legend className="settings-dialog__label">테마</legend>

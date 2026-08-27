@@ -1,7 +1,12 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { CircleMinus, CirclePlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { FileChange } from '@git-gui/domain'
+import type {
+  DiscardChangesRequest,
+  FileChange,
+  FileMutationGuard,
+  RemoveFileRequest,
+} from '@git-gui/domain'
 import type { SelectedFile } from '../store/repository-store'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -28,9 +33,10 @@ interface ChangesPanelProps {
   onStage(paths: string[]): void
   onUnstage(paths: string[]): void
   /** 선택 파일 변경 취소 — tracked 경로와 untracked 경로를 분리해 넘긴다. 되돌릴 수 없다 */
-  onDiscard(trackedPaths: string[], untrackedPaths: string[]): void
+  onCaptureGuard(paths: string[]): Promise<FileMutationGuard | null>
+  onDiscard(request: DiscardChangesRequest): void
   /** 우클릭 → "파일 삭제" — 확인창을 거친 뒤 호출된다. 되돌릴 수 없다 (E5a 피드백 2) */
-  onRemoveFile(path: string): void
+  onRemoveFile(request: RemoveFileRequest): void
   onSelect(selected: SelectedFile): void
 }
 
@@ -128,9 +134,10 @@ interface FileListProps {
   busy: boolean
   bulkLabel: string
   /** unstaged 목록에만 있다 — 확인창을 거쳐 선택 파일의 변경을 취소한다 */
-  onDiscard?: (trackedPaths: string[], untrackedPaths: string[]) => void
+  onCaptureGuard?: (paths: string[]) => Promise<FileMutationGuard | null>
+  onDiscard?: (request: DiscardChangesRequest) => void
   /** unstaged 목록에만 있다 — 우클릭 "파일 삭제". 확인창은 이 목록이 관리한다 (E5a) */
-  onRemoveFile?: (path: string) => void
+  onRemoveFile?: (request: RemoveFileRequest) => void
   onAction(paths: string[]): void
   onSelect(selected: SelectedFile): void
 }
@@ -145,6 +152,7 @@ function FileList({
   selected,
   busy,
   bulkLabel,
+  onCaptureGuard,
   onDiscard,
   onRemoveFile,
   onAction,
@@ -189,30 +197,54 @@ function FileList({
     onAction(validChecked.flatMap((change) => actionPaths(change, staged)))
     setChecked(new Set())
   }
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const [confirmingDiscard, setConfirmingDiscard] = useState<DiscardChangesRequest | null>(null)
   const discardTracked = validChecked.filter((c) => c.unstaged !== 'untracked').map((c) => c.path)
   const discardUntracked = validChecked.filter((c) => c.unstaged === 'untracked').map((c) => c.path)
+  const openDiscard = async () => {
+    const paths = [...discardTracked, ...discardUntracked]
+    const guard = await onCaptureGuard?.(paths)
+    if (guard !== null && guard !== undefined) {
+      setConfirmingDiscard({
+        trackedPaths: discardTracked,
+        untrackedPaths: discardUntracked,
+        guard,
+      })
+    }
+  }
   const runDiscard = () => {
-    setConfirmingDiscard(false)
-    onDiscard?.(discardTracked, discardUntracked)
+    const request = confirmingDiscard
+    setConfirmingDiscard(null)
+    if (request !== null) onDiscard?.(request)
     setChecked(new Set())
   }
 
   // 우클릭 메뉴와 단일 파일 확인창(되돌리기·삭제) — 이 목록이 관리한다 (E5a 피드백 2)
   const [menu, setMenu] = useState<{ x: number; y: number; change: FileChange } | null>(null)
-  const [menuDiscard, setMenuDiscard] = useState<FileChange | null>(null)
-  const [menuRemove, setMenuRemove] = useState<FileChange | null>(null)
+  const [menuDiscard, setMenuDiscard] = useState<DiscardChangesRequest | null>(null)
+  const [menuRemove, setMenuRemove] = useState<RemoveFileRequest | null>(null)
+  const openMenuDiscard = async (change: FileChange) => {
+    const guard = await onCaptureGuard?.([change.path])
+    if (guard === null || guard === undefined) return
+    setMenuDiscard({
+      trackedPaths: change.unstaged === 'untracked' ? [] : [change.path],
+      untrackedPaths: change.unstaged === 'untracked' ? [change.path] : [],
+      guard,
+    })
+  }
+  const openMenuRemove = async (change: FileChange) => {
+    const guard = await onCaptureGuard?.([change.path])
+    if (guard === null || guard === undefined) return
+    setMenuRemove({ path: change.path, guard })
+  }
   const runMenuDiscard = () => {
-    const change = menuDiscard
+    const request = menuDiscard
     setMenuDiscard(null)
-    if (change === null) return
-    if (change.unstaged === 'untracked') onDiscard?.([], [change.path])
-    else onDiscard?.([change.path], [])
+    if (request !== null) onDiscard?.(request)
   }
   const runMenuRemove = () => {
-    const change = menuRemove
+    const request = menuRemove
     setMenuRemove(null)
-    if (change !== null) onRemoveFile?.(change.path)
+    if (request !== null) onRemoveFile?.(request)
   }
 
   return (
@@ -249,7 +281,7 @@ function FileList({
                 variant="danger"
                 size="sm"
                 isDisabled={busy || validChecked.length === 0}
-                onPress={() => setConfirmingDiscard(true)}
+                onPress={() => void openDiscard()}
                 testId="discard-selected"
               >
                 변경 취소{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
@@ -306,15 +338,16 @@ function FileList({
           </div>
           {onDiscard && (
             <ConfirmDialog
-              isOpen={confirmingDiscard}
+              isOpen={confirmingDiscard !== null}
               title="변경 내용을 취소할까요?"
               confirmLabel="변경 취소"
               onConfirm={runDiscard}
-              onCancel={() => setConfirmingDiscard(false)}
+              onCancel={() => setConfirmingDiscard(null)}
             >
-              선택한 파일 {validChecked.length}개의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔
+              선택한 파일 {confirmingDiscard?.guard.files.length ?? 0}개의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔
               (staged) 내용은 남아요.
-              {discardUntracked.length > 0 && ` 새 파일 ${discardUntracked.length}개는 삭제돼요.`} 이
+              {(confirmingDiscard?.untrackedPaths.length ?? 0) > 0 &&
+                ` 새 파일 ${confirmingDiscard?.untrackedPaths.length ?? 0}개는 삭제돼요.`} 이
               동작은 되돌릴 수 없어요.
             </ConfirmDialog>
           )}
@@ -351,12 +384,12 @@ function FileList({
                         {
                           key: 'discard-file',
                           label: '이 파일만 되돌리기',
-                          onSelect: () => setMenuDiscard(menu.change),
+                          onSelect: () => void openMenuDiscard(menu.change),
                         },
                         {
                           key: 'remove-file',
                           label: '파일 삭제',
-                          onSelect: () => setMenuRemove(menu.change),
+                          onSelect: () => void openMenuRemove(menu.change),
                         },
                       ]
               }
@@ -370,9 +403,9 @@ function FileList({
             onConfirm={runMenuDiscard}
             onCancel={() => setMenuDiscard(null)}
           >
-            "{menuDiscard?.path}"의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔(staged) 내용은
+            "{menuDiscard?.guard.files[0]?.path}"의 아직 올리지 않은 변경 내용을 되돌려요. 올려둔(staged) 내용은
             남아요.
-            {menuDiscard?.unstaged === 'untracked' && ' 새 파일이라 파일 자체가 삭제돼요.'} 이 동작은
+            {(menuDiscard?.untrackedPaths.length ?? 0) > 0 && ' 새 파일이라 파일 자체가 삭제돼요.'} 이 동작은
             되돌릴 수 없어요.
           </ConfirmDialog>
           <ConfirmDialog
@@ -397,6 +430,7 @@ export function ChangesPanel({
   findOpen,
   findNonce,
   onFindClose,
+  onCaptureGuard,
   onStage,
   onUnstage,
   onDiscard,
@@ -447,6 +481,7 @@ export function ChangesPanel({
         bulkLabel="올리기"
         onAction={onStage}
         onDiscard={onDiscard}
+        onCaptureGuard={onCaptureGuard}
         onRemoveFile={onRemoveFile}
         onSelect={onSelect}
       />

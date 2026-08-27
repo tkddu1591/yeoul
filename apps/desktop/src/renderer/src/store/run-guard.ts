@@ -42,6 +42,11 @@ export function isWithinSuppressWindow(now = Date.now()): boolean {
   return now - lastWriteEndAt < WATCH_SUPPRESS_MS
 }
 
+/** 자기 작업 꼬리 이벤트를 미루고 난 뒤 반드시 한 번 재조회하기 위한 남은 시간 */
+export function getSuppressRemainingMs(now = Date.now()): number {
+  return Math.max(0, WATCH_SUPPRESS_MS - (now - lastWriteEndAt))
+}
+
 /** 억제 창을 즉시 닫는다 — 저장소를 새로 열 때(init) 이전 저장소의 꼬리를 끌고 오지 않게 한다 */
 export function resetSuppression(): void {
   lastWriteEndAt = 0

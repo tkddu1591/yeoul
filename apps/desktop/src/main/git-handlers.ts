@@ -1,8 +1,16 @@
 import { stat } from 'node:fs/promises'
 import { app, dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
-import type { DiffOptions } from '@git-gui/domain'
-import { execGit, execGitOrThrow, type GitResult } from '@git-gui/git-process'
+import type {
+  DiffOptions,
+  DiscardChangesRequest,
+  FileMutationGuard,
+  HunkStageRequest,
+  LineStageRequest,
+  RemoveFileRequest,
+  PushConfirmation,
+} from '@git-gui/domain'
+import { cancelGitProcesses, execGit, execGitOrThrow, type GitResult } from '@git-gui/git-process'
 import { CHANNELS, type RepoOpenResult } from '@git-gui/ipc-contract'
 import { watchRepository, watchWorkingTree } from './repo-watcher'
 import {
@@ -14,6 +22,7 @@ import {
 } from './repo-open-guard'
 import { assertOpenableWorktree } from './worktree-open-guard'
 import type { WindowRegistry } from './window-registry'
+import { RepositoryMutationQueue } from './repository-mutation-queue'
 
 /** `.catch((cause) => cause)`로 합쳐 받은 값이 결과인지 오류인지 가른다 (repoOpen) */
 function isGitResult(value: unknown): value is GitResult {
@@ -114,6 +123,113 @@ function assertBoolean(value: unknown): boolean {
   return value
 }
 
+function assertFileMutationGuard(value: unknown): FileMutationGuard {
+  if (typeof value !== 'object' || value === null || !('files' in value) || !Array.isArray(value.files)) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  const files = [...value.files].map((entry) => {
+    if (
+      typeof entry !== 'object' ||
+      entry === null ||
+      !('path' in entry) ||
+      typeof entry.path !== 'string' ||
+      !('worktree' in entry) ||
+      typeof entry.worktree !== 'string' ||
+      !('index' in entry) ||
+      typeof entry.index !== 'string'
+    ) {
+      throw new Error('잘못된 요청 형식이에요.')
+    }
+    return { path: entry.path, worktree: entry.worktree, index: entry.index }
+  })
+  return { files }
+}
+
+function assertDiscardChangesRequest(value: unknown): DiscardChangesRequest {
+  if (typeof value !== 'object' || value === null) throw new Error('잘못된 요청 형식이에요.')
+  return {
+    trackedPaths: assertStringArray('trackedPaths' in value ? value.trackedPaths : undefined),
+    untrackedPaths: assertStringArray('untrackedPaths' in value ? value.untrackedPaths : undefined),
+    guard: assertFileMutationGuard('guard' in value ? value.guard : undefined),
+  }
+}
+
+function assertRemoveFileRequest(value: unknown): RemoveFileRequest {
+  if (typeof value !== 'object' || value === null) throw new Error('잘못된 요청 형식이에요.')
+  return {
+    path: assertString('path' in value ? value.path : undefined),
+    guard: assertFileMutationGuard('guard' in value ? value.guard : undefined),
+  }
+}
+
+function assertHunkStageRequest(value: unknown): HunkStageRequest {
+  if (typeof value !== 'object' || value === null) throw new Error('잘못된 요청 형식이에요.')
+  const options = assertDiffOptions('options' in value ? value.options : undefined)
+  const hunk = 'hunk' in value ? value.hunk : null
+  if (
+    typeof hunk !== 'object' ||
+    hunk === null ||
+    !('header' in hunk) ||
+    typeof hunk.header !== 'string' ||
+    !('lines' in hunk) ||
+    !Array.isArray(hunk.lines)
+  ) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  const lines = [...hunk.lines].map((line) => {
+    if (
+      typeof line !== 'object' ||
+      line === null ||
+      !('kind' in line) ||
+      !['context', 'add', 'del', 'note'].includes(String(line.kind)) ||
+      !('oldLine' in line) ||
+      (line.oldLine !== null && typeof line.oldLine !== 'number') ||
+      !('newLine' in line) ||
+      (line.newLine !== null && typeof line.newLine !== 'number') ||
+      !('text' in line) ||
+      typeof line.text !== 'string'
+    ) {
+      throw new Error('잘못된 요청 형식이에요.')
+    }
+    return {
+      kind: line.kind as 'context' | 'add' | 'del' | 'note',
+      oldLine: line.oldLine as number | null,
+      newLine: line.newLine as number | null,
+      text: line.text,
+    }
+  })
+  return {
+    path: assertString('path' in value ? value.path : undefined),
+    options,
+    hunk: { header: hunk.header, lines },
+  }
+}
+
+function assertLineStageRequest(value: unknown): LineStageRequest {
+  const request = assertHunkStageRequest(value)
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('lineIndex' in value) ||
+    typeof value.lineIndex !== 'number' ||
+    !Number.isInteger(value.lineIndex) ||
+    value.lineIndex < 0
+  ) {
+    throw new Error('잘못된 요청 형식이에요.')
+  }
+  return { ...request, lineIndex: value.lineIndex }
+}
+
+function assertPushConfirmation(value: unknown): PushConfirmation | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null) throw new Error('잘못된 요청 형식이에요.')
+  return {
+    remote: assertString('remote' in value ? value.remote : undefined),
+    branch: assertString('branch' in value ? value.branch : undefined),
+    expectedHead: assertHash('expectedHead' in value ? value.expectedHead : undefined),
+  }
+}
+
 function assertNullableHash(value: unknown): string | null {
   if (value === null) return null
   return assertHash(value)
@@ -156,6 +272,11 @@ export async function openRepoPath(path: string): Promise<RepoOpenResult> {
 }
 
 export function registerGitHandlers(registry: WindowRegistry): void {
+  const mutations = new RepositoryMutationQueue()
+  const mutate = <T>(repoPath: unknown, mutation: (client: ReturnType<typeof createGitClient>) => Promise<T>) => {
+    const root = assertAllowedRepo(repoPath)
+    return mutations.run(root, () => mutation(createGitClient(root)))
+  }
   /**
    * 이 탭이 지금 무엇을 열었는지 레지스트리에 반영한다 (E15b, E15c에서 창→탭).
    *
@@ -169,6 +290,10 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     return topLevel
   }
 
+  ipcMain.handle(CHANNELS.jobsCancel, (_event, repoPath: unknown) =>
+    cancelGitProcesses(assertAllowedRepo(repoPath)),
+  )
+
   ipcMain.handle(CHANNELS.repoSelect, async (event) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -179,6 +304,49 @@ export function registerGitHandlers(registry: WindowRegistry): void {
       throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
     }
     return remember(event.sender.id, await registerRepoPath(path))
+  })
+
+  ipcMain.handle(CHANNELS.repoClone, async (_event, remoteUrl: unknown) => {
+    const url = assertString(remoteUrl).trim()
+    if (url === '' || url.length > 4096 || url.includes('\0') || url.includes('\n')) {
+      throw new Error('복제할 원격 주소를 확인해 주세요.')
+    }
+    const picked = await dialog.showOpenDialog({
+      title: '복제할 빈 폴더 선택',
+      buttonLabel: '이 폴더에 복제',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return null
+    const destination = picked.filePaths[0]!
+    const result = await execGit(['clone', '--', url, '.'], { cwd: destination })
+    if (result.exitCode !== 0) {
+      const output = result.stderr + result.stdout
+      if (/Authentication failed|could not read Username|Permission denied/i.test(output)) {
+        throw new Error(
+          'Git 원격 인증에 실패했어요. SSH 키나 macOS Keychain의 Git 자격 증명을 확인해 주세요. GitHub API 연결과는 별개예요.',
+        )
+      }
+      if (/not found|does not appear to be a git repository/i.test(output)) {
+        throw new Error('원격 저장소를 찾지 못했어요. 주소와 접근 권한을 확인해 주세요.')
+      }
+      throw new Error('저장소를 복제하지 못했어요. 대상 폴더가 비어 있는지와 네트워크를 확인해 주세요.')
+    }
+    return registerRepoPath(destination)
+  })
+
+  ipcMain.handle(CHANNELS.repoInit, async () => {
+    const picked = await dialog.showOpenDialog({
+      title: '새 Git 저장소로 만들 폴더 선택',
+      buttonLabel: '저장소 만들기',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return null
+    const destination = picked.filePaths[0]!
+    const result = await execGit(['init', '-b', 'main'], { cwd: destination })
+    if (result.exitCode !== 0) {
+      throw new Error('이 폴더에 Git 저장소를 만들지 못했어요. 폴더 권한을 확인해 주세요.')
+    }
+    return registerRepoPath(destination)
   })
 
   // 최근 목록에서 고른 경로로 연다 (E15a). 인자는 디스크 settings.json에서 온 렌더러 입력이라
@@ -269,20 +437,23 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   ipcMain.handle(
     CHANNELS.worktreesAdd,
     (_event, repoPath: unknown, path: unknown, branch: unknown, createBranch: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).worktrees.add(
-        assertString(path),
-        assertString(branch),
-        { createBranch: assertBoolean(createBranch) },
+      mutate(repoPath, (client) =>
+        client.worktrees.add(assertString(path), assertString(branch), {
+          createBranch: assertBoolean(createBranch),
+        }),
       ),
   )
 
   ipcMain.handle(
     CHANNELS.worktreesRemove,
-    (_event, repoPath: unknown, path: unknown, force: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).worktrees.remove(
-        assertString(path),
-        assertBoolean(force),
-      ),
+    async (_event, repoPath: unknown, path: unknown, force: unknown, guard: unknown) => {
+      const root = assertAllowedRepo(repoPath)
+      const target = await assertWorktreePath(root, path)
+      const parsedGuard = guard === undefined ? undefined : assertString(guard)
+      return mutate(root, (client) =>
+        client.worktrees.remove(target, assertBoolean(force), parsedGuard),
+      )
+    },
   )
 
   ipcMain.handle(CHANNELS.worktreesReveal, async (_event, repoPath: unknown, path: unknown) => {
@@ -298,7 +469,16 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   })
 
   ipcMain.handle(CHANNELS.remotesFetch, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).remotes.fetch(),
+    mutate(repoPath, (client) => client.remotes.fetch()),
+  )
+  ipcMain.handle(CHANNELS.remotesList, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).remotes.list(),
+  )
+  ipcMain.handle(CHANNELS.remotesAdd, (_event, repoPath: unknown, name: unknown, url: unknown) =>
+    mutate(repoPath, (client) => client.remotes.add(assertString(name), assertString(url))),
+  )
+  ipcMain.handle(CHANNELS.remotesRemove, (_event, repoPath: unknown, name: unknown) =>
+    mutate(repoPath, (client) => client.remotes.remove(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesList, (_event, repoPath: unknown) =>
@@ -308,35 +488,32 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   ipcMain.handle(
     CHANNELS.branchesCreate,
     (_event, repoPath: unknown, name: unknown, fromHash: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).branches.create(
-        assertString(name),
-        assertNullableHash(fromHash),
+      mutate(repoPath, (client) =>
+        client.branches.create(assertString(name), assertNullableHash(fromHash)),
       ),
   )
 
   ipcMain.handle(CHANNELS.branchesSwitch, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.switch(assertString(name)),
+    mutate(repoPath, (client) => client.branches.switch(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesMerge, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.merge(assertString(name)),
+    mutate(repoPath, (client) => client.branches.merge(assertString(name))),
   )
 
   ipcMain.handle(
     CHANNELS.branchesRemove,
     (_event, repoPath: unknown, name: unknown, force: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).branches.remove(
-        assertString(name),
-        assertBoolean(force),
+      mutate(repoPath, (client) =>
+        client.branches.remove(assertString(name), assertBoolean(force)),
       ),
   )
 
   ipcMain.handle(
     CHANNELS.branchesRename,
     (_event, repoPath: unknown, oldName: unknown, newName: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).branches.rename(
-        assertString(oldName),
-        assertString(newName),
+      mutate(repoPath, (client) =>
+        client.branches.rename(assertString(oldName), assertString(newName)),
       ),
   )
 
@@ -345,19 +522,19 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.branchesUpdate, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.update(assertString(name)),
+    mutate(repoPath, (client) => client.branches.update(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesBackup, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.backup(assertString(name)),
+    mutate(repoPath, (client) => client.branches.backup(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesCheckoutRemote, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.checkoutRemote(assertString(name)),
+    mutate(repoPath, (client) => client.branches.checkoutRemote(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesRemoveRemote, (_event, repoPath: unknown, name: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).branches.removeRemote(assertString(name)),
+    mutate(repoPath, (client) => client.branches.removeRemote(assertString(name))),
   )
 
   ipcMain.handle(CHANNELS.branchesCompare, (_event, repoPath: unknown, name: unknown) =>
@@ -365,15 +542,15 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.rebaseStart, (_event, repoPath: unknown, onto: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).rebase.start(assertString(onto)),
+    mutate(repoPath, (client) => client.rebase.start(assertString(onto))),
   )
 
   ipcMain.handle(CHANNELS.rebaseContinue, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).rebase.continue(),
+    mutate(repoPath, (client) => client.rebase.continue()),
   )
 
   ipcMain.handle(CHANNELS.rebaseAbort, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).rebase.abort(),
+    mutate(repoPath, (client) => client.rebase.abort()),
   )
 
   ipcMain.handle(CHANNELS.rebaseProgress, (_event, repoPath: unknown) =>
@@ -381,70 +558,78 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.mergeAbort, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).merge.abort(),
+    mutate(repoPath, (client) => client.merge.abort()),
   )
 
   ipcMain.handle(
     CHANNELS.conflictsResolve,
-    (_event, repoPath: unknown, path: unknown, choice: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).conflicts.resolve(
-        assertString(path),
-        assertConflictChoice(choice),
+    (_event, repoPath: unknown, path: unknown, choice: unknown, expectedContent: unknown) =>
+      mutate(repoPath, (client) =>
+        client.conflicts.resolve(
+          assertString(path),
+          assertConflictChoice(choice),
+          assertString(expectedContent),
+        ),
       ),
   )
 
   ipcMain.handle(CHANNELS.conflictsMarkResolved, (_event, repoPath: unknown, path: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).conflicts.markResolved(assertString(path)),
+    mutate(repoPath, (client) => client.conflicts.markResolved(assertString(path))),
   )
 
   ipcMain.handle(
     CHANNELS.conflictsSaveText,
-    (_event, repoPath: unknown, path: unknown, content: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).conflicts.saveText(
-        assertString(path),
-        assertString(content),
+    (_event, repoPath: unknown, path: unknown, content: unknown, expectedContent: unknown) =>
+      mutate(repoPath, (client) =>
+        client.conflicts.saveText(
+          assertString(path),
+          assertString(content),
+          assertString(expectedContent),
+        ),
       ),
   )
 
-  ipcMain.handle(CHANNELS.conflictsReset, (_event, repoPath: unknown, path: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).conflicts.reset(assertString(path)),
+  ipcMain.handle(
+    CHANNELS.conflictsReset,
+    (_event, repoPath: unknown, path: unknown, expectedContent: unknown) =>
+      mutate(repoPath, (client) =>
+        client.conflicts.reset(assertString(path), assertString(expectedContent)),
+      ),
   )
 
   ipcMain.handle(CHANNELS.commitsRevert, (_event, repoPath: unknown, hash: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.revert(assertHash(hash)),
+    mutate(repoPath, (client) => client.commits.revert(assertHash(hash))),
   )
 
   ipcMain.handle(CHANNELS.commitsRevertAbort, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.revertAbort(),
+    mutate(repoPath, (client) => client.commits.revertAbort()),
   )
 
   ipcMain.handle(CHANNELS.commitsCherryPick, (_event, repoPath: unknown, hash: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.cherryPick(assertHash(hash)),
+    mutate(repoPath, (client) => client.commits.cherryPick(assertHash(hash))),
   )
 
   ipcMain.handle(CHANNELS.commitsCherryPickAbort, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.cherryPickAbort(),
+    mutate(repoPath, (client) => client.commits.cherryPickAbort()),
   )
 
   ipcMain.handle(
     CHANNELS.commitsCreateTag,
     (_event, repoPath: unknown, name: unknown, hash: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).commits.createTag(
-        assertString(name),
-        assertHash(hash),
+      mutate(repoPath, (client) =>
+        client.commits.createTag(assertString(name), assertHash(hash)),
       ),
   )
 
   ipcMain.handle(CHANNELS.commitsUndoLast, (_event, repoPath: unknown, hash: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.undoLast(assertHash(hash)),
+    mutate(repoPath, (client) => client.commits.undoLast(assertHash(hash))),
   )
 
   ipcMain.handle(
     CHANNELS.commitsReword,
     (_event, repoPath: unknown, hash: unknown, message: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).commits.reword(
-        assertHash(hash),
-        assertString(message),
+      mutate(repoPath, (client) =>
+        client.commits.reword(assertHash(hash), assertString(message)),
       ),
   )
 
@@ -453,7 +638,7 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.shelfSave, (_event, repoPath: unknown, message: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).shelf.save(assertString(message)),
+    mutate(repoPath, (client) => client.shelf.save(assertString(message))),
   )
 
   ipcMain.handle(CHANNELS.shelfList, (_event, repoPath: unknown) =>
@@ -461,28 +646,45 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.shelfRestore, (_event, repoPath: unknown, ref: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).shelf.restore(assertShelfRef(ref)),
+    mutate(repoPath, (client) => client.shelf.restore(assertShelfRef(ref))),
   )
 
   ipcMain.handle(CHANNELS.shelfDrop, (_event, repoPath: unknown, ref: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).shelf.drop(assertShelfRef(ref)),
+    mutate(repoPath, (client) => client.shelf.drop(assertShelfRef(ref))),
   )
 
   ipcMain.handle(CHANNELS.changesStage, (_event, repoPath: unknown, paths: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).changes.stage(assertStringArray(paths)),
+    mutate(repoPath, (client) => client.changes.stage(assertStringArray(paths))),
   )
 
   ipcMain.handle(CHANNELS.changesUnstage, (_event, repoPath: unknown, paths: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).changes.unstage(assertStringArray(paths)),
+    mutate(repoPath, (client) => client.changes.unstage(assertStringArray(paths))),
+  )
+
+  ipcMain.handle(CHANNELS.changesHunkStage, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.hunk.stage(assertHunkStageRequest(request))),
+  )
+
+  ipcMain.handle(CHANNELS.changesHunkUnstage, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.hunk.unstage(assertHunkStageRequest(request))),
+  )
+
+  ipcMain.handle(CHANNELS.changesLineStage, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.line.stage(assertLineStageRequest(request))),
+  )
+
+  ipcMain.handle(CHANNELS.changesLineUnstage, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.line.unstage(assertLineStageRequest(request))),
+  )
+
+  ipcMain.handle(CHANNELS.changesGuardCapture, (_event, repoPath: unknown, paths: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).changes.guard.capture(assertStringArray(paths)),
   )
 
   ipcMain.handle(
     CHANNELS.changesDiscard,
-    (_event, repoPath: unknown, trackedPaths: unknown, untrackedPaths: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).changes.discard(
-        assertStringArray(trackedPaths),
-        assertStringArray(untrackedPaths),
-      ),
+    (_event, repoPath: unknown, request: unknown) =>
+      mutate(repoPath, (client) => client.changes.discard(assertDiscardChangesRequest(request))),
   )
 
   ipcMain.handle(
@@ -495,7 +697,7 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   )
 
   ipcMain.handle(CHANNELS.commitsCreate, (_event, repoPath: unknown, message: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).commits.create(assertString(message)),
+    mutate(repoPath, (client) => client.commits.create(assertString(message))),
   )
 
   ipcMain.handle(CHANNELS.commitsShow, (_event, repoPath: unknown, hash: unknown) =>
@@ -515,9 +717,8 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   ipcMain.handle(
     CHANNELS.commitsRestoreFile,
     (_event, repoPath: unknown, hash: unknown, path: unknown) =>
-      createGitClient(assertAllowedRepo(repoPath)).commits.restoreFile(
-        assertHash(hash),
-        assertString(path),
+      mutate(repoPath, (client) =>
+        client.commits.restoreFile(assertHash(hash), assertString(path)),
       ),
   )
 
@@ -531,8 +732,8 @@ export function registerGitHandlers(registry: WindowRegistry): void {
       ),
   )
 
-  ipcMain.handle(CHANNELS.changesRemoveFile, (_event, repoPath: unknown, path: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).changes.removeFile(assertString(path)),
+  ipcMain.handle(CHANNELS.changesRemoveFile, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.removeFile(assertRemoveFileRequest(request))),
   )
 
   ipcMain.handle(CHANNELS.historyList, (_event, repoPath: unknown, limit: unknown, ref: unknown) =>
@@ -551,12 +752,23 @@ export function registerGitHandlers(registry: WindowRegistry): void {
       ),
   )
 
-  ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown) =>
-    createGitClient(assertAllowedRepo(repoPath)).sync.push(),
+  ipcMain.handle(CHANNELS.syncPushPreview, (_event, repoPath: unknown) =>
+    createGitClient(assertAllowedRepo(repoPath)).sync.previewPush(),
+  )
+
+  ipcMain.handle(CHANNELS.syncPush, (_event, repoPath: unknown, confirmation: unknown) =>
+    mutate(repoPath, async (client) => {
+      const parsed = assertPushConfirmation(confirmation)
+      const preview = await client.sync.previewPush()
+      if (preview.needsConfirmation && parsed === undefined) {
+        throw new Error('처음 푸시할 원격과 브랜치를 먼저 확인해 주세요.')
+      }
+      return client.sync.push(parsed)
+    }),
   )
 
   ipcMain.handle(CHANNELS.syncPull, (_event, repoPath: unknown, mode: unknown) => {
     if (mode !== 'merge' && mode !== 'rebase') throw new Error('잘못된 요청 형식이에요.')
-    return createGitClient(assertAllowedRepo(repoPath)).sync.pull(mode)
+    return mutate(repoPath, (client) => client.sync.pull(mode))
   })
 }

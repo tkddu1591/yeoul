@@ -7,6 +7,7 @@ import {
   MAIN_GAP,
   MAIN_ROW_COUNT,
   MAIN_TRACK_COUNT,
+  RESIZER_GUTTER,
   RESIZER_WIDTH,
 } from '../src/renderer/src/ui/grid-tracks'
 import { computeColumns } from '../src/renderer/src/ui/column-resize'
@@ -17,7 +18,7 @@ import { computeColumns } from '../src/renderer/src/ui/column-resize'
  * 바꿨더니 이 파일 10건은 물론 루트 555건 전부가 그대로 통과했다. 값 자체를 여기서 리터럴로
  * 못박아야 조용한 변경이 잡힌다. 리터럴은 CSS 쪽 정본과 짝이다:
  *   - MAIN_GAP 16 ↔ layout.css `.app__main`의 폴백 트랙 문자열·`--space-4`
- *   - RESIZER_WIDTH 6 ↔ layout.css `.app__resizer`가 올라앉는 5번 트랙 폭
+ *   - RESIZER_WIDTH 6 + RESIZER_GUTTER 5×2 = MAIN_GAP 16
  *   - MAIN_ROW_COUNT 3 ↔ layout.css `.app__left`의 `grid-row: 1 / 4`
  * (e2e는 간격이 커지는 쪽만 잡는다 — 작아지면 아무도 못 잡았다)
  */
@@ -26,8 +27,10 @@ describe('레이아웃 상수 (CSS와 짝 — 리터럴로 못박는다)', () =>
     expect(MAIN_GAP).toBe(16)
   })
 
-  it('RESIZER_WIDTH는 6 — layout.css .app__resizer가 사는 트랙 폭', () => {
+  it('리사이저와 양쪽 여백의 합은 열 사이 간격 16과 같다', () => {
     expect(RESIZER_WIDTH).toBe(6)
+    expect(RESIZER_GUTTER).toBe(5)
+    expect(RESIZER_GUTTER * 2 + RESIZER_WIDTH).toBe(MAIN_GAP)
   })
 
   it('MAIN_TRACK_COUNT는 7 · MAIN_ROW_COUNT는 3 — CSS의 grid-column/grid-row 리터럴과 짝', () => {
@@ -38,10 +41,10 @@ describe('레이아웃 상수 (CSS와 짝 — 리터럴로 못박는다)', () =>
   })
 
   it('column-resize가 쓰는 간격도 같은 정본이다 — 반응형 계산이 MAIN_GAP을 따라 움직인다', () => {
-    // 1200px 창·양쪽 펼침: chrome = 패딩 40 + 간격 3칸 + 리사이저 6.
+    // 1200px 창·양쪽 펼침: chrome = 패딩 40 + 열 사이 간격 2칸.
     // 좌 = min(380, 1200 - chrome - 380(중앙 최소) - 우측). MAIN_GAP이 정본이 아니면
     // 여기 유도식이 실제 계산과 어긋나 이 단언이 깨진다
-    const chrome = 40 + 3 * MAIN_GAP + RESIZER_WIDTH
+    const chrome = 40 + 2 * MAIN_GAP
     const { left, right } = computeColumns(1200, 360, {})
     expect(right).toBe(360)
     expect(left).toBe(Math.min(380, 1200 - chrome - 380 - right))
@@ -60,7 +63,7 @@ describe('buildMainColumns', () => {
   it('둘 다 펼침 — 좌·간격·중앙·간격·리사이저·간격·우 순서', () => {
     const template = buildMainColumns({ left: 380, right: 360 }, {})
     expect(template).toBe(
-      `380px ${MAIN_GAP}px minmax(0, 1fr) ${MAIN_GAP}px ${RESIZER_WIDTH}px ${MAIN_GAP}px 360px`,
+      `380px ${MAIN_GAP}px minmax(0, 1fr) ${RESIZER_GUTTER}px ${RESIZER_WIDTH}px ${RESIZER_GUTTER}px 360px`,
     )
   })
 
@@ -88,9 +91,9 @@ describe('buildMainColumns', () => {
     expect(count(buildMainColumns({ left: 0, right: 0 }, { left: true, right: true }))).toBe(open)
   })
 
-  it('펼침 상태의 px 합 = 열 + 간격 3 + 리사이저', () => {
+  it('펼침 상태의 px 합 = 열 + 동일한 간격 2개', () => {
     expect(sum(buildMainColumns({ left: 380, right: 360 }, {}))).toBe(
-      380 + 360 + MAIN_GAP * 3 + RESIZER_WIDTH,
+      380 + 360 + MAIN_GAP * 2,
     )
   })
 })
