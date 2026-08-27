@@ -2815,6 +2815,38 @@ test('E7k — 좁은 창에서는 헤더 라벨이 접히고 버튼은 계속 �
   }
 })
 
+test('E7k — 좁은 창에서도 헤더의 푸시·풀 개수는 한 줄을 유지한다', async () => {
+  const repo = await createRepoWithChange()
+  const remote = await addBareRemote(repo)
+  await execGitOrThrow(['push', '--set-upstream', 'origin', 'main'], { cwd: repo })
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_E2E_REPO: repo },
+  })
+  try {
+    const window = await app.firstWindow()
+    const syncCount = window.getByText('↑0 ↓0', { exact: true })
+    await expect(syncCount).toBeVisible()
+
+    for (const width of [1200, 970]) {
+      await window.setViewportSize({ width, height: 800 })
+      const layout = await syncCount.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return {
+          height: element.getBoundingClientRect().height,
+          whiteSpace: style.whiteSpace,
+        }
+      })
+      expect(layout.whiteSpace).toBe('nowrap')
+      expect(layout.height).toBeLessThan(24)
+    }
+  } finally {
+    await app.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(remote, { recursive: true, force: true })
+  }
+})
+
 test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치가 뜬다', async () => {
   const repo = await createRepoWithChange()
   await execGitOrThrow(['checkout', '--', 'app.txt'], { cwd: repo })
