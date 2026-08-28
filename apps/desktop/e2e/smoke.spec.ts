@@ -158,19 +158,38 @@ test('멀티레포 워크스페이스 — 별도 탐색기 없이 기존 탭과 
     await expect(window.getByTestId('workspace-history-panel')).toContainText('back')
     await expect(window.getByTestId('workspace-history-panel')).toContainText('front')
 
-    // 레포별 일괄 올리기 — 작업 뒤에도 원래 보던 back 저장소로 돌아온다.
-    await window.getByTestId('workspace-stage-all-front').click()
+    // 파일 체크박스 + 상단 버튼 — 작업 뒤에도 원래 보던 back 저장소로 돌아온다.
+    await window.getByTestId('workspace-check-front-unstaged-client.txt').check()
+    await window.getByTestId('workspace-stage-selected').click()
     await expect(window.getByTestId('workspace-changes-front')).toContainText('저장 예정')
     await expect(window.getByTestId('repo-path')).toHaveText(backPath)
 
-    // 워크스페이스 전체 일괄 올리기·내리기 — 두 저장소를 순차 처리한다.
-    await window.getByTestId('workspace-stage-all').click()
+    // 레포 체크박스는 그 저장소의 변경을 한 번에 선택한다.
+    await window.getByTestId('workspace-check-repository-back').check()
+    await window.getByTestId('workspace-stage-selected').click()
     await expect(window.getByTestId('workspace-changes-back')).toContainText('저장 예정')
-    await expect(window.getByTestId('workspace-stage-all')).toBeDisabled()
-    await window.getByTestId('workspace-unstage-all').click()
+
+    // 워크스페이스 전체 체크 후 선택 내리기 — 두 저장소를 순차 처리한다.
+    await window.getByTestId('workspace-check-all').check()
+    await window.getByTestId('workspace-unstage-selected').click()
     await expect(window.getByTestId('workspace-changes-back')).toContainText('변경사항')
     await expect(window.getByTestId('workspace-changes-front')).toContainText('변경사항')
     await expect(window.getByTestId('repo-path')).toHaveText(backPath)
+
+    // 레포 전체 +/-는 평소 숨기고 헤더를 가리킬 때만 보인다.
+    const frontRepository = window.getByTestId('workspace-changes-front').locator('.workspace-change-tree__repository')
+    const frontActions = frontRepository.locator('.workspace-change-tree__actions')
+    await expect(frontActions).toHaveCSS('opacity', '0')
+    await frontRepository.hover()
+    await expect(frontActions).toHaveCSS('opacity', '1')
+    await window.getByTestId('workspace-stage-all-front').click()
+    await expect(window.getByTestId('workspace-changes-front')).toContainText('저장 예정')
+
+    // 파일별 +/- 버튼은 없고, 한 건 내리기는 우클릭 메뉴에서 한다.
+    await expect(window.locator('.workspace-change-row__move')).toHaveCount(0)
+    await window.getByTestId('workspace-file-front-staged-client.txt').click({ button: 'right' })
+    await window.getByTestId('context-workspace-unstage-file').click()
+    await expect(window.getByTestId('workspace-changes-front')).toContainText('변경사항')
     await window.screenshot({ path: 'test-results/workspace-multi-repo.png' })
 
     await window.getByTestId('left-tab-branches').click()

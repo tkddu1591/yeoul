@@ -1,11 +1,15 @@
 import { ChevronDown, ChevronRight, CircleMinus, CirclePlus, FolderGit2, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
-import type { FileChange } from '@git-gui/domain'
 import type { WorkspaceRepository } from '@git-gui/ipc-contract'
 import type { SelectedFile } from '../store/repository-store'
-import type { WorkspaceChangeMoveRequest } from '../store/workspace-change-command'
+import {
+  workspaceChangeCommand,
+  type WorkspaceChangeEntry,
+  type WorkspaceChangeMoveRequest,
+} from '../store/workspace-change-command'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
 import { Tooltip } from '../ui/Tooltip'
 import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
@@ -26,26 +30,27 @@ interface WorkspaceChangesPanelProps {
 }
 
 interface WorkspaceChangeRowProps {
-  repository: WorkspaceRepository
-  change: FileChange
-  staged: boolean
+  entry: WorkspaceChangeEntry
   current: boolean
   selected: boolean
+  checked: boolean
   busy: boolean
+  onCheck(): void
   onSelect(): void
-  onMove(): void
+  onMenu(x: number, y: number): void
 }
 
 function WorkspaceChangeRow({
-  repository,
-  change,
-  staged,
+  entry,
   current,
   selected,
+  checked,
   busy,
+  onCheck,
   onSelect,
-  onMove,
+  onMenu,
 }: WorkspaceChangeRowProps) {
+  const { repository, change, staged } = entry
   const kind = staged ? change.staged : change.unstaged
   const slashIndex = change.path.lastIndexOf('/')
   const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex) : ''
@@ -53,12 +58,26 @@ function WorkspaceChangeRow({
   const label = `${repository.name}/${change.path} — ${kind === null ? '' : KIND_LABELS[kind]}`
   return (
     <div className={`workspace-change-row${selected ? ' workspace-change-row--selected' : ''}`}>
+      <span className="workspace-change-row__checkcell">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={busy}
+          onChange={onCheck}
+          aria-label={`${repository.name}/${change.path} 선택`}
+          data-testid={`workspace-check-${repository.relativePath}-${staged ? 'staged' : 'unstaged'}-${change.path}`}
+        />
+      </span>
       <Tooltip content={label} summary={label} describedBy={false}>
         <button
           type="button"
           className={`workspace-change-row__main workspace-change-row__main--${kind ?? 'none'}`}
           disabled={busy}
           onClick={onSelect}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            onMenu(event.clientX, event.clientY)
+          }}
           data-testid={`workspace-file-${repository.relativePath}-${staged ? 'staged' : 'unstaged'}-${change.path}`}
         >
           <span className="workspace-change-row__kind" aria-hidden="true">
@@ -68,21 +87,6 @@ function WorkspaceChangeRow({
             <strong>{basename}</strong>
             <span>{directory || '.'}</span>
           </span>
-        </button>
-      </Tooltip>
-      <Tooltip
-        content={`${repository.name}에서 ${staged ? '내리기' : '올리기'}`}
-        summary={staged ? '내리기' : '올리기'}
-        describedBy={false}
-      >
-        <button
-          type="button"
-          className="workspace-change-row__move"
-          disabled={busy}
-          onClick={onMove}
-          aria-label={`${repository.name}/${change.path} ${staged ? '내리기' : '올리기'}`}
-        >
-          {staged ? <CircleMinus size={14} aria-hidden="true" /> : <CirclePlus size={14} aria-hidden="true" />}
         </button>
       </Tooltip>
       {!current && <span className="workspace-change-row__switch">전환</span>}
@@ -105,27 +109,61 @@ export function WorkspaceChangesPanel({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState('')
   const [moving, setMoving] = useState(false)
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: WorkspaceChangeEntry } | null>(null)
   const normalizedQuery = findOpen ? query.trim().toLowerCase() : ''
   const repositories = workspaceView.overview?.repositories ?? []
   const total = repositories.reduce((count, item) => count + (item.status?.changes.length ?? 0), 0)
-  const workspaceUnstaged = repositories.flatMap(({ repository, status }) => {
-    const changes = status?.changes.filter((change) => change.unstaged !== null) ?? []
-    return changes.length === 0 ? [] : [{ repository, changes }]
-  })
-  const workspaceStaged = repositories.flatMap(({ repository, status }) => {
-    const changes = status?.changes.filter((change) => change.staged !== null) ?? []
-    return changes.length === 0 ? [] : [{ repository, changes }]
-  })
+  const entries: WorkspaceChangeEntry[] = repositories.flatMap(({ repository, status }) =>
+    (status?.changes ?? []).flatMap((change) => [
+      ...(change.unstaged === null ? [] : [{ repository, change, staged: false }]),
+      ...(change.staged === null ? [] : [{ repository, change, staged: true }]),
+    ]),
+  )
+  const validChecked = entries.filter((entry) => checked.has(workspaceChangeCommand.selection.key.get(entry)))
+  const selectedUnstaged = validChecked.filter((entry) => !entry.staged)
+  const selectedStaged = validChecked.filter((entry) => entry.staged)
+  const allChecked = entries.length > 0 && validChecked.length === entries.length
   const interactionBusy = busy || moving
 
-  const moveChanges = async (request: WorkspaceChangeMoveRequest) => {
-    if (request.groups.length === 0) return
+  const moveEntries = async (
+    targetEntries: WorkspaceChangeEntry[],
+    target: WorkspaceChangeMoveRequest['target'],
+  ) => {
+    if (targetEntries.length === 0) return
     setMoving(true)
     try {
-      await onMove(request)
+      await onMove({ target, groups: workspaceChangeCommand.group.toList(targetEntries) })
     } finally {
       setMoving(false)
+      setChecked((current) => {
+        const next = new Set(current)
+        for (const entry of targetEntries) next.delete(workspaceChangeCommand.selection.key.get(entry))
+        return next
+      })
     }
+  }
+
+  const toggleEntry = (entry: WorkspaceChangeEntry) => {
+    const key = workspaceChangeCommand.selection.key.get(entry)
+    setChecked((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleEntries = (targetEntries: WorkspaceChangeEntry[], allTargetEntriesChecked: boolean) => {
+    setChecked((current) => {
+      const next = new Set(current)
+      for (const entry of targetEntries) {
+        const key = workspaceChangeCommand.selection.key.get(entry)
+        if (allTargetEntriesChecked) next.delete(key)
+        else next.add(key)
+      }
+      return next
+    })
   }
 
   const toggleRepository = (path: string) => {
@@ -172,24 +210,36 @@ export function WorkspaceChangesPanel({
         )}
         {workspaceView.error !== null && <p className="workspace-changes__empty" role="alert">{workspaceView.error}</p>}
         <div className="workspace-changes__toolbar" data-testid="workspace-changes-toolbar">
-          <span>워크스페이스 전체</span>
+          <label className="workspace-changes__check-all">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              ref={(element) => {
+                if (element) element.indeterminate = validChecked.length > 0 && !allChecked
+              }}
+              onChange={() => toggleEntries(entries, allChecked)}
+              disabled={interactionBusy || entries.length === 0}
+              data-testid="workspace-check-all"
+            />
+            모두 선택{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
+          </label>
           <Button
             variant="ghost"
             size="sm"
-            isDisabled={interactionBusy || workspaceUnstaged.length === 0}
-            onPress={() => void moveChanges({ target: 'staged', groups: workspaceUnstaged })}
-            testId="workspace-stage-all"
+            isDisabled={interactionBusy || selectedUnstaged.length === 0}
+            onPress={() => void moveEntries(selectedUnstaged, 'staged')}
+            testId="workspace-stage-selected"
           >
-            <CirclePlus size={13} aria-hidden="true" /> 모두 올리기
+            <CirclePlus size={13} aria-hidden="true" /> 선택 올리기
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            isDisabled={interactionBusy || workspaceStaged.length === 0}
-            onPress={() => void moveChanges({ target: 'unstaged', groups: workspaceStaged })}
-            testId="workspace-unstage-all"
+            isDisabled={interactionBusy || selectedStaged.length === 0}
+            onPress={() => void moveEntries(selectedStaged, 'unstaged')}
+            testId="workspace-unstage-selected"
           >
-            <CircleMinus size={13} aria-hidden="true" /> 모두 내리기
+            <CircleMinus size={13} aria-hidden="true" /> 선택 내리기
           </Button>
         </div>
         <div className="workspace-changes__scroll">
@@ -210,6 +260,12 @@ export function WorkspaceChangesPanel({
             const staged = changes.filter((change) => change.staged !== null)
             const allUnstaged = allChanges.filter((change) => change.unstaged !== null)
             const allStaged = allChanges.filter((change) => change.staged !== null)
+            const repositoryEntries = entries.filter((entry) => entry.repository.path === repository.path)
+            const checkedRepositoryEntries = repositoryEntries.filter((entry) =>
+              checked.has(workspaceChangeCommand.selection.key.get(entry)),
+            )
+            const allRepositoryEntriesChecked =
+              repositoryEntries.length > 0 && checkedRepositoryEntries.length === repositoryEntries.length
             return (
               <section
                 className={`workspace-change-tree${current ? ' workspace-change-tree--current' : ''}`}
@@ -226,6 +282,20 @@ export function WorkspaceChangesPanel({
                   >
                     {repositoryCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                   </button>
+                  <input
+                    type="checkbox"
+                    className="workspace-change-tree__check"
+                    checked={allRepositoryEntriesChecked}
+                    ref={(element) => {
+                      if (element) {
+                        element.indeterminate = checkedRepositoryEntries.length > 0 && !allRepositoryEntriesChecked
+                      }
+                    }}
+                    onChange={() => toggleEntries(repositoryEntries, allRepositoryEntriesChecked)}
+                    disabled={interactionBusy || repositoryEntries.length === 0}
+                    aria-label={`${repository.name} 변경 모두 선택`}
+                    data-testid={`workspace-check-repository-${repository.relativePath}`}
+                  />
                   <FolderGit2 size={14} aria-hidden="true" />
                   <span className="workspace-change-tree__identity">
                     <strong>{repository.name}</strong>
@@ -236,10 +306,10 @@ export function WorkspaceChangesPanel({
                       <button
                         type="button"
                         disabled={interactionBusy || allUnstaged.length === 0}
-                        onClick={() => void moveChanges({
-                          target: 'staged',
-                          groups: [{ repository, changes: allUnstaged }],
-                        })}
+                        onClick={() => void moveEntries(
+                          allUnstaged.map((change) => ({ repository, change, staged: false })),
+                          'staged',
+                        )}
                         aria-label={`${repository.name} 변경 모두 올리기`}
                         data-testid={`workspace-stage-all-${repository.relativePath}`}
                       >
@@ -250,10 +320,10 @@ export function WorkspaceChangesPanel({
                       <button
                         type="button"
                         disabled={interactionBusy || allStaged.length === 0}
-                        onClick={() => void moveChanges({
-                          target: 'unstaged',
-                          groups: [{ repository, changes: allStaged }],
-                        })}
+                        onClick={() => void moveEntries(
+                          allStaged.map((change) => ({ repository, change, staged: true })),
+                          'unstaged',
+                        )}
                         aria-label={`${repository.name} 변경 모두 내리기`}
                         data-testid={`workspace-unstage-all-${repository.relativePath}`}
                       >
@@ -274,34 +344,28 @@ export function WorkspaceChangesPanel({
                         {unstaged.map((change) => (
                           <WorkspaceChangeRow
                             key={`unstaged:${change.path}`}
-                            repository={repository}
-                            change={change}
-                            staged={false}
+                            entry={{ repository, change, staged: false }}
                             current={current}
                             selected={current && selected?.staged === false && selected.change.path === change.path}
+                            checked={checked.has(workspaceChangeCommand.selection.key.get({ repository, change, staged: false }))}
                             busy={interactionBusy}
+                            onCheck={() => toggleEntry({ repository, change, staged: false })}
                             onSelect={() => onSelect(repository, { change, staged: false })}
-                            onMove={() => void moveChanges({
-                              target: 'staged',
-                              groups: [{ repository, changes: [change] }],
-                            })}
+                            onMenu={(x, y) => setMenu({ x, y, entry: { repository, change, staged: false } })}
                           />
                         ))}
                         {staged.length > 0 && <p className="workspace-change-tree__group">저장 예정</p>}
                         {staged.map((change) => (
                           <WorkspaceChangeRow
                             key={`staged:${change.path}`}
-                            repository={repository}
-                            change={change}
-                            staged
+                            entry={{ repository, change, staged: true }}
                             current={current}
                             selected={current && selected?.staged === true && selected.change.path === change.path}
+                            checked={checked.has(workspaceChangeCommand.selection.key.get({ repository, change, staged: true }))}
                             busy={interactionBusy}
+                            onCheck={() => toggleEntry({ repository, change, staged: true })}
                             onSelect={() => onSelect(repository, { change, staged: true })}
-                            onMove={() => void moveChanges({
-                              target: 'unstaged',
-                              groups: [{ repository, changes: [change] }],
-                            })}
+                            onMenu={(x, y) => setMenu({ x, y, entry: { repository, change, staged: true } })}
                           />
                         ))}
                         {changes.length === 0 && <p className="workspace-changes__empty">깨끗해요.</p>}
@@ -318,6 +382,24 @@ export function WorkspaceChangesPanel({
             </p>
           )}
         </div>
+        {menu !== null && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={[
+              {
+                key: menu.entry.staged ? 'workspace-unstage-file' : 'workspace-stage-file',
+                label: menu.entry.staged ? '내리기' : '올리기',
+                disabled: interactionBusy,
+                onSelect: () => void moveEntries(
+                  [menu.entry],
+                  menu.entry.staged ? 'unstaged' : 'staged',
+                ),
+              },
+            ]}
+            onClose={() => setMenu(null)}
+          />
+        )}
       </div>
     </Panel>
   )
