@@ -103,7 +103,7 @@ select {
 }
 
 /* E11 — 테마 토글 순간, 호버·눌림에 걸어둔 배경색 transition이 토큰 값 변경에도 동시 발화해
-   화면 전체가 물결친다(실측 — Step 4). ui/theme.ts가 전환 전후 한 프레임만 이 클래스를 건다 */
+   화면 전체가 물결친다(실측 — Step 4). ui/appearance.ts가 전환 전후 한 프레임만 이 클래스를 건다 */
 .theme-switching,
 .theme-switching * {
   transition: none !important;

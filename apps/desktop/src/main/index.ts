@@ -15,7 +15,7 @@ import { openRepoPath, registerGitHandlers } from './git-handlers'
 import { registerHostingHandlers } from './hosting-handlers'
 import { assertAbsoluteRepoPath } from './repo-open-guard'
 import { canAutoRestart, nextCrashStreak } from './restart-policy'
-import { readTheme, readWindows, registerSettingsHandlers, saveWindows } from './settings'
+import { appSettings, readWindows, registerSettingsHandlers, saveWindows } from './settings'
 import { registerTerminalHandlers } from './terminal-handlers'
 import { createTrailingDebounce } from './watch-filter'
 import { createWindowRegistry } from './window-registry'
@@ -68,15 +68,23 @@ const registry = createWindowRegistry((kind) => {
  * 배경을 지정하지 않아(layout.css) body 배경이 창 전체에 그대로 비친다. --color-surface를
  * 썼다면 body 배경과 미묘하게 어긋나는 색이 창 생성 직후 잠깐 보였을 것이다.
  * 값이 바뀌면 여기도 손으로 맞춘다 (use-terminal-sessions.ts TERMINAL_FONT_FAMILY와 같은 관례) */
-const APP_BACKGROUND = { light: '#f3f5f3', dark: '#141916' } as const
+const APP_BACKGROUND = {
+  yeoul: { light: '#f3f5f3', dark: '#141916' },
+  blue: { light: '#f3f6fb', dark: '#111821' },
+  forest: { light: '#f2f6f2', dark: '#121914' },
+  retro: { light: '#f7f1e5', dark: '#1d1813' },
+  violet: { light: '#f6f3fa', dark: '#18151f' },
+} as const
 
-/** 창 배경색을 저장된 테마로 정한다 — 저장값이 없으면(첫 실행) renderer의 resolveInitialTheme과
- * 같은 폴백(OS 다크모드 설정)을 쓴다. 이 색은 창(BaseWindow)과 뷰(WebContentsView) 둘 다에
+/** 창 배경색을 저장된 외형 설정으로 정한다 — 저장된 모드가 없으면 OS 다크모드 설정을 쓴다.
+ * 이 색은 창(BaseWindow)과 뷰(WebContentsView) 둘 다에
  * 생성 순간부터 칠해져 있어, 창이 페인트를 마치고 보이는 시점에 흰 배경이 낄 틈이 없다 */
 function resolveBackgroundColor(): string {
-  const saved = readTheme()
-  const dark = saved === 'dark' || (saved === undefined && nativeTheme.shouldUseDarkColors)
-  return dark ? APP_BACKGROUND.dark : APP_BACKGROUND.light
+  const saved = appSettings.appearance.get()
+  const mode =
+    saved.colorMode ?? (nativeTheme.shouldUseDarkColors ? ('dark' as const) : ('light' as const))
+  const theme = saved.colorTheme ?? 'yeoul'
+  return APP_BACKGROUND[theme][mode]
 }
 
 // 앱 이름 (E7f) — 창 전환 UI·일부 메뉴에 반영. dev 메뉴바는 "Electron" 고정(Info.plist — 실측 6),

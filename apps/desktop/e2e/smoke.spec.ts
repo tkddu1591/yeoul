@@ -436,27 +436,29 @@ test('960px 최소 창에서 중앙 diff 폭이 380px 이상으로 보장된다 
   }
 })
 
-test('테마를 설정 모달에서 전환하고 재시작해도 기억한다 (E7d ⑦ 이관)', async () => {
+test('모드와 색상 테마를 따로 전환하고 재시작해도 기억한다', async () => {
   const repo = await createRepoWithChange()
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
   const env = { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData }
   const app = await electron.launch({ args: [APP_ROOT], env })
-  let flipped: string | undefined
+  let flippedMode: string | undefined
   try {
     const window = await app.firstWindow()
     // firstWindow는 React 마운트 전에 반환될 수 있다 — UI가 뜬 뒤 테마를 읽는다 (실측 레이스)
     await expect(window.getByTestId('settings-open')).toBeVisible()
     // 헤더 토글은 설정으로 이관되어 없다 (E7d ⑦)
     await expect(window.getByTestId('theme-toggle')).toHaveCount(0)
-    const initial = await window.evaluate(() => document.documentElement.dataset.theme)
+    const initial = await window.evaluate(() => document.documentElement.dataset.colorMode)
     expect(['light', 'dark']).toContain(initial)
     await window.getByTestId('settings-open').click()
     await window.getByTestId('settings-cat-theme').click()
     await window
-      .getByTestId(initial === 'dark' ? 'settings-theme-light' : 'settings-theme-dark')
+      .getByTestId(initial === 'dark' ? 'settings-mode-light' : 'settings-mode-dark')
       .click()
-    flipped = await window.evaluate(() => document.documentElement.dataset.theme)
-    expect(flipped).not.toBe(initial)
+    flippedMode = await window.evaluate(() => document.documentElement.dataset.colorMode)
+    expect(flippedMode).not.toBe(initial)
+    await window.getByTestId('settings-theme-retro').click()
+    expect(await window.evaluate(() => document.documentElement.dataset.theme)).toBe('retro')
   } finally {
     await app.close()
   }
@@ -465,8 +467,11 @@ test('테마를 설정 모달에서 전환하고 재시작해도 기억한다 (E
   try {
     const window = await second.firstWindow()
     await expect(window.getByTestId('settings-open')).toBeVisible()
-    const restored = await window.evaluate(() => document.documentElement.dataset.theme)
-    expect(restored).toBe(flipped)
+    const restored = await window.evaluate(() => ({
+      mode: document.documentElement.dataset.colorMode,
+      theme: document.documentElement.dataset.theme,
+    }))
+    expect(restored).toEqual({ mode: flippedMode, theme: 'retro' })
   } finally {
     await second.close()
     await rm(repo, { recursive: true, force: true })
@@ -1933,11 +1938,11 @@ test('설정에서 테마를 바꾸면 열린 터미널 배경도 바뀐다 (E7d
       })
     const before = await readBackground()
     // 설정 → 테마 카테고리 → 반대 테마
-    const initial = await window.evaluate(() => document.documentElement.dataset.theme)
+    const initial = await window.evaluate(() => document.documentElement.dataset.colorMode)
     await window.getByTestId('settings-open').click()
     await window.getByTestId('settings-cat-theme').click()
     await window
-      .getByTestId(initial === 'dark' ? 'settings-theme-light' : 'settings-theme-dark')
+      .getByTestId(initial === 'dark' ? 'settings-mode-light' : 'settings-mode-dark')
       .click()
     await expect.poll(readBackground).not.toBe(before)
   } finally {

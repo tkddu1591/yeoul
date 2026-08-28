@@ -1,4 +1,4 @@
-import { FolderGit2, FolderOpen, GitFork } from 'lucide-react'
+import { FolderGit2, FolderOpen, GitBranch, GitCommitHorizontal, GitFork, ScanText } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { ProductIcon } from '../ui/ProductIcon'
 import { T } from '../terms'
@@ -28,49 +28,83 @@ export function RepoPicker({ onOpen, onClone, onInit, recent, home, onOpenRecent
   return (
     <div className="repo-picker">
       <div className="repo-picker__card">
-        <ProductIcon size={80} label="여울" />
-        <h1>여울</h1>
-        <p className="repo-picker__desc">
-          브랜치와 여러 워크트리를 한곳에서 편하게 살펴보고
-          <br />
-          변경 검토부터 안전한 {T.commit}과 통합까지 이어가요.
-        </p>
-        <div className="repo-picker__actions">
-          <Button variant="primary" onPress={onOpen} testId="open-repo">
-            <FolderOpen size={16} aria-hidden="true" /> 저장소 열기
-          </Button>
-          <Button variant="ghost" onPress={onClone} testId="clone-repo">
-            <GitFork size={16} aria-hidden="true" /> 원격 저장소 복제
-          </Button>
-          <Button variant="ghost" onPress={onInit} testId="init-repo">
-            <FolderGit2 size={16} aria-hidden="true" /> 새 저장소 만들기
-          </Button>
-        </div>
-        {recent.length > 0 && (
-          <div className="repo-picker__recent">
-            <h2 className="repo-picker__recent-title">최근 연 저장소</h2>
-            <ul className="repo-picker__recent-list" data-testid="repo-picker-recent">
-              {recent.map((path) => (
-                <li key={path}>
-                  <button
-                    type="button"
-                    className="repo-picker__recent-item"
-                    onClick={() => onOpenRecent(path)}
-                    data-testid={`repo-picker-recent-${path}`}
-                  >
-                    <span className="repo-picker__recent-name">{folderName(path)}</span>
-                    <span className="repo-picker__recent-path">{shortenParent(path, home)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+        <section className="repo-picker__intro" aria-labelledby="repo-picker-title">
+          <div className="repo-picker__brand">
+            <span className="repo-picker__icon-wrap">
+              <ProductIcon size={62} label="여울" />
+            </span>
+            <span>YEOUL</span>
           </div>
-        )}
-        {error && (
-          <p className="repo-picker__error" role="alert">
-            {error}
+          <span className="repo-picker__eyebrow">Git이 흐르는 방식 그대로</span>
+          <h1 id="repo-picker-title">
+            복잡한 작업도
+            <br />한눈에 이어 보세요.
+          </h1>
+          <p className="repo-picker__desc">
+            여러 {T.branch}와 {T.worktree}의 흐름을 놓치지 않고,
+            <br />변경 검토부터 안전한 {T.commit}과 통합까지 이어가요.
           </p>
-        )}
+          <ul className="repo-picker__features" aria-label="여울의 주요 기능">
+            <li>
+              <ScanText size={15} aria-hidden="true" /> 변경을 나란히 검토
+            </li>
+            <li>
+              <GitBranch size={15} aria-hidden="true" /> {T.branch}와 {T.worktree} 한곳에
+            </li>
+            <li>
+              <GitCommitHorizontal size={15} aria-hidden="true" /> 흐름을 보며 안전하게 저장
+            </li>
+          </ul>
+        </section>
+
+        <section className="repo-picker__workspace" aria-labelledby="repo-picker-start-title">
+          <div className="repo-picker__workspace-heading">
+            <div>
+              <span>작업 공간</span>
+              <h2 id="repo-picker-start-title">어디서 시작할까요?</h2>
+            </div>
+            <span className="repo-picker__status">준비됨</span>
+          </div>
+          <div className="repo-picker__actions">
+            <Button variant="primary" onPress={onOpen} testId="open-repo">
+              <FolderOpen size={16} aria-hidden="true" /> 저장소 열기
+            </Button>
+            <Button variant="neutral" onPress={onClone} testId="clone-repo">
+              <GitFork size={16} aria-hidden="true" /> 원격 저장소 복제
+            </Button>
+            <Button variant="ghost" onPress={onInit} testId="init-repo">
+              <FolderGit2 size={16} aria-hidden="true" /> 새 저장소 만들기
+            </Button>
+          </div>
+          {recent.length > 0 && (
+            <div className="repo-picker__recent">
+              <h3 className="repo-picker__recent-title">최근 연 저장소</h3>
+              <ul className="repo-picker__recent-list" data-testid="repo-picker-recent">
+                {recent.map((path) => (
+                  <li key={path}>
+                    <button
+                      type="button"
+                      className="repo-picker__recent-item"
+                      onClick={() => onOpenRecent(path)}
+                      data-testid={`repo-picker-recent-${path}`}
+                    >
+                      <span className="repo-picker__recent-mark" aria-hidden="true" />
+                      <span className="repo-picker__recent-copy">
+                        <span className="repo-picker__recent-name">{folderName(path)}</span>
+                        <span className="repo-picker__recent-path">{shortenParent(path, home)}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {error && (
+            <p className="repo-picker__error" role="alert">
+              {error}
+            </p>
+          )}
+        </section>
       </div>
     </div>
   )

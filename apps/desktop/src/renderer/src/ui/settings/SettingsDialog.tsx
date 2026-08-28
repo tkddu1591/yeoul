@@ -1,27 +1,32 @@
 import { useState } from 'react'
 import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components'
+import { GitFork, Palette, Settings2 } from 'lucide-react'
 import { Button } from '../Button'
 import '../confirm-dialog.css'
 import './settings-dialog.css'
-import { T } from '../../terms'
-import type { Theme } from '../theme'
+import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
+import {
+  GeneralSettingsPanel,
+  type GeneralSettingsPreferences,
+} from './GeneralSettingsPanel'
+import {
+  RemoteSettingsPanel,
+  type RemoteDraft,
+  type RemoteSettingsState,
+} from './RemoteSettingsPanel'
 import type { WorktreeSelectAction } from './worktree-select-action'
 import type { PullMode } from './sync-settings'
-import type { RemoteInfo } from '@git-gui/domain'
+import type { Appearance } from '@git-gui/ipc-contract'
 
 interface SettingsDialogProps {
   isOpen: boolean
-  theme: Theme
-  onChangeTheme(theme: Theme): void
-  worktreeSelectAction: WorktreeSelectAction
+  appearance: Appearance
+  onChangeAppearance(appearance: Appearance): void
+  preferences: GeneralSettingsPreferences
   onChangeWorktreeSelectAction(action: WorktreeSelectAction): void
-  pullMode: PullMode
   onChangePullMode(mode: PullMode): void
-  autoFetch: boolean
   onChangeAutoFetch(enabled: boolean): void
-  remotes: RemoteInfo[]
-  busy: boolean
-  error: string | null
+  remote: RemoteSettingsState
   onAddRemote(name: string, url: string): Promise<boolean>
   onRemoveRemote(name: string): void
   onRevealDiagnostics(): void
@@ -36,25 +41,20 @@ type SettingsCategory = 'general' | 'remotes' | 'theme'
  */
 export function SettingsDialog({
   isOpen,
-  theme,
-  onChangeTheme,
-  worktreeSelectAction,
+  appearance,
+  onChangeAppearance,
+  preferences,
   onChangeWorktreeSelectAction,
-  pullMode,
   onChangePullMode,
-  autoFetch,
   onChangeAutoFetch,
-  remotes,
-  busy,
-  error,
+  remote,
   onAddRemote,
   onRemoveRemote,
   onRevealDiagnostics,
   onClose,
 }: SettingsDialogProps) {
   const [category, setCategory] = useState<SettingsCategory>('general')
-  const [remoteName, setRemoteName] = useState('origin')
-  const [remoteUrl, setRemoteUrl] = useState('')
+  const [remoteDraft, setRemoteDraft] = useState<RemoteDraft>({ name: 'origin', url: '' })
   return (
     <ModalOverlay
       className="ui-modal-overlay"
@@ -77,7 +77,8 @@ export function SettingsDialog({
                 onClick={() => setCategory('general')}
                 data-testid="settings-cat-general"
               >
-                일반
+                <Settings2 size={15} aria-hidden="true" />
+                <span>일반</span>
               </button>
               <button
                 type="button"
@@ -85,7 +86,8 @@ export function SettingsDialog({
                 onClick={() => setCategory('remotes')}
                 data-testid="settings-cat-remotes"
               >
-                원격
+                <GitFork size={15} aria-hidden="true" />
+                <span>원격</span>
               </button>
               <button
                 type="button"
@@ -93,166 +95,32 @@ export function SettingsDialog({
                 onClick={() => setCategory('theme')}
                 data-testid="settings-cat-theme"
               >
-                테마
+                <Palette size={15} aria-hidden="true" />
+                <span>테마</span>
               </button>
             </nav>
             <div className="settings-dialog__content">
               {category === 'general' ? (
-                <>
-                  <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">{T.worktree} 선택 시 동작</legend>
-                    <label className="settings-dialog__radio">
-                      <input
-                        type="radio"
-                        name="worktree-select-action"
-                        checked={worktreeSelectAction === 'terminal'}
-                        onChange={() => onChangeWorktreeSelectAction('terminal')}
-                        data-testid="settings-worktree-terminal"
-                      />
-                      터미널만 따라가기 — 새 터미널이 그 폴더에서 열려요
-                    </label>
-                    <label className="settings-dialog__radio">
-                      <input
-                        type="radio"
-                        name="worktree-select-action"
-                        checked={worktreeSelectAction === 'switch-app'}
-                        onChange={() => onChangeWorktreeSelectAction('switch-app')}
-                        data-testid="settings-worktree-switch"
-                      />
-                      앱 전체 전환 — 변경·{T.history}·{T.branch}도 그 {T.worktree} 기준으로 바뀌어요
-                    </label>
-                    <p className="settings-dialog__desc">
-                      우클릭 메뉴에서는 설정과 무관하게 두 동작을 언제든 고를 수 있어요.
-                    </p>
-                  </fieldset>
-                  <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">진단 자료</legend>
-                    <p className="settings-dialog__desc">
-                      런타임 로그와 크래시 덤프는 외부로 전송하지 않고 이 Mac에만 보관해요.
-                    </p>
-                    <Button variant="ghost" size="sm" onPress={onRevealDiagnostics}>
-                      Finder에서 진단 자료 보기
-                    </Button>
-                  </fieldset>
-                  <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">{T.pull} 방식</legend>
-                    <label className="settings-dialog__radio">
-                      <input
-                        type="radio"
-                        name="pull-mode"
-                        checked={pullMode === 'merge'}
-                        onChange={() => onChangePullMode('merge')}
-                        data-testid="settings-pull-merge"
-                      />
-                      {T.merge}하며 받기 — 원격과 내 {T.commit}을 {T.merge}해요. 지금까지의 방식
-                    </label>
-                    <label className="settings-dialog__radio">
-                      <input
-                        type="radio"
-                        name="pull-mode"
-                        checked={pullMode === 'rebase'}
-                        onChange={() => onChangePullMode('rebase')}
-                        data-testid="settings-pull-rebase"
-                      />
-                      {T.rebase}로 받기 — 내 {T.commit}을 원격 최신 위로 다시 쌓아 {T.history}가 일직선이
-                      돼요
-                    </label>
-                  </fieldset>
-                  <fieldset className="settings-dialog__field">
-                    <legend className="settings-dialog__label">{T.fetch}</legend>
-                    <label className="settings-dialog__radio">
-                      <input
-                        type="checkbox"
-                        checked={autoFetch}
-                        onChange={(event) => onChangeAutoFetch(event.target.checked)}
-                        data-testid="settings-auto-fetch"
-                      />
-                      주기적으로 {T.fetch} (10분)
-                    </label>
-                    <p className="settings-dialog__desc">
-                      원격의 새 {T.branch}·↑↓ 차이가 저절로 최신으로 유지돼요.
-                    </p>
-                  </fieldset>
-                </>
+                <GeneralSettingsPanel
+                  preferences={preferences}
+                  onChangeWorktreeSelectAction={onChangeWorktreeSelectAction}
+                  onChangePullMode={onChangePullMode}
+                  onChangeAutoFetch={onChangeAutoFetch}
+                  onRevealDiagnostics={onRevealDiagnostics}
+                />
               ) : category === 'remotes' ? (
-                <section className="settings-dialog__field" aria-labelledby="remote-settings-title">
-                  <h2 id="remote-settings-title" className="settings-dialog__label">
-                    Git 원격
-                  </h2>
-                  <p className="settings-dialog__desc">
-                    푸시·Pull에 쓰는 Git 인증은 GitHub API 연결과 별개예요. HTTPS는 macOS Keychain,
-                    SSH는 등록된 키를 사용해요.
-                  </p>
-                  <ul className="settings-dialog__remote-list">
-                    {remotes.map((remote) => (
-                      <li key={remote.name} className="settings-dialog__remote">
-                        <span>
-                          <strong>{remote.name}</strong>
-                          <small>{remote.fetchUrl}</small>
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          isDisabled={busy}
-                          onPress={() => onRemoveRemote(remote.name)}
-                        >
-                          제거
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                  <form
-                    className="settings-dialog__remote-form"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      void onAddRemote(remoteName, remoteUrl).then((added) => {
-                        if (added) setRemoteUrl('')
-                      })
-                    }}
-                  >
-                    <label>
-                      이름
-                      <input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} />
-                    </label>
-                    <label>
-                      주소
-                      <input
-                        value={remoteUrl}
-                        onChange={(event) => setRemoteUrl(event.target.value)}
-                        placeholder="git@github.com:owner/repository.git"
-                      />
-                    </label>
-                    <Button variant="primary" size="sm" type="submit" isDisabled={busy}>
-                      원격 추가
-                    </Button>
-                  </form>
-                  {error !== null && <p className="settings-dialog__error">{error}</p>}
-                </section>
+                <RemoteSettingsPanel
+                  remote={remote}
+                  draft={remoteDraft}
+                  onChangeDraft={setRemoteDraft}
+                  onAdd={onAddRemote}
+                  onRemove={onRemoveRemote}
+                />
               ) : (
-                <fieldset className="settings-dialog__field">
-                  <legend className="settings-dialog__label">테마</legend>
-                  <label className="settings-dialog__radio">
-                    <input
-                      type="radio"
-                      name="app-theme"
-                      checked={theme === 'light'}
-                      onChange={() => onChangeTheme('light')}
-                      data-testid="settings-theme-light"
-                    />
-                    밝게
-                  </label>
-                  <label className="settings-dialog__radio">
-                    <input
-                      type="radio"
-                      name="app-theme"
-                      checked={theme === 'dark'}
-                      onChange={() => onChangeTheme('dark')}
-                      data-testid="settings-theme-dark"
-                    />
-                    어둡게
-                  </label>
-                  <p className="settings-dialog__desc">터미널 색도 함께 바뀌어요.</p>
-                </fieldset>
+                <AppearanceSettingsPanel
+                  appearance={appearance}
+                  onChange={onChangeAppearance}
+                />
               )}
             </div>
           </div>

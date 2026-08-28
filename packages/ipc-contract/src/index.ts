@@ -485,8 +485,17 @@ export interface WindowLayout {
  * 창별 필드(WindowLayout)와 앱 공용 필드가 여기서 평평하게 합쳐진다 (E15b) —
  * 렌더러가 보는 표면은 분리 이전과 완전히 동일하다
  */
+export type ColorMode = 'light' | 'dark'
+export type ColorTheme = 'yeoul' | 'blue' | 'forest' | 'retro' | 'violet'
+
+export interface Appearance {
+  mode: ColorMode
+  theme: ColorTheme
+}
+
 export interface AppSettings extends WindowLayout {
-  theme?: 'light' | 'dark'
+  colorMode?: ColorMode
+  colorTheme?: ColorTheme
   /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
   worktreeSelectAction?: 'terminal' | 'switch-app'
   /** 받아오기 방식 — merge(기본)/rebase (E7e) */
@@ -502,7 +511,18 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
   const candidate = value as AppSettings
   const settings: AppSettings = {}
-  if (candidate.theme === 'light' || candidate.theme === 'dark') settings.theme = candidate.theme
+  if (candidate.colorMode === 'light' || candidate.colorMode === 'dark') {
+    settings.colorMode = candidate.colorMode
+  }
+  if (
+    candidate.colorTheme === 'yeoul' ||
+    candidate.colorTheme === 'blue' ||
+    candidate.colorTheme === 'forest' ||
+    candidate.colorTheme === 'retro' ||
+    candidate.colorTheme === 'violet'
+  ) {
+    settings.colorTheme = candidate.colorTheme
+  }
   if (typeof candidate.rightWidth === 'number' && Number.isFinite(candidate.rightWidth)) {
     settings.rightWidth = candidate.rightWidth
   }
@@ -639,6 +659,15 @@ function sanitizePersistedTabs(value: unknown): PersistedTab[] | undefined {
 export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   const settings: PersistedSettings = sanitizeSettings(value)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return settings
+  // E7d 옛 설정은 light/dark를 `theme` 하나에 저장했다. 이제 모드와 색상 테마가 분리됐으므로
+  // 기존 사용자의 선택을 colorMode로 한 번 마이그레이션하고 색상 테마는 기본 여울을 쓴다.
+  const legacyTheme = (value as { theme?: unknown }).theme
+  if (
+    settings.colorMode === undefined &&
+    (legacyTheme === 'light' || legacyTheme === 'dark')
+  ) {
+    settings.colorMode = legacyTheme
+  }
   // 창 목록 (E15b → E15c) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수
   // 있는 디스크 파일에서 오고 각 탭의 repoPath가 **뷰를 만드는 인자**가 된다.
   //

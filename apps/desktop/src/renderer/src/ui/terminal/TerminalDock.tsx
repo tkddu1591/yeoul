@@ -3,13 +3,13 @@ import { useEffect, useRef } from 'react'
 import { Button } from '../Button'
 import { Tooltip } from '../Tooltip'
 import { useTerminalSessions } from './use-terminal-sessions'
-import type { Theme } from '../theme'
+import type { Appearance } from '@git-gui/ipc-contract'
 import './terminal-dock.css'
 
 interface TerminalDockProps {
   repoPath: string | null
-  /** 앱 테마 — xterm 팔레트가 따라간다 (E7d ③) */
-  theme: Theme
+  /** 앱 외형 — xterm의 모드와 색상 테마가 함께 따라간다. */
+  appearance: Appearance
   /** 활성 워크트리(터미널 대상) — 새 세션이 이 폴더에서 열린다. 이름은 도크 헤더에 표시된다
      (E7c, 탭 라벨 병기는 E12에서 폐지) */
   activeWorktree: { cwd: string; label: string } | null
@@ -27,7 +27,7 @@ interface TerminalDockProps {
 /** 하단 터미널 도크 (E7b) — 렌더 전용. 세션 로직은 useTerminalSessions가 소유한다 */
 export function TerminalDock({
   repoPath,
-  theme,
+  appearance,
   activeWorktree,
   open,
   height,
@@ -36,18 +36,20 @@ export function TerminalDock({
   onResizeStart,
   onClose,
 }: TerminalDockProps) {
-  const sessions = useTerminalSessions(repoPath, theme)
+  const sessions = useTerminalSessions(repoPath, appearance)
   // 이펙트가 쓰는 액션은 구조 분해로 받는다 — `sessions.foo()`처럼 메서드로 부르면 수신자
   // `sessions`(매 렌더 새 객체 리터럴) 전체가 의존성으로 요구된다(v7 lint 실측). 액션 자체는
   // 코어 소유의 안정 참조(E14c)라 이름으로 떼어 deps에 넣으면 재실행을 만들지 않는다
-  const { activateGroup, closeGroup, refitActive } = sessions
+  const { activate: activateGroup, close: closeGroup } = sessions.group
+  const { refit: refitActive } = sessions.view
   // 아래 ResizeObserver가 관찰할 이 요소 자신의 DOM 참조 — 창 크기와 무관한 폭 변화(사이드
   // 접기)를 잡는 용도다(그 effect 주석 참조, E13 후속에서 세로→가로로 역할 정정)
   const dockRef = useRef<HTMLDivElement | null>(null)
   // 현재 그룹 키 — 워크트리별 터미널 탭 묶음의 기준 (E7h ④). repoPath가 null이면 도크 자체가 비활성
   const groupKey = activeWorktree?.cwd ?? repoPath
   // 빈 상태 오버레이는 지금 보이는 탭 기준 (E12)
-  const activeTab = sessions.tabs.find((tab) => tab.sessionId === sessions.activeId) ?? null
+  const activeTab =
+    sessions.data.tabs.find((tab) => tab.sessionId === sessions.data.activeId) ?? null
 
   // 도크가 열려 있는 상태에서 열리거나(open) 그룹이 바뀌면(groupKey) 그 그룹을 활성화한다 —
   // 기억된 탭 복원, 없으면 자동 1개 생성, 활성 탭이 이미 이 그룹이면(재열림) refit만.
@@ -80,7 +82,7 @@ export function TerminalDock({
   // deps에 넣어도 재실행은 여전히 height·activeId 전이 때뿐이다
   useEffect(() => {
     refitActive()
-  }, [height, sessions.activeId, refitActive])
+  }, [height, sessions.data.activeId, refitActive])
 
   // 창 폭이 바뀌면 도크 폭(중앙+우측 flex 트랙)도 따라 바뀐다 — 높이와 별개 축이라
   // 위 effect가 못 잡는다. 폰트·줄간격을 명시하기 시작해 FitAddon 셀 계산이 더 정밀해진
@@ -139,7 +141,7 @@ export function TerminalDock({
       >
         <span className="terminal-dock__label">터미널</span>
         <div className="terminal-dock__tabs" onPointerDown={(event) => event.stopPropagation()}>
-          {sessions.tabs
+          {sessions.data.tabs
             .filter((tab) => tab.groupKey === groupKey)
             .map((tab) => (
               // E12 — 탭은 번호만 보여준다. 이 워크트리에서 어느 폴더가 열렸는지는 이제
@@ -148,13 +150,13 @@ export function TerminalDock({
               <Tooltip key={tab.sessionId} content={tab.groupKey} summary={tab.groupKey}>
                 <span
                   className={`terminal-dock__tab${
-                    tab.sessionId === sessions.activeId ? ' terminal-dock__tab--on' : ''
+                    tab.sessionId === sessions.data.activeId ? ' terminal-dock__tab--on' : ''
                   }`}
                 >
                   <button
                     type="button"
                     className="terminal-dock__tab-name"
-                    onClick={() => sessions.select(tab.sessionId)}
+                    onClick={() => sessions.session.select(tab.sessionId)}
                   >
                     {tab.title}
                     {tab.exited ? ' (종료)' : ''}
@@ -163,7 +165,7 @@ export function TerminalDock({
                     type="button"
                     className="terminal-dock__tab-close"
                     aria-label={`${tab.title} 닫기`}
-                    onClick={() => sessions.close(tab.sessionId)}
+                    onClick={() => sessions.session.close(tab.sessionId)}
                   >
                     <X size={11} aria-hidden="true" />
                   </button>
@@ -173,7 +175,7 @@ export function TerminalDock({
           <Button
             variant="ghost"
             size="sm"
-            onPress={() => void sessions.create(activeWorktree ?? undefined)}
+            onPress={() => void sessions.session.create(activeWorktree ?? undefined)}
             testId="terminal-new-tab"
           >
             <Plus size={13} aria-hidden="true" />
@@ -190,18 +192,18 @@ export function TerminalDock({
           </Button>
         </div>
       </div>
-      {sessions.error !== null && (
+      {sessions.data.error !== null && (
         <p className="terminal-dock__error" role="alert" data-testid="terminal-error">
-          {sessions.error}
+          {sessions.data.error}
         </p>
       )}
       <div className="terminal-dock__body" data-testid="terminal-body">
-        {sessions.tabs.map((tab) => (
+        {sessions.data.tabs.map((tab) => (
           <div
             key={tab.sessionId}
             className="terminal-dock__view"
-            style={{ display: tab.sessionId === sessions.activeId ? 'block' : 'none' }}
-            ref={(element) => sessions.attach(tab.sessionId, element)}
+            style={{ display: tab.sessionId === sessions.data.activeId ? 'block' : 'none' }}
+            ref={(element) => sessions.view.attach(tab.sessionId, element)}
           />
         ))}
         {/* E12 — 새 탭의 빈 화면 안내. 셸에 문자를 넣지 않는 순수 오버레이(pointer-events: none)라

@@ -2,7 +2,7 @@
    컴포넌트는 var()만 사용한다 (스펙 10장). */
 :root {
   /* 다크 모드에서 네이티브 컨트롤(스크롤바·리사이즈 핸들)도 함께 전환 */
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* 타이포 */
   --font-sans: 'SUIT Variable', SUIT, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -42,6 +42,23 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 양방향으로 오가는 상태 */
   --shadow-1: 0 1px 2px rgb(19 28 24 / 0.035);
   --shadow-2: 0 8px 24px rgb(19 28 24 / 0.09);
+
+  /* 테마 선택 카드 미리보기 — 현재 테마와 무관하게 각 팔레트의 고유색을 보여준다. */
+  --theme-yeoul-1: #5757b8;
+  --theme-yeoul-2: #3d718e;
+  --theme-yeoul-3: #2b7b75;
+  --theme-blue-1: #255da8;
+  --theme-blue-2: #4b83c6;
+  --theme-blue-3: #93b8e5;
+  --theme-forest-1: #2f7048;
+  --theme-forest-2: #609066;
+  --theme-forest-3: #abc495;
+  --theme-retro-1: #8a4b20;
+  --theme-retro-2: #c17a36;
+  --theme-retro-3: #e2bd78;
+  --theme-violet-1: #674399;
+  --theme-violet-2: #906dbc;
+  --theme-violet-3: #c7b2df;
 
   /* 중립 */
   --color-bg: #f3f5f3;
@@ -108,7 +125,8 @@
   --diff-hunk-text: #3e6066;
 }
 
-:root[data-theme='dark'] {
+:root[data-color-mode='dark'] {
+    color-scheme: dark;
     --color-bg: #141916;
     --color-surface: #1b211e;
     --color-surface-sunken: #171d1a;
@@ -162,4 +180,186 @@
 
     --shadow-1: 0 1px 2px rgb(0 0 0 / 0.28);
     --shadow-2: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+/* 색상 테마는 모드와 독립적이다. 여울은 위의 기본 토큰을 그대로 사용하고, 아래 팔레트는
+   중립 표면과 주 액션 계열만 바꾼다. Git 상태·변경 종류의 의미색은 테마가 바뀌어도 유지한다. */
+:root[data-theme='blue'][data-color-mode='light'] {
+  --color-bg: #f3f6fb;
+  --color-surface: #fbfcff;
+  --color-surface-sunken: #ebf0f8;
+  --color-border: #d9e2ef;
+  --color-border-strong: #bbc9db;
+  --color-text: #1e2938;
+  --color-text-muted: #526174;
+  --color-text-faint: #5e6d80;
+  --color-hover-bg: #e6edf7;
+  --color-accent: #285ea8;
+  --color-accent-hover: #224f8d;
+  --color-accent-active: #1c4378;
+  --color-focus: #285ea8;
+  --color-selection-bg: #edf4fd;
+  --brand-mark-upper: #315fa4;
+  --brand-mark-middle: #4d83bd;
+  --brand-mark-lower: #539da9;
+  --diff-hunk-bg: #e6edf8;
+  --diff-hunk-text: #365b86;
+}
+
+:root[data-theme='blue'][data-color-mode='dark'] {
+  --color-bg: #111821;
+  --color-surface: #18212d;
+  --color-surface-sunken: #141c27;
+  --color-border: #293649;
+  --color-border-strong: #3b4d66;
+  --color-text: #e6ecf5;
+  --color-text-muted: #a1adbd;
+  --color-text-faint: #8f9bac;
+  --color-hover-bg: #222e3e;
+  --color-accent: #78a9ff;
+  --color-accent-hover: #8bb6ff;
+  --color-accent-active: #9cc1ff;
+  --color-accent-text: #0c1624;
+  --color-focus: #78a9ff;
+  --color-selection-bg: #1f3048;
+  --brand-mark-upper: #8aaeff;
+  --brand-mark-middle: #6ca9d8;
+  --brand-mark-lower: #63b7bd;
+  --diff-hunk-bg: #213454;
+  --diff-hunk-text: #afc9ff;
+}
+
+:root[data-theme='forest'][data-color-mode='light'] {
+  --color-bg: #f2f6f2;
+  --color-surface: #fbfdfb;
+  --color-surface-sunken: #eaf1eb;
+  --color-border: #d7e2d8;
+  --color-border-strong: #b9cbbd;
+  --color-text: #202a23;
+  --color-text-muted: #536259;
+  --color-text-faint: #607066;
+  --color-hover-bg: #e4ede6;
+  --color-accent: #2f7048;
+  --color-accent-hover: #285f3d;
+  --color-accent-active: #214f33;
+  --color-focus: #2f7048;
+  --color-selection-bg: #ebf4ed;
+  --brand-mark-upper: #5b6f48;
+  --brand-mark-middle: #43805b;
+  --brand-mark-lower: #3c8177;
+  --diff-hunk-bg: #e4eee6;
+  --diff-hunk-text: #3c664a;
+}
+
+:root[data-theme='forest'][data-color-mode='dark'] {
+  --color-bg: #121914;
+  --color-surface: #19221b;
+  --color-surface-sunken: #151d17;
+  --color-border: #29352c;
+  --color-border-strong: #3a4b3f;
+  --color-text: #e4ebe5;
+  --color-text-muted: #a0aca3;
+  --color-text-faint: #8e9a91;
+  --color-hover-bg: #232e26;
+  --color-accent: #7fbd91;
+  --color-accent-hover: #91c9a0;
+  --color-accent-active: #a3d4af;
+  --color-accent-text: #0e1811;
+  --color-focus: #7fbd91;
+  --color-selection-bg: #203326;
+  --brand-mark-upper: #a2b57f;
+  --brand-mark-middle: #79b38b;
+  --brand-mark-lower: #6ab5a6;
+  --diff-hunk-bg: #24382a;
+  --diff-hunk-text: #a8d4b3;
+}
+
+:root[data-theme='retro'][data-color-mode='light'] {
+  --color-bg: #f7f1e5;
+  --color-surface: #fffaf0;
+  --color-surface-sunken: #f1e7d5;
+  --color-border: #e3d5bd;
+  --color-border-strong: #cdbb9c;
+  --color-text: #352b22;
+  --color-text-muted: #685c4e;
+  --color-text-faint: #746556;
+  --color-hover-bg: #eee2cf;
+  --color-accent: #8a4b20;
+  --color-accent-hover: #753f1b;
+  --color-accent-active: #633516;
+  --color-focus: #8a4b20;
+  --color-selection-bg: #fbf1df;
+  --brand-mark-upper: #9b5630;
+  --brand-mark-middle: #b57936;
+  --brand-mark-lower: #7a8060;
+  --diff-hunk-bg: #f1e2c8;
+  --diff-hunk-text: #79552b;
+}
+
+:root[data-theme='retro'][data-color-mode='dark'] {
+  --color-bg: #1d1813;
+  --color-surface: #261f19;
+  --color-surface-sunken: #211a15;
+  --color-border: #3b3026;
+  --color-border-strong: #534333;
+  --color-text: #eee4d4;
+  --color-text-muted: #b5a895;
+  --color-text-faint: #a19483;
+  --color-hover-bg: #332920;
+  --color-accent: #e0a15a;
+  --color-accent-hover: #e8b06e;
+  --color-accent-active: #efbd82;
+  --color-accent-text: #21150b;
+  --color-focus: #e0a15a;
+  --color-selection-bg: #38291a;
+  --brand-mark-upper: #e09b67;
+  --brand-mark-middle: #d6aa64;
+  --brand-mark-lower: #9fab7a;
+  --diff-hunk-bg: #43311f;
+  --diff-hunk-text: #ebc890;
+}
+
+:root[data-theme='violet'][data-color-mode='light'] {
+  --color-bg: #f6f3fa;
+  --color-surface: #fdfbff;
+  --color-surface-sunken: #eee9f4;
+  --color-border: #e0d8ea;
+  --color-border-strong: #c7b9d7;
+  --color-text: #2d2734;
+  --color-text-muted: #62586d;
+  --color-text-faint: #6e627a;
+  --color-hover-bg: #eae3f1;
+  --color-accent: #674399;
+  --color-accent-hover: #573982;
+  --color-accent-active: #49306d;
+  --color-focus: #674399;
+  --color-selection-bg: #f6effb;
+  --brand-mark-upper: #7652a7;
+  --brand-mark-middle: #8b69ae;
+  --brand-mark-lower: #5a8694;
+  --diff-hunk-bg: #ece4f4;
+  --diff-hunk-text: #684d85;
+}
+
+:root[data-theme='violet'][data-color-mode='dark'] {
+  --color-bg: #18151f;
+  --color-surface: #201b29;
+  --color-surface-sunken: #1b1723;
+  --color-border: #332b40;
+  --color-border-strong: #493b5b;
+  --color-text: #ebe6f0;
+  --color-text-muted: #ada3b8;
+  --color-text-faint: #998ea4;
+  --color-hover-bg: #2b2436;
+  --color-accent: #b49bde;
+  --color-accent-hover: #c0aae5;
+  --color-accent-active: #ccb9eb;
+  --color-accent-text: #1b1226;
+  --color-focus: #b49bde;
+  --color-selection-bg: #382c4a;
+  --brand-mark-upper: #c1a5ea;
+  --brand-mark-middle: #ac91cf;
+  --brand-mark-lower: #79a8b7;
+  --diff-hunk-bg: #382c4d;
+  --diff-hunk-text: #d1baf0;
 }

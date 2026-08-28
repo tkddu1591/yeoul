@@ -13,9 +13,43 @@ function parseTokens(block: string): Map<string, string> {
   return map
 }
 
-const darkIndex = css.indexOf(":root[data-theme='dark']")
+const darkIndex = css.indexOf(":root[data-color-mode='dark']")
 const lightTokens = parseTokens(css.slice(0, darkIndex))
-const darkTokens = new Map([...lightTokens, ...parseTokens(css.slice(darkIndex))])
+
+function parseSelectorTokens(selector: string): Map<string, string> {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const block = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? ''
+  return parseTokens(block)
+}
+
+const modeTokens = {
+  light: new Map(lightTokens),
+  dark: new Map([
+    ...lightTokens,
+    ...parseSelectorTokens(":root[data-color-mode='dark']"),
+  ]),
+}
+
+const appearances = [
+  ['여울 라이트', 'yeoul', 'light'],
+  ['여울 다크', 'yeoul', 'dark'],
+  ['블루 라이트', 'blue', 'light'],
+  ['블루 다크', 'blue', 'dark'],
+  ['숲 라이트', 'forest', 'light'],
+  ['숲 다크', 'forest', 'dark'],
+  ['레트로 라이트', 'retro', 'light'],
+  ['레트로 다크', 'retro', 'dark'],
+  ['보랏빛 라이트', 'violet', 'light'],
+  ['보랏빛 다크', 'violet', 'dark'],
+] as const
+
+const appearanceTokens = appearances.map(([label, theme, mode]) => [
+  label,
+  new Map([
+    ...modeTokens[mode],
+    ...parseSelectorTokens(`:root[data-theme='${theme}'][data-color-mode='${mode}']`),
+  ]),
+] as const)
 
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {
@@ -69,10 +103,7 @@ const PAIRS: Array<[string, string, number]> = [
   ['--diff-hunk-text', '--diff-hunk-bg', 4.5],
 ]
 
-describe.each([
-  ['라이트', lightTokens],
-  ['다크', darkTokens],
-] as const)('%s 테마 토큰 대비 (WCAG)', (_theme, tokens) => {
+describe.each(appearanceTokens)('%s 테마 토큰 대비 (WCAG)', (_theme, tokens) => {
   it.each(PAIRS)('%s / %s ≥ %s:1', (foreground, background, minimum) => {
     const fg = tokens.get(foreground)
     const bg = tokens.get(background)
@@ -94,23 +125,23 @@ describe.each([
  */
 describe('부팅 창 배경색 (main/index.ts) ↔ --color-bg 토큰', () => {
   const mainSource = readFileSync(join(__dirname, '../src/main/index.ts'), 'utf8')
-  const declaration = /const APP_BACKGROUND = \{([^}]*)\}/.exec(mainSource)?.[1]
+  const declaration = /const APP_BACKGROUND = \{([\s\S]*?)\n\} as const/.exec(mainSource)?.[1]
   const appBackground = new Map(
-    [...(declaration ?? '').matchAll(/(light|dark):\s*'(#[0-9a-fA-F]{6})'/g)].map((m) => [
-      m[1]!,
-      m[2]!.toLowerCase(),
-    ]),
+    [...(declaration ?? '').matchAll(/(\w+):\s*\{\s*light:\s*'(#[0-9a-fA-F]{6})',\s*dark:\s*'(#[0-9a-fA-F]{6})'/g)].flatMap(
+      (match) => [
+        [`${match[1]}-light`, match[2]!.toLowerCase()] as const,
+        [`${match[1]}-dark`, match[3]!.toLowerCase()] as const,
+      ],
+    ),
   )
 
   it('APP_BACKGROUND 선언을 실제로 찾아냈다 (이 테스트가 조용히 무력화되지 않게)', () => {
     expect(declaration, 'main/index.ts에서 APP_BACKGROUND 선언을 못 찾았다').toBeDefined()
-    expect([...appBackground.keys()].sort()).toEqual(['dark', 'light'])
+    expect(appBackground.size).toBe(10)
   })
 
-  it.each([
-    ['light', lightTokens],
-    ['dark', darkTokens],
-  ] as const)('%s — APP_BACKGROUND가 그 테마의 --color-bg와 같다', (theme, tokens) => {
-    expect(appBackground.get(theme)).toBe(tokens.get('--color-bg')!.toLowerCase())
+  it.each(appearances)('%s — APP_BACKGROUND가 그 테마의 --color-bg와 같다', (label, theme, mode) => {
+    const tokens = appearanceTokens.find(([candidate]) => candidate === label)![1]
+    expect(appBackground.get(`${theme}-${mode}`)).toBe(tokens.get('--color-bg')!.toLowerCase())
   })
 })

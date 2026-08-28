@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { suggestCommitMessage, type PushPreview, type RepositoryStateKind } from '@git-gui/domain'
-import type { TabInfo } from '@git-gui/ipc-contract'
+import type { Appearance, TabInfo } from '@git-gui/ipc-contract'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
 import { BranchesPanel } from './components/BranchesPanel'
@@ -66,7 +66,7 @@ import {
 } from './ui/settings/worktree-select-action'
 import { loadAutoFetch, saveAutoFetch } from './ui/settings/sync-settings'
 import { NOTICE_TTL_MS, useRepositoryStore } from './store/repository-store'
-import { applyTheme, initTheme, type Theme } from './ui/theme'
+import { appAppearance } from './ui/appearance'
 import { T } from './terms'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -106,11 +106,11 @@ export function App() {
   const searchHistory = useRepositoryStore((s) => s.searchHistory)
 
   // 첫 렌더에서 문서에 테마를 새긴다 — 저장값 우선, 없으면 시스템 설정 (⑥)
-  const [theme, setTheme] = useState<Theme>(() => initTheme())
+  const [appearance, setAppearance] = useState<Appearance>(() => appAppearance.initial.get())
   // 전환 UI는 설정 모달 [테마] 카테고리로 이관 (E7d ⑦ — 헤더 단순화)
-  const changeTheme = (next: Theme) => {
-    applyTheme(next)
-    setTheme(next)
+  const changeAppearance = (next: Appearance) => {
+    appAppearance.selection.apply(next)
+    setAppearance(next)
   }
 
   // 새 실험 공간 다이얼로그 — fromHash가 있으면 우클릭한 저장 시점에서 갈라진다
@@ -445,7 +445,7 @@ export function App() {
   // 비교를 상태마다 두면 새 다이얼로그가 늘 때 빠뜨린다 — 비교는 하나, 목록만 는다.
   //
   // 여기 없는 것들은 **저장소에 안 매였다고 판단한 것**이다(전수):
-  // - leftTab·leftCollapsed·rightCollapsed·rightWidth·dockOpen/dockHeight·theme — 뷰 선호.
+  // - leftTab·leftCollapsed·rightCollapsed·rightWidth·dockOpen/dockHeight·appearance — 뷰 선호.
   //   저장소를 바꿨다고 보던 탭·접힘·폭이 리셋되면 그게 더 놀랍다
   // - settingsOpen·worktreeSelectAction·autoFetch·home — 앱 전역 설정
   // - tokenPrompt — GitHub 토큰은 **계정 인증**이라 저장소 무관하다(hosting().connect.token은
@@ -957,17 +957,13 @@ export function App() {
       </header>
       <SettingsDialog
         isOpen={settingsOpen}
-        theme={theme}
-        onChangeTheme={changeTheme}
-        worktreeSelectAction={worktreeSelectAction}
+        appearance={appearance}
+        onChangeAppearance={changeAppearance}
+        preferences={{ worktreeSelectAction, pullMode: store.pullMode, autoFetch }}
         onChangeWorktreeSelectAction={changeWorktreeSelectAction}
-        pullMode={store.pullMode}
         onChangePullMode={(mode) => store.setPullMode(mode)}
-        autoFetch={autoFetch}
         onChangeAutoFetch={changeAutoFetch}
-        remotes={store.remotes}
-        busy={store.busy}
-        error={store.error}
+        remote={{ items: store.remotes, busy: store.busy, error: store.error }}
         onAddRemote={(name, url) => store.remote.add(name, url)}
         onRemoveRemote={(name) => void store.remote.remove(name)}
         onRevealDiagnostics={() => void window.windowApi.revealDiagnostics()}
@@ -1572,7 +1568,7 @@ export function App() {
           >
             <TerminalDock
               repoPath={store.repoPath}
-              theme={theme}
+              appearance={appearance}
               activeWorktree={activeWorktree}
               open={dockOpen}
               height={dockHeight}

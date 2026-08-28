@@ -4,9 +4,9 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { silentExitNotice } from './silent-exit'
 import { nextTabNumber } from './tab-number'
-import { terminalPalette } from './terminal-theme'
+import { terminalAppearance } from './terminal-theme'
 import type { Dispatch, SetStateAction } from 'react'
-import type { Theme } from '../theme'
+import type { Appearance } from '@git-gui/ipc-contract'
 
 export interface TerminalTab {
   sessionId: string
@@ -30,7 +30,7 @@ interface SessionView {
 /** 액션이 렌더 클로저 대신 읽는 최신 스냅숏 — 훅이 매 렌더 미러한다 (E14c 참조 안정화) */
 interface LatestSnapshot {
   repoPath: string | null
-  theme: Theme
+  appearance: Appearance
   tabs: TerminalTab[]
   activeId: string | null
 }
@@ -61,7 +61,7 @@ function stripIpcPrefix(message: string): string {
  * 참조를 유지하므로 소비자(TerminalDock) 이펙트의 deps에 정직하게 넣어도 재실행을 만들지
  * 않는다 — E14b가 남긴 exhaustive-deps 억제 5곳과, `[]`로 굳은 클로저가 refitActive를
  * 항상 activeId=null로 부르던 잠복 버그(사이드 접기 refit 불능, E12부터)의 공통 해법이다.
- * 렌더에 묶인 값(repoPath·theme·tabs·activeId)은 클로저가 아니라 `latest` 스냅숏으로 읽는다
+ * 렌더에 묶인 값(repoPath·appearance·tabs·activeId)은 클로저가 아니라 `latest` 스냅숏으로 읽는다
  * (훅이 매 렌더 이펙트에서 미러 — 액션은 이벤트·이펙트에서만 불리므로 미러가 항상 앞선다).
  * useMemo/useCallback 없이 참조가 안정되는 구조라 지침(성능 훅 지양)과도 어긋나지 않는다
  */
@@ -144,7 +144,7 @@ function createTerminalCore(initial: LatestSnapshot, set: CoreSetters) {
    * 필요가 없다(오히려 "다른 그룹의 번호가 여기 붙어온다"는 착시를 만들었다)
    */
   const create = async (options?: { cwd?: string; label?: string }) => {
-    const { repoPath, theme } = latest()
+    const { repoPath, appearance } = latest()
     if (repoPath === null) return
     try {
       const { sessionId } = await window.terminalApi.create(repoPath, options?.cwd)
@@ -152,7 +152,7 @@ function createTerminalCore(initial: LatestSnapshot, set: CoreSetters) {
         fontSize: 12,
         fontFamily: TERMINAL_FONT_FAMILY,
         lineHeight: 1.4,
-        theme: terminalPalette(theme),
+        theme: terminalAppearance.palette.get(appearance),
         scrollback: 1000,
       })
       const fit = new FitAddon()
@@ -297,9 +297,9 @@ function createTerminalCore(initial: LatestSnapshot, set: CoreSetters) {
  * 터미널 세션 로직 (E7b) — 세션 생성·xterm 인스턴스 수명·push 라우팅을 소유한다.
  * TerminalDock(프레젠테이션)은 이 훅의 값·콜백만 렌더한다 (레이어 분리).
  * E14c — 액션은 createTerminalCore가 1회만 만들어 렌더 간 참조가 안정적이다: 소비자 이펙트가
- * `sessions.refitActive` 등을 deps에 정직하게 넣을 수 있다(넣어도 재실행 없음)
+ * `sessions.view.refit` 등을 deps에 정직하게 넣을 수 있다(넣어도 재실행 없음)
  */
-export function useTerminalSessions(repoPath: string | null, theme: Theme) {
+export function useTerminalSessions(repoPath: string | null, appearance: Appearance) {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -307,7 +307,10 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   // 소유한다(useState에 담아 필드를 고쳐 쓰면 immutability, ref를 렌더 중 넘기면 refs 규칙
   // 위반 — 둘 다 실측 lint 에러라 모듈 클로저 소유로 정리했다. createTerminalCore 주석)
   const [core] = useState(() =>
-    createTerminalCore({ repoPath, theme, tabs: [], activeId: null }, { setTabs, setActiveId, setError }),
+    createTerminalCore(
+      { repoPath, appearance, tabs: [], activeId: null },
+      { setTabs, setActiveId, setError },
+    ),
   )
 
   // 최신 스냅숏 미러(매 렌더, deps 없음) — 액션은 이벤트·이펙트에서만 불리고, 이 이펙트는 훅
@@ -315,7 +318,7 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   // 항상 그 커밋의 값임이 보장된다. 유일한 예외인 attach(ref 콜백, 이펙트보다 앞선 커밋 단계)는
   // 스냅숏을 읽지 않는다(views와 인자 sessionId만 쓴다)
   useEffect(() => {
-    core.syncLatest({ repoPath, theme, tabs, activeId })
+    core.syncLatest({ repoPath, appearance, tabs, activeId })
   })
 
   // push 구독 — core가 안정 참조라 실질 마운트 1회다
@@ -331,20 +334,14 @@ export function useTerminalSessions(repoPath: string | null, theme: Theme) {
   // 테마 전환 시 열린 세션 전부 즉시 교체 — options.theme는 "객체 재할당"이어야 반영된다 (실측 3)
   useEffect(() => {
     for (const view of core.views.values()) {
-      view.terminal.options.theme = { ...terminalPalette(theme) }
+      view.terminal.options.theme = { ...terminalAppearance.palette.get(appearance) }
     }
-  }, [core, theme])
+  }, [core, appearance])
 
   return {
-    tabs,
-    activeId,
-    error,
-    create: core.create,
-    close: core.close,
-    select: core.select,
-    activateGroup: core.activateGroup,
-    closeGroup: core.closeGroup,
-    attach: core.attach,
-    refitActive: core.refitActive,
+    data: { tabs, activeId, error },
+    session: { create: core.create, close: core.close, select: core.select },
+    group: { activate: core.activateGroup, close: core.closeGroup },
+    view: { attach: core.attach, refit: core.refitActive },
   }
 }

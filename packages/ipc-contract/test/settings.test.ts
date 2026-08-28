@@ -4,12 +4,18 @@ import { sanitizePersistedSettings, sanitizeSettings, splitSettings } from '../s
 describe('sanitizeSettings', () => {
   it('알려진 필드만, 올바른 타입만 통과시킨다', () => {
     expect(
-      sanitizeSettings({ theme: 'dark', rightWidth: 420, evil: 'x', __proto__: { a: 1 } }),
-    ).toEqual({ theme: 'dark', rightWidth: 420 })
+      sanitizeSettings({
+        colorMode: 'dark',
+        colorTheme: 'retro',
+        rightWidth: 420,
+        evil: 'x',
+        __proto__: { a: 1 },
+      }),
+    ).toEqual({ colorMode: 'dark', colorTheme: 'retro', rightWidth: 420 })
   })
 
   it('잘못된 값은 조용히 버린다 — 설정은 전부 선택적이다', () => {
-    expect(sanitizeSettings({ theme: 'sepia', rightWidth: 'wide' })).toEqual({})
+    expect(sanitizeSettings({ colorMode: 'sepia', colorTheme: 'neon', rightWidth: 'wide' })).toEqual({})
     expect(sanitizeSettings({ rightWidth: NaN })).toEqual({})
   })
 
@@ -100,10 +106,19 @@ describe('sanitizePersistedSettings', () => {
   it('renderer 필드에 더해 hosting.github(token·login)을 통과시킨다', () => {
     expect(
       sanitizePersistedSettings({
-        theme: 'dark',
+        colorMode: 'dark',
+        colorTheme: 'forest',
         hosting: { github: { token: 'enc-base64', login: 'octocat', evil: 'x' } },
       }),
-    ).toEqual({ theme: 'dark', hosting: { github: { token: 'enc-base64', login: 'octocat' } } })
+    ).toEqual({
+      colorMode: 'dark',
+      colorTheme: 'forest',
+      hosting: { github: { token: 'enc-base64', login: 'octocat' } },
+    })
+  })
+
+  it('옛 theme 필드는 colorMode로 마이그레이션한다', () => {
+    expect(sanitizePersistedSettings({ theme: 'dark' })).toEqual({ colorMode: 'dark' })
   })
 
   it('hosting이 잘못된 형태면 조용히 버린다', () => {
@@ -113,8 +128,8 @@ describe('sanitizePersistedSettings', () => {
   })
 
   it('sanitizeSettings(renderer 표면)는 hosting을 걷어낸다 — 토큰은 renderer로 가지 않는다', () => {
-    expect(sanitizeSettings({ theme: 'light', hosting: { github: { token: 'enc' } } })).toEqual({
-      theme: 'light',
+    expect(sanitizeSettings({ colorMode: 'light', hosting: { github: { token: 'enc' } } })).toEqual({
+      colorMode: 'light',
     })
   })
 })
@@ -239,10 +254,10 @@ describe('sanitizePersistedSettings의 windows 방어 (E15c 형식)', () => {
   it('windows는 renderer 표면이 아니다 — sanitizeSettings가 걷어낸다', () => {
     expect(
       sanitizeSettings({
-        theme: 'dark',
+        colorMode: 'dark',
         windows: [{ tabs: [{ repoPath: '/a' }], activeTab: 0, layout: {} }],
       }),
-    ).toEqual({ theme: 'dark' })
+    ).toEqual({ colorMode: 'dark' })
   })
 })
 
@@ -327,14 +342,18 @@ describe('splitSettings — 창별/앱공용 분리 (E15b)', () => {
   })
 
   it('앱 공용 필드는 app으로 간다', () => {
-    const { app, layout } = splitSettings({ theme: 'dark', pullMode: 'rebase' })
-    expect(app).toEqual({ theme: 'dark', pullMode: 'rebase' })
+    const { app, layout } = splitSettings({
+      colorMode: 'dark',
+      colorTheme: 'violet',
+      pullMode: 'rebase',
+    })
+    expect(app).toEqual({ colorMode: 'dark', colorTheme: 'violet', pullMode: 'rebase' })
     expect(layout).toEqual({})
   })
 
   it('한 partial에 섞여 와도 각각 제 자리로 간다 — 렌더러가 갈라 보낼 의무가 없다', () => {
-    const { app, layout } = splitSettings({ theme: 'light', rightWidth: 300 })
-    expect(app).toEqual({ theme: 'light' })
+    const { app, layout } = splitSettings({ colorMode: 'light', rightWidth: 300 })
+    expect(app).toEqual({ colorMode: 'light' })
     expect(layout).toEqual({ rightWidth: 300 })
   })
 

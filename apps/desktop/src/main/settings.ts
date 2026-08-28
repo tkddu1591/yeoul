@@ -39,11 +39,14 @@ function save(next: PersistedSettings): void {
   writeFileSync(settingsPath(), JSON.stringify(next))
 }
 
-/** 저장된 테마 — 부팅 창 배경색 결정에 쓴다(index.ts, E13 흰 화면 제거). GitHub 토큰과 달리
- * 이미 renderer 표면 필드라(sanitizeSettings 대상) 노출 범위를 넓히는 게 아니다 — theme 하나만
- * 돌려주는 가장 좁은 형태로 export한다 */
-export function readTheme(): 'light' | 'dark' | undefined {
-  return current().theme
+/** 부팅 창 배경색 결정에 필요한 외형 설정만 main에 공개한다. */
+export const appSettings = {
+  appearance: {
+    get() {
+      const { colorMode, colorTheme } = current()
+      return { colorMode, colorTheme }
+    },
+  },
 }
 
 /**

@@ -23,10 +23,8 @@ import {
   WINDOW_API_KEY,
   WINDOW_CHANNELS,
 } from '@git-gui/ipc-contract'
-// E13 — 부팅 흰 화면 3단계가 쓰는 순수 함수. renderer의 App이 첫 렌더에서 쓰는 것과 같은
-// 판정(resolveInitialTheme)을 preload에서도 그대로 재사용한다(부작용 없는 순수 함수라 여기
-// 임포트해도 안전 — theme.ts 참조)
-import { resolveInitialTheme } from '../renderer/src/ui/theme'
+// E13 — 부팅 흰 화면 3단계가 쓰는 순수 판정을 preload와 renderer가 shared에서 함께 쓴다.
+import { appearancePreference } from '../shared/appearance'
 
 const api: GitApi = {
   jobs: {
@@ -217,11 +215,11 @@ contextBridge.exposeInMainWorld(HOSTING_API_KEY, hostingApi)
 const initialSettings = ipcRenderer.sendSync(SETTINGS_CHANNELS.getSync) as AppSettings
 
 // E13 — 값을 읽어두는 것만으론 부족했다(위 주석의 "깜빡임이 없다"는 값이 준비된다는 뜻이지
-// 화면에 반영된다는 뜻이 아니었다 — 실제 반영은 React 첫 렌더의 initTheme(theme.ts)이 했는데,
+// 화면에 반영된다는 뜻이 아니었다 — 실제 반영은 React 첫 렌더의 외형 초기화가 했는데,
 // 그때는 이미 첫 페인트가 지나 있을 수 있다). 여기서 문서 루트에 곧장 새긴다 — preload는 페이지
 // 스크립트(React 번들)보다 먼저 실행되고 CSP 대상도 아니라, tokens.css의
-// `:root[data-theme='dark']` 오버라이드가 React가 뜨기도 전부터 걸린다. initTheme()은 그대로
-// 두되(React state 초기값 계산이 여전히 필요) 같은 값을 다시 쓸 뿐이라 무해하다.
+// 모드·테마 오버라이드가 React가 뜨기도 전부터 걸린다. renderer도 React state 초기값 계산을
+// 위해 같은 값을 다시 쓰므로 무해하다.
 //
 // ⚠️ 실측: 샌드박스 preload는 이 시점에 document.documentElement가 아직 null이다(이 줄을
 // document.documentElement.dataset = ...로 바로 쓰면 TypeError로 preload 전체가 죽고,
@@ -231,10 +229,12 @@ const initialSettings = ipcRenderer.sendSync(SETTINGS_CHANNELS.getSync) as AppSe
 // (HTML 표준 순서: interactive 진입 → readystatechange 발화 → defer/module 스크립트 실행 →
 // DOMContentLoaded) — 그래서 이 이벤트를 기다렸다가 새긴다
 function paintInitialTheme(): void {
-  document.documentElement.dataset.theme = resolveInitialTheme(
-    initialSettings.theme ?? null,
+  const appearance = appearancePreference.initial.get(
+    initialSettings,
     window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
+  document.documentElement.dataset.colorMode = appearance.mode
+  document.documentElement.dataset.theme = appearance.theme
 }
 if (document.readyState === 'loading') {
   document.addEventListener(
