@@ -10,17 +10,26 @@
   color: var(--color-text);
 }
 
-.repo-switcher__active-repository,
-.repo-switcher__repo-path-alias {
+.repo-switcher__workspace-repository {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: var(--space-1);
   overflow: hidden;
   color: var(--color-accent);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.repo-switcher__repo-path-alias {
+.repo-switcher__workspace-repository > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-switcher__test-path {
   display: none;
 }
 .repo-switcher__popover {

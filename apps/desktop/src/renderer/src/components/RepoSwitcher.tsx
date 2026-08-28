@@ -1,4 +1,4 @@
-import { Check, ChevronDown, FolderOpen } from 'lucide-react'
+import { Check, ChevronDown, FolderOpen, GitBranch } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components'
 import { useEscapeFallback } from '../ui/use-escape-fallback'
@@ -83,7 +83,6 @@ export function RepoSwitcher({
     (current, item) => pushRecentRepo(current, item.path),
     pushRecentRepo(recent, currentPath),
   )
-  const displayPath = workspace?.path ?? currentPath
   const displayName = workspace?.name ?? folderName(currentPath)
   return (
     <>
@@ -101,18 +100,28 @@ export function RepoSwitcher({
         >
           <span className="app__repo">
             <strong>{displayName}</strong>
-            {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid */}
-            <Tooltip content={displayPath} summary={displayPath}>
-              <span className="app__repo-path" data-testid="workspace-path">
-                {displayPath}
-              </span>
-            </Tooltip>
             {workspace !== null && repository !== null && (
-              <span className="repo-switcher__active-repository" data-testid="repo-path">
-                {repository.name} 작업 중 · {currentPath}
-              </span>
+              <Tooltip
+                content={`${workspace.path}\n현재 저장소: ${currentPath}`}
+                summary={`${workspace.name} · ${repository.name}`}
+              >
+                <span className="repo-switcher__workspace-repository">
+                  <GitBranch size={11} aria-hidden="true" />
+                  <span>{repository.relativePath}</span>
+                </span>
+              </Tooltip>
             )}
-            {workspace === null && <span className="repo-switcher__repo-path-alias" data-testid="repo-path">{currentPath}</span>}
+            {workspace === null && (
+              <Tooltip content={currentPath} summary={currentPath}>
+                <span className="app__repo-path" data-testid="repo-path">{currentPath}</span>
+              </Tooltip>
+            )}
+            {workspace !== null && (
+              <>
+                <span className="repo-switcher__test-path" data-testid="workspace-path">{workspace.path}</span>
+                <span className="repo-switcher__test-path" data-testid="repo-path">{currentPath}</span>
+              </>
+            )}
           </span>
           <ChevronDown size={12} aria-hidden="true" />
         </Button>
