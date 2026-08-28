@@ -52,6 +52,10 @@ import {
   onRecentReposChanged,
   saveRecentRepos,
 } from '../ui/settings/recent-repos-settings'
+import {
+  workspaceChangeCommand,
+  type WorkspaceChangeMoveRequest,
+} from './workspace-change-command'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
@@ -246,6 +250,10 @@ interface RepositoryStore {
   shelfDrop(ref: string): Promise<void>
   stage(paths: string[]): Promise<void>
   unstage(paths: string[]): Promise<void>
+  workspaceChanges: {
+    /** 여러 저장소의 변경을 차례로 옮긴 뒤 사용자가 원래 보던 저장소로 돌아온다. */
+    move(request: WorkspaceChangeMoveRequest): Promise<void>
+  }
   hunk: {
     stage(request: HunkStageRequest): Promise<void>
     unstage(request: HunkStageRequest): Promise<void>
@@ -963,6 +971,37 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       await git().changes.unstage(repoPath, paths)
       set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
     })
+  },
+
+  workspaceChanges: {
+    async move(request) {
+      const originalPath = get().repoPath
+      let operationError: string | null = null
+
+      for (const group of request.groups) {
+        const paths = workspaceChangeCommand.path.toList(group.changes, request.target)
+        if (paths.length === 0) continue
+        if (get().repoPath !== group.repository.path) {
+          const opened = await get().openRepository(group.repository.path)
+          if (!opened || get().repoPath !== group.repository.path) {
+            operationError = get().error ?? `${group.repository.name} 저장소로 전환하지 못했어요.`
+            break
+          }
+        }
+        if (request.target === 'staged') await get().stage(paths)
+        else await get().unstage(paths)
+        if (get().error !== null) {
+          operationError = get().error
+          break
+        }
+      }
+
+      if (originalPath !== null && get().repoPath !== originalPath) {
+        const restored = await get().openRepository(originalPath)
+        if (!restored && operationError === null) operationError = get().error
+      }
+      if (operationError !== null) set({ error: operationError })
+    },
   },
 
   hunk: {

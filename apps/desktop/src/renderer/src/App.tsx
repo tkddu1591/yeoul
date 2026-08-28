@@ -1241,18 +1241,11 @@ export function App() {
                   if (findScope === 'diff') setFindScope(null)
                   void runInWorkspaceRepository(repository, () => store.selectFile(selected))
                 }}
-                onStage={(repository, change) => {
-                  void runInWorkspaceRepository(repository, () => store.stage([change.path]))
+                onMove={(request) =>
+                  store.workspaceChanges
+                    .move(request)
                     .then(() => workspaceOverview.query.refresh(store.workspace))
-                }}
-                onUnstage={(repository, change) => {
-                  const paths =
-                    change.staged === 'renamed' && change.origPath !== null
-                      ? [change.path, change.origPath]
-                      : [change.path]
-                  void runInWorkspaceRepository(repository, () => store.unstage(paths))
-                    .then(() => workspaceOverview.query.refresh(store.workspace))
-                }}
+                }
               />
               <CommitForm
                 stagedCount={stagedCount}

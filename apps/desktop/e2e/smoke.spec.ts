@@ -157,6 +157,20 @@ test('멀티레포 워크스페이스 — 별도 탐색기 없이 기존 탭과 
     await expect(window.getByTestId('workspace-changes-front')).toContainText('client.txt')
     await expect(window.getByTestId('workspace-history-panel')).toContainText('back')
     await expect(window.getByTestId('workspace-history-panel')).toContainText('front')
+
+    // 레포별 일괄 올리기 — 작업 뒤에도 원래 보던 back 저장소로 돌아온다.
+    await window.getByTestId('workspace-stage-all-front').click()
+    await expect(window.getByTestId('workspace-changes-front')).toContainText('저장 예정')
+    await expect(window.getByTestId('repo-path')).toHaveText(backPath)
+
+    // 워크스페이스 전체 일괄 올리기·내리기 — 두 저장소를 순차 처리한다.
+    await window.getByTestId('workspace-stage-all').click()
+    await expect(window.getByTestId('workspace-changes-back')).toContainText('저장 예정')
+    await expect(window.getByTestId('workspace-stage-all')).toBeDisabled()
+    await window.getByTestId('workspace-unstage-all').click()
+    await expect(window.getByTestId('workspace-changes-back')).toContainText('변경사항')
+    await expect(window.getByTestId('workspace-changes-front')).toContainText('변경사항')
+    await expect(window.getByTestId('repo-path')).toHaveText(backPath)
     await window.screenshot({ path: 'test-results/workspace-multi-repo.png' })
 
     await window.getByTestId('left-tab-branches').click()

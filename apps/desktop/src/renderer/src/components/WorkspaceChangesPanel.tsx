@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { FileChange } from '@git-gui/domain'
 import type { WorkspaceRepository } from '@git-gui/ipc-contract'
 import type { SelectedFile } from '../store/repository-store'
+import type { WorkspaceChangeMoveRequest } from '../store/workspace-change-command'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
@@ -21,8 +22,7 @@ interface WorkspaceChangesPanelProps {
   onFindClose(): void
   onRefresh(): void
   onSelect(repository: WorkspaceRepository, selected: SelectedFile): void
-  onStage(repository: WorkspaceRepository, change: FileChange): void
-  onUnstage(repository: WorkspaceRepository, change: FileChange): void
+  onMove(request: WorkspaceChangeMoveRequest): Promise<void>
 }
 
 interface WorkspaceChangeRowProps {
@@ -100,14 +100,33 @@ export function WorkspaceChangesPanel({
   onFindClose,
   onRefresh,
   onSelect,
-  onStage,
-  onUnstage,
+  onMove,
 }: WorkspaceChangesPanelProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState('')
+  const [moving, setMoving] = useState(false)
   const normalizedQuery = findOpen ? query.trim().toLowerCase() : ''
   const repositories = workspaceView.overview?.repositories ?? []
   const total = repositories.reduce((count, item) => count + (item.status?.changes.length ?? 0), 0)
+  const workspaceUnstaged = repositories.flatMap(({ repository, status }) => {
+    const changes = status?.changes.filter((change) => change.unstaged !== null) ?? []
+    return changes.length === 0 ? [] : [{ repository, changes }]
+  })
+  const workspaceStaged = repositories.flatMap(({ repository, status }) => {
+    const changes = status?.changes.filter((change) => change.staged !== null) ?? []
+    return changes.length === 0 ? [] : [{ repository, changes }]
+  })
+  const interactionBusy = busy || moving
+
+  const moveChanges = async (request: WorkspaceChangeMoveRequest) => {
+    if (request.groups.length === 0) return
+    setMoving(true)
+    try {
+      await onMove(request)
+    } finally {
+      setMoving(false)
+    }
+  }
 
   const toggleRepository = (path: string) => {
     setCollapsed((current) => {
@@ -122,7 +141,7 @@ export function WorkspaceChangesPanel({
     <Panel
       title="변경"
       titleHint="workspace status"
-      pending={workspaceView.loading}
+      pending={workspaceView.loading || moving}
       testId="workspace-changes-panel"
       accessory={
         <>
@@ -152,21 +171,45 @@ export function WorkspaceChangesPanel({
           />
         )}
         {workspaceView.error !== null && <p className="workspace-changes__empty" role="alert">{workspaceView.error}</p>}
+        <div className="workspace-changes__toolbar" data-testid="workspace-changes-toolbar">
+          <span>워크스페이스 전체</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={interactionBusy || workspaceUnstaged.length === 0}
+            onPress={() => void moveChanges({ target: 'staged', groups: workspaceUnstaged })}
+            testId="workspace-stage-all"
+          >
+            <CirclePlus size={13} aria-hidden="true" /> 모두 올리기
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={interactionBusy || workspaceStaged.length === 0}
+            onPress={() => void moveChanges({ target: 'unstaged', groups: workspaceStaged })}
+            testId="workspace-unstage-all"
+          >
+            <CircleMinus size={13} aria-hidden="true" /> 모두 내리기
+          </Button>
+        </div>
         <div className="workspace-changes__scroll">
           {repositories.map(({ repository, status, error }) => {
             const repositoryMatches =
               normalizedQuery === '' ||
               repository.name.toLowerCase().includes(normalizedQuery) ||
               repository.relativePath.toLowerCase().includes(normalizedQuery)
+            const allChanges = status?.changes ?? []
             const changes =
-              status?.changes.filter(
+              allChanges.filter(
                 (change) => repositoryMatches || change.path.toLowerCase().includes(normalizedQuery),
-              ) ?? []
+              )
             if (!repositoryMatches && changes.length === 0) return null
             const current = repository.path === workspaceView.currentRepository?.path
             const repositoryCollapsed = collapsed.has(repository.path) && normalizedQuery === ''
             const unstaged = changes.filter((change) => change.unstaged !== null)
             const staged = changes.filter((change) => change.staged !== null)
+            const allUnstaged = allChanges.filter((change) => change.unstaged !== null)
+            const allStaged = allChanges.filter((change) => change.staged !== null)
             return (
               <section
                 className={`workspace-change-tree${current ? ' workspace-change-tree--current' : ''}`}
@@ -188,6 +231,36 @@ export function WorkspaceChangesPanel({
                     <strong>{repository.name}</strong>
                     <span>{repository.relativePath}</span>
                   </span>
+                  <span className="workspace-change-tree__actions">
+                    <Tooltip content={`${repository.name} 변경 모두 올리기`} summary="모두 올리기" describedBy={false}>
+                      <button
+                        type="button"
+                        disabled={interactionBusy || allUnstaged.length === 0}
+                        onClick={() => void moveChanges({
+                          target: 'staged',
+                          groups: [{ repository, changes: allUnstaged }],
+                        })}
+                        aria-label={`${repository.name} 변경 모두 올리기`}
+                        data-testid={`workspace-stage-all-${repository.relativePath}`}
+                      >
+                        <CirclePlus size={13} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content={`${repository.name} 변경 모두 내리기`} summary="모두 내리기" describedBy={false}>
+                      <button
+                        type="button"
+                        disabled={interactionBusy || allStaged.length === 0}
+                        onClick={() => void moveChanges({
+                          target: 'unstaged',
+                          groups: [{ repository, changes: allStaged }],
+                        })}
+                        aria-label={`${repository.name} 변경 모두 내리기`}
+                        data-testid={`workspace-unstage-all-${repository.relativePath}`}
+                      >
+                        <CircleMinus size={13} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                  </span>
                   <span className="workspace-change-tree__count">{changes.length}</span>
                   {current && <span className="workspace-change-tree__current">작업 중</span>}
                 </div>
@@ -206,9 +279,12 @@ export function WorkspaceChangesPanel({
                             staged={false}
                             current={current}
                             selected={current && selected?.staged === false && selected.change.path === change.path}
-                            busy={busy}
+                            busy={interactionBusy}
                             onSelect={() => onSelect(repository, { change, staged: false })}
-                            onMove={() => onStage(repository, change)}
+                            onMove={() => void moveChanges({
+                              target: 'staged',
+                              groups: [{ repository, changes: [change] }],
+                            })}
                           />
                         ))}
                         {staged.length > 0 && <p className="workspace-change-tree__group">저장 예정</p>}
@@ -220,9 +296,12 @@ export function WorkspaceChangesPanel({
                             staged
                             current={current}
                             selected={current && selected?.staged === true && selected.change.path === change.path}
-                            busy={busy}
+                            busy={interactionBusy}
                             onSelect={() => onSelect(repository, { change, staged: true })}
-                            onMove={() => onUnstage(repository, change)}
+                            onMove={() => void moveChanges({
+                              target: 'unstaged',
+                              groups: [{ repository, changes: [change] }],
+                            })}
                           />
                         ))}
                         {changes.length === 0 && <p className="workspace-changes__empty">깨끗해요.</p>}
