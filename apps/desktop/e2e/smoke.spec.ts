@@ -4161,11 +4161,10 @@ async function sampleCollapseFrames(
  *     지우면 `0s`가 되어 즉시 빨개진다 — reduced-motion 테스트의 대조군이기도 하다.
  * (b) 접는 동안 `.app__left`의 트랙 폭이 **처음도 0도 아닌 중간값**을 실제로 지난다.
  *
- * 표본 개수 기준(≥3)의 근거 — 리뷰어가 실측한 240ms 곡선은 3ms=366 · 37ms=311 · 70ms=185 ·
- * 103ms=90 · 137ms=39 · 170ms=13 · 204ms=1.9 · 237ms=0으로, 60Hz면 중간값 프레임이 13개쯤
- * 나온다. 3이면 프레임률이 4분의 1(≈15Hz)로 주저앉아도 견딘다. 반대로 전환이 없으면 중간값은
- * **구조적으로 0개**다(스타일 커밋 한 번에 366→0으로 끝나 그 사이 프레임이 존재하지 않는다) —
- * 즉 이 단언은 "느린 머신에서 흔들리는" 종류가 아니라 있고 없고가 갈리는 종류다.
+ * 중간값 표본은 한 개만 요구한다. macOS CI가 장시간 E2E 중 렌더링 프레임을 크게 건너뛰면
+ * 240ms 전환에서도 2개만 관측될 수 있기 때문이다. 전환 선언과 정확한 0.24s 지속 시간은 (a)에서
+ * 별도로 검증하므로, (b)는 실제 레이아웃이 시작값에서 끝값으로 즉시 점프하지 않았다는 증거 하나면
+ * 충분하다. 전환이 없으면 중간값은 구조적으로 0개다.
  */
 test('E13 후속 — 접기가 실제로 240ms 동안 중간값을 지난다 (애니메이션 회귀)', async () => {
   const repo = await createRepoWithChange()
@@ -4198,7 +4197,7 @@ test('E13 후속 — 접기가 실제로 240ms 동안 중간값을 지난다 (�
       middles.length,
       `중간값 프레임 수 (표본 ${samples.length}개, 시작 ${start}px, ` +
         `추이 ${samples.map((s) => Math.round(s.trackW)).join('→')})`,
-    ).toBeGreaterThanOrEqual(3)
+    ).toBeGreaterThanOrEqual(1)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
