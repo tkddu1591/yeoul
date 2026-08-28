@@ -5462,11 +5462,18 @@ test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', asyn
     // 창 B를 닫는다 — 수정 전에는 여기서 (이미 꺼져 있던) A의 감시가 되살아날 길도 사라진다
     await second.close()
 
-    // A의 저장소에 앱 밖에서 새 파일을 만든다. A의 감시가 살아 있으면 새로고침 없이 나타난다
-    await writeFile(join(repoA, 'watch-alive.txt'), '외부 변경\n')
-    await expect(first.getByTestId('file-unstaged-watch-alive.txt')).toBeVisible({
-      timeout: 15_000,
-    })
+    // A의 저장소에 앱 밖에서 새 파일을 만든다. A의 감시가 살아 있으면 새로고침 없이 나타난다.
+    // macOS fs.watch는 창 종료 직후의 단발 이벤트를 드물게 합칠 수 있다(CI와 로컬 반복에서
+    // 실측). 같은 파일을 다시 저장하면 산 watcher는 다음 이벤트에서 전체 status를 읽어 첫 변경까지
+    // 반영하고, 죽은 watcher는 몇 번을 써도 15초 동안 끝내 반응하지 않아 원래 회귀 검증은 유지된다.
+    let attempt = 0
+    await expect(async () => {
+      attempt += 1
+      await writeFile(join(repoA, 'watch-alive.txt'), `외부 변경 ${attempt}\n`)
+      await expect(first.getByTestId('file-unstaged-watch-alive.txt')).toBeVisible({
+        timeout: 1_000,
+      })
+    }).toPass({ timeout: 15_000, intervals: [100, 250, 500, 1_000] })
   } finally {
     await app.close()
     await rm(repoA, { recursive: true, force: true })

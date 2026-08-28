@@ -589,6 +589,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   pullDetail: null,
 
   async init() {
+    // 감시 구독은 앱 수명 1회 — watcher가 준비된 직후 도착하는 첫 이벤트도 놓치지 않도록
+    // 저장소 초기 조회보다 먼저 연결한다. 이벤트가 온 저장소가 지금 저장소일 때만 재조회한다.
+    git().repo.onChanged((changedPath) => {
+      if (get().repoPath === changedPath) void get().externalRefresh()
+    })
+    onRecentReposChanged((recentRepos) => set({ recentRepos }))
+    // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
+    windowApi().onFocused(() => {
+      if (get().repoPath !== null) void get().refresh()
+    })
     await runWrite(set, get, async () => {
       const [initial, workspace] = await Promise.all([
         git().repo.initialPath(),
@@ -596,6 +606,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       ])
       if (!initial) return
       const snapshot = await fetchSnapshot(initial, get().historyLimit)
+      // 화면을 먼저 보여주고 감시를 fire-and-forget하면, 느린 환경에서 사용자가 만든 첫 외부
+      // 변경이 watcher 준비 전에 지나가 영구히 누락된다. 준비 완료를 저장소 진입의 일부로 둔다.
+      await git().repo.watch(initial)
       set({
         repoPath: initial,
         workspace,
@@ -606,21 +619,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         hostingStatus: await hosting().status(initial),
         ...snapshot,
       })
-      void git().repo.watch(initial)
     })
     // 이 runWrite는 읽기 전용(상태 조회)이라 자기 꼬리 이벤트가 없다 — 시작 직후 도착하는 첫 감시
     // 이벤트까지 억제 창에 걸려 삼켜지지 않도록 초기화한다 (E7b: 실측 — 실제 앱 기동~외부 커밋
     // 간격이 800ms 억제 창보다 짧을 수 있어 재현됨)
     resetSuppression()
-    // 감시 구독은 앱 수명 1회 — 이벤트가 온 저장소가 지금 저장소일 때만 재조회한다 (E7b)
-    git().repo.onChanged((changedPath) => {
-      if (get().repoPath === changedPath) void get().externalRefresh()
-    })
-    onRecentReposChanged((recentRepos) => set({ recentRepos }))
-    // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
-    windowApi().onFocused(() => {
-      if (get().repoPath !== null) void get().refresh()
-    })
   },
 
   async openRepository(path) {
@@ -693,6 +696,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         get().workspace?.repositories.find((repository) =>
           snapshot.worktrees.some((worktree) => worktree.path === repository.path),
         ) ?? null
+      // 저장소가 화면에 나타나는 순간부터 외부 변경을 놓치지 않게 watcher 준비를 먼저 끝낸다.
+      await git().repo.watch(opened)
       set({
         repoPath: opened,
         workspaceRepository,
@@ -708,8 +713,6 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...snapshot,
       })
-      // 새 저장소로 감시 교체 (E7b) — 이전 저장소 감시는 main이 새 watch 호출에서 정리한다
-      void git().repo.watch(opened)
       // 최근 목록 갱신 — 성공한 뒤에만. 넘긴 경로가 아니라 main이 정규화한 저장소 루트를 넣는다
       // (하위 폴더를 골랐을 수 있다 — 이후 IPC에서 유효한 값은 이쪽뿐이다)
       const recentRepos = pushRecentRepo(get().recentRepos, opened)
@@ -1625,6 +1628,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const hostingStatus = await hosting().status(opened)
       set({ historyRef: null })
       const snapshot = await fetchSnapshot(opened, HISTORY_LIMIT)
+      // 워크트리 전환도 새 화면을 노출하기 전에 그 경로의 watcher를 준비한다.
+      await git().repo.watch(opened)
       set({
         repoPath: opened,
         historyLimit: HISTORY_LIMIT,
@@ -1634,7 +1639,6 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         ...CLEAR_SELECTIONS,
         ...snapshot,
       })
-      void git().repo.watch(opened)
     })
   },
 
