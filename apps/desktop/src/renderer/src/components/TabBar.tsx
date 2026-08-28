@@ -46,7 +46,7 @@ interface DragGesture {
  */
 export function TabBar({ tabs, onActivate, onClose, onAdd, onDragEnd }: TabBarProps) {
   // i번째 라벨이 i번째 탭의 것 — 동명 저장소는 구분되는 부모까지 붙는다 (tab-labels.ts)
-  const labels = tabLabels(tabs.map((tab) => tab.repoPath))
+  const labels = tabLabels(tabs.map((tab) => tab.workspacePath ?? tab.repoPath))
 
   const barRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragGesture | null>(null)

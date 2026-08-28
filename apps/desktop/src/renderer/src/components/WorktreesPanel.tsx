@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from 'react'
-import { MoreHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
+import type { WorkspaceRepository } from '@git-gui/ipc-contract'
 import { formatRelativeTime } from './relative-time'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
@@ -8,6 +9,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { useNow } from '../ui/use-now'
 import { shortenAbove, shortenBranch, sourceChip, uniqueNames } from './worktree-label'
 import { T } from '../terms'
+import type { WorkspaceOverviewView } from './workspace-overview-view'
 import './worktrees-panel.css'
 
 export type WorktreeAction =
@@ -26,6 +28,8 @@ export type WorktreeAction =
 
 interface WorktreesPanelProps {
   worktrees: WorktreeInfo[]
+  /** null이면 기존 단일 저장소 목록, 값이 있으면 저장소를 최상위 노드로 감싼다. */
+  workspaceView: WorkspaceOverviewView | null
   /** 앱이 지금 열고 있는 워크트리 경로 */
   currentPath: string | null
   /** 활성(터미널 대상) 워크트리 경로 */
@@ -38,11 +42,14 @@ interface WorktreesPanelProps {
   onHoverWorktree(path: string, headHash: string | null): void
   busy: boolean
   onAction(action: WorktreeAction): void
+  onRefreshWorkspace(): void
+  onOpenWorkspaceRepository(repository: WorkspaceRepository): void
 }
 
 /** 워크트리 탭 (E7c) — 목록·활성 지정(클릭)·우클릭 관리. 폴더 이름으로 표시, 경로는 흐리게 */
 export function WorktreesPanel({
   worktrees,
+  workspaceView,
   currentPath,
   activePath,
   home,
@@ -50,8 +57,11 @@ export function WorktreesPanel({
   onHoverWorktree,
   busy,
   onAction,
+  onRefreshWorkspace,
+  onOpenWorkspaceRepository,
 }: WorktreesPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; worktree: WorktreeInfo } | null>(null)
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   // E14b — 워크트리 행마다가 아니라 여기서 한 번만 구독한다 (행마다 부르면 워크트리 수만큼 구독자가 생긴다)
   const now = useNow()
 
@@ -129,6 +139,192 @@ export function WorktreesPanel({
       : worktree.branch !== null
         ? shortenBranch(worktree.branch, 28)
         : `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`
+
+  const toggleRepository = (key: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  if (workspaceView !== null) {
+    const repositoryOverviews = workspaceView.overview?.repositories ?? []
+    return (
+      <Panel
+        title={T.worktree}
+        titleHint="worktree"
+        testId="worktrees-panel"
+        pending={workspaceView.loading}
+      >
+        <div className="worktrees-panel">
+          <div className="worktrees-panel__workspace-toolbar">
+            <span>저장소별로 묶어 표시해요</span>
+            <button
+              type="button"
+              disabled={workspaceView.loading}
+              onClick={onRefreshWorkspace}
+              data-testid="workspace-worktrees-refresh"
+            >
+              <RefreshCw size={13} aria-hidden="true" /> 전체 다시 읽기
+            </button>
+          </div>
+          <div className="worktrees-panel__scroll" data-testid="worktrees-list">
+            {workspaceView.error !== null && (
+              <p className="worktrees-panel__workspace-error" role="alert">{workspaceView.error}</p>
+            )}
+            {repositoryOverviews.map((repositoryOverview) => {
+              const { repository, worktrees: repositoryWorktrees, error } = repositoryOverview
+              const items = repositoryWorktrees ?? []
+              const namesByPath = uniqueNames(items.map((worktree) => worktree.path))
+              const key = `workspace-worktrees:${repository.path}`
+              const repositoryCollapsed = collapsed.has(key)
+              const currentRepository = repository.path === workspaceView.currentRepository?.path
+              return (
+                <section
+                  className={`workspace-worktree-tree${currentRepository ? ' workspace-worktree-tree--current' : ''}`}
+                  key={repository.path}
+                  data-testid={`workspace-worktrees-${repository.relativePath}`}
+                >
+                  <div className="workspace-worktree-tree__repository">
+                    <button
+                      type="button"
+                      className="workspace-worktree-tree__toggle"
+                      aria-label={`${repository.name} ${repositoryCollapsed ? '펼치기' : '접기'}`}
+                      aria-expanded={!repositoryCollapsed}
+                      onClick={() => toggleRepository(key)}
+                    >
+                      {repositoryCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <FolderGit2 size={14} aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="workspace-worktree-tree__name"
+                      onClick={() => onOpenWorkspaceRepository(repository)}
+                    >
+                      <strong>{repository.name}</strong>
+                      <span>{repository.relativePath}</span>
+                    </button>
+                    <span className="workspace-worktree-tree__count">{items.length}</span>
+                    {currentRepository && <span className="workspace-worktree-tree__current">열림</span>}
+                  </div>
+                  {!repositoryCollapsed && (
+                    <div className="workspace-worktree-tree__children">
+                      {error !== null ? (
+                        <p className="worktrees-panel__workspace-error">
+                          이 저장소를 읽지 못했어요. {error}
+                        </p>
+                      ) : (
+                        items.map((worktree) => {
+                          const name = namesByPath.get(worktree.path) ?? folderName(worktree.path)
+                          const summary = worktree.summary
+                          const dirty =
+                            summary != null &&
+                            summary.staged + summary.unstaged + summary.untracked + summary.conflicted > 0
+                          return (
+                            <div className="worktree-row-shell" key={worktree.path}>
+                              <Tooltip content={worktree.path} summary={worktree.path}>
+                                <button
+                                  type="button"
+                                  className={`worktree-row workspace-worktree-tree__row${worktree.prunable ? ' worktree-row--gone' : ''}`}
+                                  onClick={(event) => {
+                                    if (!currentRepository) {
+                                      onOpenWorkspaceRepository(repository)
+                                      return
+                                    }
+                                    if (worktree.prunable) openMenu(event, worktree)
+                                    else onAction({ kind: 'select', path: worktree.path, label: name })
+                                  }}
+                                  onContextMenu={(event) => {
+                                    if (currentRepository) openMenu(event, worktree)
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (currentRepository) {
+                                      onHoverWorktree(worktree.path, worktree.headHash)
+                                    }
+                                  }}
+                                  data-testid={`workspace-worktree-${repository.relativePath}-${folderName(worktree.path)}`}
+                                >
+                                  <span className="worktree-row__glyph">
+                                    {worktree.path === currentPath ? '➤' : '⌂'}
+                                  </span>
+                                  <span className="workspace-worktree-tree__row-copy">
+                                    <span>
+                                      <strong>{branchLabel(worktree)}</strong>
+                                      {worktree.isMain && <em>본체</em>}
+                                    </span>
+                                    <span>{name}</span>
+                                  </span>
+                                  {summary != null && (
+                                    <span
+                                      className={`workspace-worktree-tree__status${dirty ? ' workspace-worktree-tree__status--dirty' : ''}`}
+                                    >
+                                      {dirty
+                                        ? [
+                                            summary.conflicted > 0 ? `충돌 ${summary.conflicted}` : null,
+                                            summary.staged > 0 ? `S ${summary.staged}` : null,
+                                            summary.unstaged > 0 ? `M ${summary.unstaged}` : null,
+                                            summary.untracked > 0 ? `? ${summary.untracked}` : null,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' · ')
+                                        : '깨끗함'}
+                                    </span>
+                                  )}
+                                </button>
+                              </Tooltip>
+                              {currentRepository && (
+                                <button
+                                  type="button"
+                                  className="worktree-row__menu"
+                                  aria-label={`${branchLabel(worktree)} 작업 메뉴`}
+                                  disabled={busy}
+                                  onClick={(event) => openMenu(event, worktree)}
+                                >
+                                  <MoreHorizontal size={16} aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                      {items.length === 0 && error === null && (
+                        <p className="worktrees-panel__workspace-error">워크트리가 없어요.</p>
+                      )}
+                      {currentRepository && error === null && (
+                        <button
+                          type="button"
+                          className="worktree-row worktree-row--add"
+                          onClick={() => onAction({ kind: 'add' })}
+                          data-testid="worktree-add"
+                        >
+                          ＋ 새 {T.worktree}…
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+            {repositoryOverviews.length === 0 && workspaceView.error === null && (
+              <p className="worktrees-panel__workspace-error">
+                {workspaceView.loading ? '저장소들을 확인하고 있어요…' : '보여줄 저장소가 없어요.'}
+              </p>
+            )}
+          </div>
+        </div>
+        {menu !== null && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={buildMenu(menu.worktree)}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </Panel>
+    )
+  }
 
   return (
     <Panel title={T.worktree} titleHint="worktree" testId="worktrees-panel">

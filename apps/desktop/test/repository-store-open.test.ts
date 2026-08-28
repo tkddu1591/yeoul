@@ -56,6 +56,19 @@ function makeGitApi() {
       unwatch: () => {},
       onChanged: () => () => {},
     },
+    workspace: {
+      select: async () => ({
+        path: '/workspace',
+        name: 'workspace',
+        repositories: [
+          { path: '/workspace/back', relativePath: 'back', name: 'back' },
+          { path: '/workspace/front', relativePath: 'front', name: 'front' },
+        ],
+      }),
+      initial: async () => null,
+      refresh: async () => null,
+      close: async () => {},
+    },
     history: { list: async () => [] },
     branches: { list: async () => [], overview: async () => [] },
     shelf: { list: async () => [] },
@@ -99,6 +112,17 @@ beforeEach(async () => {
 })
 
 describe('저장소를 바꾸면 옛 저장소에 매인 상태가 남지 않는다 (E15a)', () => {
+  it('껍데기 폴더를 고르면 하위 저장소를 워크스페이스로 열고 첫 저장소로 전환한다', async () => {
+    const store = mod.useRepositoryStore
+    store.setState({ repoPath: '/repo', workspace: null, workspaceRepository: null })
+
+    await store.getState().openRepository()
+
+    expect(store.getState().repoPath).toBe('/workspace/back')
+    expect(store.getState().workspace?.path).toBe('/workspace')
+    expect(store.getState().workspace?.repositories).toHaveLength(2)
+  })
+
   it('openRepository가 headInfos 캐시와 마지막 가져옴 시각을 비운다', async () => {
     const store = mod.useRepositoryStore
     store.setState({ repoPath: '/repo', headInfos: {}, lastFetchAt: null })

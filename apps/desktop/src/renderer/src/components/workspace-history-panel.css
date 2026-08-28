@@ -1,0 +1,115 @@
+.workspace-history {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.workspace-history__list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.workspace-history__scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.workspace-history__row {
+  height: 58px;
+}
+
+.workspace-history__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-history__item:hover:not(:disabled) {
+  background: var(--color-surface-sunken);
+}
+
+.workspace-history__item--selected {
+  background: var(--color-selection-bg);
+}
+
+.workspace-history__item:disabled {
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+.workspace-history__rail {
+  position: relative;
+  display: grid;
+  width: 18px;
+  align-self: stretch;
+  flex: none;
+  place-items: center;
+  color: var(--concept-commit);
+}
+
+.workspace-history__rail::before,
+.workspace-history__rail::after {
+  position: absolute;
+  left: 50%;
+  width: 1px;
+  height: calc(50% - 9px);
+  background: var(--color-border-strong);
+  content: '';
+}
+
+.workspace-history__rail::before { top: 0; }
+.workspace-history__rail::after { bottom: 0; }
+
+.workspace-history__body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-history__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.workspace-history__title strong {
+  overflow: hidden;
+  flex: 1;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-history__meta,
+.workspace-history__hash {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.workspace-history__hash {
+  flex: none;
+  font-family: var(--font-mono);
+}
+
+.workspace-history__empty {
+  padding: var(--space-4);
+  margin: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}

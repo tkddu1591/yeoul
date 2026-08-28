@@ -37,7 +37,13 @@ export interface WindowRegistry {
   removeWindow(windowId: number): void
   getWindow(windowId: number): WindowState | undefined
   /** 탭을 창에 더한다 — index는 생략 시 끝. 같은 탭을 두 창에 넣으면 throw(프로그래밍 오류다) */
-  addTab(windowId: number, tabId: number, repoPath: string | null, index?: number): void
+  addTab(
+    windowId: number,
+    tabId: number,
+    repoPath: string | null,
+    index?: number,
+    workspacePath?: string | null,
+  ): void
   /** 탭을 뗀다. 마지막 탭이었으면 창 항목도 지운다(창 닫힘과 동치) */
   removeTab(tabId: number): void
   setActiveTab(windowId: number, tabId: number): void
@@ -75,6 +81,8 @@ export interface WindowRegistry {
   isTabCrashed(tabId: number): boolean
   /** 탭이 갈아탄 저장소 — E15b setRepoPath의 후계 */
   setTabRepoPath(tabId: number, repoPath: string | null): void
+  /** 탭이 속한 멀티레포 워크스페이스. 저장소 전환과 별개로 유지된다. */
+  setTabWorkspacePath(tabId: number, workspacePath: string | null): void
   setLayout(windowId: number, patch: WindowLayout): void
   /** 탭 id → 그 탭이 사는 창 id */
   windowOfTab(tabId: number): number | undefined
@@ -84,12 +92,13 @@ export interface WindowRegistry {
   /** 이 저장소를 연 탭 — 모든 창을 훑는다. { windowId, tabId } 또는 undefined */
   findTabByRepoPath(repoPath: string): { windowId: number; tabId: number } | undefined
   getTabRepoPath(tabId: number): string | null | undefined
+  getTabWorkspacePath(tabId: number): string | null | undefined
   /** 등록 순서. 복원이 이 순서로 창을 만든다.
    *
    * ⚠️ 여기서만 `activeTab`이 **탭 id가 아니라 배열 인덱스**다 — id(webContents.id)는 재시작하면
    * 무의미해서 영속 경계에서 변환한다. 복원이 인덱스로 활성 탭을 고른다 */
   snapshot(): Array<{
-    tabs: Array<{ repoPath: string | null }>
+    tabs: Array<{ repoPath: string | null; workspacePath?: string }>
     activeTab: number
     layout: WindowLayout
   }>
@@ -109,7 +118,10 @@ export function createWindowRegistry(
   // 두 맵의 정합(탭이 정확히 한 창의 tabs에 있고 tabEntries에도 있다)은 addTab/removeTab/
   // removeWindow만 지나므로 거기서 지킨다 — 탭 검색·windowOfTab이 O(1)이 되는 대가다
   const windows = new Map<number, WindowState>()
-  const tabEntries = new Map<number, { windowId: number; repoPath: string | null; crashed: boolean }>()
+  const tabEntries = new Map<
+    number,
+    { windowId: number; repoPath: string | null; workspacePath: string | null; crashed: boolean }
+  >()
 
   /**
    * 활성 승계 — 떠나는 자리(fromIndex)에서 가장 가까운 오른쪽 후보, 없으면 가장 가까운 왼쪽
@@ -147,14 +159,14 @@ export function createWindowRegistry(
     getWindow(windowId) {
       return windows.get(windowId)
     },
-    addTab(windowId, tabId, repoPath, index) {
+    addTab(windowId, tabId, repoPath, index, workspacePath) {
       const state = windows.get(windowId)
       // 여기 둘은 늦은 IPC가 아니라 프로그래밍 오류다(호출자가 main 자신뿐) — 조용히 넘기면
       // 두 맵의 정합이 깨진 채 굴러가 엉뚱한 창의 탭을 닫는 식으로 멀리서 터진다. 즉시 던진다
       if (state === undefined) throw new Error(`없는 창(${windowId})에 탭을 넣을 수 없어요`)
       if (tabEntries.has(tabId)) throw new Error(`탭(${tabId})은 이미 다른 창에 있어요 — 뷰는 한 창에만 산다`)
       state.tabs.splice(index ?? state.tabs.length, 0, tabId)
-      tabEntries.set(tabId, { windowId, repoPath, crashed: false })
+      tabEntries.set(tabId, { windowId, repoPath, workspacePath: workspacePath ?? null, crashed: false })
       // 첫 탭이 활성이 된다 — 이후 추가는 활성을 훔치지 않는다(활성 전환은 setActiveTab의 일)
       if (state.activeTab === -1) state.activeTab = tabId
       onChange('windows')
@@ -265,6 +277,12 @@ export function createWindowRegistry(
       entry.repoPath = repoPath
       onChange('windows')
     },
+    setTabWorkspacePath(tabId, workspacePath) {
+      const entry = tabEntries.get(tabId)
+      if (entry === undefined || entry.workspacePath === workspacePath) return
+      entry.workspacePath = workspacePath
+      onChange('windows')
+    },
     setLayout(windowId, patch) {
       const state = windows.get(windowId)
       if (state === undefined) return
@@ -295,12 +313,21 @@ export function createWindowRegistry(
     getTabRepoPath(tabId) {
       return tabEntries.get(tabId)?.repoPath
     },
+    getTabWorkspacePath(tabId) {
+      return tabEntries.get(tabId)?.workspacePath
+    },
     snapshot() {
       // 얕은 복사로는 부족하다 — layout까지 복사해야 받은 쪽의 수정이 안 샌다.
       // activeTab은 여기서만 id→인덱스 변환이다(인터페이스 주석 참조). 탭이 아직 없는 과도기
       // 창(indexOf가 -1)은 0으로 접는다 — Task 8의 sanitize가 범위 밖을 0으로 접는 것과 같은 정책
       return [...windows.values()].map((state) => ({
-        tabs: state.tabs.map((tabId) => ({ repoPath: tabEntries.get(tabId)!.repoPath })),
+        tabs: state.tabs.map((tabId) => {
+          const entry = tabEntries.get(tabId)!
+          return {
+            repoPath: entry.repoPath,
+            ...(entry.workspacePath !== null ? { workspacePath: entry.workspacePath } : {}),
+          }
+        }),
         activeTab: Math.max(0, state.tabs.indexOf(state.activeTab)),
         layout: { ...state.layout },
       }))

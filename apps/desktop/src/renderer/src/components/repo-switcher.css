@@ -9,6 +9,20 @@
   min-width: 0;
   color: var(--color-text);
 }
+
+.repo-switcher__active-repository,
+.repo-switcher__repo-path-alias {
+  overflow: hidden;
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-switcher__repo-path-alias {
+  display: none;
+}
 .repo-switcher__popover {
   background: var(--color-surface);
   border: 1px solid var(--color-border);

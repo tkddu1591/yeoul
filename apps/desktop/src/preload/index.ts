@@ -48,6 +48,13 @@ const api: GitApi = {
       ipcRenderer.invoke(CHANNELS.repoOpenPath, repoPath, worktreePath),
     home: () => ipcRenderer.invoke(CHANNELS.repoHome),
   },
+  workspace: {
+    select: () => ipcRenderer.invoke(CHANNELS.workspaceSelect),
+    initial: () => ipcRenderer.invoke(CHANNELS.workspaceInitial),
+    refresh: () => ipcRenderer.invoke(CHANNELS.workspaceRefresh),
+    overview: () => ipcRenderer.invoke(CHANNELS.workspaceOverview),
+    close: () => ipcRenderer.invoke(CHANNELS.workspaceClose),
+  },
   window: {
     open: (repoPath) => ipcRenderer.invoke(WINDOW_CHANNELS.open, repoPath),
   },

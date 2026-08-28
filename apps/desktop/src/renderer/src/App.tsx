@@ -12,17 +12,19 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { suggestCommitMessage, type PushPreview, type RepositoryStateKind } from '@git-gui/domain'
-import type { Appearance, TabInfo } from '@git-gui/ipc-contract'
+import type { Appearance, TabInfo, WorkspaceRepository } from '@git-gui/ipc-contract'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
 import { BranchesPanel } from './components/BranchesPanel'
 import { BranchSwitcher } from './components/BranchSwitcher'
 import { ConflictPanel } from './components/ConflictPanel'
 import { ChangesPanel } from './components/ChangesPanel'
+import { WorkspaceChangesPanel } from './components/WorkspaceChangesPanel'
 import { CommitDetailPanel } from './components/CommitDetailPanel'
 import { CommitForm } from './components/CommitForm'
 import { DiffPanel } from './components/DiffPanel'
 import { HistoryPanel } from './components/HistoryPanel'
+import { WorkspaceHistoryPanel } from './components/WorkspaceHistoryPanel'
 import { ManageBranchesDialog } from './components/ManageBranchesDialog'
 import { RepoPicker } from './components/RepoPicker'
 import { RepoSwitcher } from './components/RepoSwitcher'
@@ -31,6 +33,8 @@ import { ReviewDetailPanel } from './components/ReviewDetailPanel'
 import { ReviewPopover } from './components/ReviewPopover'
 import { ShelfPopover } from './components/ShelfPopover'
 import { WorktreesPanel } from './components/WorktreesPanel'
+import { useWorkspaceOverview } from './components/use-workspace-overview'
+import { workspaceOverviewItems } from './components/workspace-overview-items'
 import {
   clampRightWidth,
   computeColumns,
@@ -96,6 +100,7 @@ const OP_BAR = {
 
 export function App() {
   const store = useRepositoryStore()
+  const workspaceOverview = useWorkspaceOverview(store.workspace)
   // E14c — 이펙트 deps에 들어갈 액션만 셀렉터로 따로 받는다. App은 위에서 스토어 전체를
   // 구독하므로(set마다 새 상태 객체) `store`를 deps에 넣으면 아무 변경에나 이펙트가 재발화한다.
   // zustand 액션은 create 초기화 때 1회 정의돼 참조가 안정 — 셀렉터로 골라 받으면 deps에
@@ -398,10 +403,10 @@ export function App() {
   const dockGridRow = MAIN_DOCK_GRID_ROW
 
   useEffect(() => {
-    void init()
+    void init().then(() => workspaceOverview.query.refresh(useRepositoryStore.getState().workspace))
     // 마운트 시 1회만 실행 — init은 셀렉터로 받은 zustand 액션이라(상단, E14c) 참조가 안정해
     // deps에 넣어도 재발화하지 않는다(예전엔 store 전체 구독분을 써서 억제가 필요했다)
-  }, [init])
+  }, [init, workspaceOverview.query])
 
   useEffect(() => {
     // 실패해도 빈 문자열 유지 — 축약 없이 전체 경로가 보일 뿐 기능은 죽지 않는다 (E7j)
@@ -648,6 +653,33 @@ export function App() {
   const status = store.status
   const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
   const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
+  const workspaceRepository = store.workspaceRepository
+  const workspaceView =
+    store.workspace === null
+      ? null
+      : {
+          overview: workspaceOverview.data.overview,
+          currentRepository: workspaceRepository,
+          loading: workspaceOverview.data.loading,
+          error: workspaceOverview.data.error,
+        }
+  const workspaceHistory = workspaceOverviewItems.history.toList(workspaceOverview.data.overview)
+  const workspaceChangeCount =
+    workspaceOverview.data.overview?.repositories.reduce(
+      (count, item) => count + (item.status?.changes.length ?? 0),
+      0,
+    ) ?? 0
+
+  const runInWorkspaceRepository = async (
+    repository: WorkspaceRepository,
+    action: () => Promise<void>,
+  ) => {
+    if (repository.path !== useRepositoryStore.getState().repoPath) {
+      const opened = await store.openRepository(repository.path)
+      if (!opened || useRepositoryStore.getState().repoPath !== repository.path) return
+    }
+    await action()
+  }
   // E7d ① 충돌이 "생기는 순간" 1회만 변경 탭으로 — 유발 경로(merge·pull·rebase·cherry-pick·
   // revert·stash) 무관하게 충돌 개수 0→1+ 전이가 신호. 이후 사용자의 탭 이동은 다시 막지 않는다.
   // 훅 순서 불변 규칙 때문에 아래 "repoPath 없으면 이른 반환"보다 앞에 둔다(반환 이후에 두면
@@ -706,7 +738,13 @@ export function App() {
             }
           />
           <RepoPicker
-            onOpen={() => void store.openRepository()}
+            onOpen={() => {
+              void store.openRepository().then((opened) => {
+                if (opened) {
+                  void workspaceOverview.query.refresh(useRepositoryStore.getState().workspace)
+                }
+              })
+            }}
             onClone={() => {
               store.clearError()
               setClonePrompt(true)
@@ -714,7 +752,13 @@ export function App() {
             onInit={() => void store.initRepository()}
             recent={store.recentRepos}
             home={home}
-            onOpenRecent={(path) => void store.openRepository(path)}
+            onOpenRecent={(path) => {
+              void store.openRepository(path).then((opened) => {
+                if (opened) {
+                  void workspaceOverview.query.refresh(useRepositoryStore.getState().workspace)
+                }
+              })
+            }}
             error={store.error}
           />
         </div>
@@ -789,10 +833,18 @@ export function App() {
             앱에 아예 없었다(아래 RepoPicker는 repoPath가 없을 때만 그려진다) */}
         <RepoSwitcher
           currentPath={store.repoPath}
+          workspace={store.workspace}
+          repository={workspaceRepository}
           home={home}
           recent={store.recentRepos}
           busy={store.busy}
-          onOpen={(path) => void store.openRepository(path)}
+          onOpen={(path) => {
+            void store.openRepository(path).then((opened) => {
+              if (opened) {
+                void workspaceOverview.query.refresh(useRepositoryStore.getState().workspace)
+              }
+            })
+          }}
           onOpenInNewWindow={(path) => void store.openInNewWindow(path)}
           onOpenInNewTab={(path) => void store.openInNewTab(path)}
         />
@@ -1136,17 +1188,27 @@ export function App() {
               role="tab"
               aria-selected={leftTab === 'changes'}
               className="app__left-tab"
-              onClick={() => setLeftTab('changes')}
+              onClick={() => {
+                setLeftTab('changes')
+                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
+              }}
               data-testid="left-tab-changes"
             >
-              변경{(status?.changes.length ?? 0) > 0 ? ` ${status?.changes.length}` : ''}
+              변경{
+                (workspaceView === null ? (status?.changes.length ?? 0) : workspaceChangeCount) > 0
+                  ? ` ${workspaceView === null ? status?.changes.length : workspaceChangeCount}`
+                  : ''
+              }
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={leftTab === 'branches'}
               className="app__left-tab"
-              onClick={() => setLeftTab('branches')}
+              onClick={() => {
+                setLeftTab('branches')
+                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
+              }}
               data-testid="left-tab-branches"
             >
               {T.branch}
@@ -1156,13 +1218,51 @@ export function App() {
               role="tab"
               aria-selected={leftTab === 'worktrees'}
               className="app__left-tab"
-              onClick={() => setLeftTab('worktrees')}
+              onClick={() => {
+                setLeftTab('worktrees')
+                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
+              }}
               data-testid="left-tab-worktrees"
             >
               {T.worktree}
             </button>
           </div>
-          {leftTab === 'changes' ? (
+          {leftTab === 'changes' && workspaceView !== null ? (
+            <>
+              <WorkspaceChangesPanel
+                workspaceView={workspaceView}
+                selected={store.selected}
+                busy={store.busy}
+                findOpen={findScope === 'changes'}
+                findNonce={findNonce}
+                onFindClose={() => setFindScope(null)}
+                onRefresh={() => void workspaceOverview.query.refresh(store.workspace)}
+                onSelect={(repository, selected) => {
+                  if (findScope === 'diff') setFindScope(null)
+                  void runInWorkspaceRepository(repository, () => store.selectFile(selected))
+                }}
+                onStage={(repository, change) => {
+                  void runInWorkspaceRepository(repository, () => store.stage([change.path]))
+                    .then(() => workspaceOverview.query.refresh(store.workspace))
+                }}
+                onUnstage={(repository, change) => {
+                  const paths =
+                    change.staged === 'renamed' && change.origPath !== null
+                      ? [change.path, change.origPath]
+                      : [change.path]
+                  void runInWorkspaceRepository(repository, () => store.unstage(paths))
+                    .then(() => workspaceOverview.query.refresh(store.workspace))
+                }}
+              />
+              <CommitForm
+                stagedCount={stagedCount}
+                busy={store.busy}
+                suggestion={suggestion}
+                allowEmpty={status?.state === 'merging'}
+                onCommit={(message) => store.commit(message)}
+              />
+            </>
+          ) : leftTab === 'changes' ? (
             <>
               <ChangesPanel
                 changes={status?.changes ?? []}
@@ -1192,6 +1292,7 @@ export function App() {
             </>
           ) : leftTab === 'branches' ? (
             <BranchesPanel
+              workspaceView={workspaceView}
               lastFetchAt={store.lastFetchAt}
               onFetchRemotes={() => void store.fetchRemotes()}
               overview={store.branchOverview}
@@ -1202,6 +1303,10 @@ export function App() {
               pending={store.reads.left > 0}
               actionsDisabled={status?.state !== 'normal'}
               onCloseCompare={() => store.clearBranchCompare()}
+              onRefreshWorkspace={() => void workspaceOverview.query.refresh(store.workspace)}
+              onOpenWorkspaceRepository={(repository) => {
+                if (repository.path !== store.repoPath) void store.openRepository(repository.path)
+              }}
               onAction={(action) => {
                 switch (action.kind) {
                   case 'switch':
@@ -1251,12 +1356,17 @@ export function App() {
           ) : leftTab === 'worktrees' ? (
             <WorktreesPanel
               worktrees={store.worktrees}
+              workspaceView={workspaceView}
               currentPath={store.repoPath}
               activePath={activeWorktree?.cwd ?? null}
               home={home}
               headInfos={store.headInfos}
               onHoverWorktree={(path, headHash) => void store.loadHeadInfo(path, headHash)}
               busy={store.busy}
+              onRefreshWorkspace={() => void workspaceOverview.query.refresh(store.workspace)}
+              onOpenWorkspaceRepository={(repository) => {
+                if (repository.path !== store.repoPath) void store.openRepository(repository.path)
+              }}
               onAction={(action) => {
                 switch (action.kind) {
                   case 'select':
@@ -1431,6 +1541,24 @@ export function App() {
             />
           ) : (
             <>
+              {workspaceView !== null ? (
+                <WorkspaceHistoryPanel
+                  items={workspaceHistory}
+                  repository={workspaceRepository}
+                  selectedHash={store.commitDetail?.hash ?? null}
+                  busy={store.busy}
+                  loading={workspaceOverview.data.loading}
+                  error={workspaceOverview.data.error}
+                  findOpen={findScope === 'history'}
+                  findNonce={findNonce}
+                  onFindClose={() => setFindScope(null)}
+                  onRefresh={() => void workspaceOverview.query.refresh(store.workspace)}
+                  onSelect={(item) => {
+                    void runInWorkspaceRepository(item.repository, () => store.selectCommit(item.commit.hash))
+                    expandRightIfCollapsed()
+                  }}
+                />
+              ) : (
               <HistoryPanel
                 history={store.history}
                 historyLimit={store.historyLimit}
@@ -1487,6 +1615,7 @@ export function App() {
                 }}
                 onClearView={() => void store.clearHistoryView()}
               />
+              )}
               {/* E11 — grid-template-rows가 0fr↔9fr로 열고 닫히려면 이 래퍼가 닫힌 동안에도
                   DOM에 남아 있어야 한다(그래야 처음 여는 순간도 애니메이션이 붙는다).
                   안은 그대로 조건부 마운트 — 가상 스크롤을 품은 CommitDetailPanel을 미리

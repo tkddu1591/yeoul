@@ -19,6 +19,7 @@ import { appSettings, readWindows, registerSettingsHandlers, saveWindows } from 
 import { registerTerminalHandlers } from './terminal-handlers'
 import { createTrailingDebounce } from './watch-filter'
 import { createWindowRegistry } from './window-registry'
+import { registerWorkspaceHandlers } from './workspace-handlers'
 
 /**
  * 레이아웃 변경을 디스크에 묶어 쓰는 간격 (E15b 리뷰 I-1) — 도크 높이·우측 폭 드래그는 초당
@@ -135,6 +136,7 @@ const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'
 /** 새 창이 무엇을 열고 어떤 모습으로 뜰지 (E15b) — 여는 쪽이 정해 넘긴다 */
 interface WindowSeed {
   repoPath: string | null
+  workspacePath?: string | null
   layout: WindowLayout
 }
 
@@ -280,9 +282,11 @@ function createWindowShell(
   return { window, windowId }
 }
 
-function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): CreatedWindow {
+function createWindow(
+  seed: WindowSeed = { repoPath: null, workspacePath: null, layout: {} },
+): CreatedWindow {
   const { window, windowId } = createWindowShell(seed.layout)
-  const view = createTab(window, windowId, seed.repoPath)
+  const view = createTab(window, windowId, seed.repoPath, undefined, seed.workspacePath)
 
   // ready-to-show는 BrowserWindow의 이벤트다 — BaseWindow에는 없다 (첫 페인트 신호가
   // WebContentsView에는 노출되지 않는다: webContents의 'paint'는 오프스크린 전용).
@@ -303,7 +307,13 @@ function createWindow(seed: WindowSeed = { repoPath: null, layout: {} }): Create
  * 가시성은 손대지 않는다: 활성 전환은 호출자가 `setActiveTab` + `showActiveTab`으로 정한다
  * (레지스트리의 "첫 탭만 활성, 이후 추가는 활성을 안 훔친다"와 결이 같다)
  */
-function createTab(window: BaseWindow, windowId: number, repoPath: string | null): WebContentsView {
+function createTab(
+  window: BaseWindow,
+  windowId: number,
+  repoPath: string | null,
+  index?: number,
+  workspacePath?: string | null,
+): WebContentsView {
   const view = createRepoView()
   const tabId = view.webContents.id
   window.contentView.addChildView(view)
@@ -315,7 +325,7 @@ function createTab(window: BaseWindow, windowId: number, repoPath: string | null
   // 크래시 장부의 시작점 — loadedAt의 초기값은 생성 시각이다: 첫 로드를 끝내지 못하고 죽는
   // 렌더러도 (긴 로드가 아니라면) 연속으로 세어져야 크래시-온-로드 상한이 잡는다
   crashLedgerOfTab.set(tabId, { streak: 0, loadedAt: Date.now() })
-  registry.addTab(windowId, tabId, repoPath)
+  registry.addTab(windowId, tabId, repoPath, index, workspacePath)
 
   // 뷰→창 방향 수명 (E15c Task 1 실측의 탭 일반화): webContents가 먼저 파괴돼도(Playwright
   // page.close()의 Target.closeTarget, DOM window.close(), 렌더러 크래시) BaseWindow는 아무
@@ -473,13 +483,17 @@ function showActiveTab(windowId: number, cause: 'auto' | 'user' = 'auto'): void 
 function tabInfosOf(windowId: number): TabInfo[] {
   const state = registry.getWindow(windowId)
   if (state === undefined) return []
-  return state.tabs.map((tabId) => ({
-    id: tabId,
-    repoPath: registry.getTabRepoPath(tabId) ?? null,
-    active: tabId === state.activeTab,
-    // 계약서: 없으면 산 것 — false를 매 탭에 싣지 않아 기존 소비처·단언이 무변이다 (E15e)
-    ...(registry.isTabCrashed(tabId) ? { crashed: true } : {}),
-  }))
+  return state.tabs.map((tabId) => {
+    const workspacePath = registry.getTabWorkspacePath(tabId)
+    return {
+      id: tabId,
+      repoPath: registry.getTabRepoPath(tabId) ?? null,
+      ...(typeof workspacePath === 'string' ? { workspacePath } : {}),
+      active: tabId === state.activeTab,
+      // 계약서: 없으면 산 것 — false를 매 탭에 싣지 않아 기존 소비처·단언이 무변이다 (E15e)
+      ...(registry.isTabCrashed(tabId) ? { crashed: true } : {}),
+    }
+  })
 }
 
 /** 이 창의 탭 목록을 그 창의 **모든 뷰**에 알린다 — 숨은 뷰 포함(나중에 켜져도 탭바가 이미 맞다).
@@ -648,7 +662,11 @@ function registerWindowHandlers(): void {
         revealExistingTab(existing)
         return { ok: true }
       }
-      createWindow({ repoPath: opened.path, layout: seedLayoutFrom(event.sender.id) })
+      createWindow({
+        repoPath: opened.path,
+        workspacePath: registry.getTabWorkspacePath(event.sender.id),
+        layout: seedLayoutFrom(event.sender.id),
+      })
       return { ok: true }
     },
   )
@@ -808,7 +826,13 @@ function registerTabHandlers(): void {
       revealExistingTab(existing)
       return { ok: true }
     }
-    const view = createTab(senderWindow, senderWindowId, opened.path)
+    const view = createTab(
+      senderWindow,
+      senderWindowId,
+      opened.path,
+      undefined,
+      registry.getTabWorkspacePath(event.sender.id),
+    )
     registry.setActiveTab(senderWindowId, view.webContents.id)
     showActiveTab(senderWindowId)
     return { ok: true }
@@ -923,11 +947,19 @@ async function createStartupWindows(): Promise<void> {
     // 않고 그 탭만 건너뛴다(손상 항목 하나가 앱 시작을 통째로 막으면 안 된다 — E15b 관례).
     // savedIndex를 들고 가는 이유: 탭이 버려지면 저장된 activeTab 인덱스가 어긋난다 — 살아남은
     // 탭이 원래 몇 번이었는지로 활성을 다시 찾는다
-    const tabs: Array<{ repoPath: string | null; savedIndex: number }> = []
+    const tabs: Array<{
+      repoPath: string | null
+      workspacePath: string | null
+      savedIndex: number
+    }> = []
     for (const [savedIndex, tab] of saved.tabs.entries()) {
+      const workspacePath =
+        typeof tab.workspacePath === 'string' && isAbsolute(tab.workspacePath)
+          ? tab.workspacePath
+          : null
       if (tab.repoPath === null) {
         // 빈 탭(RepoPicker)은 검증할 경로가 없다 — 그대로 돌아온다
-        tabs.push({ repoPath: null, savedIndex })
+        tabs.push({ repoPath: null, workspacePath, savedIndex })
         continue
       }
       if (!isAbsolute(tab.repoPath)) continue
@@ -935,17 +967,20 @@ async function createStartupWindows(): Promise<void> {
       // 없어진 저장소는 그 탭을 만들지 않고 넘어간다. 알림은 띄우지 않는다 — 시작하자마자
       // 배너를 보는 건 성가시고, 그 경로는 최근 목록에서도 곧 빠진다
       if (!opened.ok) continue
-      tabs.push({ repoPath: opened.path, savedIndex })
+      tabs.push({ repoPath: opened.path, workspacePath, savedIndex })
     }
     // 탭이 전부 사라진 창은 만들지 않는다 — 탭 없는 창은 없다(sanitize·registry와 같은 판단)
     if (tabs.length === 0) continue
     const { window, windowId, view } = createWindow({
       repoPath: tabs[0]!.repoPath,
+      workspacePath: tabs[0]!.workspacePath,
       layout: saved.layout,
     })
     const tabIds = [view.webContents.id]
     for (const tab of tabs.slice(1)) {
-      tabIds.push(createTab(window, windowId, tab.repoPath).webContents.id)
+      tabIds.push(
+        createTab(window, windowId, tab.repoPath, undefined, tab.workspacePath).webContents.id,
+      )
     }
     // 활성 탭 복원 — 저장된 인덱스의 탭이 살아남았으면 그 탭, 사라졌으면 첫 탭(sanitize가 범위
     // 밖을 0으로 접는 것과 같은 정책). showActiveTab은 활성이 첫 탭이어도 부른다 — 뷰는 만들어질
@@ -967,6 +1002,7 @@ app
   .whenReady()
   .then(async () => {
     registerGitHandlers(registry)
+    registerWorkspaceHandlers(registry)
     registerSettingsHandlers(registry, pushLayoutToSiblings)
     registerHostingHandlers()
     registerTerminalHandlers()

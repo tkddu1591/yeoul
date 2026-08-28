@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from 'react'
-import { MoreHorizontal, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
+import type { WorkspaceRepository } from '@git-gui/ipc-contract'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
@@ -9,6 +10,7 @@ import { useNow } from '../ui/use-now'
 import { buildBranchTree, flatSearch, flattenBranchTree } from './branch-tree'
 import { formatRelativeTime } from './relative-time'
 import { T } from '../terms'
+import type { WorkspaceOverviewView } from './workspace-overview-view'
 import './branches-panel.css'
 
 export type BranchPanelAction =
@@ -27,6 +29,8 @@ export type BranchPanelAction =
   | { kind: 'view'; name: string }
 
 interface BranchesPanelProps {
+  /** null이면 기존 단일 저장소 목록, 값이 있으면 저장소를 최상위 노드로 감싼다. */
+  workspaceView: WorkspaceOverviewView | null
   overview: BranchOverview | null
   /** "지금과 비교" 결과 — non-null이면 목록 대신 비교 뷰를 보여준다 */
   compare: { name: string; result: BranchCompare } | null
@@ -44,6 +48,8 @@ interface BranchesPanelProps {
   onCloseCompare(): void
   /** 이 패널로 떨어질 조회(좌측 비교)가 진행 중인가 (E14a) */
   pending: boolean
+  onRefreshWorkspace(): void
+  onOpenWorkspaceRepository(repository: WorkspaceRepository): void
 }
 
 interface MenuState {
@@ -57,6 +63,7 @@ interface MenuState {
  * 1클릭=선택만(중립) · 더블클릭=조회(view) · 우클릭=메뉴. 빠른 전환은 헤더 스위처가 담당
  */
 export function BranchesPanel({
+  workspaceView,
   overview,
   compare,
   currentBranch,
@@ -68,6 +75,8 @@ export function BranchesPanel({
   onAction,
   onCloseCompare,
   pending,
+  onRefreshWorkspace,
+  onOpenWorkspaceRepository,
 }: BranchesPanelProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -373,6 +382,180 @@ export function BranchesPanel({
       : remotes.some((remote) => remote.name === selectedName) && selectedName !== null
         ? { kind: 'remote', name: selectedName }
         : null
+
+  if (workspaceView !== null) {
+    const normalizedQuery = query.trim().toLowerCase()
+    const repositoryOverviews = workspaceView.overview?.repositories ?? []
+    return (
+      <Panel
+        title={T.branch}
+        titleHint="branch"
+        testId="branches-panel"
+        pending={workspaceView.loading}
+      >
+        <div className="branches-panel">
+          <div className="branches-panel__fetch">
+            <Button
+              variant="ghost"
+              size="sm"
+              isDisabled={workspaceView.loading}
+              onPress={onRefreshWorkspace}
+              testId="workspace-branches-refresh"
+            >
+              <RefreshCw size={13} aria-hidden="true" /> 전체 다시 읽기
+            </Button>
+            <span className="branches-panel__fetch-at">저장소별로 묶어 표시해요</span>
+          </div>
+          <input
+            className="branches-panel__search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="저장소 또는 브랜치 찾기"
+            aria-label="워크스페이스 브랜치 검색"
+            data-testid="branches-search"
+          />
+          <div className="branches-panel__scroll" data-testid="branches-list">
+            {workspaceView.error !== null && (
+              <p className="branches-panel__empty" role="alert">{workspaceView.error}</p>
+            )}
+            {repositoryOverviews.map((repositoryOverview) => {
+              const { repository, branches, error } = repositoryOverview
+              const repositoryMatches =
+                normalizedQuery === '' ||
+                repository.name.toLowerCase().includes(normalizedQuery) ||
+                repository.relativePath.toLowerCase().includes(normalizedQuery)
+              const workspaceLocals =
+                branches?.locals.filter(
+                  (branch) => repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
+                ) ?? []
+              const workspaceRemotes =
+                branches?.remotes.filter(
+                  (branch) => repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
+                ) ?? []
+              if (!repositoryMatches && workspaceLocals.length === 0 && workspaceRemotes.length === 0) {
+                return null
+              }
+              const key = `workspace-branches:${repository.path}`
+              const repositoryCollapsed = collapsed.has(key) && normalizedQuery === ''
+              const currentRepository = repository.path === workspaceView.currentRepository?.path
+              return (
+                <section
+                  className={`workspace-branch-tree${currentRepository ? ' workspace-branch-tree--current' : ''}`}
+                  key={repository.path}
+                  data-testid={`workspace-branches-${repository.relativePath}`}
+                >
+                  <div className="workspace-branch-tree__repository">
+                    <button
+                      type="button"
+                      className="workspace-branch-tree__toggle"
+                      aria-label={`${repository.name} ${repositoryCollapsed ? '펼치기' : '접기'}`}
+                      aria-expanded={!repositoryCollapsed}
+                      onClick={() => toggleFolder(key)}
+                    >
+                      {repositoryCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <FolderGit2 size={14} aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="workspace-branch-tree__name"
+                      onClick={() => onOpenWorkspaceRepository(repository)}
+                    >
+                      <strong>{repository.name}</strong>
+                      <span>{repository.relativePath}</span>
+                    </button>
+                    <span className="branch-row__count">
+                      {workspaceLocals.length + workspaceRemotes.length}
+                    </span>
+                    {currentRepository && <span className="workspace-branch-tree__current">열림</span>}
+                  </div>
+                  {!repositoryCollapsed && (
+                    <div className="workspace-branch-tree__children">
+                      {error !== null ? (
+                        <p className="branches-panel__empty">이 저장소를 읽지 못했어요. {error}</p>
+                      ) : (
+                        <>
+                          {workspaceLocals.length > 0 && (
+                            <p className="branches-panel__group">로컬 {T.branch}</p>
+                          )}
+                          {workspaceLocals.map((branch) =>
+                            currentRepository ? (
+                              localRow(branch, branch.name, 0)
+                            ) : (
+                              <button
+                                type="button"
+                                className="branch-row branch-row--workspace-readonly"
+                                key={`local:${branch.name}`}
+                                onClick={() => onOpenWorkspaceRepository(repository)}
+                              >
+                                <span className={`branch-row__glyph${branch.isCurrent ? ' branch-row__glyph--here' : ''}`}>
+                                  {branch.isCurrent ? '➤' : '⎇'}
+                                </span>
+                                <span className="branch-row__name">{branch.name}</span>
+                                {branch.ahead !== null && branch.ahead > 0 && (
+                                  <span className="branch-row__ahead">↑{branch.ahead}</span>
+                                )}
+                                {branch.behind !== null && branch.behind > 0 && (
+                                  <span className="branch-row__behind">↓{branch.behind}</span>
+                                )}
+                              </button>
+                            ),
+                          )}
+                          {workspaceRemotes.length > 0 && <p className="branches-panel__group">원격</p>}
+                          {workspaceRemotes.map((branch) =>
+                            currentRepository ? (
+                              remoteRow(branch.name, branch.name, 0)
+                            ) : (
+                              <button
+                                type="button"
+                                className="branch-row branch-row--remote branch-row--workspace-readonly"
+                                key={`remote:${branch.name}`}
+                                onClick={() => onOpenWorkspaceRepository(repository)}
+                              >
+                                <span className="branch-row__glyph">☁</span>
+                                <span className="branch-row__name">{branch.name}</span>
+                              </button>
+                            ),
+                          )}
+                          {workspaceLocals.length === 0 && workspaceRemotes.length === 0 && (
+                            <p className="branches-panel__empty">보여줄 {T.branch}가 없어요.</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+            {repositoryOverviews.length === 0 && workspaceView.error === null && (
+              <p className="branches-panel__empty">
+                {workspaceView.loading ? '저장소들을 확인하고 있어요…' : '보여줄 저장소가 없어요.'}
+              </p>
+            )}
+          </div>
+          {selectedTarget !== null && (
+            <div className="branches-panel__selection-actions" data-testid="branch-selection-actions">
+              <span>현재 저장소 브랜치는 기존 작업 메뉴를 그대로 쓸 수 있어요.</span>
+              <button type="button" onClick={(event) => openMenu(event, selectedTarget)}>
+                <MoreHorizontal size={15} aria-hidden="true" /> 작업
+              </button>
+            </div>
+          )}
+        </div>
+        {menu !== null && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={
+              menu.target.kind === 'local'
+                ? buildLocalMenu(menu.target.branch)
+                : buildRemoteMenu(menu.target.name)
+            }
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </Panel>
+    )
+  }
 
   return (
     <Panel title={T.branch} titleHint="branch" testId="branches-panel" pending={pending}>

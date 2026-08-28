@@ -2,6 +2,7 @@ import { Check, ChevronDown, FolderOpen } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components'
 import { useEscapeFallback } from '../ui/use-escape-fallback'
+import type { WorkspaceInfo, WorkspaceRepository } from '@git-gui/ipc-contract'
 import { Button } from '../ui/Button'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Tooltip } from '../ui/Tooltip'
@@ -12,6 +13,8 @@ import './repo-switcher.css'
 interface RepoSwitcherProps {
   /** 지금 열려 있는 저장소 절대 경로 */
   currentPath: string
+  workspace: WorkspaceInfo | null
+  repository: WorkspaceRepository | null
   /** `~` 축약용 홈 경로 — 못 구했으면 빈 문자열(순수 함수가 축약 없이 처리) */
   home: string
   /** 최신이 앞 (E15a) */
@@ -39,6 +42,8 @@ const folderName = (path: string) => path.split('/').filter(Boolean).pop() ?? pa
  */
 export function RepoSwitcher({
   currentPath,
+  workspace,
+  repository,
   home,
   recent,
   busy,
@@ -74,7 +79,12 @@ export function RepoSwitcher({
   useEscapeFallback(open, () => changeOpen(false))
   // 지금 저장소는 목록에 없어도 항상 보인다 — 시작 시 복원된 저장소는 아직 목록에 없다.
   // 같은 규칙(중복 없이 최신이 앞)을 그대로 쓴다: 이미 맨 앞이면 결과가 recent와 같다
-  const paths = pushRecentRepo(recent, currentPath)
+  const paths = (workspace?.repositories ?? []).reduce(
+    (current, item) => pushRecentRepo(current, item.path),
+    pushRecentRepo(recent, currentPath),
+  )
+  const displayPath = workspace?.path ?? currentPath
+  const displayName = workspace?.name ?? folderName(currentPath)
   return (
     <>
       <MenuTrigger isOpen={open} onOpenChange={changeOpen}>
@@ -90,13 +100,19 @@ export function RepoSwitcher({
           className="repo-switcher__trigger"
         >
           <span className="app__repo">
-            <strong>{folderName(currentPath)}</strong>
+            <strong>{displayName}</strong>
             {/* E7h ③ — 전환 완료(성공 후에만) 검증용 testid */}
-            <Tooltip content={currentPath} summary={currentPath}>
-              <span className="app__repo-path" data-testid="repo-path">
-                {currentPath}
+            <Tooltip content={displayPath} summary={displayPath}>
+              <span className="app__repo-path" data-testid="workspace-path">
+                {displayPath}
               </span>
             </Tooltip>
+            {workspace !== null && repository !== null && (
+              <span className="repo-switcher__active-repository" data-testid="repo-path">
+                {repository.name} 작업 중 · {currentPath}
+              </span>
+            )}
+            {workspace === null && <span className="repo-switcher__repo-path-alias" data-testid="repo-path">{currentPath}</span>}
           </span>
           <ChevronDown size={12} aria-hidden="true" />
         </Button>

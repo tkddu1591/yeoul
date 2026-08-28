@@ -78,6 +78,41 @@ export type WindowOpenResult =
   | { ok: true }
   | { ok: false; reason: RepoOpenFailureReason; message: string }
 
+/** 워크스페이스 안에서 발견한 하나의 독립 Git 저장소. */
+export interface WorkspaceRepository {
+  /** Git이 정규화한 저장소 루트 절대 경로 */
+  path: string
+  /** 워크스페이스 루트 기준 경로. 루트 자체가 저장소면 `.` */
+  relativePath: string
+  /** 목록에서 쓰는 마지막 폴더 이름 */
+  name: string
+}
+
+/** 여러 Git 저장소를 묶는 상위 작업 폴더. */
+export interface WorkspaceInfo {
+  /** 실제 경로로 정규화한 워크스페이스 루트 */
+  path: string
+  name: string
+  repositories: WorkspaceRepository[]
+}
+
+/** 워크스페이스 관제 화면에서 저장소 하나를 요약한 읽기 전용 데이터. */
+export interface WorkspaceRepositoryOverview {
+  repository: WorkspaceRepository
+  status: RepositoryStatus | null
+  branches: BranchOverview | null
+  worktrees: WorktreeInfo[] | null
+  history: CommitSummary[] | null
+  /** 이 저장소만 읽지 못해도 나머지 저장소는 계속 보여 준다. */
+  error: string | null
+}
+
+/** 여러 독립 저장소의 변경·브랜치·워크트리·이력을 한 시점에 모은 워크스페이스 개요. */
+export interface WorkspaceOverview {
+  workspace: WorkspaceInfo
+  repositories: WorkspaceRepositoryOverview[]
+}
+
 /**
  * preload가 contextBridge로 노출하고 renderer가 사용하는 API 표면.
  *
@@ -123,6 +158,19 @@ export interface GitApi {
     openPath(repoPath: string, worktreePath: string): Promise<string>
     /** OS 홈 디렉터리 절대 경로 — 워크트리 행의 `~` 축약에 쓴다 (E7j) */
     home(): Promise<string>
+  }
+  /** 여러 독립 저장소를 한 작업 폴더로 묶는 멀티레포 워크스페이스. */
+  workspace: {
+    /** 폴더를 고르고 그 안의 Git 저장소를 찾는다. 취소하면 null. */
+    select(): Promise<WorkspaceInfo | null>
+    /** 복원된 이 탭의 워크스페이스를 다시 검색한다. 없거나 유효하지 않으면 null. */
+    initial(): Promise<WorkspaceInfo | null>
+    /** 현재 탭 워크스페이스의 저장소 목록을 다시 검색한다. */
+    refresh(): Promise<WorkspaceInfo | null>
+    /** 하위 모든 저장소의 로컬·원격 브랜치와 워크트리를 병렬로 모은다. */
+    overview(): Promise<WorkspaceOverview | null>
+    /** 현재 저장소는 유지하고 워크스페이스 문맥만 닫는다. */
+    close(): Promise<void>
   }
   /** 창 (E15b) */
   window: {
@@ -331,6 +379,11 @@ export const CHANNELS = {
   repoOpen: 'repo:open',
   repoOpenPath: 'repo:open-path',
   repoHome: 'repo:home',
+  workspaceSelect: 'workspace:select',
+  workspaceInitial: 'workspace:initial',
+  workspaceRefresh: 'workspace:refresh',
+  workspaceOverview: 'workspace:overview',
+  workspaceClose: 'workspace:close',
   remotesFetch: 'remotes:fetch',
   remotesList: 'remotes:list',
   remotesAdd: 'remotes:add',
@@ -602,6 +655,8 @@ export function sanitizeWindowLayout(value: unknown): WindowLayout {
 /** 마지막 종료 시점의 탭 하나 (E15c) — 빈 탭(RepoPicker)은 명시적 null이다 */
 export interface PersistedTab {
   repoPath: string | null
+  /** 멀티레포 상위 폴더. 옛 설정에는 없으므로 선택 필드다. */
+  workspacePath?: string
 }
 
 /**
@@ -652,7 +707,10 @@ function sanitizePersistedTabs(value: unknown): PersistedTab[] | undefined {
       (entry) =>
         'repoPath' in entry && (typeof entry.repoPath === 'string' || entry.repoPath === null),
     )
-    .map((entry) => ({ repoPath: entry.repoPath as string | null }))
+    .map((entry) => ({
+      repoPath: entry.repoPath as string | null,
+      ...(typeof entry.workspacePath === 'string' ? { workspacePath: entry.workspacePath } : {}),
+    }))
 }
 
 /** 디스크 파일용 방어 — renderer 표면 sanitize에 hosting.github(token·login)과 windows를 더한다 */
@@ -802,6 +860,8 @@ export interface TabInfo {
   /** 뷰 webContents.id — 클릭·닫기 요청의 키 */
   id: number
   repoPath: string | null
+  /** 멀티레포 탭이면 탭 이름의 최상위 문맥으로 쓰는 워크스페이스 경로 */
+  workspacePath?: string
   active: boolean
   /** 렌더러가 크래시해 응답 없음 (E15e) — **없으면 산 것이다**(기존 소비처 무변). 산 형제의
    * 탭바가 죽음 표시를 그리고, 클릭(tabs:activate)이 reload를 겸해 되살린다 */

@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
@@ -38,6 +38,16 @@ async function createRepoWithFile(name: string): Promise<string> {
 
 async function createRepoWithChange(): Promise<string> {
   return createRepoWithFile('app.txt')
+}
+
+async function createRepositoryAt(path: string, fileName: string): Promise<void> {
+  await mkdir(path, { recursive: true })
+  await execGitOrThrow(['init', '--initial-branch=main'], { cwd: path })
+  await execGitOrThrow(['config', 'user.name', 'E2E'], { cwd: path })
+  await execGitOrThrow(['config', 'user.email', 'e2e@test.local'], { cwd: path })
+  await writeFile(join(path, fileName), 'workspace\n')
+  await execGitOrThrow(['add', '-A'], { cwd: path })
+  await execGitOrThrow(['commit', '-m', 'init'], { cwd: path })
 }
 
 /** GIT_SCENARIOS fixture 원칙 — 로컬 bare remote로 백업(push)을 검증한다 */
@@ -103,6 +113,72 @@ async function hoverAndCmdF(window: Page, selector: string): Promise<void> {
   }).toPass({ timeout: 2000 })
   await window.keyboard.press('Meta+f')
 }
+
+test('멀티레포 워크스페이스 — 별도 탐색기 없이 기존 탭과 이력에서 저장소별로 보인다', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'git-gui-e2e-workspace-'))
+  const back = join(workspace, 'back')
+  const front = join(workspace, 'front')
+  const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
+  await createRepositoryAt(back, 'server.txt')
+  await createRepositoryAt(front, 'client.txt')
+  await execGitOrThrow(['branch', 'api'], { cwd: back })
+  await execGitOrThrow(['worktree', 'add', join(workspace, '.worktrees', 'back-api'), 'api'], {
+    cwd: back,
+  })
+  await execGitOrThrow(['branch', 'ui'], { cwd: front })
+  await writeFile(join(back, 'server.txt'), 'workspace\nbackend change\n')
+  await writeFile(join(front, 'client.txt'), 'workspace\nfrontend change\n')
+  const workspacePath = realpathSync(workspace)
+  const backPath = realpathSync(back)
+  const frontPath = realpathSync(front)
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({
+      windows: [
+        {
+          tabs: [{ repoPath: backPath, workspacePath }],
+          activeTab: 0,
+          layout: {},
+        },
+      ],
+    }),
+  )
+
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: { ...process.env, GIT_GUI_USER_DATA: userData },
+  })
+  try {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId('repo-path')).toContainText(backPath)
+    await expect(window.getByTestId('workspace-path')).toHaveText(workspacePath)
+    await expect(window.getByTestId('workspace-changes-panel')).toBeVisible()
+    await expect(window.getByTestId('workspace-changes-back')).toContainText('server.txt')
+    await expect(window.getByTestId('workspace-changes-front')).toContainText('client.txt')
+    await expect(window.getByTestId('workspace-history-panel')).toContainText('back')
+    await expect(window.getByTestId('workspace-history-panel')).toContainText('front')
+    await window.screenshot({ path: 'test-results/workspace-multi-repo.png' })
+
+    await window.getByTestId('left-tab-branches').click()
+    await expect(window.getByTestId('workspace-branches-back')).toContainText('api')
+    await expect(window.getByTestId('workspace-branches-front')).toContainText('ui')
+    await window.screenshot({ path: 'test-results/workspace-multi-repo-branches.png' })
+
+    await window.getByTestId('workspace-branches-front').locator('.workspace-branch-tree__name').click()
+    await expect(window.getByTestId('repo-path')).toContainText(frontPath)
+
+    await window.getByTestId('left-tab-worktrees').click()
+    await expect(window.getByTestId('workspace-worktrees-back')).toContainText('back-api')
+    await expect(window.getByTestId('workspace-worktrees-front')).toContainText('main')
+    await window.screenshot({ path: 'test-results/workspace-multi-repo-worktrees.png' })
+
+    await expect(window.getByTestId('workspace-repositories')).toHaveCount(0)
+  } finally {
+    await app.close()
+    await rm(workspace, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
 
 test('열기 → stage → commit → 역사 반영 → 백업', async () => {
   const repo = await createRepoWithChange()

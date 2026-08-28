@@ -28,6 +28,8 @@ import type {
   PullDetailView,
   PullSummary,
   RepoOpenFailureReason,
+  WorkspaceInfo,
+  WorkspaceRepository,
 } from '@git-gui/ipc-contract'
 import { applyBlockChoice } from '../components/conflict-markers'
 import {
@@ -75,6 +77,10 @@ export interface SelectedFile {
 
 interface RepositoryStore {
   repoPath: string | null
+  /** 현재 탭의 멀티레포 상위 폴더. null이면 단일 저장소 모드다. */
+  workspace: WorkspaceInfo | null
+  /** 현재 워크트리가 속한 워크스페이스 저장소. */
+  workspaceRepository: WorkspaceRepository | null
   status: RepositoryStatus | null
   branches: BranchSummary[]
   /** 실험 공간 탭 데이터 — 스냅샷마다 함께 갱신된다 (E7a) */
@@ -131,6 +137,10 @@ interface RepositoryStore {
    * 이미 열려 있으면 이 탭이 갈아타지 않고 main이 그 탭으로 데려간다
    */
   openRepository(path?: string): Promise<boolean>
+  /** 워크스페이스의 하위 저장소 목록을 다시 검색한다. */
+  refreshWorkspace(): Promise<void>
+  /** 현재 저장소는 유지한 채 멀티레포 문맥만 닫는다. */
+  closeWorkspace(): Promise<void>
   cloneRepository(url: string): Promise<boolean>
   initRepository(): Promise<boolean>
   /**
@@ -539,6 +549,8 @@ function deferSelections(
 
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   repoPath: null,
+  workspace: null,
+  workspaceRepository: null,
   status: null,
   history: [],
   branches: [],
@@ -570,12 +582,21 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async init() {
     await runWrite(set, get, async () => {
-      const initial = await git().repo.initialPath()
+      const [initial, workspace] = await Promise.all([
+        git().repo.initialPath(),
+        git().workspace.initial(),
+      ])
       if (!initial) return
+      const snapshot = await fetchSnapshot(initial, get().historyLimit)
       set({
         repoPath: initial,
+        workspace,
+        workspaceRepository:
+          workspace?.repositories.find((repository) =>
+            snapshot.worktrees.some((worktree) => worktree.path === repository.path),
+          ) ?? null,
         hostingStatus: await hosting().status(initial),
-        ...(await fetchSnapshot(initial, get().historyLimit)),
+        ...snapshot,
       })
       void git().repo.watch(initial)
     })
@@ -596,11 +617,33 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async openRepository(path) {
     return runWrite(set, get, async () => {
-      // 인자가 있으면 최근 목록에서 고른 것 — 다이얼로그를 건너뛴다. 검증은 main이 한다 (E15a)
+      // 인자 없음은 폴더 선택이다. 이제 선택 폴더 자체가 저장소가 아니어도 하위 저장소를 찾아
+      // 워크스페이스로 연다. 일반 저장소 하나를 고르면 repositories가 하나라 기존 흐름과 같다.
       let opened: string | null
       if (path === undefined) {
-        opened = await git().repo.select()
+        const workspace = await git().workspace.select()
+        if (workspace === null) return
+        const repository =
+          workspace.repositories.find((entry) => entry.path === workspace.path) ??
+          workspace.repositories[0]
+        if (repository === undefined) return
+        const isWorkspace =
+          workspace.repositories.length > 1 || repository.path !== workspace.path
+        if (isWorkspace) set({ workspace, workspaceRepository: repository })
+        else {
+          await git().workspace.close()
+          set({ workspace: null, workspaceRepository: null })
+        }
+        const result = await git().repo.open(repository.path)
+        if (!result.ok) throw new Error(result.message)
+        opened = result.path
       } else {
+        const belongsToWorkspace =
+          get().workspace?.repositories.some((repository) => repository.path === path) === true
+        if (!belongsToWorkspace && get().workspace !== null) {
+          await git().workspace.close()
+          set({ workspace: null, workspaceRepository: null })
+        }
         // E15c Task 6 — 규칙 하나 (스펙 §3 첫 행): 어느 창의 탭에든 이미 열려 있으면 이 탭이
         // 갈아타지 않고 main이 그 탭으로 데려간다(창 앞으로 + 활성화). 판정만 main(정본
         // 레지스트리)에 묻고, false면 아래 기존 갈아타기 경로 그대로다 — E15a가 쌓은 상태 유출
@@ -638,8 +681,13 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const hostingStatus = await hosting().status(opened)
       set({ historyRef: null })
       const snapshot = await fetchSnapshot(opened, HISTORY_LIMIT)
+      const workspaceRepository =
+        get().workspace?.repositories.find((repository) =>
+          snapshot.worktrees.some((worktree) => worktree.path === repository.path),
+        ) ?? null
       set({
         repoPath: opened,
+        workspaceRepository,
         historyLimit: HISTORY_LIMIT,
         historyRef: null,
         hostingStatus,
@@ -660,6 +708,28 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       set({ recentRepos })
       saveRecentRepos(recentRepos)
     })
+  },
+
+  async refreshWorkspace() {
+    if (get().workspace === null) return
+    try {
+      const workspace = await git().workspace.refresh()
+      set({
+        workspace,
+        workspaceRepository:
+          workspace?.repositories.find((repository) =>
+            get().worktrees.some((worktree) => worktree.path === repository.path),
+          ) ?? null,
+        error: null,
+      })
+    } catch (cause) {
+      set({ error: toErrorMessage(cause) })
+    }
+  },
+
+  async closeWorkspace() {
+    await git().workspace.close()
+    set({ workspace: null, workspaceRepository: null })
   },
 
   async cloneRepository(url) {

@@ -1,4 +1,11 @@
-import { FolderGit2, FolderOpen, GitBranch, GitCommitHorizontal, GitFork, ScanText } from 'lucide-react'
+import {
+  FolderGit2,
+  FolderKanban,
+  GitBranch,
+  GitCommitHorizontal,
+  GitFork,
+  ScanText,
+} from 'lucide-react'
 import { Button } from '../ui/Button'
 import { ProductIcon } from '../ui/ProductIcon'
 import { T } from '../terms'
@@ -41,7 +48,7 @@ export function RepoPicker({ onOpen, onClone, onInit, recent, home, onOpenRecent
             <br />한눈에 이어 보세요.
           </h1>
           <p className="repo-picker__desc">
-            여러 {T.branch}와 {T.worktree}의 흐름을 놓치지 않고,
+            여러 저장소와 {T.worktree}의 흐름을 놓치지 않고,
             <br />변경 검토부터 안전한 {T.commit}과 통합까지 이어가요.
           </p>
           <ul className="repo-picker__features" aria-label="여울의 주요 기능">
@@ -67,7 +74,7 @@ export function RepoPicker({ onOpen, onClone, onInit, recent, home, onOpenRecent
           </div>
           <div className="repo-picker__actions">
             <Button variant="primary" onPress={onOpen} testId="open-repo">
-              <FolderOpen size={16} aria-hidden="true" /> 저장소 열기
+              <FolderKanban size={16} aria-hidden="true" /> 폴더 · 워크스페이스 열기
             </Button>
             <Button variant="neutral" onPress={onClone} testId="clone-repo">
               <GitFork size={16} aria-hidden="true" /> 원격 저장소 복제

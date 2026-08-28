@@ -623,3 +623,36 @@ describe('레지스트리 변경 알림 (E15b 리뷰 I-1)', () => {
     expect(registry.snapshot()).toHaveLength(1)
   })
 })
+
+describe('탭별 멀티레포 워크스페이스', () => {
+  it('저장소와 별도 문맥으로 보관하고 스냅샷에 선택적으로 남긴다', () => {
+    const registry = createWindowRegistry()
+    registry.addWindow(1, {})
+    registry.addTab(1, 10, '/workspace/front', undefined, '/workspace')
+    registry.addTab(1, 11, '/single')
+
+    expect(registry.getTabWorkspacePath(10)).toBe('/workspace')
+    expect(registry.getTabWorkspacePath(11)).toBeNull()
+    expect(registry.snapshot()).toEqual([
+      {
+        tabs: [
+          { repoPath: '/workspace/front', workspacePath: '/workspace' },
+          { repoPath: '/single' },
+        ],
+        activeTab: 0,
+        layout: {},
+      },
+    ])
+  })
+
+  it('워크스페이스만 닫아도 현재 저장소는 유지한다', () => {
+    const registry = createWindowRegistry()
+    registry.addWindow(1, {})
+    registry.addTab(1, 10, '/workspace/back', undefined, '/workspace')
+
+    registry.setTabWorkspacePath(10, null)
+
+    expect(registry.getTabRepoPath(10)).toBe('/workspace/back')
+    expect(registry.getTabWorkspacePath(10)).toBeNull()
+  })
+})

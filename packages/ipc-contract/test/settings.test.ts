@@ -154,6 +154,31 @@ describe('sanitizePersistedSettings의 windows 방어 (E15c 형식)', () => {
     ])
   })
 
+  it('탭의 워크스페이스 경로를 보존하고 잘못된 타입은 걷어낸다', () => {
+    const value = {
+      windows: [
+        {
+          tabs: [
+            { repoPath: '/workspace/front', workspacePath: '/workspace' },
+            { repoPath: '/single', workspacePath: 42 },
+          ],
+          activeTab: 0,
+          layout: {},
+        },
+      ],
+    }
+    expect(sanitizePersistedSettings(value).windows).toEqual([
+      {
+        tabs: [
+          { repoPath: '/workspace/front', workspacePath: '/workspace' },
+          { repoPath: '/single' },
+        ],
+        activeTab: 0,
+        layout: {},
+      },
+    ])
+  })
+
   it('배열이 아니면 필드째 버린다', () => {
     expect(sanitizePersistedSettings({ windows: '창' })).not.toHaveProperty('windows')
   })
