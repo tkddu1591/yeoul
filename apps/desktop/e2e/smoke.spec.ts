@@ -5172,7 +5172,7 @@ test('E15a — 없어진 저장소를 누르면 열리지 않고 최근 목록�
 /**
  * E15a ④ — ⌘O가 폴더 선택을 연다.
  *
- * OS 폴더 선택 다이얼로그는 Playwright로 열 수도 닫을 수도 없다. 대신 main에서 `repo:select`
+ * OS 폴더 선택 다이얼로그는 Playwright로 열 수도 닫을 수도 없다. 대신 main에서 `workspace:select`
  * IPC 핸들러를 감싸 호출 수를 센다 — E14b가 `repo:status`에 이미 쓴 기법이다(:3235). 원본을
  * 부르지 않고 `null`(사용자가 취소한 것과 같은 응답)을 돌려주므로 다이얼로그가 실제로 뜨지
  * 않는다. `_invokeHandlers`는 Electron 내부 필드라 업그레이드하면 깨질 수 있지만, 그때
@@ -5192,19 +5192,19 @@ test('E15a — ⌘O가 폴더 선택을 연다', async () => {
       const impl = ipcMain as unknown as {
         _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
       }
-      const original = impl._invokeHandlers.get('repo:select')
+      const original = impl._invokeHandlers.get('workspace:select')
       if (original === undefined) return false
-      const globals = globalThis as unknown as { __selectCalls: number }
-      globals.__selectCalls = 0
+      const globals = globalThis as unknown as { __workspaceSelectCalls: number }
+      globals.__workspaceSelectCalls = 0
       // 다이얼로그를 실제로 띄우지 않도록 원본을 부르지 않고 null(취소)로 답한다
-      impl._invokeHandlers.set('repo:select', () => {
-        globals.__selectCalls += 1
+      impl._invokeHandlers.set('workspace:select', () => {
+        globals.__workspaceSelectCalls += 1
         return null
       })
       return true
     })
     // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
-    expect(patched, 'repo:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
+    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
       true,
     )
 
@@ -5212,7 +5212,11 @@ test('E15a — ⌘O가 폴더 선택을 연다', async () => {
     await expect
       .poll(
         () =>
-          app.evaluate(() => (globalThis as unknown as { __selectCalls: number }).__selectCalls),
+          app.evaluate(
+            () =>
+              (globalThis as unknown as { __workspaceSelectCalls: number })
+                .__workspaceSelectCalls,
+          ),
         { timeout: 5_000 },
       )
       .toBe(1)
@@ -5225,43 +5229,63 @@ test('E15a — ⌘O가 폴더 선택을 연다', async () => {
 })
 
 /**
- * 위 테스트의 `repo:select` 감싸기를 재사용 가능하게 꺼낸 것 (E15a 리뷰 ②).
+ * 위 테스트의 `workspace:select` 감싸기를 재사용 가능하게 꺼낸 것 (E15a 리뷰 ②).
  *
  * `picked`가 `null`이면 "사용자가 취소"와 같은 응답이라 다이얼로그도, 전환도 일어나지 않는다.
  * 경로를 주면 **⌘O로 실제 전환**을 일으킬 수 있다 — 네이티브 다이얼로그를 Playwright로 못 여는
  * 이 스위트에서 ⌘O 경로를 끝까지 도는 유일한 방법이다.
  *
- * 경로를 그냥 돌려주면 안 된다(실측): main은 자기가 **직접 검증해 등록한** 경로만 신뢰하므로
- * (`allowedRepoPaths`), 등록을 건너뛴 경로로는 이어지는 `repo:status`가 "열려 있지 않은 저장소
- * 경로예요"로 거부돼 전환이 통째로 실패한다. 그래서 `repo:open` 핸들러에 그대로 위임한다 —
- * 검증·정규화·allowlist 등록이 실제 코드로 일어나고, 이 헬퍼는 다이얼로그만 대신한다.
+ * 경로를 워크스페이스 응답에 바로 담으면 안 된다(실측): main은 자기가 **직접 검증해 등록한**
+ * 경로만 신뢰하므로(`allowedRepoPaths`), 등록을 건너뛴 경로로는 이어지는 `repo:status`가
+ * "열려 있지 않은 저장소 경로예요"로 거부돼 전환이 통째로 실패한다. 그래서 `repo:open`
+ * 핸들러에 그대로 위임해 검증·정규화·allowlist 등록을 실제 코드로 거친 뒤, 단일 저장소
+ * 워크스페이스 응답을 만든다. 이 헬퍼는 OS 다이얼로그와 폴더 검색만 대신한다.
  *
  * 계측 실패는 조용히 넘어가지 않는다 — false를 돌려주므로 호출부가 명시적으로 단언한다.
  */
-async function stubRepoSelect(app: ElectronApplication, picked: string | null): Promise<boolean> {
-  return app.evaluate(({ ipcMain }, result) => {
+async function stubWorkspaceSelect(
+  app: ElectronApplication,
+  picked: string | null,
+  currentPath?: string,
+): Promise<boolean> {
+  return app.evaluate(({ ipcMain }, selection) => {
     const impl = ipcMain as unknown as {
       _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
     }
     const open = impl._invokeHandlers.get('repo:open')
-    if (impl._invokeHandlers.get('repo:select') === undefined || open === undefined) return false
-    const globals = globalThis as unknown as { __selectCalls: number }
-    globals.__selectCalls = 0
-    impl._invokeHandlers.set('repo:select', async (event, ..._rest) => {
-      globals.__selectCalls += 1
-      if (result === null) return null
+    if (impl._invokeHandlers.get('workspace:select') === undefined || open === undefined) return false
+    const globals = globalThis as unknown as { __workspaceSelectCalls: number }
+    globals.__workspaceSelectCalls = 0
+    impl._invokeHandlers.set('workspace:select', async (event, ..._rest) => {
+      globals.__workspaceSelectCalls += 1
+      if (selection.picked === null) return null
       // 받은 event를 그대로 넘긴다 — 실제 검증·등록 경로를 그대로 탄다.
       // E15b 전에는 `open(null, result)`였다("핸들러는 event를 안 쓴다"). 그 가정은 E15b에서
       // 거짓이 됐다 — repo:open이 event.sender.id로 이 창의 저장소를 창 레지스트리에 반영한다
-      const opened = (await open(event, result)) as { ok: boolean; path?: string }
-      return opened.ok ? (opened.path ?? null) : null
+      const opened = (await open(event, selection.picked)) as { ok: boolean; path?: string }
+      if (!opened.ok || opened.path === undefined) return null
+      // repo:open은 allowlist 등록과 함께 탭 레지스트리도 바꾼다. 실제 workspace:select는
+      // 레지스트리의 저장소를 건드리지 않으므로, 현재 경로를 다시 열어 원래 상태로 돌려놓는다.
+      // 안 그러면 renderer가 이어서 repo:open을 부를 때 showExisting이 '현재 탭에 이미 열림'으로
+      // 오판해 화면 전환을 생략한다.
+      if (selection.currentPath !== undefined) await open(event, selection.currentPath)
+      return {
+        path: opened.path,
+        name: selection.pickedName,
+        repositories: [
+          { path: opened.path, relativePath: '.', name: selection.pickedName },
+        ],
+      }
     })
     return true
-  }, picked)
+  }, { picked, pickedName: picked === null ? '' : basename(picked), currentPath })
 }
 
-const selectCalls = (app: ElectronApplication): Promise<number> =>
-  app.evaluate(() => (globalThis as unknown as { __selectCalls: number }).__selectCalls)
+const workspaceSelectCalls = (app: ElectronApplication): Promise<number> =>
+  app.evaluate(
+    () =>
+      (globalThis as unknown as { __workspaceSelectCalls: number }).__workspaceSelectCalls,
+  )
 
 /**
  * E15a 리뷰 ② — 도크 터미널이 포커스면 ⌘O를 가로채지 않는다.
@@ -5284,8 +5308,8 @@ test('E15a — 도크 터미널이 포커스면 ⌘O·Ctrl+O를 가로채지 않
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
-    const patched = await stubRepoSelect(app, null)
-    expect(patched, 'repo:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
+    const patched = await stubWorkspaceSelect(app, null)
+    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
       true,
     )
 
@@ -5302,7 +5326,7 @@ test('E15a — 도크 터미널이 포커스면 ⌘O·Ctrl+O를 가로채지 않
     // 위 두 번이 세어졌다면 여기서 카운트가 3이 되어 이 단언이 절대 통과하지 못한다
     await window.getByTestId('left-tab-changes').click()
     await window.keyboard.press('Meta+o')
-    await expect.poll(() => selectCalls(app), { timeout: 5_000 }).toBe(1)
+    await expect.poll(() => workspaceSelectCalls(app), { timeout: 5_000 }).toBe(1)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -5334,8 +5358,8 @@ test('E15a — ⌘O 전환은 옛 저장소에 매인 확인창을 남기지 않
     const window = await app.firstWindow()
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
     // ⌘O가 열 OS 다이얼로그를 대신해 "저장소 B를 골랐다"로 답한다
-    const patched = await stubRepoSelect(app, pathB)
-    expect(patched, 'repo:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
+    const patched = await stubWorkspaceSelect(app, pathB, realpathSync(repoA))
+    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
       true,
     )
 
