@@ -3346,7 +3346,7 @@ E2E는 실패한 테스트의 마지막 화면을 test-results에 남기고, GIT
 E2E는 실패한 테스트의 마지막 화면을 test-results에 남기고, GIT_GUI_E2E_SHOW=1로 창을 보면서 디버깅할 수 있습니다. E7a로 좌측에 [변경 | 실험 공간] 탭이 생겨 브랜치를 IntelliJ처럼 관리합니다 — 검색·폴더 그룹·상태 배지(↑↓·연결 없음), 우클릭으로 이동·합치기·재배치(rebase — 겹치면 카드로 하나씩 해결하고 계속하기)·원격 최신 업데이트·checkout 없는 백업·이름 바꾸기·지우기, 원격 브랜치 가져오기(추적)·원격에서 지우기·지금과 비교까지 됩니다.
 ```
 
-- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + 세션 scratchpad 사본(경로가 없으면 `mkdir -p`로 만든다: `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad`). **생성 후 e2e 재실행 금지**(test-results가 갈린다). 임시 파일 `apps/desktop/e2e/tmp-shots-e7a.spec.ts`:
+- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + 세션 scratchpad 사본(경로가 없으면 `mkdir -p`로 만든다: `<temporary-scratchpad>`). **생성 후 e2e 재실행 금지**(test-results가 갈린다). 임시 파일 `apps/desktop/e2e/tmp-shots-e7a.spec.ts`:
 
 ```ts
 // 임시 파일 — 공식 스크린샷 생성 후 삭제한다 (커밋 금지)
@@ -3358,7 +3358,7 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 const SCRATCH =
-  '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad'
+  '<temporary-scratchpad>'
 
 test('공식 스크린샷 — E7a 실험 공간 탭·rebase 진행 바 2장', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-shot-'))

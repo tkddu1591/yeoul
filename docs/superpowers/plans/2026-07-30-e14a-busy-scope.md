@@ -15,7 +15,7 @@
 - **E2E는 반드시 단일 포그라운드 Bash 호출 + `timeout: 600000`.** 기본 120초 상한은 실행을 조용히 백그라운드로 보내고 멈춘다.
 - **`npx playwright test`는 빌드하지 않는다.** `pnpm --filter @git-gui/desktop e2e`만 `electron-vite build &&`가 붙는다. 소스를 고친 뒤 `npx playwright test`를 돌리면 낡은 번들을 테스트하는 것이고 반증은 무의미해진다.
 - **E2E 환경변수:** `GIT_GUI_E2E_REPO`(저장소 즉시 열기) · `GIT_GUI_USER_DATA`(설정 격리 — 하네스가 자동 주입하지만 직접 launch할 땐 반드시 지정) · `GIT_GUI_E2E_SHOW=1`(실제 창).
-- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright의 창/페이지 캡처만 쓰고 `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`에 쓴다.
+- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright의 창/페이지 캡처만 쓰고 `<temporary-scratchpad>/`에 쓴다.
 - **사용자의 실행 중인 dev 앱을 건드리거나 재시작하지 않는다.**
 - **모션 안전망:** `apps/desktop/test/motion-tokens.test.ts`가 레이아웃 속성 전환을 금지한다. `opacity`·`transform`은 허용 대상이다.
 - **기준 게이트(시작 시점):** typecheck 6/6 · 루트 `pnpm test` **562** · build 성공 · e2e **119**.
@@ -275,7 +275,7 @@ describe('억제 창', () => {
 
 - [x] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/run-guard.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/run-guard.test.ts`
 Expected: FAIL — `Failed to resolve import "../src/renderer/src/store/run-guard"`
 
 - [x] **Step 3: 모듈을 구현한다**
@@ -401,7 +401,7 @@ function toMessage(cause: unknown): string {
 
 - [x] **Step 4: 통과를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/run-guard.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/run-guard.test.ts`
 Expected: PASS — 16 passed
 
 - [x] **Step 5: 반증한다 — 테스트가 실제로 무는지**
@@ -413,7 +413,7 @@ Expected: PASS — 16 passed
 - [x] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/store/run-guard.ts apps/desktop/test/run-guard.test.ts
 git commit -m "feat(desktop): E14a runWrite/runRead 분리 — 조회를 전역 잠금에서 뺀다
 
@@ -551,21 +551,21 @@ export { WATCH_SUPPRESS_MS } from './run-guard'
 - [x] **Step 5: 타입·단위 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm typecheck && pnpm test
 ```
 Expected: typecheck 6/6 · Tests **578 passed** (562 + Task 1의 16건)
 
 - [x] **Step 6: 잔재를 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui/apps/desktop/src/renderer/src/store" && grep -c "armSuppression" repository-store.ts; grep -c "runRead(" repository-store.ts; grep -c "runWrite(" repository-store.ts
+cd "<repo-root>/apps/desktop/src/renderer/src/store" && grep -c "armSuppression" repository-store.ts; grep -c "runRead(" repository-store.ts; grep -c "runWrite(" repository-store.ts
 ```
 Expected: `0` · `15` · `50`  (조회 15 · 쓰기 50 · 총 65 — 위 Step 3 정정 참조)
 
 - [x] **Step 7: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/store/repository-store.ts
 git commit -m "refactor(desktop): E14a 조회 15개를 runRead로 — armSuppression 인자 폐기
 
@@ -755,7 +755,7 @@ test('E14a — 에디터에서 저장해도 앱이 잠기지 않는다 (외부 �
 - [x] **Step 2: 통과를 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 (**단일 포그라운드 호출 · `timeout: 600000`**)
 Expected: **121 passed** (119 + 2)
@@ -770,7 +770,7 @@ Expected: **121 passed** (119 + 2)
 - [x] **Step 4: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/e2e/smoke.spec.ts
 git commit -m "test(desktop): E14a 깜빡임 회귀 E2E 2건 — 파일 이동·외부 저장
 
@@ -940,14 +940,14 @@ export function DiffPanel({ /* …기존… */ pending }: DiffPanelProps) {
 - [x] **Step 5: 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm typecheck && pnpm test
 ```
 Expected: typecheck 6/6 · Tests **578 passed** (변동 없음 — 이 태스크는 단위 테스트를 늘리지 않는다)
 
 - [x] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/ui apps/desktop/src/renderer/src/App.tsx apps/desktop/src/renderer/src/components
 git commit -m "feat(desktop): E14a 조회 로딩 표시 — animation-delay로 느린 조회에만 배어난다
 
@@ -1114,7 +1114,7 @@ test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', asy
 - [x] **Step 2: 통과를 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **123 passed** (121 + 2)
 
@@ -1137,7 +1137,7 @@ Expected: **123 passed** (121 + 2)
 - [x] **Step 4: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/e2e/smoke.spec.ts
 git commit -m "test(desktop): E14a 동시성·로딩 표시 E2E 2건
 
@@ -1155,10 +1155,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [x] **Step 1: 네 게이트를 전부 실행한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
-cd "/Users/sangyeop_kim/git gui" && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm typecheck
+cd "<repo-root>" && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop build
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: 6/6 · **578** · 성공 · **123**
 
@@ -1186,7 +1186,7 @@ Playwright 창 캡처로만 찍는다(OS 전체 화면 금지). 스크래치패�
 - [x] **Step 5: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add docs/superpowers/plans/2026-07-30-e14a-busy-scope.md README.md
 git commit -m "docs: E14a 플랜 실행 기록 — 편차·반증·최종 게이트
 
@@ -1404,7 +1404,7 @@ B1을 막는 대신 거울상 버그를 만들었다 — `refresh`가 `center` s
 
 ### 증거 스크린샷
 
-`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`
+`<temporary-scratchpad>/`
 (Playwright 창 캡처만 — OS 전체 화면 금지)
 
 - **`e14a-1-pending-spinner.png`** — 느린 조회에서 스피너가 배어나는 순간. `runRead`에 임시로

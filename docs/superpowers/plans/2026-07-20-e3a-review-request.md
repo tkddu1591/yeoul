@@ -2683,7 +2683,7 @@ Expected: 1 passed. 촬영물 확인·사본·정리:
 
 ```bash
 ls apps/desktop/test-results/e3a-connect.png apps/desktop/test-results/e3a-created.png apps/desktop/test-results/e3a-pulls.png
-cp apps/desktop/test-results/e3a-connect.png apps/desktop/test-results/e3a-created.png apps/desktop/test-results/e3a-pulls.png "/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/"
+cp apps/desktop/test-results/e3a-connect.png apps/desktop/test-results/e3a-created.png apps/desktop/test-results/e3a-pulls.png "<temporary-scratchpad>/"
 rm apps/desktop/e2e/shots.spec.ts
 ```
 

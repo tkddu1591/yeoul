@@ -352,7 +352,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: 전체 게이트** — 루트 `pnpm test`(**300**) + typecheck(6 Done) + build + E2E **35 passed** — 전부 exit 0
 
-- [ ] **Step 2: 스크린샷 2장** (1440×900, test-results/ + scratchpad `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/` 사본, **생성 후 e2e 재실행 금지**)
+- [ ] **Step 2: 스크린샷 2장** (1440×900, test-results/ + scratchpad `<temporary-scratchpad>/` 사본, **생성 후 e2e 재실행 금지**)
 
 - (a) `e4-refs.png` — 한 커밋에 브랜치 5개+origin이 몰린 히스토리: 배지 2개 + "+N", 현재 브랜치 강조
 - (b) `e4-overlay.png` — merging 충돌 + notice 동시 상태: 머지 바(위)·알림(아래) 스택, 본문 무시프트

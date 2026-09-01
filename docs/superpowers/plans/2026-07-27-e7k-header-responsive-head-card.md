@@ -839,7 +839,7 @@ test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치�
 
 - [x] **Step 3: 전체 게이트** — 루트 `pnpm test` **520(512+3+4+1 — 실측 확정)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **92**(smoke 86 + hosting 6) · last-screen 아티팩트 0건.
 
-- [x] **Step 4: 공식 스크린샷 1장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7k.spec.ts`(관례: harness electron·**970×800**·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **e7k-header-compact.png** — 좁은 창에서 헤더가 아이콘만으로 접히고 저장소 이름이 살아 있는 상태. 스크래치패드(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`)에 사본.
+- [x] **Step 4: 공식 스크린샷 1장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7k.spec.ts`(관례: harness electron·**970×800**·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **e7k-header-compact.png** — 좁은 창에서 헤더가 아이콘만으로 접히고 저장소 이름이 살아 있는 상태. 스크래치패드(`<temporary-scratchpad>/`)에 사본.
 
 - [x] **Step 5: README.** 기존 E7j 문단 끝(실독) 뒤에 추가:
 

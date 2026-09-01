@@ -2375,7 +2375,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 좌측 변경 목록에서 올리기/내리기/이 파일만 되돌리기/파일 삭제. E5b로 히스토리가 전체 그래프(--all)로 바뀌었습니다 — 로컬·원격(☁)·태그를 한 화면에서 보고 "지금 여기" 마커가 HEAD를 따라가며, 커밋 우클릭으로 실험 공간 이동(switch)·이 저장만 가져오기(cherry-pick, 충돌 시 상태 바·취소)·저장 실행취소(undo, 내용 보존)·메시지 고치기(amend)·태그 만들기(tag)를 할 수 있습니다.
 ```
 
-- [ ] **Step 3: 공식 스크린샷 3장** (1440×900, `test-results/` + scratchpad `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/` 사본, **생성 후 e2e 재실행 금지** — 재실행하면 test-results가 갈린다)
+- [ ] **Step 3: 공식 스크린샷 3장** (1440×900, `test-results/` + scratchpad `<temporary-scratchpad>/` 사본, **생성 후 e2e 재실행 금지** — 재실행하면 test-results가 갈린다)
 
 임시 파일 `apps/desktop/e2e/screens-e5b.spec.ts`를 다음 내용으로 만들고:
 
@@ -2388,7 +2388,7 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 const SCRATCH =
-  '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad'
+  '<temporary-scratchpad>'
 
 test('공식 스크린샷 — E5b 전체 그래프·커밋 메뉴·가져오기 바 3장 (1440×900)', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-shot-'))

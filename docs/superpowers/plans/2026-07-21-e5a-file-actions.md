@@ -1906,7 +1906,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 다크/라이트 테마를 전환할 수 있고, 대형 저장소를 위해 변경 목록·역사·diff는 가상 스크롤로 렌더됩니다. E5a로 파일 단위 우클릭 작업이 추가되었습니다 — 커밋 상세·보관함 미리보기에서 "이 파일만 지금 코드에 적용(checkout, 미저장 변경은 자동 보관)"·"지금 코드와 비교(diff)", 좌측 변경 목록에서 올리기/내리기/이 파일만 되돌리기/파일 삭제.
 ```
 
-- [ ] **Step 3: 공식 스크린샷 2장** (1440×900, `test-results/` + scratchpad `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/` 사본, **생성 후 e2e 재실행 금지** — 재실행하면 test-results가 갈린다)
+- [ ] **Step 3: 공식 스크린샷 2장** (1440×900, `test-results/` + scratchpad `<temporary-scratchpad>/` 사본, **생성 후 e2e 재실행 금지** — 재실행하면 test-results가 갈린다)
 
 임시 파일 `apps/desktop/e2e/screens-e5a.spec.ts`를 다음 내용으로 만들고:
 
@@ -1919,7 +1919,7 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 const SCRATCH =
-  '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad'
+  '<temporary-scratchpad>'
 
 test('공식 스크린샷 — E5a 파일 우클릭 메뉴 2장 (1440×900)', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-shot-'))

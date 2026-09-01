@@ -2008,10 +2008,10 @@ export interface ContextMenuItem {
 - [ ] **Step 11: 공식 스크린샷 복원** — Step 10의 e2e 실행이 test-results/를 비운다. scratchpad 사본에서 3장을 되돌린다:
 
 ```bash
-cp /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-manage.png \
-   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-revert-bar.png \
-   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1c-pull.png \
-   "/Users/sangyeop_kim/git gui/apps/desktop/test-results/"
+cp <temporary-scratchpad>/e1c-manage.png \
+   <temporary-scratchpad>/e1c-revert-bar.png \
+   <temporary-scratchpad>/e1c-pull.png \
+   "<repo-root>/apps/desktop/test-results/"
 ```
 
 (참고: e1c-revert-bar.png는 가드 추가 후에도 유효하다 — 화면은 reverting 상태 바·충돌 뷰로, 이번 변경은 우클릭 메뉴 항목만 비활성화한다.)

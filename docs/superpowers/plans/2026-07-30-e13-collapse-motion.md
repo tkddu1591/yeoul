@@ -238,7 +238,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [x] **Step 3: 최종 게이트.** typecheck 6/6 · 루트 **551** · build · smoke **110**(107+3) · e2e **116** · `last-screen` 0건.
 
-- [x] **Step 4: 스크린샷 4장** — 접히는 **중간 프레임**(모션은 정지 이미지로 안 보인다 — E11 관례) · 접힘 완료 · 도크 닫히는 중간 프레임 · **다크 테마 부팅 직후 첫 화면**(흰색이 아님을 보이는 것이 목적). 하이픈 경로(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`)에 저장하고 `ls`로 확인해 붙인다.
+- [x] **Step 4: 스크린샷 4장** — 접히는 **중간 프레임**(모션은 정지 이미지로 안 보인다 — E11 관례) · 접힘 완료 · 도크 닫히는 중간 프레임 · **다크 테마 부팅 직후 첫 화면**(흰색이 아님을 보이는 것이 목적). 하이픈 경로(`<temporary-scratchpad>/`)에 저장하고 `ls`로 확인해 붙인다.
 
 - [x] **Step 5: README.** 기존 E12 문장(**실독**) 뒤에:
 

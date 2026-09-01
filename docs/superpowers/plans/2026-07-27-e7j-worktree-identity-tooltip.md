@@ -1348,7 +1348,7 @@ test('E7j — 워크트리에 호버하면 전체 경로가 잘림 없이 보인
 
 - [x] **Step 3: 전체 게이트** — 루트 `pnpm test` **512(486+12+5+1+4+4 — 실측 확정)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **89**(smoke 83 + hosting 6) · last-screen 아티팩트 0건.
 
-- [x] **Step 4: 공식 스크린샷 2장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7j.spec.ts`(관례: harness electron·1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **(1) e7j-worktree-rows.png** — 같은 리프 이름 워크트리 2~3개가 출처 칩·유일화 이름·경로 뒤 조각으로 구분되는 목록. **(2) e7j-worktree-hover.png** — 행 호버 카드(전체 경로·출처·HEAD, 가능하면 분기점 줄까지). 스크래치패드에 사본을 남긴다(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`).
+- [x] **Step 4: 공식 스크린샷 2장** — 임시 spec `apps/desktop/e2e/tmp-shots-e7j.spec.ts`(관례: harness electron·1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **(1) e7j-worktree-rows.png** — 같은 리프 이름 워크트리 2~3개가 출처 칩·유일화 이름·경로 뒤 조각으로 구분되는 목록. **(2) e7j-worktree-hover.png** — 행 호버 카드(전체 경로·출처·HEAD, 가능하면 분기점 줄까지). 스크래치패드에 사본을 남긴다(`<temporary-scratchpad>/`).
 
 - [x] **Step 5: README.** 기존 E7i 문단 끝(실독) 뒤에 추가:
 

@@ -1,6 +1,6 @@
 # macOS 릴리스
 
-여울(Yeoul) 릴리스는 비공개 소스 저장소에 `v<앱 버전>` 태그를 push하면 GitHub Actions가 다음 작업을 한 번에 수행합니다. 설치 파일은 공개 저장소 [`tkddu1591/yeoul-releases`](https://github.com/tkddu1591/yeoul-releases)에만 발행합니다.
+여울(Yeoul) 릴리스는 공개 소스 저장소 [`tkddu1591/yeoul`](https://github.com/tkddu1591/yeoul)에 `v<앱 버전>` 태그를 push하면 GitHub Actions가 다음 작업을 한 번에 수행합니다. 설치 파일과 자동 업데이트 메타데이터는 바이너리 전용 저장소 [`tkddu1591/yeoul-releases`](https://github.com/tkddu1591/yeoul-releases)에 발행합니다.
 
 - lint, 타입 검사, 전체 테스트
 - Apple Silicon과 Intel을 모두 포함한 Universal 앱 생성
@@ -11,17 +11,17 @@
 
 ## 무료 ad-hoc 릴리스
 
-Apple Developer Program 없이 사용할 수 있는 기본 방식입니다. 비공개 소스 저장소에서 Universal DMG와 ZIP을 만든 뒤 공개 바이너리 저장소에만 올립니다.
+Apple Developer Program 없이 사용할 수 있는 기본 방식입니다. 공개 소스 저장소의 GitHub Actions에서 Universal DMG와 ZIP을 만든 뒤 바이너리 전용 저장소에 올립니다.
 
 ad-hoc 앱은 Apple 공증을 받지 않았으므로 처음 실행할 때 Gatekeeper 경고가 표시될 수 있습니다. 테스트 사용자는 Finder에서 앱을 우클릭한 뒤 `열기`를 선택해야 할 수 있습니다.
 
 앱은 공개 바이너리 저장소의 최신 릴리스를 시작 15초 후, 이후 6시간마다 확인합니다. 새 버전이 있으면 DMG와 `.sha512`를 내려받아 검증한 뒤 DMG를 엽니다. Developer ID 서명이 없는 동안에는 실행 중인 앱을 자동 교체하지 않으며, 사용자가 여울을 종료하고 DMG의 앱을 응용 프로그램 폴더에 덮어씁니다.
 
-## 공개 바이너리 저장소 권한
+## 바이너리 저장소 권한
 
-비공개 소스 저장소의 Actions secret에 `YEOUL_RELEASE_TOKEN`을 등록합니다. 이 토큰은 공개 저장소 `tkddu1591/yeoul-releases`의 Contents 쓰기 권한이 필요합니다. 앱에는 이 토큰이 포함되지 않습니다.
+소스 저장소의 Actions secret에 `YEOUL_RELEASE_TOKEN`을 등록합니다. 이 토큰은 `tkddu1591/yeoul-releases`의 Contents 쓰기 권한만 가진 fine-grained token 또는 GitHub App token이어야 합니다. 앱과 빌드 산출물에는 이 토큰이 포함되지 않습니다.
 
-현재 저장소에는 로컬 GitHub CLI 인증 토큰을 `YEOUL_RELEASE_TOKEN`으로 등록해 두었습니다. 나중에 전용 fine-grained token을 만들면 이 secret만 교체하면 됩니다.
+fork에서 실행한 워크플로와 일반 Pull Request에는 이 secret을 전달하지 않습니다. 릴리스는 저장소 관리자가 만든 `v*` 태그에서만 실행합니다.
 
 ## 선택 사항: Developer ID 서명·공증
 
@@ -44,8 +44,8 @@ ad-hoc 앱은 Apple 공증을 받지 않았으므로 처음 실행할 때 Gateke
 `apps/desktop/package.json`의 `version`을 먼저 올리고 같은 버전의 태그를 push합니다.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 태그와 앱 버전이 다르면 릴리스는 발행되지 않습니다. 서명 secret 5개가 모두 없으면 ad-hoc으로 발행하고, 모두 있으면 Developer ID 서명·공증으로 발행합니다. 일부만 등록된 경우에는 잘못된 보안 설정으로 간주해 릴리스를 중단합니다.

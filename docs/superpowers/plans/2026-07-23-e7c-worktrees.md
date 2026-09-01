@@ -2469,7 +2469,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 터미널이나 다른 도구로 저장소를 바꾸면 .git 감시가 화면(변경·역사·실험 공간)을 자동으로 따라 갱신합니다. E7c로 좌측에 [워크트리] 탭이 생겨 워크트리를 1급으로 관리합니다 — 목록(브랜치·경로·지금 여기/터미널 대상 표시), 새로 만들기(체크아웃 안 된 실험 공간 선택·경로 자동 제안)·지우기(2단 확인), 클릭하면 그 폴더에서 새 터미널이 열리고(헤더 ⚙ 설정에서 "앱 전체 전환"으로 바꾸면 변경·역사도 그 워크트리 기준으로), 우클릭으로 터미널·앱 열기·Finder 보기까지 됩니다.
 ```
 
-- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + scratchpad(`mkdir -p '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad'`) 사본. **생성 후 e2e 재실행 금지.** 임시 파일 `apps/desktop/e2e/tmp-shots-e7c.spec.ts`:
+- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + scratchpad(`mkdir -p '<temporary-scratchpad>'`) 사본. **생성 후 e2e 재실행 금지.** 임시 파일 `apps/desktop/e2e/tmp-shots-e7c.spec.ts`:
 
 ```ts
 // 임시 파일 — 공식 스크린샷 생성 후 삭제한다 (커밋 금지)
@@ -2481,7 +2481,7 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 const SCRATCH =
-  '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad'
+  '<temporary-scratchpad>'
 
 test('공식 스크린샷 — E7c 워크트리 탭·설정 모달 2장', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-shot-'))

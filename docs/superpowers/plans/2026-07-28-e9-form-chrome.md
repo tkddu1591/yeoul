@@ -432,7 +432,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   2. `e9-composer-ready.png` — 1개 스테이지 + 메시지 입력, textarea 포커스 상태(상자 링이 보여야 한다)
   3. `e9-panels.png` — 모서리 10px 적용 후 전체 화면(패널 3개가 한 화면에)
   4. `e9-dialog.png` — 확인창 하나를 열어 컨테이너 모서리 확인
-  스크래치패드(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`)에 절대 경로로 보고 — 컨트롤러가 육안 검수 후 사용자에게 보낸다. **14→10 변경은 취향이 갈릴 수 있는 지점이라 3·4번이 특히 중요하다.**
+  스크래치패드(`<temporary-scratchpad>/`)에 절대 경로로 보고 — 컨트롤러가 육안 검수 후 사용자에게 보낸다. **14→10 변경은 취향이 갈릴 수 있는 지점이라 3·4번이 특히 중요하다.**
 
 - [x] **Step 3: README.** 기존 E8 문장(실독) 뒤에 추가:
 

@@ -17,7 +17,7 @@
 - **E2E는 반드시 단일 포그라운드 Bash 호출 + `timeout: 600000`.** 기본 120초 상한은 실행을 조용히 백그라운드로 보내고 멈춘다.
 - **`npx playwright test`는 빌드하지 않는다.** `pnpm --filter @git-gui/desktop e2e`만 `electron-vite build &&`가 붙는다. 소스를 고친 뒤 `npx playwright test`를 돌리면 낡은 번들을 테스트하는 것이고 반증은 무의미해진다.
 - **E2E 환경변수:** `GIT_GUI_E2E_REPO`(저장소 즉시 열기) · `GIT_GUI_USER_DATA`(설정 격리 — **하네스가 없으면 자동 주입한다**, `e2e/harness.ts:33`) · `GIT_GUI_E2E_SHOW=1`(실제 창).
-- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`에 쓴다.
+- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `<temporary-scratchpad>/`에 쓴다.
 - **사용자의 실행 중인 dev 앱을 건드리거나 재시작하지 않는다.**
 - **기준 게이트(시작 시점):** lint **0 errors / 5 warnings** · typecheck 6/6 · 루트 `pnpm test` **639** · build 성공 · e2e **135**.
 - **알려진 플레이크(오귀속 금지):** `packages/git-adapter` 단위 테스트가 루트 전체 병렬 실행에서 3회 중 2회꼴로 1건 타임아웃한다 — 매번 다른 테스트·항상 정확히 15000ms·단독 실행은 242/242 초록. 실제 git 서브프로세스를 띄우는 탓이고 이 에픽과 무관하다.
@@ -152,7 +152,7 @@ describe('창 레지스트리 (E15b)', () => {
 
 - [ ] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/window-registry.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/window-registry.test.ts`
 Expected: FAIL — `Failed to resolve import ".../window-registry"`
 
 - [ ] **Step 3: 계약서에 타입과 채널을 더한다**
@@ -291,7 +291,7 @@ export function createWindowRegistry(): WindowRegistry {
 
 - [ ] **Step 5: 통과를 확인하고 반증한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/window-registry.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/window-registry.test.ts`
 Expected: PASS — 10 passed
 
 그다음 **세 변이를 각각 넣고 어느 테스트가 빨개지는지 실제로 확인한 뒤 원복**한다. 빨강/초록 출력을 그대로 보고에 붙인다.
@@ -483,7 +483,7 @@ test('E15b — 새 창이 뜨고 두 창을 각각 조작할 수 있다', async 
 - [ ] **Step 8: 두 창 E2E가 실제로 도는지 확인한다 — 여기가 관문이다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **136 passed** (135 + 이 1건).
 
@@ -492,14 +492,14 @@ Expected: **136 passed** (135 + 이 1건).
 - [ ] **Step 9: 나머지 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: lint **0 errors / 5 warnings** · typecheck **6/6** · Tests **649** (639 + 레지스트리 10)
 
 - [ ] **Step 10: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop packages/ipc-contract
 git commit -m "feat(desktop): E15b 창 레지스트리 + window.open — 여러 창의 토대
 
@@ -586,7 +586,7 @@ test('E15b — 창 B를 닫아도 창 A의 외부 변경 감지가 산다', asyn
 - [ ] **Step 2: 현재 코드에서 빨간 것을 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **새 테스트가 빨강**(`file-unstaged-watch-alive.txt`가 15초 안에 안 뜬다). 초록이면 위에 적은 대로 보고한다.
 
@@ -640,7 +640,7 @@ Expected: **새 테스트가 빨강**(`file-unstaged-watch-alive.txt`가 15초 �
 - [ ] **Step 4: 초록을 확인하고 반증한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **137 passed** (136 + 이 1건)
 
@@ -651,12 +651,12 @@ Expected: **137 passed** (136 + 이 1건)
 - [ ] **Step 5: 나머지 게이트 + 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **649**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop
 git commit -m "fix(desktop): E15b 감시를 창별로 — 창 B를 닫으면 A의 감시까지 죽던 것
 
@@ -738,7 +738,7 @@ describe('창별 터미널 상한 (E15b)', () => {
 
 - [ ] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/terminal-cap.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/terminal-cap.test.ts`
 Expected: FAIL — `countSessionsFor`·`MAX_SESSIONS_PER_WINDOW`가 export되지 않음
 
 - [ ] **Step 3: 구현한다**
@@ -781,7 +781,7 @@ export function countSessionsFor<T>(targets: ReadonlyMap<string, T>, sender: T):
 
 - [ ] **Step 4: 통과를 확인하고 반증한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/terminal-cap.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/terminal-cap.test.ts`
 Expected: PASS — 4 passed
 
 반증 둘(각각 원복):
@@ -795,13 +795,13 @@ Expected: PASS — 4 passed
 - [ ] **Step 5: 게이트 + 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **653** (649 + 4) · e2e **137**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop
 git commit -m "fix(desktop): E15b 터미널 상한을 창마다 8개로
 
@@ -892,7 +892,7 @@ import에 `splitSettings`를 더한다.
 
 - [ ] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root packages/ipc-contract`
+Run: `cd "<repo-root>" && npx vitest run --root packages/ipc-contract`
 Expected: FAIL — `splitSettings` 없음
 
 - [ ] **Step 3: `splitSettings`를 구현한다**
@@ -1000,8 +1000,8 @@ test('E15b — 사이드 접힘은 창마다 따로 산다', async () => {
 - [ ] **Step 6: 게이트 + 반증**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **659** (653 + 6) · e2e **138**
 
@@ -1012,7 +1012,7 @@ Expected: lint 0 errors / 5 warnings · 6/6 · **659** (653 + 6) · e2e **138**
 - [ ] **Step 7: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop packages/ipc-contract
 git commit -m "feat(desktop): E15b 설정을 창별/앱공용으로 가른다
 
@@ -1246,15 +1246,15 @@ test('E15b — 빈 창의 최근 목록에서 저장소를 연다', async () => 
 - [ ] **Step 6: 게이트 + 반증 + 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **659** · e2e **141**
 
 반증: ⌥ 분기 무력화 · `findByRepoPath` 반환을 `undefined`로 고정 · `RepoPicker`의 `recent` 렌더 제거 — 각각 해당 테스트가 빨개지는지 확인하고 원복.
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop
 git commit -m "feat(desktop): E15b 진입점 넷 + 중복 차단 + 빈 창의 최근 목록
 
@@ -1360,13 +1360,13 @@ E2E로는 못 본다(네이티브 탭바는 OS가 그리고 Playwright의 `windo
 - [ ] **Step 5: 게이트 + 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **659** · e2e **141** (변동 없음 — 탭은 E2E로 안 본다)
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop README.md
 git commit -m "feat(desktop): E15b macOS 네이티브 탭
 
@@ -1459,7 +1459,7 @@ describe('sanitizePersistedSettings의 windows 방어 (E15b)', () => {
 
 - [ ] **Step 2: 실패를 확인하고 구현한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root packages/ipc-contract`
+Run: `cd "<repo-root>" && npx vitest run --root packages/ipc-contract`
 Expected: FAIL → 구현 후 PASS
 
 - [ ] **Step 3: main에 저장·복원을 배선한다**
@@ -1571,8 +1571,8 @@ test('E15b — 껐다 켜면 열려 있던 창들이 돌아온다', async () => 
 - [ ] **Step 5: 게이트 + 반증**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 0 errors / 5 warnings · 6/6 · **664** (659 + 5) · e2e **142**
 
@@ -1583,7 +1583,7 @@ Expected: lint 0 errors / 5 warnings · 6/6 · **664** (659 + 5) · e2e **142**
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop packages/ipc-contract
 git commit -m "feat(desktop): E15b 창 복원 — 껐을 때 그대로
 
@@ -1614,11 +1614,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 다섯 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
-cd "/Users/sangyeop_kim/git gui" && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint
+cd "<repo-root>" && pnpm typecheck
+cd "<repo-root>" && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop build
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint **0 errors / 5 warnings** · 6/6 · **664** · 성공 · **142**
 
@@ -1642,7 +1642,7 @@ Expected: lint **0 errors / 5 warnings** · 6/6 · **664** · 성공 · **142**
 - [ ] **Step 4: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add docs/superpowers README.md
 git commit -m "docs: E15b 실행 기록
 

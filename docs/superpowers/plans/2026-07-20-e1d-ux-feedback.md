@@ -913,10 +913,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 4: 공식 스크린샷 3장 복원** — Step 3의 e2e가 test-results/를 비운다. scratchpad 사본에서 되돌린다:
 
 ```bash
-cp /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-scrollbar-notice.png \
-   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-branch-folders.png \
-   /private/tmp/claude-501/-Users-sangyeop-kim-git-gui/47e198c4-f65c-435f-b962-13de0c0d68a0/scratchpad/e1d-shelf-preview.png \
-   "/Users/sangyeop_kim/git gui/apps/desktop/test-results/"
+cp <temporary-scratchpad>/e1d-scrollbar-notice.png \
+   <temporary-scratchpad>/e1d-branch-folders.png \
+   <temporary-scratchpad>/e1d-shelf-preview.png \
+   "<repo-root>/apps/desktop/test-results/"
 ```
 
 (e1d-shelf-preview.png는 새 안내 문구가 없는 이전 화면이지만 제목·구성은 유효 — 재촬영하지 않는다.)

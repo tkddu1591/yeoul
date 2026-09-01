@@ -720,7 +720,7 @@ test('E8 — 변경이 없으면 목록이 빈 상자로 자리를 먹지 않는
 
 - [x] **Step 3: 전체 게이트** — 루트 `pnpm test` **523(520+3 — 실측 확정)** · typecheck 전부 Done · desktop build · `pnpm --filter @git-gui/desktop e2e` → **95**(smoke 89 + hosting 6) · last-screen 아티팩트 0건.
 
-- [x] **Step 4: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e8.spec.ts`(관례: harness electron·1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **(1) e8-commit-form.png** — 변경 3개·스테이지 1개 상태의 좌측 열(새 커밋 폼·접힌 빈 공간). **(2) e8-header.png** — 배지 없는 헤더. **(3) e8-full.png** — 전체 화면. 스크래치패드(`/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`)에 사본.
+- [x] **Step 4: 공식 스크린샷 3장** — 임시 spec `apps/desktop/e2e/tmp-shots-e8.spec.ts`(관례: harness electron·1440×900·try/finally 정리·촬영 후 spec 삭제·전체 e2e 재실행 금지): **(1) e8-commit-form.png** — 변경 3개·스테이지 1개 상태의 좌측 열(새 커밋 폼·접힌 빈 공간). **(2) e8-header.png** — 배지 없는 헤더. **(3) e8-full.png** — 전체 화면. 스크래치패드(`<temporary-scratchpad>/`)에 사본.
 
 - [x] **Step 5: README.** 기존 E7k 문단 끝(실독) 뒤에 추가:
 

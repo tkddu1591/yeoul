@@ -1,0 +1,48 @@
+name: 버그 제보
+description: 재현 가능한 오류나 예상과 다른 동작을 알려 주세요.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        공개 저장소 내용이나 실제 토큰은 첨부하지 마세요. 보안 문제는 Security 탭의 비공개 신고를 이용해 주세요.
+  - type: input
+    id: version
+    attributes:
+      label: 여울 버전
+      placeholder: 예) 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS와 Mac 종류
+      placeholder: 예) macOS 15.6, Apple Silicon
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 절차
+      description: 어떤 저장소 상태에서 어떤 순서로 동작했는지 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 결과
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 결과
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 추가 정보
+      description: 민감한 저장소 정보가 보이지 않는 화면이나 진단 내용을 첨부해 주세요.

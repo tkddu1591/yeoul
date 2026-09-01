@@ -2,11 +2,16 @@
   "name": "@git-gui/desktop",
   "private": true,
   "version": "0.2.0",
+  "license": "MIT",
   "description": "복잡한 Git 작업을 안전하게 이해하고 수행하는 macOS 데스크톱 클라이언트",
   "author": "tkddu1591",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tkddu1591/git-gui.git"
+    "url": "https://github.com/tkddu1591/yeoul.git"
+  },
+  "homepage": "https://github.com/tkddu1591/yeoul#readme",
+  "bugs": {
+    "url": "https://github.com/tkddu1591/yeoul/issues"
   },
   "main": "out/main/index.js",
   "scripts": {

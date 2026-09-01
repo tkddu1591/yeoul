@@ -16,7 +16,7 @@
 - **E2E는 반드시 단일 포그라운드 Bash 호출 + `timeout: 600000`.** 기본 120초 상한은 실행을 조용히 백그라운드로 보내고 멈춘다.
 - **`npx playwright test`는 빌드하지 않는다.** `pnpm --filter @git-gui/desktop e2e`만 `electron-vite build &&`가 붙는다. 소스를 고친 뒤 `npx playwright test`를 돌리면 낡은 번들을 테스트하는 것이고 반증은 무의미해진다.
 - **E2E 환경변수:** `GIT_GUI_E2E_REPO`(저장소 즉시 열기) · `GIT_GUI_USER_DATA`(설정 격리 — **하네스가 없으면 자동 주입한다**, `e2e/harness.ts:32`) · `GIT_GUI_E2E_SHOW=1`(실제 창).
-- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`에 쓴다.
+- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `<temporary-scratchpad>/`에 쓴다.
 - **사용자의 실행 중인 dev 앱을 건드리거나 재시작하지 않는다.**
 - **기준 게이트(시작 시점):** lint **0 errors / 5 warnings** · typecheck 6/6 · 루트 `pnpm test` **606** · build 성공 · e2e **128**.
 - **알려진 플레이크(오귀속 금지):** `packages/git-adapter` 단위 테스트가 루트 전체 병렬 실행에서 3회 중 2회꼴로 1건 타임아웃한다 — 매번 다른 테스트·항상 정확히 15000ms·단독 실행은 242/242 초록. 실제 git 서브프로세스를 띄우는 탓이고 이 에픽과 무관하다.
@@ -104,7 +104,7 @@ describe('최근 저장소 목록', () => {
 
 - [ ] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/recent-repos.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/recent-repos.test.ts`
 Expected: FAIL — `Failed to resolve import ".../recent-repos"`
 
 - [ ] **Step 3: 구현한다**
@@ -133,7 +133,7 @@ export function removeRecentRepo(recent: readonly string[], path: string): strin
 
 - [ ] **Step 4: 통과를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/recent-repos.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/recent-repos.test.ts`
 Expected: PASS — 8 passed
 
 - [ ] **Step 5: 반증한다**
@@ -150,7 +150,7 @@ Expected: PASS — 8 passed
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/components/recent-repos.ts apps/desktop/test/recent-repos.test.ts
 git commit -m "feat(desktop): E15a 최근 저장소 목록 순수 규칙
 
@@ -245,7 +245,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 4: 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: lint 에러 0 · typecheck 6/6 · Tests **621** (606 + Task 1의 8건 + `sanitizeSettings`
 방어 7건 — 아래 Step 2a. 원래 이 플랜은 614를 못박았으나, `recentRepos` 방어를 새로 넣으면서
@@ -267,7 +267,7 @@ Expected: lint 에러 0 · typecheck 6/6 · Tests **621** (606 + Task 1의 8건 
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add packages/ipc-contract/src/index.ts apps/desktop/src/main/git-handlers.ts apps/desktop/src/preload/index.ts
 git commit -m "feat(desktop): E15a repo.open(path) — 다이얼로그 없이 경로로 열기
 
@@ -393,8 +393,8 @@ interface RepoSwitcherProps {
 - [ ] **Step 4: 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 에러 0 · 6/6 · **621** · e2e **128** (아직 새 E2E 없음 — 기존이 안 깨지는지만 본다)
 
@@ -406,7 +406,7 @@ Expected: lint 에러 0 · 6/6 · **621** · e2e **128** (아직 새 E2E 없음 
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src
 git commit -m "feat(desktop): E15a 헤더 저장소 전환기 — 최근 목록·다른 폴더 열기
 
@@ -462,7 +462,7 @@ E2E 픽스처 주의(실측): **`autoFetch: false`가 필수**다 — 켜져 있
 - [ ] **Step 2: 현재 코드에서 빨간 것을 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: **새 테스트가 빨강.** 초록이면 그 유출이 실제로는 없다는 뜻이니 **멈추고 보고한다** —
 컨트롤러의 대조가 틀렸을 수 있다. 어느 단언이 빨갛고 어느 것이 초록인지 그대로 적는다.
@@ -493,7 +493,7 @@ if (activeWorktreeRepo !== store.repoPath) {
 - [ ] **Step 5: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop
 git commit -m "fix(desktop): E15a 저장소 전환 시 상태 유출 3건
 
@@ -552,11 +552,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 3: 다섯 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
-cd "/Users/sangyeop_kim/git gui" && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint
+cd "<repo-root>" && pnpm typecheck
+cd "<repo-root>" && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop build
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint **0 errors / 5 warnings** · 6/6 · **622** · 성공 · **133** (129 + 여기 4건)
 
@@ -574,7 +574,7 @@ Expected: lint **0 errors / 5 warnings** · 6/6 · **622** · 성공 · **133** 
 - [ ] **Step 5: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add docs/superpowers apps/desktop/e2e README.md
 git commit -m "docs: E15a 실행 기록 + 저장소 전환 E2E
 

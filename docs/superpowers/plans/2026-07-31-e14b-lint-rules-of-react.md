@@ -15,7 +15,7 @@
 - **E2E는 반드시 단일 포그라운드 Bash 호출 + `timeout: 600000`.** 기본 120초 상한은 실행을 조용히 백그라운드로 보내고 멈춘다.
 - **`npx playwright test`는 빌드하지 않는다.** `pnpm --filter @git-gui/desktop e2e`만 `electron-vite build &&`가 붙는다. 소스를 고친 뒤 `npx playwright test`를 돌리면 낡은 번들을 테스트하는 것이고 반증은 무의미해진다.
 - **E2E 환경변수:** `GIT_GUI_E2E_REPO`(저장소 즉시 열기) · `GIT_GUI_USER_DATA`(설정 격리 — 직접 launch할 땐 반드시 지정) · `GIT_GUI_E2E_SHOW=1`(실제 창).
-- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad/`에 쓴다.
+- **OS 전체 화면 캡처 금지.** 사용자의 다른 창에 사적 정보가 있다. Playwright 창 캡처만 쓰고 `<temporary-scratchpad>/`에 쓴다.
 - **사용자의 실행 중인 dev 앱을 건드리거나 재시작하지 않는다.**
 - **`exhaustive-deps` 14건은 이 에픽에서 고치지 않는다** (E14c). 억제를 유지하되 Task 7이 각각에 이유를 단다.
 - **기준 게이트(시작 시점):** typecheck 6/6 · 루트 `pnpm test` **600** · build 성공 · e2e **124** · lint 없음.
@@ -59,7 +59,7 @@
 - [ ] **Step 1: 의존성을 설치한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 pnpm add -w -D eslint@^10 eslint-plugin-react-hooks@^7 typescript-eslint@^8
 ```
 
@@ -149,7 +149,7 @@ export default [
 - [ ] **Step 3: 게이트가 에러 0으로 통과하는지 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint
+cd "<repo-root>" && pnpm lint
 ```
 Expected: **에러 0.** 경고는 나온다(`incompatible-library` 5 + 부채 목록 11 + 죽은 억제 3 = 19).
 에러가 하나라도 있으면 부채 목록에 빠진 파일이 있는 것이니 그 파일을 목록에 더한다.
@@ -157,14 +157,14 @@ Expected: **에러 0.** 경고는 나온다(`incompatible-library` 5 + 부채 �
 - [ ] **Step 4: 부채 목록이 실제로 무언가를 강등하고 있는지 확인한다 (공허한 게이트 방지)**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && npx eslint . -f json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).reduce((n,f)=>n+f.messages.length,0)))'
+cd "<repo-root>" && npx eslint . -f json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).reduce((n,f)=>n+f.messages.length,0)))'
 ```
 Expected: **19**. (초안의 `grep -c "warning"`은 **21**을 준다 — 요약 두 줄도 그 단어를 포함한다. Task 1 실측 정정.) 0이면 규칙이 아예 안 돌고 있는 것이다 — 설정이 렌더러를 못 잡고 있으니 고친다.
 
 - [ ] **Step 5: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add eslint.config.mjs package.json pnpm-lock.yaml
 git commit -m "chore: E14b eslint 게이트 도입 — 이 저장소의 첫 lint
 
@@ -267,7 +267,7 @@ describe('공용 시각 틱', () => {
 
 - [ ] **Step 2: 실패를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/use-now.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/use-now.test.ts`
 Expected: FAIL — `Failed to resolve import "../src/renderer/src/ui/use-now"`
 
 - [ ] **Step 3: 구현한다**
@@ -323,7 +323,7 @@ export function useNow(): number {
 
 - [ ] **Step 4: 통과를 확인한다**
 
-Run: `cd "/Users/sangyeop_kim/git gui" && npx vitest run --root apps/desktop test/use-now.test.ts`
+Run: `cd "<repo-root>" && npx vitest run --root apps/desktop test/use-now.test.ts`
 Expected: PASS — 6 passed
 
 - [ ] **Step 5: 반증한다**
@@ -359,7 +359,7 @@ Expected: PASS — 6 passed
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/ui/use-now.ts apps/desktop/test/use-now.test.ts
 git commit -m "feat(desktop): E14b useNow() — 공용 60초 틱
 
@@ -387,7 +387,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: 전수를 다시 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui/apps/desktop/src/renderer/src" && grep -rn "formatRelativeTime(" . | grep "Date.now()"
+cd "<repo-root>/apps/desktop/src/renderer/src" && grep -rn "formatRelativeTime(" . | grep "Date.now()"
 ```
 Expected: 7줄. 다르면 플랜 작성 이후 코드가 바뀐 것이니 실제 목록을 따르고 보고한다.
 
@@ -425,7 +425,7 @@ export function BranchSwitcher(/* … */) {
 - [ ] **Step 4: 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: lint 에러 0 · typecheck 6/6 · Tests **606** (600 + Task 2의 6건)
 
@@ -438,14 +438,14 @@ Expected: lint 에러 0 · typecheck 6/6 · Tests **606** (600 + Task 2의 6건)
 E2E나 스크린샷이 아니라 **단위 수준**으로 족하다 — `useNow`가 틱마다 새 값을 준다는 것은 Task 2가 이미 고정했고, 그 값이 `formatRelativeTime`으로 들어간다는 것은 타입이 보장한다. 다만 **7곳 전부 `now`를 실제로 쓰는지** grep으로 확인한다:
 
 ```bash
-cd "/Users/sangyeop_kim/git gui/apps/desktop/src/renderer/src" && grep -rn "formatRelativeTime(" . | grep -c "Date.now()"
+cd "<repo-root>/apps/desktop/src/renderer/src" && grep -rn "formatRelativeTime(" . | grep -c "Date.now()"
 ```
 Expected: **0**
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/components eslint.config.mjs
 git commit -m "fix(desktop): E14b 렌더 중 Date.now() 7곳 제거 — react-hooks/purity
 
@@ -573,7 +573,7 @@ test('E14b — 워크트리 만들기를 닫았다 열면 폼이 초기화된다
 - [ ] **Step 2: 현재 코드에서 초록임을 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 (**단일 포그라운드 호출 · `timeout: 600000`**)
 Expected: **126 passed** (124 + 2). **여기서 빨간 것이 있으면 멈추고 보고한다** — 요구사항이
@@ -582,7 +582,7 @@ Expected: **126 passed** (124 + 2). **여기서 빨간 것이 있으면 멈추�
 - [ ] **Step 3: 커밋 (테스트만 먼저)**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/e2e/smoke.spec.ts
 git commit -m "test(desktop): E14b 다이얼로그 회귀 2건 — key 도입 전에 먼저 고정
 
@@ -644,8 +644,8 @@ function PromptDialogBody({ isOpen, initialValue, /* …나머지 props 그대�
 - [ ] **Step 7: 게이트 + 반증**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 에러 0 · typecheck 6/6 · 606 · **126 passed**
 
@@ -655,7 +655,7 @@ Expected: lint 에러 0 · typecheck 6/6 · 606 · **126 passed**
 - [ ] **Step 8: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/ui/PromptDialog.tsx apps/desktop/src/renderer/src/components/AddWorktreeDialog.tsx eslint.config.mjs
 git commit -m "fix(desktop): E14b 다이얼로그 2건 — 이펙트 setState를 key remount로
 
@@ -773,7 +773,7 @@ function assignRef(ref: unknown, node: HTMLElement | null): void {
 - [ ] **Step 2: 정확히 한 건만 억제됐는지 확인한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && npx eslint apps/desktop/src/renderer/src/ui/Tooltip.tsx
+cd "<repo-root>" && npx eslint apps/desktop/src/renderer/src/ui/Tooltip.tsx
 ```
 Expected: **에러 0 · 경고 0**. `immutability`가 남아 있으면 헬퍼가 제대로 분리되지 않은 것이다.
 `reportUnusedDisableDirectives`가 켜져 있으므로 억제가 불필요해지면 그것도 에러로 잡힌다.
@@ -783,8 +783,8 @@ Expected: **에러 0 · 경고 0**. `immutability`가 남아 있으면 헬퍼가
 - [ ] **Step 4: 게이트 — 툴팁 19곳이 살아 있는지**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint 에러 0 · 6/6 · 606 · **126 passed**
 
@@ -799,7 +799,7 @@ E2E나 프로브로 확인한다. 확인 방법과 결과를 보고에 적는다
 - [ ] **Step 6: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src/ui/Tooltip.tsx eslint.config.mjs
 git commit -m "fix(desktop): E14b Tooltip immutability 해소 — ref 대입을 모듈 헬퍼로
 
@@ -850,14 +850,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 3: 게이트**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint && pnpm typecheck && pnpm test
+cd "<repo-root>" && pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: lint 에러 0 · 6/6 · 606
 
 - [ ] **Step 4: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add apps/desktop/src/renderer/src
 git commit -m "chore(desktop): E14b 억제 위생 — 죽은 3건 삭제, 남는 것에 이유
 
@@ -928,11 +928,11 @@ const marks = await window.evaluate(() => (window as unknown as { __renders: unk
 - [ ] **Step 3: 다섯 게이트를 전부 실행한다**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm lint
-cd "/Users/sangyeop_kim/git gui" && pnpm typecheck
-cd "/Users/sangyeop_kim/git gui" && pnpm test
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop build
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop e2e
+cd "<repo-root>" && pnpm lint
+cd "<repo-root>" && pnpm typecheck
+cd "<repo-root>" && pnpm test
+cd "<repo-root>" && pnpm --filter @git-gui/desktop build
+cd "<repo-root>" && pnpm --filter @git-gui/desktop e2e
 ```
 Expected: lint **에러 0 · 경고 5**(`incompatible-library`만) · 6/6 · **606** · 성공 · **126**
 
@@ -951,7 +951,7 @@ Expected: lint **에러 0 · 경고 5**(`incompatible-library`만) · 6/6 · **6
 - [ ] **Step 5: 커밋**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui"
+cd "<repo-root>"
 git add docs/superpowers eslint.config.mjs README.md
 git commit -m "docs: E14b 실행 기록 + 리렌더 기준선 — 부채 목록 비움
 

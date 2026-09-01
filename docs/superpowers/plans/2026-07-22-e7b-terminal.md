@@ -94,7 +94,7 @@
 - [x] **Step 1: 의존성 설치.**
 
 ```bash
-cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop add node-pty @xterm/xterm @xterm/addon-fit
+cd "<repo-root>" && pnpm --filter @git-gui/desktop add node-pty @xterm/xterm @xterm/addon-fit
 ```
 
 설치 출력에서 **"Ignored build scripts: node-pty"류 경고를 확인**한다. 경고가 있으면 **`pnpm-workspace.yaml`의 기존 `onlyBuiltDependencies` 목록에** `- node-pty`를 추가하고 `pnpm install --force` 재실행(프리빌드라 실제 빌드는 일어나지 않지만 경고를 정리한다 — 실측 2).
@@ -103,7 +103,7 @@ cd "/Users/sangyeop_kim/git gui" && pnpm --filter @git-gui/desktop add node-pty 
 
 경고가 없으면 이 조건 단계는 건너뛴다(보고서에 어느 쪽이었는지 기록).
 
-> **실행 중 실측 추가(Task 5에서 발견):** node-pty 1.1.0의 **발행 tarball 자체가 `prebuilds/darwin-*/spawn-helper`를 실행 권한 없이(-rw-r--r--) 담고 있다**(npm pack 실독 — pnpm/npm 무관, 새 설치마다 재현). 이 상태에서 모든 pty spawn이 `posix_spawnp failed`로 죽는다. 해법: `apps/desktop/package.json`에 postinstall 스크립트로 darwin 프리빌드 spawn-helper를 chmod 755(멱등, 재설치마다 자가치유 — fix(build) 커밋). 사전 실측 2의 프로브가 통과했던 것은 npm 설치 경로의 우연이었다. 설치 후 `node -e "console.log(require('/Users/sangyeop_kim/git gui/node_modules/.pnpm/node_modules/node-pty/package.json').version)"`가 실패하면 desktop의 node_modules 경로로 확인: `node -e "console.log(require('$(pwd)/apps/desktop/node_modules/node-pty/package.json').version)"` → **1.1.x**.
+> **실행 중 실측 추가(Task 5에서 발견):** node-pty 1.1.0의 **발행 tarball 자체가 `prebuilds/darwin-*/spawn-helper`를 실행 권한 없이(-rw-r--r--) 담고 있다**(npm pack 실독 — pnpm/npm 무관, 새 설치마다 재현). 이 상태에서 모든 pty spawn이 `posix_spawnp failed`로 죽는다. 해법: `apps/desktop/package.json`에 postinstall 스크립트로 darwin 프리빌드 spawn-helper를 chmod 755(멱등, 재설치마다 자가치유 — fix(build) 커밋). 사전 실측 2의 프로브가 통과했던 것은 npm 설치 경로의 우연이었다. 설치 후 `node -e "console.log(require('<repo-root>/node_modules/.pnpm/node_modules/node-pty/package.json').version)"`가 실패하면 desktop의 node_modules 경로로 확인: `node -e "console.log(require('$(pwd)/apps/desktop/node_modules/node-pty/package.json').version)"` → **1.1.x**.
 
 - [x] **Step 2: Red — resolveShell 테스트.** `apps/desktop/test/terminal-shell.test.ts` 신규:
 
@@ -2026,7 +2026,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 원격 브랜치 가져오기(추적)·원격에서 지우기·지금과 비교까지 됩니다. E7b로 중앙+우측 하단에 터미널 도크가 생겼습니다 — 탭 여러 개(상한 8)의 진짜 쉘(node-pty)이 저장소 루트에서 열리고(⌘\`/헤더 버튼 토글, 접어도 세션 유지, 높이 드래그 기억), 터미널이나 다른 도구로 저장소를 바꾸면 .git 감시가 화면(변경·역사·실험 공간)을 자동으로 따라 갱신합니다.
 ```
 
-- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + 세션 scratchpad 사본(경로 없으면 `mkdir -p`: `/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad`). **생성 후 e2e 재실행 금지.** 임시 파일 `apps/desktop/e2e/tmp-shots-e7b.spec.ts`:
+- [x] **Step 3: 공식 스크린샷 2장** — `test-results/` + 세션 scratchpad 사본(경로 없으면 `mkdir -p`: `<temporary-scratchpad>`). **생성 후 e2e 재실행 금지.** 임시 파일 `apps/desktop/e2e/tmp-shots-e7b.spec.ts`:
 
 ```ts
 // 임시 파일 — 공식 스크린샷 생성 후 삭제한다 (커밋 금지)
@@ -2038,7 +2038,7 @@ import { execGitOrThrow } from '@git-gui/git-process'
 
 const APP_ROOT = join(__dirname, '..')
 const SCRATCH =
-  '/private/tmp/claude-501/-Users-sangyeop-kim-git-gui/b4ef6d32-042d-440c-8252-b8944659aa01/scratchpad'
+  '<temporary-scratchpad>'
 
 test('공식 스크린샷 — E7b 터미널 도크·탭 2장', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'git-gui-shot-'))
