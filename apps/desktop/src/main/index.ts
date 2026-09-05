@@ -83,7 +83,8 @@ const APP_BACKGROUND = {
 function resolveBackgroundColor(): string {
   const saved = appSettings.appearance.get()
   const mode =
-    saved.colorMode ?? (nativeTheme.shouldUseDarkColors ? ('dark' as const) : ('light' as const))
+    (saved.systemTheme ? undefined : saved.colorMode) ??
+    (nativeTheme.shouldUseDarkColors ? ('dark' as const) : ('light' as const))
   const theme = saved.colorTheme ?? 'yeoul'
   return APP_BACKGROUND[theme][mode]
 }
@@ -127,8 +128,7 @@ gitExecutionEvents.subscribe((event) => {
 // 판정하면 복원 2회차처럼 REPO 없이 띄우는 launch가 사용자 화면에 창을 띄운다(사용자 불만).
 // GIT_GUI_E2E_REPO 폴백은 하위 호환 — 하네스를 안 거치는 프로브가 옛 방식으로 띄울 수 있다
 const isE2E =
-  !app.isPackaged &&
-  (process.env.GIT_GUI_E2E === '1' || process.env.GIT_GUI_E2E_REPO !== undefined)
+  !app.isPackaged && (process.env.GIT_GUI_E2E === '1' || process.env.GIT_GUI_E2E_REPO !== undefined)
 // 로컬 디버깅 opt-out (E6a 후속) — GIT_GUI_E2E_SHOW=1이면 숨김 게이트만 무시하고 창을 보여준다.
 // 스로틀 해제 등 나머지 E2E 동작은 유지. 프로덕션(isPackaged)·CI 기본 동작 무변
 const isE2EShow = isE2E && process.env.GIT_GUI_E2E_SHOW === '1'
@@ -325,7 +325,13 @@ function createTab(
   // 크래시 장부의 시작점 — loadedAt의 초기값은 생성 시각이다: 첫 로드를 끝내지 못하고 죽는
   // 렌더러도 (긴 로드가 아니라면) 연속으로 세어져야 크래시-온-로드 상한이 잡는다
   crashLedgerOfTab.set(tabId, { streak: 0, loadedAt: Date.now() })
-  registry.addTab(windowId, tabId, repoPath, index, workspacePath)
+  registry.addTab(
+    windowId,
+    tabId,
+    repoPath,
+    index,
+    workspacePath ?? appSettings.workspace.get(repoPath),
+  )
 
   // 뷰→창 방향 수명 (E15c Task 1 실측의 탭 일반화): webContents가 먼저 파괴돼도(Playwright
   // page.close()의 Target.closeTarget, DOM window.close(), 렌더러 크래시) BaseWindow는 아무
@@ -714,7 +720,10 @@ function windowAtPoint(x: number, y: number): { windowId: number; window: BaseWi
     if (window.isMinimized()) return false
     const bounds = window.getBounds()
     return (
-      x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
+      x >= bounds.x &&
+      x <= bounds.x + bounds.width &&
+      y >= bounds.y &&
+      y <= bounds.y + bounds.height
     )
   })
 }
@@ -746,7 +755,10 @@ function adoptTabInto(toWindowId: number, toWindow: BaseWindow, tabId: number): 
   // 레이아웃은 창 단위(E15c 스펙 §4) — 이동한 탭은 새 창의 layout을 받아야 한다(push 1회).
   // pushLayoutToSiblings는 "보낸 탭만 뺀다"라 모양이 반대다 — 같은 채널로 이 탭에만 보낸다
   if (!view.webContents.isDestroyed()) {
-    view.webContents.send(SETTINGS_CHANNELS.layoutChanged, registry.getWindow(toWindowId)?.layout ?? {})
+    view.webContents.send(
+      SETTINGS_CHANNELS.layoutChanged,
+      registry.getWindow(toWindowId)?.layout ?? {},
+    )
   }
   // 가시성 갱신 양쪽 — 대상 창은 이적한 탭이 활성(transferTab), 원 창은 승계된 이웃
   showActiveTab(toWindowId)
@@ -768,10 +780,13 @@ function tearOffTab(tabId: number, screenX: number, screenY: number): void {
   const fromWindowId = registry.windowOfTab(tabId)
   if (fromWindowId === undefined || viewOfTab.get(tabId) === undefined) return
   // 새 창의 레이아웃 씨앗은 떠나는 창의 것 — 새 창(window:open)의 seedLayoutFrom과 같은 판단
-  const shell = createWindowShell({ ...(registry.getWindow(fromWindowId)?.layout ?? {}) }, {
-    x: Math.round(screenX - TEAR_OFF_OFFSET_X),
-    y: Math.round(screenY - TEAR_OFF_OFFSET_Y),
-  })
+  const shell = createWindowShell(
+    { ...(registry.getWindow(fromWindowId)?.layout ?? {}) },
+    {
+      x: Math.round(screenX - TEAR_OFF_OFFSET_X),
+      y: Math.round(screenY - TEAR_OFF_OFFSET_Y),
+    },
+  )
   adoptTabInto(shell.windowId, shell.window, tabId)
   // 새 창을 드러낸다 — createWindow의 did-finish-load 신호가 여기엔 없다(뷰는 이미 로드돼
   // 있고 배경도 칠해져 있다). E2E 게이트는 bringWindowForward가 그대로 지킨다(숨김 유지)
@@ -985,7 +1000,10 @@ async function createStartupWindows(): Promise<void> {
     // 활성 탭 복원 — 저장된 인덱스의 탭이 살아남았으면 그 탭, 사라졌으면 첫 탭(sanitize가 범위
     // 밖을 0으로 접는 것과 같은 정책). showActiveTab은 활성이 첫 탭이어도 부른다 — 뷰는 만들어질
     // 때 전부 보이는 상태라(createTab은 가시성을 손대지 않는다) 비활성 뷰를 숨기는 일이 남아 있다
-    const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.savedIndex === saved.activeTab))
+    const activeIndex = Math.max(
+      0,
+      tabs.findIndex((tab) => tab.savedIndex === saved.activeTab),
+    )
     registry.setActiveTab(windowId, tabIds[activeIndex]!)
     showActiveTab(windowId)
     created += 1

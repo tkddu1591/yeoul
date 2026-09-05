@@ -1,3 +1,5 @@
+import { pullFeedback } from '../shared/pull-feedback'
+import { pullPolicy } from '@git-gui/domain'
 import { app, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
 import {
@@ -187,7 +189,9 @@ export function registerHostingHandlers(): void {
     const client = createGitClient(path)
     const branch = await client.sync.branchStatus()
     if (branch.branch === null) {
-      throw new Error('지금은 브랜치가 아닌 시점(분리 HEAD)에 있어요. 브랜치로 이동한 뒤 요청해 주세요.')
+      throw new Error(
+        '지금은 브랜치가 아닌 시점(분리 HEAD)에 있어요. 브랜치로 이동한 뒤 요청해 주세요.',
+      )
     }
     // 전환·받아오기와 같은 기준 — 진행 중 작업(merging·reverting) 중에는 요청을 받지 않는다 (품질 리뷰)
     const repoStatus = await client.repo.status()
@@ -217,15 +221,20 @@ export function registerHostingHandlers(): void {
     return pull
   })
 
-  ipcMain.handle(HOSTING_CHANNELS.pullOpen, async (_event, repoPath: unknown, number: unknown) => {
-    const path = assertAllowedRepo(repoPath)
-    const url = knownPullUrls.get(pullUrlKey(path, assertPullNumber(number)))
-    // main이 목록·생성에서 보관한 주소만 연다 — renderer가 만든 임의 URL은 여기 없다 (https 재확인은 심층 방어)
-    if (url === undefined || !url.startsWith('https://')) {
-      throw new Error('풀 리퀘스트 주소를 찾지 못했어요. 풀 리퀘스트 목록을 다시 열어 주세요.')
-    }
-    await shell.openExternal(url)
-  })
+  ipcMain.handle(
+    HOSTING_CHANNELS.pullOpen,
+    async (_event, repoPath: unknown, number: unknown, section: unknown) => {
+      const path = assertAllowedRepo(repoPath)
+      const url = knownPullUrls.get(pullUrlKey(path, assertPullNumber(number)))
+      // main이 목록·생성에서 보관한 주소만 연다 — renderer가 만든 임의 URL은 여기 없다 (https 재확인은 심층 방어)
+      if (url === undefined || !url.startsWith('https://')) {
+        throw new Error('풀 리퀘스트 주소를 찾지 못했어요. 풀 리퀘스트 목록을 다시 열어 주세요.')
+      }
+      await shell.openExternal(
+        section === 'files' || section === 'checks' ? `${url}/${section}` : url,
+      )
+    },
+  )
 
   ipcMain.handle(
     HOSTING_CHANNELS.pullDetail,
@@ -271,11 +280,19 @@ export function registerHostingHandlers(): void {
 
   ipcMain.handle(
     HOSTING_CHANNELS.pullMerge,
-    async (_event, repoPath: unknown, number: unknown) => {
+    async (_event, repoPath: unknown, number: unknown, expectedHead: unknown) => {
       const path = assertAllowedRepo(repoPath)
       const pullNumber = assertPullNumber(number)
       const { api, owner, repo } = await requireHosting(path)
-      await api.pulls.merge(owner, repo, pullNumber)
+      const [detail, comments] = await Promise.all([
+        api.pulls.get(owner, repo, pullNumber),
+        api.pulls.comments(owner, repo, pullNumber),
+      ])
+      if (typeof expectedHead !== 'string' || detail.headSha !== expectedHead)
+        throw new Error('검토한 커밋이 바뀌었어요. 다시 확인해 주세요.')
+      const permission = pullPolicy.merge.check(detail, comments)
+      if (!permission.allowed) throw new Error(pullFeedback.merge.message.get(permission.reason))
+      await api.pulls.merge(owner, repo, pullNumber, expectedHead)
     },
   )
 }

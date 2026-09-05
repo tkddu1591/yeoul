@@ -8,7 +8,8 @@ export interface PullComment {
   /** comment: 이슈 코멘트 / review: 리뷰 요약(승인·코멘트 리뷰) */
   kind: 'comment' | 'review'
   /** kind='review'이고 승인(APPROVED)이면 'approved' — 그 외 null */
-  state: 'approved' | null
+  state: 'approved' | 'changes-requested' | 'dismissed' | null
+  commitId?: string | null
 }
 
 /** GitHub 이슈 코멘트 응답 — 우리가 쓰는 필드만. user는 탈퇴 계정이면 null이다 */
@@ -25,6 +26,7 @@ interface RawReview {
   user: { login: string } | null
   body: string | null
   state: string
+  commit_id?: string
   submitted_at?: string
 }
 
@@ -40,7 +42,7 @@ function toEpochSeconds(iso: string | undefined): number {
  * 상세의 "승인됨" 배지와 타임라인의 "승인했어요" 표시가 이 목록에서 나온다.
  * 라인 단위 리뷰 코멘트(/pulls/{n}/comments)는 이번 범위 제외(후속 노트).
  */
-export function buildPullTimeline(rawComments: unknown[], rawReviews: unknown[]): PullComment[] {
+function toTimeline(rawComments: unknown[], rawReviews: unknown[]): PullComment[] {
   const comments: PullComment[] = rawComments.map((raw) => {
     const comment = raw as RawIssueComment
     return {
@@ -53,15 +55,32 @@ export function buildPullTimeline(rawComments: unknown[], rawReviews: unknown[])
     }
   })
   const reviews: PullComment[] = (rawReviews as RawReview[])
-    .filter((review) => review.state === 'APPROVED' || (review.body ?? '') !== '')
-    .map((review) => ({
-      id: review.id,
-      author: review.user?.login ?? '(알 수 없음)',
-      body: review.body ?? '',
-      createdAt: toEpochSeconds(review.submitted_at),
-      kind: 'review',
-      state: review.state === 'APPROVED' ? 'approved' : null,
-    }))
+    .filter(
+      (review) =>
+        review.state !== 'PENDING' &&
+        (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state) ||
+          (review.body ?? '') !== ''),
+    )
+    .map(
+      (review): PullComment => ({
+        id: review.id,
+        author: review.user?.login ?? '(알 수 없음)',
+        body: review.body ?? '',
+        createdAt: toEpochSeconds(review.submitted_at),
+        kind: 'review',
+        state:
+          review.state === 'APPROVED'
+            ? 'approved'
+            : review.state === 'CHANGES_REQUESTED'
+              ? 'changes-requested'
+              : review.state === 'DISMISSED'
+                ? 'dismissed'
+                : null,
+        commitId: review.commit_id ?? null,
+      }),
+    )
   // 시간순 — 같은 시각이면 안정 정렬로 원래 순서(코멘트 먼저)를 유지한다
   return [...comments, ...reviews].sort((a, b) => a.createdAt - b.createdAt)
 }
+
+export const pullTimelineAdapter = { item: { toList: toTimeline } }

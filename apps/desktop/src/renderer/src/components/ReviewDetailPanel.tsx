@@ -1,3 +1,4 @@
+import { pullReviewService } from '../service/pull-review.service'
 import { ArrowLeft, Check, ExternalLink, GitMerge, Send } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { PullComment, PullDetailView } from '@git-gui/ipc-contract'
@@ -14,7 +15,8 @@ interface ReviewDetailPanelProps {
   view: PullDetailView
   busy: boolean
   /** 브라우저에서 열기 — 주소는 main이 보관한 목록에서만 찾는다(기존 pull-open) */
-  onOpenBrowser(): void
+  onOpenBrowser(section?: 'files' | 'checks'): void
+  onRefresh(): void
   onBack(): void
   /** 답변 달기 — 성공 여부 반환(성공 시에만 입력을 비운다) */
   onComment(body: string): Promise<boolean>
@@ -25,24 +27,19 @@ interface ReviewDetailPanelProps {
   pending: boolean
 }
 
-/** 상태 배지 — 병합됨 > 닫힘 > 승인됨 > 열림 순으로 판정한다(§5 일상어+원어 병기) */
-function statusOf(view: PullDetailView): { label: string; raw: string } {
-  if (view.detail.merged) return { label: '병합됨', raw: 'merged' }
-  if (view.detail.state === 'closed') return { label: '닫힘', raw: 'closed' }
-  if (view.comments.some((comment) => comment.state === 'approved')) {
-    return { label: `${T.approve}됨`, raw: 'approved' }
-  }
-  return { label: '열림', raw: 'open' }
-}
-
 /** `now`를 props로 받는다 — 코멘트 행마다 useNow()를 부르면 코멘트 수만큼 구독자가 생긴다 (E14b) */
 function CommentRow({ comment, now }: { comment: PullComment; now: number }) {
   return (
-    <li className="review-detail__comment" data-testid={`review-comment-${comment.kind}-${comment.id}`}>
+    <li
+      className="review-detail__comment"
+      data-testid={`review-comment-${comment.kind}-${comment.id}`}
+    >
       <p className="review-detail__comment-meta">
         <strong>@{comment.author}</strong>
         <span>{formatRelativeTime(comment.createdAt, now)}</span>
-        {comment.state === 'approved' && <Badge>{T.approve}했어요</Badge>}
+        {comment.state === 'approved' && <Badge>승인</Badge>}
+        {comment.state === 'changes-requested' && <Badge>수정 요청</Badge>}
+        {comment.state === 'dismissed' && <Badge>리뷰 취소됨</Badge>}
       </p>
       {comment.body !== '' && <p className="review-detail__comment-body">{comment.body}</p>}
     </li>
@@ -58,6 +55,7 @@ export function ReviewDetailPanel({
   view,
   busy,
   onOpenBrowser,
+  onRefresh,
   onBack,
   onComment,
   onApprove,
@@ -74,9 +72,9 @@ export function ReviewDetailPanel({
     const el = timelineRef.current
     if (el !== null) el.scrollTop = el.scrollHeight
   }, [view.comments.length])
-  const status = statusOf(view)
+  const summary = pullReviewService.summary.get(view)
   // 병합·닫힘 뒤에는 승인·병합이 의미 없다 — 코멘트는 닫힌 뒤에도 달 수 있다(GitHub 동작 그대로)
-  const settled = view.detail.merged || view.detail.state === 'closed'
+  const settled = summary.settled
   const submitReply = () => {
     const body = reply.trim()
     if (body === '') return
@@ -90,8 +88,11 @@ export function ReviewDetailPanel({
       pending={pending}
       accessory={
         <>
-          <span className="review-detail__status" data-testid="review-detail-status">
-            {status.label} <span className="review-detail__status-raw">{status.raw}</span>
+          <span
+            className="review-detail__status max-w-36 whitespace-normal! text-right"
+            data-testid="review-detail-status"
+          >
+            {summary.status}
           </span>
           <Button
             variant="ghost"
@@ -119,13 +120,39 @@ export function ReviewDetailPanel({
           variant="ghost"
           size="sm"
           isDisabled={busy}
-          onPress={onOpenBrowser}
+          onPress={() => onOpenBrowser()}
           testId="review-detail-browser"
         >
           <ExternalLink size={13} aria-hidden="true" /> 브라우저에서 열기
         </Button>
       </div>
-      <div ref={timelineRef} className="review-detail__timeline" data-testid="review-detail-timeline">
+      <div className="max-h-48 shrink-0 overflow-auto border-b border-(--color-border) px-3 py-2 text-xs">
+        <p className="my-1 text-(--color-text-muted)">
+          HEAD {view.detail.headSha?.slice(0, 8) ?? '확인 필요'} · 파일{' '}
+          {view.detail.changedFiles ?? '?'} · +{view.detail.additions ?? 0} / −
+          {view.detail.deletions ?? 0}
+        </p>
+        <p className="whitespace-pre-wrap break-words">{view.detail.body || '본문이 없어요.'}</p>
+        <div className="flex flex-wrap gap-1">
+          <Button variant="primary" size="sm" onPress={() => onOpenBrowser('files')}>
+            GitHub에서 변경 검토
+          </Button>
+          <Button variant="ghost" size="sm" onPress={() => onOpenBrowser('checks')}>
+            검사 결과
+          </Button>
+          <Button variant="ghost" size="sm" isDisabled={pending || busy} onPress={onRefresh}>
+            상태 다시 확인
+          </Button>
+        </div>
+        <p role="status" className="mb-0 text-(--color-text-muted)">
+          {summary.merge.reason}
+        </p>
+      </div>
+      <div
+        ref={timelineRef}
+        className="review-detail__timeline min-h-0!"
+        data-testid="review-detail-timeline"
+      >
         {view.comments.length === 0 ? (
           <p className="review-detail__empty">아직 코멘트가 없어요.</p>
         ) : (
@@ -171,7 +198,7 @@ export function ReviewDetailPanel({
           <Button
             variant="primary"
             size="sm"
-            isDisabled={busy || settled}
+            isDisabled={busy || !summary.merge.allowed}
             onPress={onMerge}
             testId="review-merge"
           >

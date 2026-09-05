@@ -41,10 +41,14 @@ function save(next: PersistedSettings): void {
 
 /** 부팅 창 배경색 결정에 필요한 외형 설정만 main에 공개한다. */
 export const appSettings = {
+  workspace: {
+    get: (repoPath: string | null) =>
+      repoPath ? current().recentWorkspaceRoots?.[repoPath] : undefined,
+  },
   appearance: {
     get() {
-      const { colorMode, colorTheme } = current()
-      return { colorMode, colorTheme }
+      const { colorMode, colorTheme, systemTheme } = current()
+      return { colorMode, colorTheme, systemTheme }
     },
   },
 }
@@ -99,6 +103,14 @@ export function registerSettingsHandlers(
     const { app: appPart, layout } = splitSettings(partial)
     // 빈 객체면 건너뛴다 — 창별 필드만 담긴 set이 앱 설정 파일을 매번 다시 쓰면 디스크 쓰기가
     // 무의미하게 는다(도크 높이 드래그는 초당 여러 번 온다)
+    if (appPart.recentWorkspaceRoots) {
+      appPart.recentWorkspaceRoots = Object.fromEntries(
+        Object.entries({
+          ...current().recentWorkspaceRoots,
+          ...appPart.recentWorkspaceRoots,
+        }).slice(-100),
+      )
+    }
     if (Object.keys(appPart).length > 0) save({ ...current(), ...appPart })
     if (Object.keys(layout).length > 0) {
       // 쓰기는 창 id가 필요하다 — 탭이 닫히는 중에 늦은 set이 오면 windowOfTab이 undefined라

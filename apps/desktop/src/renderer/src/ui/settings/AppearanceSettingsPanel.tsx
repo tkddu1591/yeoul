@@ -1,3 +1,4 @@
+import { ReviewPreferencesPanel } from '../../components/ReviewPreferencesPanel'
 import { Check, Moon, Sun } from 'lucide-react'
 import { appearanceCatalog } from './appearance-catalog'
 import type { Appearance } from '@git-gui/ipc-contract'
@@ -19,8 +20,31 @@ export function AppearanceSettingsPanel({ appearance, onChange }: AppearanceSett
       <fieldset className="settings-dialog__appearance-group">
         <legend>모드</legend>
         <div className="settings-dialog__mode-options">
+          <label
+            className="settings-dialog__mode-option"
+            data-selected={appearance.followSystem || undefined}
+          >
+            <input
+              type="radio"
+              name="color-mode"
+              checked={appearance.followSystem === true}
+              onChange={() =>
+                onChange({
+                  ...appearance,
+                  followSystem: true,
+                  mode: window.matchMedia('(prefers-color-scheme: dark)').matches
+                    ? 'dark'
+                    : 'light',
+                })
+              }
+            />
+            <span>
+              <strong>시스템</strong>
+              <small>macOS 설정 따라가기</small>
+            </span>
+          </label>
           {appearanceCatalog.mode.options.map((option) => {
-            const selected = appearance.mode === option.value
+            const selected = !appearance.followSystem && appearance.mode === option.value
             return (
               <label
                 key={option.value}
@@ -34,7 +58,9 @@ export function AppearanceSettingsPanel({ appearance, onChange }: AppearanceSett
                   name="color-mode"
                   value={option.value}
                   checked={selected}
-                  onChange={() => onChange({ ...appearance, mode: option.value })}
+                  onChange={() =>
+                    onChange({ ...appearance, mode: option.value, followSystem: false })
+                  }
                 />
                 <span className="settings-dialog__mode-icon" aria-hidden="true">
                   {option.value === 'light' ? <Sun size={17} /> : <Moon size={17} />}
@@ -50,6 +76,7 @@ export function AppearanceSettingsPanel({ appearance, onChange }: AppearanceSett
         </div>
       </fieldset>
 
+      <ReviewPreferencesPanel />
       <fieldset className="settings-dialog__appearance-group">
         <legend>테마</legend>
         <div className="settings-dialog__theme-options">

@@ -1,3 +1,4 @@
+import { workspaceSummary } from '../service/workspace-summary.service'
 import { useState, type MouseEvent } from 'react'
 import { ChevronDown, ChevronRight, FolderGit2, MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { WorktreeHeadInfo, WorktreeInfo } from '@git-gui/domain'
@@ -41,9 +42,12 @@ interface WorktreesPanelProps {
   /** 행에 마우스가 머물면 그 워크트리 하나만 조회한다 */
   onHoverWorktree(path: string, headHash: string | null): void
   busy: boolean
-  onAction(action: WorktreeAction): void
+  onAction(action: WorktreeAction, repository?: WorkspaceRepository): void
   onRefreshWorkspace(): void
-  onOpenWorkspaceRepository(repository: WorkspaceRepository): void
+  onOpenWorkspaceRepository(
+    repository: WorkspaceRepository,
+    target?: { path: string; label: string },
+  ): void
 }
 
 /** 워크트리 탭 (E7c) — 목록·활성 지정(클릭)·우클릭 관리. 폴더 이름으로 표시, 경로는 흐리게 */
@@ -73,18 +77,20 @@ export function WorktreesPanel({
   const buildMenu = (worktree: WorktreeInfo): ContextMenuEntry[] => {
     const isCurrent = worktree.path === currentPath
     const name = folderName(worktree.path)
+    const owner = workspaceSummary.repository.find(workspaceView?.overview ?? null, worktree.path)
+    const dispatch = (action: WorktreeAction) => onAction(action, owner ?? undefined)
     return [
       {
         key: 'terminal',
         label: '여기서 터미널 열기',
         disabled: busy || worktree.prunable,
-        onSelect: () => onAction({ kind: 'terminal', path: worktree.path, label: name }),
+        onSelect: () => dispatch({ kind: 'terminal', path: worktree.path, label: name }),
       },
       {
         key: 'open',
         label: isCurrent ? `앱에서 열기 — ${T.head}예요` : '앱에서 열기 (전체 전환)',
         disabled: busy || isCurrent || worktree.prunable,
-        onSelect: () => onAction({ kind: 'open', path: worktree.path }),
+        onSelect: () => dispatch({ kind: 'open', path: worktree.path }),
       },
       {
         // E15c — "새 창에서 열기"의 탭 짝 (브라우저 관례 순서 — 탭이 창보다 앞).
@@ -92,7 +98,7 @@ export function WorktreesPanel({
         key: 'new-tab',
         label: '새 탭에서 열기',
         disabled: busy || worktree.prunable,
-        onSelect: () => onAction({ kind: 'new-tab', path: worktree.path }),
+        onSelect: () => dispatch({ kind: 'new-tab', path: worktree.path }),
       },
       {
         // E15b — "앱에서 열기"가 이 창을 통째로 갈아타는 것이라면 이쪽은 이 창을 그대로 둔다.
@@ -100,14 +106,14 @@ export function WorktreesPanel({
         key: 'new-window',
         label: '새 창에서 열기',
         disabled: busy || worktree.prunable,
-        onSelect: () => onAction({ kind: 'new-window', path: worktree.path }),
+        onSelect: () => dispatch({ kind: 'new-window', path: worktree.path }),
       },
       { key: 'sep-1', separator: true },
       {
         key: 'reveal',
         label: 'Finder에서 보기',
         disabled: busy || worktree.prunable,
-        onSelect: () => onAction({ kind: 'reveal', path: worktree.path }),
+        onSelect: () => dispatch({ kind: 'reveal', path: worktree.path }),
       },
       {
         key: 'remove',
@@ -117,7 +123,7 @@ export function WorktreesPanel({
             ? `지우기 — 지금 열고 있는 ${T.worktree}예요`
             : '지우기… (worktree remove)',
         disabled: busy || worktree.isMain || isCurrent,
-        onSelect: () => onAction({ kind: 'remove', path: worktree.path }),
+        onSelect: () => dispatch({ kind: 'remove', path: worktree.path }),
       },
     ]
   }
@@ -172,10 +178,15 @@ export function WorktreesPanel({
           </div>
           <div className="worktrees-panel__scroll" data-testid="worktrees-list">
             {workspaceView.error !== null && (
-              <p className="worktrees-panel__workspace-error" role="alert">{workspaceView.error}</p>
+              <p className="worktrees-panel__workspace-error" role="alert">
+                {workspaceView.error}
+              </p>
             )}
             {repositoryOverviews.map((repositoryOverview) => {
-              const { repository, worktrees: repositoryWorktrees, error } = repositoryOverview
+              const { repository, worktrees: repositoryWorktrees } = repositoryOverview
+              const error =
+                repositoryOverview.errors?.worktrees ??
+                (repositoryWorktrees === null ? repositoryOverview.error : null)
               const items = repositoryWorktrees ?? []
               const namesByPath = uniqueNames(items.map((worktree) => worktree.path))
               const key = `workspace-worktrees:${repository.path}`
@@ -207,7 +218,9 @@ export function WorktreesPanel({
                       <span>{repository.relativePath}</span>
                     </button>
                     <span className="workspace-worktree-tree__count">{items.length}</span>
-                    {currentRepository && <span className="workspace-worktree-tree__current">열림</span>}
+                    {currentRepository && (
+                      <span className="workspace-worktree-tree__current">열림</span>
+                    )}
                   </div>
                   {!repositoryCollapsed && (
                     <div className="workspace-worktree-tree__children">
@@ -221,7 +234,11 @@ export function WorktreesPanel({
                           const summary = worktree.summary
                           const dirty =
                             summary != null &&
-                            summary.staged + summary.unstaged + summary.untracked + summary.conflicted > 0
+                            summary.staged +
+                              summary.unstaged +
+                              summary.untracked +
+                              summary.conflicted >
+                              0
                           return (
                             <div className="worktree-row-shell" key={worktree.path}>
                               <Tooltip content={worktree.path} summary={worktree.path}>
@@ -230,14 +247,18 @@ export function WorktreesPanel({
                                   className={`worktree-row workspace-worktree-tree__row${worktree.prunable ? ' worktree-row--gone' : ''}`}
                                   onClick={(event) => {
                                     if (!currentRepository) {
-                                      onOpenWorkspaceRepository(repository)
+                                      onOpenWorkspaceRepository(repository, {
+                                        path: worktree.path,
+                                        label: name,
+                                      })
                                       return
                                     }
                                     if (worktree.prunable) openMenu(event, worktree)
-                                    else onAction({ kind: 'select', path: worktree.path, label: name })
+                                    else
+                                      onAction({ kind: 'select', path: worktree.path, label: name })
                                   }}
                                   onContextMenu={(event) => {
-                                    if (currentRepository) openMenu(event, worktree)
+                                    openMenu(event, worktree)
                                   }}
                                   onMouseEnter={() => {
                                     if (currentRepository) {
@@ -262,7 +283,9 @@ export function WorktreesPanel({
                                     >
                                       {dirty
                                         ? [
-                                            summary.conflicted > 0 ? `충돌 ${summary.conflicted}` : null,
+                                            summary.conflicted > 0
+                                              ? `충돌 ${summary.conflicted}`
+                                              : null,
                                             summary.staged > 0 ? `S ${summary.staged}` : null,
                                             summary.unstaged > 0 ? `M ${summary.unstaged}` : null,
                                             summary.untracked > 0 ? `? ${summary.untracked}` : null,
@@ -338,116 +361,125 @@ export function WorktreesPanel({
             return (
               <div className="worktree-row-shell" key={worktree.path}>
                 <Tooltip
-                summary={worktree.path}
-                content={
-                  <>
-                    <div className="ui-tooltip__title">
-                      {worktree.branch ?? `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`}
-                    </div>
-                    <div className="ui-tooltip__path">{worktree.path}</div>
-                    <div className="ui-tooltip__meta">
-                      출처 {sourceChip(worktree.path, home)}
-                      {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
-                      {head !== null && ` · ${head.subject}`}
-                      {head !== null && ` · ${formatRelativeTime(head.committedAt, now)}`}
-                      {worktree.path === currentPath && ` · ${T.head}`}
-                      {worktree.locked && ' · 잠김'}
-                    </div>
-                    {worktree.prunable && (
-                      <div className="ui-tooltip__meta">
-                        폴더가 없어졌어요 — 목록에서 정리할 수 있어요
+                  summary={worktree.path}
+                  content={
+                    <>
+                      <div className="ui-tooltip__title">
+                        {worktree.branch ??
+                          `${T.detached} (${worktree.headHash?.slice(0, 7) ?? '?'})`}
                       </div>
-                    )}
-                    {fork != null && (
+                      <div className="ui-tooltip__path">{worktree.path}</div>
                       <div className="ui-tooltip__meta">
-                        {fork.base}에서 갈라짐 · {fork.ahead}개 앞섬 · {fork.behind}개 뒤처짐
+                        출처 {sourceChip(worktree.path, home)}
+                        {worktree.headHash !== null && ` · HEAD ${worktree.headHash.slice(0, 7)}`}
+                        {head !== null && ` · ${head.subject}`}
+                        {head !== null && ` · ${formatRelativeTime(head.committedAt, now)}`}
+                        {worktree.path === currentPath && ` · ${T.head}`}
+                        {worktree.locked && ' · 잠김'}
                       </div>
-                    )}
-                    {worktree.branch === null && head !== null && head.containedIn.length > 0 && (
-                      <div className="ui-tooltip__meta">
-                        {head.containedIn.join('·')}
-                        {head.containedTruncated && ' 외 여러 곳'}에 포함된 {T.commit}
-                      </div>
-                    )}
-                  </>
-                }
+                      {worktree.prunable && (
+                        <div className="ui-tooltip__meta">
+                          폴더가 없어졌어요 — 목록에서 정리할 수 있어요
+                        </div>
+                      )}
+                      {fork != null && (
+                        <div className="ui-tooltip__meta">
+                          {fork.base}에서 갈라짐 · {fork.ahead}개 앞섬 · {fork.behind}개 뒤처짐
+                        </div>
+                      )}
+                      {worktree.branch === null && head !== null && head.containedIn.length > 0 && (
+                        <div className="ui-tooltip__meta">
+                          {head.containedIn.join('·')}
+                          {head.containedTruncated && ' 외 여러 곳'}에 포함된 {T.commit}
+                        </div>
+                      )}
+                    </>
+                  }
                 >
                   <button
-                  type="button"
-                  className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
-                  onClick={(event) =>
-                    worktree.prunable
-                      ? openMenu(event, worktree)
-                      : onAction({
-                          kind: 'select',
-                          path: worktree.path,
-                          label: names.get(worktree.path) ?? folderName(worktree.path),
-                        })
-                  }
-                  onContextMenu={(event) => openMenu(event, worktree)}
-                  onMouseEnter={() => onHoverWorktree(worktree.path, worktree.headHash)}
-                  data-testid={`worktree-row-${folderName(worktree.path)}`}
+                    type="button"
+                    className={`worktree-row${worktree.prunable ? ' worktree-row--gone' : ''}`}
+                    onClick={(event) =>
+                      worktree.prunable
+                        ? openMenu(event, worktree)
+                        : onAction({
+                            kind: 'select',
+                            path: worktree.path,
+                            label: names.get(worktree.path) ?? folderName(worktree.path),
+                          })
+                    }
+                    onContextMenu={(event) => openMenu(event, worktree)}
+                    onMouseEnter={() => onHoverWorktree(worktree.path, worktree.headHash)}
+                    data-testid={`worktree-row-${folderName(worktree.path)}`}
                   >
                     <span className="worktree-row__lines">
-                    <span className="worktree-row__line">
-                      <span
-                        className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
-                      >
-                        {worktree.path === currentPath ? '➤' : '⌂'}
-                      </span>
-                      <span
-                        className={`worktree-row__branch${worktree.path === currentPath ? ' worktree-row__branch--here' : ''}`}
-                      >
-                        {branchLabel(worktree)}
-                      </span>
-                      <span className="worktree-row__source">{sourceChip(worktree.path, home)}</span>
-                      {worktree.path === activePath && (
-                        <Tooltip
-                          content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
-                          summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                      <span className="worktree-row__line">
+                        <span
+                          className={`worktree-row__glyph${worktree.path === currentPath ? ' worktree-row__glyph--here' : ''}`}
                         >
-                          <span className="worktree-row__terminal">❯_</span>
-                        </Tooltip>
+                          {worktree.path === currentPath ? '➤' : '⌂'}
+                        </span>
+                        <span
+                          className={`worktree-row__branch${worktree.path === currentPath ? ' worktree-row__branch--here' : ''}`}
+                        >
+                          {branchLabel(worktree)}
+                        </span>
+                        <span className="worktree-row__source">
+                          {sourceChip(worktree.path, home)}
+                        </span>
+                        {worktree.path === activePath && (
+                          <Tooltip
+                            content="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                            summary="터미널 대상 — 새 터미널이 이 폴더에서 열려요"
+                          >
+                            <span className="worktree-row__terminal">❯_</span>
+                          </Tooltip>
+                        )}
+                      </span>
+                      <span className="worktree-row__line worktree-row__line--sub">
+                        <span className="worktree-row__name">
+                          {names.get(worktree.path) ?? folderName(worktree.path)}
+                        </span>
+                        <span className="worktree-row__dot">·</span>
+                        <span className="worktree-row__path">
+                          {shortenAbove(
+                            worktree.path,
+                            home,
+                            (names.get(worktree.path) ?? '').split('/').length,
+                          )}
+                        </span>
+                      </span>
+                      {worktree.summary != null && (
+                        <span className="worktree-row__line worktree-row__line--status">
+                          {worktree.summary.conflicted > 0 && (
+                            <span className="worktree-row__alert">
+                              충돌 {worktree.summary.conflicted}
+                            </span>
+                          )}
+                          {worktree.summary.staged > 0 && (
+                            <span>스테이지 {worktree.summary.staged}</span>
+                          )}
+                          {worktree.summary.unstaged > 0 && (
+                            <span>변경 {worktree.summary.unstaged}</span>
+                          )}
+                          {worktree.summary.untracked > 0 && (
+                            <span>새 파일 {worktree.summary.untracked}</span>
+                          )}
+                          {worktree.summary.ahead !== null && worktree.summary.ahead > 0 && (
+                            <span>↑{worktree.summary.ahead}</span>
+                          )}
+                          {worktree.summary.behind !== null && worktree.summary.behind > 0 && (
+                            <span>↓{worktree.summary.behind}</span>
+                          )}
+                          {worktree.summary.staged === 0 &&
+                            worktree.summary.unstaged === 0 &&
+                            worktree.summary.untracked === 0 &&
+                            worktree.summary.conflicted === 0 && <span>깨끗함</span>}
+                          {worktree.summary.lastCommittedAt !== null && (
+                            <span>{formatRelativeTime(worktree.summary.lastCommittedAt, now)}</span>
+                          )}
+                        </span>
                       )}
-                    </span>
-                    <span className="worktree-row__line worktree-row__line--sub">
-                      <span className="worktree-row__name">
-                        {names.get(worktree.path) ?? folderName(worktree.path)}
-                      </span>
-                      <span className="worktree-row__dot">·</span>
-                      <span className="worktree-row__path">
-                        {shortenAbove(
-                          worktree.path,
-                          home,
-                          (names.get(worktree.path) ?? '').split('/').length,
-                        )}
-                      </span>
-                    </span>
-                    {worktree.summary != null && (
-                      <span className="worktree-row__line worktree-row__line--status">
-                        {worktree.summary.conflicted > 0 && (
-                          <span className="worktree-row__alert">
-                            충돌 {worktree.summary.conflicted}
-                          </span>
-                        )}
-                        {worktree.summary.staged > 0 && <span>스테이지 {worktree.summary.staged}</span>}
-                        {worktree.summary.unstaged > 0 && <span>변경 {worktree.summary.unstaged}</span>}
-                        {worktree.summary.untracked > 0 && <span>새 파일 {worktree.summary.untracked}</span>}
-                        {worktree.summary.ahead !== null && worktree.summary.ahead > 0 && (
-                          <span>↑{worktree.summary.ahead}</span>
-                        )}
-                        {worktree.summary.behind !== null && worktree.summary.behind > 0 && (
-                          <span>↓{worktree.summary.behind}</span>
-                        )}
-                        {worktree.summary.staged === 0 &&
-                          worktree.summary.unstaged === 0 &&
-                          worktree.summary.untracked === 0 &&
-                          worktree.summary.conflicted === 0 && <span>깨끗함</span>}
-                        {worktree.summary.lastCommittedAt !== null && (
-                          <span>{formatRelativeTime(worktree.summary.lastCommittedAt, now)}</span>
-                        )}
-                      </span>
-                    )}
                     </span>
                   </button>
                 </Tooltip>

@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { Dialog, Heading, Input, Label, Modal, ModalOverlay, TextField } from 'react-aria-components'
+import {
+  Dialog,
+  Heading,
+  Input,
+  Label,
+  Modal,
+  ModalOverlay,
+  TextField,
+} from 'react-aria-components'
 import { Button } from './Button'
 import { isSubmitEnter } from './keyboard'
 import './confirm-dialog.css'
@@ -7,6 +15,7 @@ import './prompt-dialog.css'
 
 interface PromptDialogProps {
   isOpen: boolean
+  busy?: boolean
   title: string
   description: string
   label: string
@@ -37,6 +46,7 @@ export function PromptDialog(props: PromptDialogProps) {
 
 function PromptDialogBody({
   isOpen,
+  busy = false,
   title,
   description,
   label,
@@ -51,7 +61,7 @@ function PromptDialogBody({
   const [value, setValue] = useState(initialValue ?? '')
   const submit = () => {
     const trimmed = value.trim()
-    if (trimmed === '') return
+    if (busy || trimmed === '') return
     onSubmit(trimmed)
   }
   return (
@@ -70,6 +80,7 @@ function PromptDialogBody({
           </Heading>
           <p className="ui-dialog__body">{description}</p>
           <TextField
+            isDisabled={busy}
             className="ui-prompt__field"
             value={value}
             onChange={setValue}
@@ -99,16 +110,16 @@ function PromptDialogBody({
           )}
           <div className="ui-dialog__actions">
             <Button variant="ghost" size="sm" onPress={onCancel} testId="prompt-cancel">
-              그만두기
+              {busy ? '작업 중단' : '취소'}
             </Button>
             <Button
               variant="primary"
               size="sm"
-              isDisabled={value.trim() === ''}
+              isDisabled={busy || value.trim() === ''}
               onPress={submit}
               testId="prompt-submit"
             >
-              {submitLabel}
+              {busy ? '작업 중…' : submitLabel}
             </Button>
           </div>
         </Dialog>

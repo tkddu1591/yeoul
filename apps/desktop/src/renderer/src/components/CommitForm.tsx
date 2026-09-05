@@ -1,44 +1,26 @@
-import { useState } from 'react'
 import { Button } from '../ui/Button'
 import { isSubmitEnter } from '../ui/keyboard'
-import { T } from '../terms'
+import type { CommitFormModel } from '../adapter/commit-form.adapter'
+import { useCommitDraft } from '../hook/use-commit-draft'
+import { commitFormPolicy } from '../service/commit-form.service'
 import './commit-form.css'
 
 interface CommitFormProps {
-  stagedCount: number
+  model: CommitFormModel
   busy: boolean
-  /** 빈 메시지로 저장하면 대신 들어갈 규칙 기반 제안 (스펙 8장). 없으면 빈 문자열 */
-  suggestion: string
-  /** 합치는 중에는 변경 0개여도 저장(병합 커밋)이 의미 있다 — 전량 ours 데드엔드 방지 (품질 리뷰) */
-  allowEmpty: boolean
   onCommit(message: string): Promise<boolean>
 }
-
-export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit }: CommitFormProps) {
-  const [message, setMessage] = useState('')
-  const effectiveMessage = message.trim().length > 0 ? message : suggestion
-  const disabled = busy || (stagedCount === 0 && !allowEmpty) || effectiveMessage.trim().length === 0
-
-  // E9 — 왼쪽 슬롯은 항상 무언가를 말한다. 못 누르면 이유를, 누를 수 있으면 무엇을 커밋하는지.
-  // (E8에서는 누를 수 있을 때 빈 문자열이라 span 높이가 0이 됐다)
-  const status = busy
-    ? '작업 중이에요'
-    : stagedCount === 0 && !allowEmpty
-      ? `${T.staged}에 올린 파일이 없어요`
-      : effectiveMessage.trim().length === 0
-        ? `${T.commitMessage}를 적어 주세요`
-        : allowEmpty && stagedCount === 0
-          ? `${T.merge} 마무리`
-          : `${stagedCount}개 파일`
-
+export function CommitForm({ model, busy, onCommit }: CommitFormProps) {
+  const draft = useCommitDraft(model.target)
+  const effective = draft.data.message.trim() ? draft.data.message : model.suggestion
+  const availability = commitFormPolicy.availability.get(model, busy, effective)
   const submit = () => {
-    if (disabled) return
-    // 커밋이 실패하면(훅 거부, 충돌 상태 등) 입력한 메시지를 보존한다
-    void onCommit(effectiveMessage).then((committed) => {
-      if (committed) setMessage('')
+    if (availability.disabled) return
+    void onCommit(effective).then((completed) => {
+      if (completed) draft.entry.clear()
     })
   }
-
+  const label = model.merging && model.stagedCount === 0 ? '병합 마무리' : '커밋'
   return (
     <form
       className="commit-form"
@@ -47,43 +29,55 @@ export function CommitForm({ stagedCount, busy, suggestion, allowEmpty, onCommit
         submit()
       }}
     >
-      <label className="commit-form__label" htmlFor="commit-message">
-        {T.commitMessage}
-      </label>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <label className="commit-form__label" htmlFor="commit-message">
+          커밋 메시지
+        </label>
+        <span
+          className="min-w-0 truncate text-(--color-accent)"
+          title={model.target.path}
+          data-testid="commit-target"
+        >
+          {model.target.name} / {model.target.branch}
+        </span>
+      </div>
       <div className="commit-form__box">
         <textarea
           id="commit-message"
           data-testid="commit-message"
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={(event) => {
-            // ⌘↵ / Ctrl+↵ 제출. IME 조합 가드는 PromptDialog와 같은 isSubmitEnter — 한글 조합
-            // 중 Enter는 확정용이라 제출하면 안 된다 (E1a 선례). meta/ctrl 요구는 이 컴포저 전용
-            if (!(event.metaKey || event.ctrlKey)) return
-            if (!isSubmitEnter(event.key, event.nativeEvent.isComposing)) return
-            event.preventDefault()
-            submit()
-          }}
-          placeholder={suggestion ? `비워 두면: ${suggestion}` : '무엇을 바꿨는지 적어 주세요'}
+          value={draft.data.message}
+          onChange={(event) => draft.entry.set(event.target.value)}
           rows={3}
+          placeholder={
+            model.suggestion ? `비워 두면: ${model.suggestion}` : '무엇을 바꿨는지 적어 주세요'
+          }
+          onKeyDown={(event) => {
+            if (
+              (event.metaKey || event.ctrlKey) &&
+              isSubmitEnter(event.key, event.nativeEvent.isComposing)
+            ) {
+              event.preventDefault()
+              submit()
+            }
+          }}
         />
-        <div className="commit-form__foot">
-          <span className="commit-form__status" data-testid="commit-hint">
-            {status}
+        <div className="commit-form__foot items-start!">
+          <span
+            className="commit-form__status whitespace-normal! overflow-visible! py-1"
+            data-testid="commit-hint"
+          >
+            {availability.label}
           </span>
           <Button
             variant="primary"
             size="sm"
             type="submit"
-            isDisabled={disabled}
+            isDisabled={availability.disabled}
             testId="commit-button"
-            // E9 보완 — kbd가 라벨 안에 있으면 접근명이 "커밋⌘↵"가 된다. kbd는 aria-hidden으로 빼고
-            // 접근명은 명시적으로 준다 (ShelfPopover 선례)
-            aria-label={allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
-            // 마무리 — aria-hidden kbd가 가리는 단축키를 스크린 리더 사용자도 알 수 있게
+            aria-label={label}
             aria-keyshortcuts="Meta+Enter"
           >
-            {allowEmpty && stagedCount === 0 ? `${T.merge} 마무리` : T.commit}
+            {label}
             <kbd className="commit-form__kbd" aria-hidden="true">
               ⌘↵
             </kbd>

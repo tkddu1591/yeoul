@@ -9,14 +9,11 @@ export interface WorkspaceHistoryItem {
 function toHistoryList(overview: WorkspaceOverview | null): WorkspaceHistoryItem[] {
   if (overview === null) return []
   return overview.repositories
-    .flatMap(({ repository, history }) =>
-      (history ?? []).map((commit) => ({ repository, commit })),
-    )
+    .flatMap(({ repository, history }) => (history ?? []).map((commit) => ({ repository, commit })))
     .sort(
       (left, right) =>
         right.commit.committedAt - left.commit.committedAt ||
-        left.repository.relativePath.localeCompare(right.repository.relativePath) ||
-        left.commit.hash.localeCompare(right.commit.hash),
+        left.repository.relativePath.localeCompare(right.repository.relativePath),
     )
 }
 

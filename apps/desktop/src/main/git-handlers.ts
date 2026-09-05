@@ -1,3 +1,5 @@
+import { applicationActivity } from './application-activity'
+import { onboardingJobs } from './onboarding-jobs'
 import { stat } from 'node:fs/promises'
 import { app, dialog, ipcMain, shell } from 'electron'
 import { createGitClient } from '@git-gui/git-adapter'
@@ -11,7 +13,12 @@ import type {
   PushConfirmation,
 } from '@git-gui/domain'
 import { cancelGitProcesses, execGit, execGitOrThrow, type GitResult } from '@git-gui/git-process'
-import { CHANNELS, type RepoOpenResult } from '@git-gui/ipc-contract'
+import {
+  CHANNELS,
+  type RepoOpenResult,
+  type WorkspaceChangeBatch,
+  type WorkspaceChangeResult,
+} from '@git-gui/ipc-contract'
 import { watchRepository, watchWorkingTree } from './repo-watcher'
 import {
   assertAbsoluteRepoPath,
@@ -22,6 +29,7 @@ import {
 } from './repo-open-guard'
 import { assertOpenableWorktree } from './worktree-open-guard'
 import type { WindowRegistry } from './window-registry'
+import { workspaceDiscovery } from './workspace-discovery'
 import { RepositoryMutationQueue } from './repository-mutation-queue'
 
 /** `.catch((cause) => cause)`로 합쳐 받은 값이 결과인지 오류인지 가른다 (repoOpen) */
@@ -79,7 +87,11 @@ function assertDiffOptions(value: unknown): DiffOptions {
     throw new Error('잘못된 요청 형식이에요.')
   }
   // 잉여 필드가 하류로 밀수되지 않도록 알려진 필드만 복사한다
-  return { staged: candidate.staged, untracked: candidate.untracked, origPath: candidate.origPath ?? null }
+  return {
+    staged: candidate.staged,
+    untracked: candidate.untracked,
+    origPath: candidate.origPath ?? null,
+  }
 }
 
 function assertLimit(value: unknown): number {
@@ -124,7 +136,12 @@ function assertBoolean(value: unknown): boolean {
 }
 
 function assertFileMutationGuard(value: unknown): FileMutationGuard {
-  if (typeof value !== 'object' || value === null || !('files' in value) || !Array.isArray(value.files)) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('files' in value) ||
+    !Array.isArray(value.files)
+  ) {
     throw new Error('잘못된 요청 형식이에요.')
   }
   const files = [...value.files].map((entry) => {
@@ -272,8 +289,12 @@ export async function openRepoPath(path: string): Promise<RepoOpenResult> {
 }
 
 export function registerGitHandlers(registry: WindowRegistry): void {
+  applicationActivity.ipc.register()
   const mutations = new RepositoryMutationQueue()
-  const mutate = <T>(repoPath: unknown, mutation: (client: ReturnType<typeof createGitClient>) => Promise<T>) => {
+  const mutate = <T>(
+    repoPath: unknown,
+    mutation: (client: ReturnType<typeof createGitClient>) => Promise<T>,
+  ) => {
     const root = assertAllowedRepo(repoPath)
     return mutations.run(root, () => mutation(createGitClient(root)))
   }
@@ -290,9 +311,62 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     return topLevel
   }
 
-  ipcMain.handle(CHANNELS.jobsCancel, (_event, repoPath: unknown) =>
-    cancelGitProcesses(assertAllowedRepo(repoPath)),
+  ipcMain.handle(
+    CHANNELS.workspaceMove,
+    async (event, request: WorkspaceChangeBatch): Promise<WorkspaceChangeResult> => {
+      const workspacePath = registry.getTabWorkspacePath(event.sender.id)
+      if (
+        !workspacePath ||
+        !request ||
+        !['staged', 'unstaged'].includes(request.target) ||
+        !Array.isArray(request.groups)
+      ) {
+        throw new Error('작업 공간과 스테이지 대상을 확인해 주세요.')
+      }
+      const workspace = await workspaceDiscovery.folder.scan(workspacePath)
+      const allowed = new Set<string>()
+      for (const repository of workspace.repositories) {
+        allowed.add(repository.path)
+        for (const tree of await createGitClient(repository.path).worktrees.list())
+          allowed.add(tree.path)
+      }
+      const results: WorkspaceChangeResult['results'] = []
+      let failed = false
+      for (const group of request.groups) {
+        if (failed) {
+          results.push({ path: group.path, status: 'pending', error: null })
+          continue
+        }
+        try {
+          if (!allowed.has(group.path) || !Array.isArray(group.paths))
+            throw new Error('작업 공간에 없는 대상이에요.')
+          const paths = assertStringArray(group.paths)
+          const path = await registerRepoPath(group.path)
+          await mutate(path, (client) =>
+            request.target === 'staged'
+              ? client.changes.stage(paths)
+              : client.changes.unstage(paths),
+          )
+          results.push({ path: group.path, status: 'completed', error: null })
+        } catch (cause) {
+          failed = true
+          results.push({
+            path: group.path,
+            status: 'failed',
+            error: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      }
+      return { results }
+    },
   )
+
+  ipcMain.handle(CHANNELS.jobsCancel, (event, repoPath: unknown) => {
+    onboardingJobs.entry.cancel(event.sender.id)
+    const pending = onboardingJobs.target.get(event.sender.id)
+    if (repoPath === undefined) return pending ? cancelGitProcesses(pending) : 0
+    return cancelGitProcesses(pending === repoPath ? pending : assertAllowedRepo(repoPath))
+  })
 
   ipcMain.handle(CHANNELS.repoSelect, async (event) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
@@ -301,12 +375,14 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     const check = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd: path })
     // bare repo와 .git 디렉터리는 "false"를 출력하며 exit 0으로 끝난다 — stdout까지 확인한다
     if (check.exitCode !== 0 || check.stdout.trim() !== 'true') {
-      throw new Error('선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.')
+      throw new Error(
+        '선택한 폴더는 Git 저장소가 아니에요. .git 폴더가 있는 프로젝트 폴더를 선택해 주세요.',
+      )
     }
     return remember(event.sender.id, await registerRepoPath(path))
   })
 
-  ipcMain.handle(CHANNELS.repoClone, async (_event, remoteUrl: unknown) => {
+  ipcMain.handle(CHANNELS.repoClone, async (event, remoteUrl: unknown) => {
     const url = assertString(remoteUrl).trim()
     if (url === '' || url.length > 4096 || url.includes('\0') || url.includes('\n')) {
       throw new Error('복제할 원격 주소를 확인해 주세요.')
@@ -318,7 +394,16 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     })
     if (picked.canceled || picked.filePaths.length === 0) return null
     const destination = picked.filePaths[0]!
-    const result = await execGit(['clone', '--', url, '.'], { cwd: destination })
+    const signal = onboardingJobs.entry.start(event.sender.id, destination)
+    const result = await execGit(['clone', '--', url, '.'], { cwd: destination, signal })
+      .catch((cause) => {
+        if (signal.aborted)
+          throw new Error('복제를 중단했어요. 대상 폴더에 일부 파일이 남아 있을 수 있어요.')
+        throw cause
+      })
+      .finally(() => onboardingJobs.entry.finish(event.sender.id))
+    if (signal.aborted || result.signal === 'SIGTERM')
+      throw new Error('복제를 중단했어요. 대상 폴더에 일부 파일이 남아 있을 수 있어요.')
     if (result.exitCode !== 0) {
       const output = result.stderr + result.stdout
       if (/Authentication failed|could not read Username|Permission denied/i.test(output)) {
@@ -329,7 +414,9 @@ export function registerGitHandlers(registry: WindowRegistry): void {
       if (/not found|does not appear to be a git repository/i.test(output)) {
         throw new Error('원격 저장소를 찾지 못했어요. 주소와 접근 권한을 확인해 주세요.')
       }
-      throw new Error('저장소를 복제하지 못했어요. 대상 폴더가 비어 있는지와 네트워크를 확인해 주세요.')
+      throw new Error(
+        '저장소를 복제하지 못했어요. 대상 폴더가 비어 있는지와 네트워크를 확인해 주세요.',
+      )
     }
     return registerRepoPath(destination)
   })
@@ -616,9 +703,7 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   ipcMain.handle(
     CHANNELS.commitsCreateTag,
     (_event, repoPath: unknown, name: unknown, hash: unknown) =>
-      mutate(repoPath, (client) =>
-        client.commits.createTag(assertString(name), assertHash(hash)),
-      ),
+      mutate(repoPath, (client) => client.commits.createTag(assertString(name), assertHash(hash))),
   )
 
   ipcMain.handle(CHANNELS.commitsUndoLast, (_event, repoPath: unknown, hash: unknown) =>
@@ -628,9 +713,7 @@ export function registerGitHandlers(registry: WindowRegistry): void {
   ipcMain.handle(
     CHANNELS.commitsReword,
     (_event, repoPath: unknown, hash: unknown, message: unknown) =>
-      mutate(repoPath, (client) =>
-        client.commits.reword(assertHash(hash), assertString(message)),
-      ),
+      mutate(repoPath, (client) => client.commits.reword(assertHash(hash), assertString(message))),
   )
 
   ipcMain.handle(CHANNELS.filesReadText, (_event, repoPath: unknown, path: unknown) =>
@@ -681,10 +764,8 @@ export function registerGitHandlers(registry: WindowRegistry): void {
     createGitClient(assertAllowedRepo(repoPath)).changes.guard.capture(assertStringArray(paths)),
   )
 
-  ipcMain.handle(
-    CHANNELS.changesDiscard,
-    (_event, repoPath: unknown, request: unknown) =>
-      mutate(repoPath, (client) => client.changes.discard(assertDiscardChangesRequest(request))),
+  ipcMain.handle(CHANNELS.changesDiscard, (_event, repoPath: unknown, request: unknown) =>
+    mutate(repoPath, (client) => client.changes.discard(assertDiscardChangesRequest(request))),
   )
 
   ipcMain.handle(

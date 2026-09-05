@@ -1,3 +1,8 @@
+import { WorkflowHelpDialog } from './components/WorkflowHelpDialog'
+import { useGitActivity } from './hook/use-git-activity'
+import { ActivityDialog } from './components/ActivityDialog'
+import { conflictDocumentAdapter } from './adapter/conflict-document.adapter'
+import { commitFormAdapter } from './adapter/commit-form.adapter'
 import {
   CloudUpload,
   DownloadCloud,
@@ -11,7 +16,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { suggestCommitMessage, type PushPreview, type RepositoryStateKind } from '@git-gui/domain'
+import { type PushPreview, type RepositoryStateKind } from '@git-gui/domain'
 import type { Appearance, TabInfo, WorkspaceRepository } from '@git-gui/ipc-contract'
 import { isHeadBackedUp } from './components/backup-state'
 import { AddWorktreeDialog } from './components/AddWorktreeDialog'
@@ -83,9 +88,9 @@ import { ListDialog } from './ui/ListDialog'
 /** 일상어 + 원어 병기(스펙 5장 문구 원칙) — 상태를 숨기지 않는다 */
 const STATE_LABELS: Record<RepositoryStateKind, string> = {
   normal: '정상',
-  merging: '합치는 중',
-  rebasing: '다시 쌓는 중',
-  'cherry-picking': '가져오는 중',
+  merging: '병합 중',
+  rebasing: '리베이스 중',
+  'cherry-picking': '체리픽 중',
   reverting: '되돌리는 중',
   bisecting: '원인 찾는 중',
 }
@@ -100,7 +105,10 @@ const OP_BAR = {
 
 export function App() {
   const store = useRepositoryStore()
-  const workspaceOverview = useWorkspaceOverview(store.workspace)
+  const activity = useGitActivity()
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
+  const workspaceOverview = useWorkspaceOverview(store.workspace, store.repoPath)
   // E14c — 이펙트 deps에 들어갈 액션만 셀렉터로 따로 받는다. App은 위에서 스토어 전체를
   // 구독하므로(set마다 새 상태 객체) `store`를 deps에 넣으면 아무 변경에나 이펙트가 재발화한다.
   // zustand 액션은 create 초기화 때 1회 정의돼 참조가 안정 — 셀렉터로 골라 받으면 deps에
@@ -118,6 +126,22 @@ export function App() {
     setAppearance(next)
   }
 
+  useEffect(() => {
+    if (!appearance.followSystem) return
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = (event: MediaQueryListEvent) => {
+      const next: Appearance = {
+        mode: event.matches ? 'dark' : 'light',
+        theme: appearance.theme,
+        followSystem: true,
+      }
+      appAppearance.document.apply(next)
+      setAppearance(next)
+    }
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [appearance.followSystem, appearance.theme])
+
   // 새 실험 공간 다이얼로그 — fromHash가 있으면 우클릭한 저장 시점에서 갈라진다
   const [branchPrompt, setBranchPrompt] = useState<{ fromHash: string | null } | null>(null)
 
@@ -127,6 +151,8 @@ export function App() {
   const [confirmingAbort, setConfirmingAbort] = useState(false)
 
   // E7a 좌측 탭 — [변경 | 실험 공간]. 기본은 변경(커밋 흐름 무변). 탭 상태는 렌더 로컬(store 오염 없음)
+  const [changeScope, setChangeScope] = useState<'all' | 'current'>('all')
+  const [historyScope, setHistoryScope] = useState<'all' | 'current'>('all')
   const [leftTab, setLeftTab] = useState<'changes' | 'branches' | 'worktrees'>('changes')
   // E7c 활성 워크트리(터미널 대상) — renderer 로컬(재시작 시 앱이 연 곳으로 초기화, 영속 안 함).
   // 저장소가 바뀌면 비운다 — 아래 "저장소에 매인 로컬 상태" 한 자리에서 함께 (:396)
@@ -259,7 +285,8 @@ export function App() {
     const onWindowResize = () => {
       // 창 가장자리를 뒤쫓는 동안은 전환을 끈다 — 마지막 resize 이벤트로부터 200ms 조용하면 푼다
       setResizeSuppress(true)
-      if (resizeSuppressTimerRef.current !== null) window.clearTimeout(resizeSuppressTimerRef.current)
+      if (resizeSuppressTimerRef.current !== null)
+        window.clearTimeout(resizeSuppressTimerRef.current)
       resizeSuppressTimerRef.current = window.setTimeout(() => setResizeSuppress(false), 200)
       setViewportWidth(window.innerWidth)
       setRightWidth((width) => clampRightWidth(width, window.innerWidth))
@@ -269,7 +296,8 @@ export function App() {
     window.addEventListener('resize', onWindowResize)
     return () => {
       window.removeEventListener('resize', onWindowResize)
-      if (resizeSuppressTimerRef.current !== null) window.clearTimeout(resizeSuppressTimerRef.current)
+      if (resizeSuppressTimerRef.current !== null)
+        window.clearTimeout(resizeSuppressTimerRef.current)
     }
   }, [])
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -391,7 +419,10 @@ export function App() {
   // E13 — 접힌 열도 트랙을 유지하고 0px로 둔다(grid-tracks.ts). 간격도 트랙으로 옮겨져
   // 열·간격·리사이저가 이 한 값 안에서 함께 보간된다 — .app__main의 transition이 이 값의
   // 변화를 탄다(부팅·드래그·창 크기 변경 중엔 noColumnTransition으로 억제)
-  const gridTemplateColumns = buildMainColumns(columns, { left: leftCollapsed, right: rightCollapsed })
+  const gridTemplateColumns = buildMainColumns(columns, {
+    left: leftCollapsed,
+    right: rightCollapsed,
+  })
   // 도크(터미널)는 좌측 관리 존(좌 트랙+그 간격)만 제외한 나머지 트랙 전부를 덮는다 — 트랙 수가
   // 이제 접힘과 무관하게 항상 고정이라(grid-tracks.ts) 시작선도 항상 3번째로 고정이다
   const dockGridColumn = MAIN_DOCK_GRID_COLUMN
@@ -410,7 +441,10 @@ export function App() {
 
   useEffect(() => {
     // 실패해도 빈 문자열 유지 — 축약 없이 전체 경로가 보일 뿐 기능은 죽지 않는다 (E7j)
-    void window.gitApi.repo.home().then(setHome).catch(() => {})
+    void window.gitApi.repo
+      .home()
+      .then(setHome)
+      .catch(() => {})
     // 마운트 시 1회만 실행 — window.gitApi는 전역, setHome은 안정이라 억제가 필요 없다
     // (E14b Task 7: 죽은 억제 삭제)
   }, [])
@@ -427,9 +461,9 @@ export function App() {
   }, [store.notice, clearNotice])
 
   // E7h ⑥ — ⌘F 검색 대상 패널(마우스 위치의 data-find-scope, 없으면 diff)
-  const [findScope, setFindScope] = useState<'history' | 'diff' | 'commit-files' | 'changes' | null>(
-    null,
-  )
+  const [findScope, setFindScope] = useState<
+    'history' | 'diff' | 'commit-files' | 'changes' | null
+  >(null)
   // ── 저장소에 매인 로컬 상태를 저장소가 바뀔 때 비운다 (E7i 보완 Step 4 · E14b · E15a 리뷰 ②) ──
   //
   // 왜 이펙트가 아닌가: set-state-in-effect는 lint 에러다 (E14b). "직전에 본 저장소를 함께
@@ -523,7 +557,10 @@ export function App() {
   // 보면 이 단축키 자체가 죽는다. event.code('Digit1'/'Digit2')는 물리 키라 흔들리지 않는다
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === '`') {
+      if ((event.metaKey || event.ctrlKey) && event.key === '/') {
+        event.preventDefault()
+        setHelpOpen(true)
+      } else if ((event.metaKey || event.ctrlKey) && event.key === '`') {
         event.preventDefault()
         setDockOpen((prev) => {
           saveDockOpen(!prev)
@@ -553,10 +590,12 @@ export function App() {
         if (document.activeElement?.closest('.terminal-dock') !== null) return
         event.preventDefault()
         const { x, y } = pointerRef.current
-        const scopeEl = document.elementFromPoint(x, y)?.closest('[data-find-scope]')
-        const rawScope = scopeEl?.getAttribute('data-find-scope') as
-          | NonNullable<typeof findScope>
-          | null
+        const scopeEl =
+          document.activeElement?.closest('[data-find-scope]') ??
+          document.elementFromPoint(x, y)?.closest('[data-find-scope]')
+        const rawScope = scopeEl?.getAttribute('data-find-scope') as NonNullable<
+          typeof findScope
+        > | null
         // E13 — 접힌 패널도 이제 DOM에 남는다(트랙만 0px, App.tsx가 언마운트하지 않는다 —
         // 전환의 시작점을 유지하려고). elementFromPoint가 그 잔여 요소를 잡아채 스코프로
         // 삼으면 찾기 오버레이가 안 보이는 접힌 열에 뜬다 — E12는 언마운트라 이 경로 자체가
@@ -572,6 +611,14 @@ export function App() {
         // 두는 셈이라 그대로 둔다
         if (scope === 'history' || scope === 'commit-files') expandRightIfCollapsed()
         else if (scope === 'changes') expandLeftIfCollapsed()
+        if (scope === 'history') {
+          const input = document.querySelector<HTMLInputElement>('[aria-label="전체 커밋 검색"]')
+          if (input) {
+            input.focus()
+            input.select()
+            return
+          }
+        }
         setFindScope(scope)
         setFindNonce((n) => n + 1)
       } else if ((event.metaKey || event.ctrlKey) && (event.key === 'o' || event.key === 'O')) {
@@ -653,29 +700,26 @@ export function App() {
   const status = store.status
   const stagedCount = status?.changes.filter((c) => c.staged !== null).length ?? 0
   const conflictCount = status?.changes.filter((c) => c.unstaged === 'conflicted').length ?? 0
-  const workspaceRepository = store.workspaceRepository
+  const workspaceRepository = workspaceOverview.data.repository ?? store.workspaceRepository
   const workspaceView =
     store.workspace === null
       ? null
       : {
           overview: workspaceOverview.data.overview,
           currentRepository: workspaceRepository,
+          currentPath: store.repoPath,
           loading: workspaceOverview.data.loading,
           error: workspaceOverview.data.error,
         }
   const workspaceHistory = workspaceOverviewItems.history.toList(workspaceOverview.data.overview)
-  const workspaceChangeCount =
-    workspaceOverview.data.overview?.repositories.reduce(
-      (count, item) => count + (item.status?.changes.length ?? 0),
-      0,
-    ) ?? 0
+  const workspaceChangeCount = workspaceOverview.data.changeCount
 
   const runInWorkspaceRepository = async (
     repository: WorkspaceRepository,
     action: () => Promise<void>,
   ) => {
     if (repository.path !== useRepositoryStore.getState().repoPath) {
-      const opened = await store.openRepository(repository.path)
+      const opened = await store.openRepository(repository.path, true)
       if (!opened || useRepositoryStore.getState().repoPath !== repository.path) return
     }
     await action()
@@ -737,7 +781,24 @@ export function App() {
               void window.gitApi.tabs.dragEnd(tabId, screenX, screenY, toIndex)
             }
           />
+          {store.busy && (
+            <div
+              className="flex items-center justify-between gap-2 bg-(--color-selection-bg) px-5 py-3 text-sm"
+              role="status"
+              data-testid="onboarding-progress"
+            >
+              <span>
+                {activity.data.running[0]
+                  ? `git ${activity.data.running[0].operation} · ${activity.data.running[0].cwd}`
+                  : '폴더와 저장소를 확인하는 중…'}
+              </span>
+              <Button variant="ghost" size="sm" onPress={() => void activity.job.cancel()}>
+                중단
+              </Button>
+            </div>
+          )}
           <RepoPicker
+            busy={store.busy}
             onOpen={() => {
               void store.openRepository().then((opened) => {
                 if (opened) {
@@ -750,7 +811,7 @@ export function App() {
               setClonePrompt(true)
             }}
             onInit={() => void store.initRepository()}
-            recent={store.recentRepos}
+            history={{ paths: store.recentRepos, roots: store.recentWorkspaceRoots }}
             home={home}
             onOpenRecent={(path) => {
               void store.openRepository(path).then((opened) => {
@@ -764,6 +825,7 @@ export function App() {
         </div>
         <PromptDialog
           isOpen={clonePrompt}
+          busy={store.busy}
           title="원격 저장소 복제"
           description="Git 원격 주소를 입력한 뒤, 내용을 받을 빈 폴더를 선택해요. GitHub API 연결과 Git 원격 인증은 서로 별개예요."
           label="원격 주소"
@@ -775,17 +837,15 @@ export function App() {
               if (await store.cloneRepository(url)) setClonePrompt(false)
             })()
           }}
-          onCancel={() => setClonePrompt(false)}
+          onCancel={() => {
+            if (store.busy) void activity.job.cancel()
+            setClonePrompt(false)
+          }}
         />
       </>
     )
   }
 
-  // 전량 ours 병합 마무리 — 변경 0개면 규칙 제안이 비므로 기본 문구를 준다 (품질 리뷰)
-  const suggestion =
-    status?.state === 'merging' && stagedCount === 0
-      ? `${T.branch} ${T.merge}`
-      : suggestCommitMessage(status?.changes ?? [])
   // 마지막 저장(HEAD)이 원격에 이미 백업됐는가 — 실행취소·메시지 고치기 확인창의 경고 병기 (판정 편차는 플랜 표)
   const headBackedUp = status !== null && isHeadBackedUp(status.branch)
   // 보관함 항목을 미리보기로 연 상태인가 — 상세 패널 문구를 보관함 맥락으로 분기한다 (품질 리뷰)
@@ -880,8 +940,7 @@ export function App() {
             {status.state !== 'normal' && (
               <span className="app__state">
                 <Pictogram kind="conflict" size={13} label="진행 중 작업" />
-                {STATE_LABELS[status.state]}{' '}
-                <span className="app__state-raw">{status.state}</span>
+                {STATE_LABELS[status.state]} <span className="app__state-raw">{status.state}</span>
               </span>
             )}
             {status.branch.ahead !== null && status.branch.behind !== null && (
@@ -960,7 +1019,8 @@ export function App() {
               testId="refresh"
               aria-label="새로고침"
             >
-              <RefreshCw size={13} aria-hidden="true" /> <span className="app__btn-label">새로고침</span>
+              <RefreshCw size={13} aria-hidden="true" />{' '}
+              <span className="app__btn-label">새로고침</span>
             </Button>
           </Tooltip>
           <Tooltip content="터미널" summary="터미널" describedBy={false}>
@@ -971,7 +1031,8 @@ export function App() {
               testId="terminal-toggle"
               aria-label="터미널"
             >
-              <Terminal size={13} aria-hidden="true" /> <span className="app__btn-label">터미널</span>
+              <Terminal size={13} aria-hidden="true" />{' '}
+              <span className="app__btn-label">터미널</span>
             </Button>
           </Tooltip>
           {/* E12 — 우측 사이드 접기. 좌측 토글과 대칭 위치(헤더 오른쪽 끝 쪽) */}
@@ -994,6 +1055,24 @@ export function App() {
               )}
             </Button>
           </Tooltip>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="보기와 단축키"
+            testId="help-open"
+            onPress={() => setHelpOpen(true)}
+          >
+            ?
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Git 작업 기록"
+            testId="activity-open"
+            onPress={() => setActivityOpen(true)}
+          >
+            기록
+          </Button>
           <Tooltip content="설정" summary="설정" describedBy={false}>
             <Button
               variant="ghost"
@@ -1007,6 +1086,26 @@ export function App() {
           </Tooltip>
         </div>
       </header>
+      <WorkflowHelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onLayout={(mode) => {
+          const right = mode !== 'default'
+          setLeftCollapsed(false)
+          saveLeftCollapsed(false)
+          setRightCollapsed(right)
+          saveRightCollapsed(right)
+          setDockOpen(mode === 'terminal')
+          saveDockOpen(mode === 'terminal')
+          setHelpOpen(false)
+        }}
+      />
+      <ActivityDialog
+        open={activityOpen}
+        entries={activity.data.entries}
+        onClose={() => setActivityOpen(false)}
+        onCancel={(path) => void activity.job.cancel(path)}
+      />
       <SettingsDialog
         isOpen={settingsOpen}
         appearance={appearance}
@@ -1015,7 +1114,15 @@ export function App() {
         onChangeWorktreeSelectAction={changeWorktreeSelectAction}
         onChangePullMode={(mode) => store.setPullMode(mode)}
         onChangeAutoFetch={changeAutoFetch}
-        remote={{ items: store.remotes, busy: store.busy, error: store.error }}
+        remote={{
+          repository: {
+            path: store.repoPath,
+            name: store.repoPath.split('/').pop() ?? store.repoPath,
+          },
+          items: store.remotes,
+          busy: store.busy,
+          error: store.error,
+        }}
         onAddRemote={(name, url) => store.remote.add(name, url)}
         onRemoveRemote={(name) => void store.remote.remove(name)}
         onRevealDiagnostics={() => void window.windowApi.revealDiagnostics()}
@@ -1079,12 +1186,17 @@ export function App() {
         store.busy ||
         store.error !== null ||
         store.notice !== null) && (
-        <div className="app__top-layer">
+        <div className="app__top-layer h-auto! max-h-[24vh] overflow-auto">
           {/* E7h ① — 좌측 탭바(z-41)와 아예 안 겹치게 스택을 좌측 열 오른쪽부터(패딩 20 + 열 폭 + gap 16) */}
-          <div className="app__top-stack" style={{ left: columns.left + 36 }}>
+          <div className="app__top-stack relative!">
             {store.busy && (
               <div className="app__notice app__job" role="status" data-testid="git-job-status">
-                <span>Git 작업 실행 중이에요. 5분을 넘기면 자동 중단돼요.</span>
+                <span>
+                  {activity.data.running.length
+                    ? `git ${activity.data.running[0]!.operation} · ${activity.data.running[0]!.cwd.split('/').pop()}`
+                    : 'Git 작업'}{' '}
+                  실행 중…
+                </span>
                 <Button variant="ghost" size="sm" onPress={() => void store.job.cancel()}>
                   중단
                 </Button>
@@ -1138,14 +1250,35 @@ export function App() {
               </div>
             )}
             {store.error && (
-              <p className="app__error" role="alert" data-testid="error">
-                {store.error}
-              </p>
+              <div className="app__error" role="alert" data-testid="error">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="whitespace-pre-wrap break-words">{store.error}</span>
+                  <Button variant="ghost" size="sm" onPress={() => store.clearError()}>
+                    닫기
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onPress={() => void store.refresh()}>
+                    상태 다시 확인
+                  </Button>
+                  <Button variant="ghost" size="sm" onPress={() => setActivityOpen(true)}>
+                    작업 기록
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onPress={() => void navigator.clipboard.writeText(store.error ?? '')}
+                  >
+                    오류 복사
+                  </Button>
+                </div>
+              </div>
             )}
             {status?.branch.name === null && status.headHash !== null && (
               <div className="app__merge-bar" role="status" data-testid="detached-head-warning">
                 <span>
-                  분리 HEAD예요. 커밋이 이름 없이 남지 않도록 먼저 새 브랜치에 현재 작업을 보존해 주세요.
+                  분리 HEAD예요. 커밋이 이름 없이 남지 않도록 먼저 새 브랜치에 현재 작업을 보존해
+                  주세요.
                 </span>
                 <Button
                   variant="primary"
@@ -1182,255 +1315,341 @@ export function App() {
             inert — 아래 app__dock 주석 참조(세 클리퍼 공통) */}
         <div className="app__left" inert={leftCollapsed} aria-hidden={leftCollapsed || undefined}>
           <div className="app__left-inner" style={{ width: leftExpandedWidth }}>
-          <div className="app__left-tabs" role="tablist" aria-label="왼쪽 패널 전환">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={leftTab === 'changes'}
-              className="app__left-tab"
-              onClick={() => {
-                setLeftTab('changes')
-                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
+            <div
+              className="app__left-tabs"
+              role="tablist"
+              aria-label="왼쪽 패널 전환"
+              onKeyDown={(event) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                const buttons = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+                )
+                const index = buttons.indexOf(event.target as HTMLButtonElement)
+                const next =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? buttons.length - 1
+                      : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) %
+                        buttons.length
+                event.preventDefault()
+                buttons[next]?.focus()
+                buttons[next]?.click()
               }}
-              data-testid="left-tab-changes"
             >
-              변경{
-                (workspaceView === null ? (status?.changes.length ?? 0) : workspaceChangeCount) > 0
+              <button
+                type="button"
+                role="tab"
+                aria-selected={leftTab === 'changes'}
+                tabIndex={leftTab === 'changes' ? 0 : -1}
+                className="app__left-tab"
+                onClick={() => {
+                  setLeftTab('changes')
+                  if (store.workspace !== null)
+                    void workspaceOverview.query.refresh(store.workspace)
+                }}
+                data-testid="left-tab-changes"
+              >
+                변경
+                {(workspaceView === null ? (status?.changes.length ?? 0) : workspaceChangeCount) > 0
                   ? ` ${workspaceView === null ? status?.changes.length : workspaceChangeCount}`
-                  : ''
-              }
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={leftTab === 'branches'}
-              className="app__left-tab"
-              onClick={() => {
-                setLeftTab('branches')
-                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
-              }}
-              data-testid="left-tab-branches"
-            >
-              {T.branch}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={leftTab === 'worktrees'}
-              className="app__left-tab"
-              onClick={() => {
-                setLeftTab('worktrees')
-                if (store.workspace !== null) void workspaceOverview.query.refresh(store.workspace)
-              }}
-              data-testid="left-tab-worktrees"
-            >
-              {T.worktree}
-            </button>
-          </div>
-          {leftTab === 'changes' && workspaceView !== null ? (
-            <>
-              <WorkspaceChangesPanel
+                  : ''}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={leftTab === 'branches'}
+                tabIndex={leftTab === 'branches' ? 0 : -1}
+                className="app__left-tab"
+                onClick={() => {
+                  setLeftTab('branches')
+                  if (store.workspace !== null)
+                    void workspaceOverview.query.refresh(store.workspace)
+                }}
+                data-testid="left-tab-branches"
+              >
+                {T.branch}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={leftTab === 'worktrees'}
+                tabIndex={leftTab === 'worktrees' ? 0 : -1}
+                className="app__left-tab"
+                onClick={() => {
+                  setLeftTab('worktrees')
+                  if (store.workspace !== null)
+                    void workspaceOverview.query.refresh(store.workspace)
+                }}
+                data-testid="left-tab-worktrees"
+              >
+                {T.worktree}
+              </button>
+            </div>
+            {workspaceView !== null && leftTab === 'changes' && (
+              <div
+                className="flex gap-1 border-b border-(--color-border) px-3 py-1"
+                aria-label="변경 범위"
+              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={changeScope === 'all'}
+                  className={
+                    changeScope === 'all' ? 'bg-(--color-selection-bg) text-(--color-accent)' : ''
+                  }
+                  onPress={() => setChangeScope('all')}
+                  testId="changes-scope-all"
+                >
+                  전체 작업
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={changeScope === 'current'}
+                  className={
+                    changeScope === 'current'
+                      ? 'bg-(--color-selection-bg) text-(--color-accent)'
+                      : ''
+                  }
+                  onPress={() => setChangeScope('current')}
+                  testId="changes-scope-current"
+                >
+                  현재 작업 · {status?.branch.name ?? '분리 HEAD'}
+                </Button>
+              </div>
+            )}
+            {leftTab === 'changes' && workspaceView !== null && changeScope === 'all' ? (
+              <>
+                <WorkspaceChangesPanel
+                  workspaceView={workspaceView}
+                  selected={store.selected}
+                  busy={store.busy}
+                  findOpen={findScope === 'changes'}
+                  findNonce={findNonce}
+                  onFindClose={() => setFindScope(null)}
+                  onRefresh={() =>
+                    void workspaceOverview.query.refresh(store.workspace, { discover: true })
+                  }
+                  onSelect={(repository, selected) => {
+                    if (findScope === 'diff') setFindScope(null)
+                    void runInWorkspaceRepository(repository, () => store.selectFile(selected))
+                  }}
+                  onMove={(request) =>
+                    store.workspaceChanges.move(request).then(async (result) => {
+                      await workspaceOverview.query.refresh(store.workspace)
+                      return result
+                    })
+                  }
+                />
+                <CommitForm
+                  model={commitFormAdapter.model.from(store.repoPath, status)}
+                  busy={store.busy}
+                  onCommit={(message) => store.commit(message)}
+                />
+              </>
+            ) : leftTab === 'changes' ? (
+              <>
+                <ChangesPanel
+                  changes={status?.changes ?? []}
+                  selected={store.selected}
+                  busy={store.busy}
+                  findOpen={findScope === 'changes'}
+                  findNonce={findNonce}
+                  onFindClose={() => setFindScope(null)}
+                  onStage={(paths) => void store.stage(paths)}
+                  onUnstage={(paths) => void store.unstage(paths)}
+                  onCaptureGuard={(paths) => store.captureChangeGuard(paths)}
+                  onDiscard={(request) => void store.discard(request)}
+                  onRemoveFile={(request) => void store.removeFile(request)}
+                  onSelect={(selected) => {
+                    // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
+                    if (findScope === 'diff') setFindScope(null)
+                    void store.selectFile(selected)
+                  }}
+                />
+                <CommitForm
+                  model={commitFormAdapter.model.from(store.repoPath, status)}
+                  busy={store.busy}
+                  onCommit={(message) => store.commit(message)}
+                />
+              </>
+            ) : leftTab === 'branches' ? (
+              <BranchesPanel
                 workspaceView={workspaceView}
-                selected={store.selected}
+                lastFetchAt={store.lastFetchAt}
+                onFetchRemotes={() => void store.fetchRemotes()}
+                overview={store.branchOverview}
+                compare={store.branchCompare}
+                currentBranch={status?.branch.name ?? null}
+                historyRef={store.historyRef}
                 busy={store.busy}
-                findOpen={findScope === 'changes'}
-                findNonce={findNonce}
-                onFindClose={() => setFindScope(null)}
-                onRefresh={() => void workspaceOverview.query.refresh(store.workspace)}
-                onSelect={(repository, selected) => {
-                  if (findScope === 'diff') setFindScope(null)
-                  void runInWorkspaceRepository(repository, () => store.selectFile(selected))
-                }}
-                onMove={(request) =>
-                  store.workspaceChanges
-                    .move(request)
-                    .then(() => workspaceOverview.query.refresh(store.workspace))
+                pending={store.reads.left > 0}
+                actionsDisabled={status?.state !== 'normal'}
+                onCloseCompare={() => store.clearBranchCompare()}
+                onRefreshWorkspace={() =>
+                  void workspaceOverview.query.refresh(store.workspace, { discover: true })
                 }
-              />
-              <CommitForm
-                stagedCount={stagedCount}
-                busy={store.busy}
-                suggestion={suggestion}
-                allowEmpty={status?.state === 'merging'}
-                onCommit={(message) => store.commit(message)}
-              />
-            </>
-          ) : leftTab === 'changes' ? (
-            <>
-              <ChangesPanel
-                changes={status?.changes ?? []}
-                selected={store.selected}
-                busy={store.busy}
-                findOpen={findScope === 'changes'}
-                findNonce={findNonce}
-                onFindClose={() => setFindScope(null)}
-                onStage={(paths) => void store.stage(paths)}
-                onUnstage={(paths) => void store.unstage(paths)}
-                onCaptureGuard={(paths) => store.captureChangeGuard(paths)}
-                onDiscard={(request) => void store.discard(request)}
-                onRemoveFile={(request) => void store.removeFile(request)}
-                onSelect={(selected) => {
-                  // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
-                  if (findScope === 'diff') setFindScope(null)
-                  void store.selectFile(selected)
+                onOpenWorkspaceRepository={(repository, branch) => {
+                  void runInWorkspaceRepository(repository, async () => {
+                    if (branch) {
+                      setHistoryScope('current')
+                      await store.viewHistory(branch)
+                    }
+                  })
+                }}
+                onAction={(action) => {
+                  switch (action.kind) {
+                    case 'switch':
+                      void store.switchBranch(action.name)
+                      break
+                    case 'branch-from':
+                      store.clearError()
+                      setBranchPrompt({ fromHash: action.hash })
+                      break
+                    case 'merge':
+                      void store.mergeBranch(action.name)
+                      break
+                    case 'rebase':
+                      setConfirmingRebase({ name: action.name })
+                      break
+                    case 'compare':
+                      void store.compareBranch(action.name)
+                      break
+                    case 'update':
+                      // 현재 공간은 기존 받아오기(pull)로 — 엔진 update는 비현재 전용 (스펙)
+                      if (action.name === status?.branch.name) void store.pullLatest()
+                      else void store.updateBranch(action.name)
+                      break
+                    case 'backup':
+                      if (action.name === status?.branch.name) requestPush()
+                      else void store.backupBranch(action.name)
+                      break
+                    case 'rename':
+                      store.clearError()
+                      setRenamePrompt({ name: action.name })
+                      break
+                    case 'remove':
+                      setConfirmingRemove({ name: action.name, force: false })
+                      break
+                    case 'checkout-remote':
+                      void store.checkoutRemoteBranch(action.name)
+                      break
+                    case 'remove-remote':
+                      setConfirmingRemoveRemote({ name: action.name })
+                      break
+                    case 'view':
+                      setHistoryScope('current')
+                      void store.viewHistory(action.name)
+                      break
+                  }
                 }}
               />
-              <CommitForm
-                stagedCount={stagedCount}
+            ) : leftTab === 'worktrees' ? (
+              <WorktreesPanel
+                worktrees={store.worktrees}
+                workspaceView={workspaceView}
+                currentPath={store.repoPath}
+                activePath={activeWorktree?.cwd ?? null}
+                home={home}
+                headInfos={store.headInfos}
+                onHoverWorktree={(path, headHash) => void store.loadHeadInfo(path, headHash)}
                 busy={store.busy}
-                suggestion={suggestion}
-                allowEmpty={status?.state === 'merging'}
-                onCommit={(message) => store.commit(message)}
-              />
-            </>
-          ) : leftTab === 'branches' ? (
-            <BranchesPanel
-              workspaceView={workspaceView}
-              lastFetchAt={store.lastFetchAt}
-              onFetchRemotes={() => void store.fetchRemotes()}
-              overview={store.branchOverview}
-              compare={store.branchCompare}
-              currentBranch={status?.branch.name ?? null}
-              historyRef={store.historyRef}
-              busy={store.busy}
-              pending={store.reads.left > 0}
-              actionsDisabled={status?.state !== 'normal'}
-              onCloseCompare={() => store.clearBranchCompare()}
-              onRefreshWorkspace={() => void workspaceOverview.query.refresh(store.workspace)}
-              onOpenWorkspaceRepository={(repository) => {
-                if (repository.path !== store.repoPath) void store.openRepository(repository.path)
-              }}
-              onAction={(action) => {
-                switch (action.kind) {
-                  case 'switch':
-                    void store.switchBranch(action.name)
-                    break
-                  case 'branch-from':
-                    store.clearError()
-                    setBranchPrompt({ fromHash: action.hash })
-                    break
-                  case 'merge':
-                    void store.mergeBranch(action.name)
-                    break
-                  case 'rebase':
-                    setConfirmingRebase({ name: action.name })
-                    break
-                  case 'compare':
-                    void store.compareBranch(action.name)
-                    break
-                  case 'update':
-                    // 현재 공간은 기존 받아오기(pull)로 — 엔진 update는 비현재 전용 (스펙)
-                    if (action.name === status?.branch.name) void store.pullLatest()
-                    else void store.updateBranch(action.name)
-                    break
-                  case 'backup':
-                    if (action.name === status?.branch.name) requestPush()
-                    else void store.backupBranch(action.name)
-                    break
-                  case 'rename':
-                    store.clearError()
-                    setRenamePrompt({ name: action.name })
-                    break
-                  case 'remove':
-                    setConfirmingRemove({ name: action.name, force: false })
-                    break
-                  case 'checkout-remote':
-                    void store.checkoutRemoteBranch(action.name)
-                    break
-                  case 'remove-remote':
-                    setConfirmingRemoveRemote({ name: action.name })
-                    break
-                  case 'view':
-                    void store.viewHistory(action.name)
-                    break
+                onRefreshWorkspace={() =>
+                  void workspaceOverview.query.refresh(store.workspace, { discover: true })
                 }
-              }}
-            />
-          ) : leftTab === 'worktrees' ? (
-            <WorktreesPanel
-              worktrees={store.worktrees}
-              workspaceView={workspaceView}
-              currentPath={store.repoPath}
-              activePath={activeWorktree?.cwd ?? null}
-              home={home}
-              headInfos={store.headInfos}
-              onHoverWorktree={(path, headHash) => void store.loadHeadInfo(path, headHash)}
-              busy={store.busy}
-              onRefreshWorkspace={() => void workspaceOverview.query.refresh(store.workspace)}
-              onOpenWorkspaceRepository={(repository) => {
-                if (repository.path !== store.repoPath) void store.openRepository(repository.path)
-              }}
-              onAction={(action) => {
-                switch (action.kind) {
-                  case 'select':
-                    // 클릭의 기본 동작은 설정을 따른다 (우클릭엔 두 동작이 따로 있다 — 스펙)
+                onOpenWorkspaceRepository={(repository, target) => {
+                  void runInWorkspaceRepository(repository, async () => {
+                    if (!target) return
                     if (worktreeSelectAction === 'switch-app') {
-                      // E7h ③ — 앱 전환이 끝난 뒤 터미널 대상을 같이 바꾼다(먼저 바꾸면 시차·실패 시 어긋남)
-                      void store.openWorktree(action.path).then((ok) => {
-                        if (ok) setActiveWorktree({ cwd: action.path, label: action.label })
-                      })
+                      if (await store.openWorktree(target.path))
+                        setActiveWorktree({ cwd: target.path, label: target.label })
                     } else {
+                      setActiveWorktree({ cwd: target.path, label: target.label })
+                      setDockOpen(true)
+                      saveDockOpen(true)
+                    }
+                  })
+                }}
+                onAction={async (action, repository) => {
+                  if (repository && action.kind !== 'new-tab' && action.kind !== 'new-window') {
+                    const current = useRepositoryStore.getState()
+                    if (!current.worktrees.some((tree) => tree.path === repository.path)) {
+                      const opened = await store.openRepository(repository.path, true)
+                      if (!opened || useRepositoryStore.getState().repoPath !== repository.path)
+                        return
+                    }
+                  }
+                  switch (action.kind) {
+                    case 'select':
+                      // 클릭의 기본 동작은 설정을 따른다 (우클릭엔 두 동작이 따로 있다 — 스펙)
+                      if (worktreeSelectAction === 'switch-app') {
+                        // E7h ③ — 앱 전환이 끝난 뒤 터미널 대상을 같이 바꾼다(먼저 바꾸면 시차·실패 시 어긋남)
+                        void store.openWorktree(action.path).then((ok) => {
+                          if (ok) setActiveWorktree({ cwd: action.path, label: action.label })
+                        })
+                      } else {
+                        setActiveWorktree({ cwd: action.path, label: action.label })
+                        setDockOpen(() => {
+                          saveDockOpen(true)
+                          return true
+                        })
+                      }
+                      break
+                    case 'terminal':
+                      // 우클릭 "여기서 터미널 열기" — 설정 무관 항상 터미널
                       setActiveWorktree({ cwd: action.path, label: action.label })
                       setDockOpen(() => {
                         saveDockOpen(true)
                         return true
                       })
-                    }
-                    break
-                  case 'terminal':
-                    // 우클릭 "여기서 터미널 열기" — 설정 무관 항상 터미널
-                    setActiveWorktree({ cwd: action.path, label: action.label })
-                    setDockOpen(() => {
-                      saveDockOpen(true)
-                      return true
-                    })
-                    break
-                  case 'open':
-                    void store.openWorktree(action.path)
-                    break
-                  case 'new-tab':
-                    // "새 창에서 열기"의 탭 짝 (E15c) — 검증·실패 처리 경로는 아래 new-window와
-                    // 같은 결이다(WindowOpenResult 재사용 — 계약서 tabs.open 주석)
-                    void store.openInNewTab(action.path)
-                    break
-                  case 'new-window':
-                    // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은
-                    // 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
-                    // 실패(워크트리 폴더가 사라진 경우 등)도 스토어가 배너로 옮긴다 (E15b 리뷰 I-2)
-                    void store.openInNewWindow(action.path)
-                    break
-                  case 'reveal':
-                    void store.revealWorktree(action.path)
-                    break
-                  case 'remove':
-                    setConfirmingRemoveWorktree({ path: action.path, force: false })
-                    break
-                  case 'add':
-                    store.clearError()
-                    setAddWorktreeOpen(true)
-                    break
-                }
-              }}
-            />
-          ) : null}
+                      break
+                    case 'open':
+                      void store.openWorktree(action.path)
+                      break
+                    case 'new-tab':
+                      // "새 창에서 열기"의 탭 짝 (E15c) — 검증·실패 처리 경로는 아래 new-window와
+                      // 같은 결이다(WindowOpenResult 재사용 — 계약서 tabs.open 주석)
+                      void store.openInNewTab(action.path)
+                      break
+                    case 'new-window':
+                      // 링크드 워크트리도 --show-toplevel이 그 워크트리 경로라 repo.open과 같은
+                      // 검증(절대 경로 + rev-parse)을 그대로 통과한다 (E15a 실측 매트릭스).
+                      // 실패(워크트리 폴더가 사라진 경우 등)도 스토어가 배너로 옮긴다 (E15b 리뷰 I-2)
+                      void store.openInNewWindow(action.path)
+                      break
+                    case 'reveal':
+                      void store.revealWorktree(action.path)
+                      break
+                    case 'remove':
+                      setConfirmingRemoveWorktree({ path: action.path, force: false })
+                      break
+                    case 'add':
+                      store.clearError()
+                      setAddWorktreeOpen(true)
+                      break
+                  }
+                }}
+              />
+            ) : null}
           </div>
         </div>
         <div className="app__center" data-find-scope="diff">
           {store.conflictFile !== null ? (
             <ConflictPanel
               key={store.conflictFile.path}
-              path={store.conflictFile.path}
-              content={store.conflictFile.content}
-              busy={store.busy}
-              // cherry-picking은 merging 취급 — 상대 라벨 '가져온 것'이 체리픽(cherry-pick) 어휘와 일치한다 (E5b 설계 판단).
-              // rebasing은 git의 ours/theirs가 뒤집힌다(내 것=새 기반) — 전용 mode로 라벨을 정직하게 (E7a)
-              mode={
+              document={conflictDocumentAdapter.document.from(
+                store.conflictFile.path,
+                store.repoPath,
+                store.conflictFile.content,
+                status?.branch.name ?? null,
                 status?.state === 'reverting'
                   ? 'reverting'
                   : status?.state === 'rebasing'
                     ? 'rebasing'
-                    : 'merging'
-              }
+                    : 'merging',
+              )}
+              busy={store.busy}
               onResolve={(choice) => void store.resolveConflict(store.conflictFile!.path, choice)}
               onMarkResolved={() => void store.markConflictResolved(store.conflictFile!.path)}
               onReload={() => store.reloadConflict(store.conflictFile!.path)}
@@ -1451,7 +1670,8 @@ export function App() {
                         store.diffLabel ??
                         (store.commitFile !== null && store.commitDetail !== null
                           ? `${store.commitFile.path} — ${T.commit} ${store.commitDetail.shortHash}`
-                          : store.selected?.change.path ?? T.diff),
+                          : (store.selected?.change.path ?? T.diff)),
+                      target: `${store.repoPath.split('/').pop()} / ${status?.branch.name ?? '분리 HEAD'}`,
                       diff: store.diff,
                       change:
                         store.selected !== null &&
@@ -1520,140 +1740,192 @@ export function App() {
             className={`app__right-inner${store.commitDetail !== null ? ' app__right-inner--detail-open' : ''}`}
             style={{ width: rightExpandedWidth }}
           >
-          {store.pullDetail !== null ? (
-            <ReviewDetailPanel
-              key={store.pullDetail.detail.number}
-              view={store.pullDetail}
-              busy={store.busy}
-              onOpenBrowser={() => void store.openPull(store.pullDetail!.detail.number)}
-              onBack={() => store.closePullDetail()}
-              onComment={(body) => store.addPullComment(body)}
-              onApprove={() => void store.approvePull()}
-              onMerge={() => setConfirmingMerge(true)}
-              pending={store.reads.right > 0}
-            />
-          ) : (
-            <>
-              {workspaceView !== null ? (
-                <WorkspaceHistoryPanel
-                  items={workspaceHistory}
-                  repository={workspaceRepository}
-                  selectedHash={store.commitDetail?.hash ?? null}
-                  busy={store.busy}
-                  loading={workspaceOverview.data.loading}
-                  error={workspaceOverview.data.error}
-                  findOpen={findScope === 'history'}
-                  findNonce={findNonce}
-                  onFindClose={() => setFindScope(null)}
-                  onRefresh={() => void workspaceOverview.query.refresh(store.workspace)}
-                  onSelect={(item) => {
-                    void runInWorkspaceRepository(item.repository, () => store.selectCommit(item.commit.hash))
-                    expandRightIfCollapsed()
-                  }}
-                />
-              ) : (
-              <HistoryPanel
-                history={store.history}
-                historyLimit={store.historyLimit}
-                currentBranch={status?.branch.name ?? null}
-                headHash={status?.headHash ?? null}
-                localBranches={store.branches.map((branch) => branch.name)}
-                selectedHash={store.commitDetail?.hash ?? null}
+            {store.pullDetail !== null ? (
+              <ReviewDetailPanel
+                key={store.pullDetail.detail.number}
+                view={store.pullDetail}
                 busy={store.busy}
+                onOpenBrowser={(section) =>
+                  void store.openPull(store.pullDetail!.detail.number, section)
+                }
+                onRefresh={() => void store.openPullDetail(store.pullDetail!.detail.number)}
+                onBack={() => store.closePullDetail()}
+                onComment={(body) => store.addPullComment(body)}
+                onApprove={() => void store.approvePull()}
+                onMerge={() => setConfirmingMerge(true)}
                 pending={store.reads.right > 0}
-                actionsDisabled={status?.state !== 'normal'}
-                historyRef={store.historyRef}
-                findOpen={findScope === 'history'}
-                findNonce={findNonce}
-                onFindClose={() => setFindScope(null)}
-                onSelect={(hash) => {
-                  void store.selectCommit(hash)
-                  // 이 목록은 우측 안이라 접힌 동안은 inert — 닿을 수 없다. 그래도 같은 규칙을
-                  // 두 호출부에 나란히 두어, 우측 밖으로 옮겨져도 죽은 클릭이 안 되게 한다 (E14b)
-                  expandRightIfCollapsed()
-                }}
-                onLoadMore={() => void store.loadMoreHistory()}
-                // 인라인 화살표가 아니라 셀렉터로 받은 액션 그대로 — HistoryPanel의 검색 이펙트가
-                // onSearch를 deps에 넣으므로, 매 렌더 새 함수를 내리면 App 렌더마다 재검색이다 (E14c)
-                onSearch={searchHistory}
-                onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
-                onLocateHead={() => void store.revealHead()}
-                onAction={(action) => {
-                  switch (action.kind) {
-                    case 'switch':
-                      void store.switchBranch(action.branch)
-                      break
-                    case 'branch-here':
-                      store.clearError()
-                      setBranchPrompt({ fromHash: action.hash })
-                      break
-                    case 'cherry-pick':
-                      void store.cherryPickCommit(action.hash)
-                      break
-                    case 'revert':
-                      void store.revertCommit(action.hash)
-                      break
-                    case 'undo':
-                      setConfirmingUndo({ hash: action.hash })
-                      break
-                    case 'reword':
-                      store.clearError()
-                      setRewordPrompt({ hash: action.hash, subject: action.subject })
-                      break
-                    case 'tag':
-                      store.clearError()
-                      setTagPrompt({ hash: action.hash })
-                      break
-                  }
-                }}
-                onClearView={() => void store.clearHistoryView()}
               />
-              )}
-              {/* E11 — grid-template-rows가 0fr↔9fr로 열고 닫히려면 이 래퍼가 닫힌 동안에도
+            ) : (
+              <>
+                <div className="flex min-h-0 flex-col overflow-hidden [&>.ui-panel]:flex-1 [&>.ui-panel]:rounded-none [&>.ui-panel]:border-0">
+                  {workspaceView !== null && (
+                    <div
+                      className="flex gap-1 border-b border-(--color-border) px-3 py-1"
+                      aria-label="이력 범위"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-pressed={historyScope === 'all'}
+                        className={
+                          historyScope === 'all'
+                            ? 'bg-(--color-selection-bg) text-(--color-accent)'
+                            : ''
+                        }
+                        onPress={() => setHistoryScope('all')}
+                        testId="history-scope-all"
+                      >
+                        전체 활동
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-pressed={historyScope === 'current'}
+                        className={
+                          historyScope === 'current'
+                            ? 'bg-(--color-selection-bg) text-(--color-accent)'
+                            : ''
+                        }
+                        onPress={() => setHistoryScope('current')}
+                        testId="history-scope-current"
+                      >
+                        현재 저장소 그래프
+                      </Button>
+                    </div>
+                  )}
+                  {workspaceView !== null && historyScope === 'all' ? (
+                    <WorkspaceHistoryPanel
+                      history={{
+                        items: workspaceHistory,
+                        repository: workspaceRepository,
+                        selectedHash: store.commitDetail?.hash ?? null,
+                        error: workspaceOverview.data.error,
+                        query: workspaceOverview.data.query,
+                        hasMore:
+                          workspaceOverview.data.historyLimit < 5000 &&
+                          (workspaceOverview.data.overview?.repositories.some(
+                            (item) => item.historyMore,
+                          ) ??
+                            false),
+                      }}
+                      busy={store.busy}
+                      loading={workspaceOverview.data.loading}
+                      onSearch={(value) => void workspaceOverview.query.search(value)}
+                      onLoadMore={() => void workspaceOverview.query.more()}
+                      onRefresh={() =>
+                        void workspaceOverview.query.refresh(store.workspace, { discover: true })
+                      }
+                      onSelect={(item) => {
+                        void runInWorkspaceRepository(item.repository, () =>
+                          store.selectCommit(item.commit.hash),
+                        )
+                        expandRightIfCollapsed()
+                      }}
+                    />
+                  ) : (
+                    <HistoryPanel
+                      history={store.history}
+                      historyLimit={store.historyLimit}
+                      currentBranch={status?.branch.name ?? null}
+                      headHash={status?.headHash ?? null}
+                      localBranches={store.branches.map((branch) => branch.name)}
+                      selectedHash={store.commitDetail?.hash ?? null}
+                      busy={store.busy}
+                      pending={store.reads.right > 0}
+                      actionsDisabled={status?.state !== 'normal'}
+                      historyRef={store.historyRef}
+                      findOpen={findScope === 'history'}
+                      findNonce={findNonce}
+                      onFindClose={() => setFindScope(null)}
+                      onSelect={(hash) => {
+                        void store.selectCommit(hash)
+                        // 이 목록은 우측 안이라 접힌 동안은 inert — 닿을 수 없다. 그래도 같은 규칙을
+                        // 두 호출부에 나란히 두어, 우측 밖으로 옮겨져도 죽은 클릭이 안 되게 한다 (E14b)
+                        expandRightIfCollapsed()
+                      }}
+                      onLoadMore={() => void store.loadMoreHistory()}
+                      // 인라인 화살표가 아니라 셀렉터로 받은 액션 그대로 — HistoryPanel의 검색 이펙트가
+                      // onSearch를 deps에 넣으므로, 매 렌더 새 함수를 내리면 App 렌더마다 재검색이다 (E14c)
+                      onSearch={searchHistory}
+                      onEnsureLoaded={(index) => store.ensureHistoryLoaded(index)}
+                      onLocateHead={() => void store.revealHead()}
+                      onAction={(action) => {
+                        switch (action.kind) {
+                          case 'switch':
+                            void store.switchBranch(action.branch)
+                            break
+                          case 'branch-here':
+                            store.clearError()
+                            setBranchPrompt({ fromHash: action.hash })
+                            break
+                          case 'cherry-pick':
+                            void store.cherryPickCommit(action.hash)
+                            break
+                          case 'revert':
+                            void store.revertCommit(action.hash)
+                            break
+                          case 'undo':
+                            setConfirmingUndo({ hash: action.hash })
+                            break
+                          case 'reword':
+                            store.clearError()
+                            setRewordPrompt({ hash: action.hash, subject: action.subject })
+                            break
+                          case 'tag':
+                            store.clearError()
+                            setTagPrompt({ hash: action.hash })
+                            break
+                        }
+                      }}
+                      onClearView={() => void store.clearHistoryView()}
+                    />
+                  )}
+                </div>
+                {/* E11 — grid-template-rows가 0fr↔9fr로 열고 닫히려면 이 래퍼가 닫힌 동안에도
                   DOM에 남아 있어야 한다(그래야 처음 여는 순간도 애니메이션이 붙는다).
                   안은 그대로 조건부 마운트 — 가상 스크롤을 품은 CommitDetailPanel을 미리
                   올려두면(즉 항상 마운트) 얻는 이득이 없고(닫힌 동안 0fr·overflow:hidden이라
                   안 보이는데 유지비만 진다) 기존 E2E(commit-detail-panel 소멸 단언)도 깨진다 —
                   그래서 CommitDetailPanel은 계속 지연 마운트한다 */}
-              <div
-                className="app__right-detail"
-                // E13 — 부모 app__right와 같은 이유로 접힌 동안은 스코프를 비운다
-                data-find-scope={
-                  !rightCollapsed && store.commitDetail !== null ? 'commit-files' : undefined
-                }
-              >
-                {store.commitDetail !== null && (
-                  <CommitDetailPanel
-                    detail={store.commitDetail}
-                    shelfPreview={shelfPreview}
-                    selectedFile={store.commitFile}
-                    busy={store.busy}
-                    pending={store.reads.right > 0}
-                    findOpen={findScope === 'commit-files'}
-                    findNonce={findNonce}
-                    onFindClose={() => setFindScope(null)}
-                    onSelectFile={(file) => {
-                      // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
-                      if (findScope === 'diff') setFindScope(null)
-                      void store.selectCommitFile(file)
-                    }}
-                    onRestoreFile={(file) =>
-                      void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
-                    }
-                    onCompareFile={(file) => {
-                      if (findScope === 'diff') setFindScope(null)
-                      void store.compareFileWithWorktree(
-                        store.commitDetail!.hash,
-                        file.path,
-                        file.origPath,
-                      )
-                    }}
-                    onBack={() => store.clearCommit()}
-                  />
-                )}
-              </div>
-            </>
-          )}
+                <div
+                  className="app__right-detail"
+                  // E13 — 부모 app__right와 같은 이유로 접힌 동안은 스코프를 비운다
+                  data-find-scope={
+                    !rightCollapsed && store.commitDetail !== null ? 'commit-files' : undefined
+                  }
+                >
+                  {store.commitDetail !== null && (
+                    <CommitDetailPanel
+                      detail={store.commitDetail}
+                      shelfPreview={shelfPreview}
+                      selectedFile={store.commitFile}
+                      busy={store.busy}
+                      pending={store.reads.right > 0}
+                      findOpen={findScope === 'commit-files'}
+                      findNonce={findNonce}
+                      onFindClose={() => setFindScope(null)}
+                      onSelectFile={(file) => {
+                        // E7h ⑥ — diff 파일이 바뀌면 이전 diff 대상 검색은 의미가 없다
+                        if (findScope === 'diff') setFindScope(null)
+                        void store.selectCommitFile(file)
+                      }}
+                      onRestoreFile={(file) =>
+                        void store.restoreFileFromCommit(store.commitDetail!.hash, file.path)
+                      }
+                      onCompareFile={(file) => {
+                        if (findScope === 'diff') setFindScope(null)
+                        void store.compareFileWithWorktree(
+                          store.commitDetail!.hash,
+                          file.path,
+                          file.origPath,
+                        )
+                      }}
+                      onBack={() => store.clearCommit()}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
         {/* E7b 터미널 도크 — 세션 유지를 위해 항상 마운트한다(언마운트 금지).
@@ -1868,7 +2140,8 @@ export function App() {
         }}
         onCancel={() => setConfirmingUndo(null)}
       >
-        {T.commit}만 취소하고 바뀐 내용은 그대로 남아요 — 왼쪽 변경 목록에서 다시 {T.commit}할 수 있어요.
+        {T.commit}만 취소하고 바뀐 내용은 그대로 남아요 — 왼쪽 변경 목록에서 다시 {T.commit}할 수
+        있어요.
         {headBackedUp && ` 이미 ${T.push}된 ${T.commit}이에요 — 취소하면 원격과 어긋나요.`}
       </ConfirmDialog>
       <PromptDialog
@@ -1932,8 +2205,8 @@ export function App() {
         }}
         onCancel={() => setConfirmingRebase(null)}
       >
-        지금 {T.branch}의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩 해결하는 화면이
-        열려요. 이미 {T.push}한 {T.branch}라면 원격과 어긋날 수 있어요.
+        지금 {T.branch}의 {T.commit}들을 그 위로 다시 쌓아요. 내용이 {T.conflict}하면 하나씩
+        해결하는 화면이 열려요. 이미 {T.push}한 {T.branch}라면 원격과 어긋날 수 있어요.
       </ConfirmDialog>
       <PromptDialog
         isOpen={renamePrompt !== null}
@@ -2004,7 +2277,8 @@ export function App() {
             }
             // needsForce가 아니면 지우기 성공이거나 다른 오류 — 성공했을 때만 터미널 그룹을 정리한다
             // (confirmingRemoveWorktree onConfirm과 동일 판정 패턴 재사용 — Task 6/E7h ④)
-            if (useRepositoryStore.getState().error === null) setPurgeTerminalGroup(target.worktreePath)
+            if (useRepositoryStore.getState().error === null)
+              setPurgeTerminalGroup(target.worktreePath)
             const retry = await store.removeBranch(target.name, target.force)
             if (retry.needsForce && !target.force) {
               setConfirmingRemove({ name: target.name, force: true })

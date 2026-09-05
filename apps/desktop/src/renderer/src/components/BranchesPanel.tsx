@@ -1,6 +1,12 @@
 import { useState, type MouseEvent } from 'react'
 import { ChevronDown, ChevronRight, FolderGit2, MoreHorizontal, RefreshCw } from 'lucide-react'
-import type { BranchCompare, BranchOverview, CommitSummary, LocalBranchStatus, RemoteBranchRef } from '@git-gui/domain'
+import type {
+  BranchCompare,
+  BranchOverview,
+  CommitSummary,
+  LocalBranchStatus,
+  RemoteBranchRef,
+} from '@git-gui/domain'
 import type { WorkspaceRepository } from '@git-gui/ipc-contract'
 import { Button } from '../ui/Button'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
@@ -49,7 +55,7 @@ interface BranchesPanelProps {
   /** 이 패널로 떨어질 조회(좌측 비교)가 진행 중인가 (E14a) */
   pending: boolean
   onRefreshWorkspace(): void
-  onOpenWorkspaceRepository(repository: WorkspaceRepository): void
+  onOpenWorkspaceRepository(repository: WorkspaceRepository, branch?: string): void
 }
 
 interface MenuState {
@@ -93,9 +99,7 @@ export function BranchesPanel({
     return [
       {
         key: 'switch',
-        label: isCurrent
-          ? `이 ${T.branch}로 이동 — ${T.head}예요`
-          : `이 ${T.branch}로 이동`,
+        label: isCurrent ? `이 ${T.branch}로 이동 — ${T.head}예요` : `이 ${T.branch}로 이동`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'switch', name: branch.name }),
       },
@@ -108,9 +112,7 @@ export function BranchesPanel({
       { key: 'sep-1', separator: true },
       {
         key: 'merge',
-        label: isCurrent
-          ? `지금 것과 ${T.merge} — 자기 자신이에요`
-          : `지금 것과 ${T.merge}`,
+        label: isCurrent ? `지금 것과 ${T.merge} — 자기 자신이에요` : `지금 것과 ${T.merge}`,
         disabled: busy || actionsDisabled || isCurrent,
         onSelect: () => onAction({ kind: 'merge', name: branch.name }),
       },
@@ -416,23 +418,34 @@ export function BranchesPanel({
           />
           <div className="branches-panel__scroll" data-testid="branches-list">
             {workspaceView.error !== null && (
-              <p className="branches-panel__empty" role="alert">{workspaceView.error}</p>
+              <p className="branches-panel__empty" role="alert">
+                {workspaceView.error}
+              </p>
             )}
             {repositoryOverviews.map((repositoryOverview) => {
-              const { repository, branches, error } = repositoryOverview
+              const { repository, branches } = repositoryOverview
+              const error =
+                repositoryOverview.errors?.branches ??
+                (branches === null ? repositoryOverview.error : null)
               const repositoryMatches =
                 normalizedQuery === '' ||
                 repository.name.toLowerCase().includes(normalizedQuery) ||
                 repository.relativePath.toLowerCase().includes(normalizedQuery)
               const workspaceLocals =
                 branches?.locals.filter(
-                  (branch) => repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
+                  (branch) =>
+                    repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
                 ) ?? []
               const workspaceRemotes =
                 branches?.remotes.filter(
-                  (branch) => repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
+                  (branch) =>
+                    repositoryMatches || branch.name.toLowerCase().includes(normalizedQuery),
                 ) ?? []
-              if (!repositoryMatches && workspaceLocals.length === 0 && workspaceRemotes.length === 0) {
+              if (
+                !repositoryMatches &&
+                workspaceLocals.length === 0 &&
+                workspaceRemotes.length === 0
+              ) {
                 return null
               }
               const key = `workspace-branches:${repository.path}`
@@ -466,7 +479,9 @@ export function BranchesPanel({
                     <span className="branch-row__count">
                       {workspaceLocals.length + workspaceRemotes.length}
                     </span>
-                    {currentRepository && <span className="workspace-branch-tree__current">열림</span>}
+                    {currentRepository && (
+                      <span className="workspace-branch-tree__current">열림</span>
+                    )}
                   </div>
                   {!repositoryCollapsed && (
                     <div className="workspace-branch-tree__children">
@@ -485,9 +500,15 @@ export function BranchesPanel({
                                 type="button"
                                 className="branch-row branch-row--workspace-readonly"
                                 key={`local:${branch.name}`}
-                                onClick={() => onOpenWorkspaceRepository(repository)}
+                                onClick={() => setSelectedName(branch.name)}
+                                onDoubleClick={() =>
+                                  onOpenWorkspaceRepository(repository, branch.name)
+                                }
+                                aria-label={`${repository.name} / ${branch.name} — 두 번 누르면 이력 보기`}
                               >
-                                <span className={`branch-row__glyph${branch.isCurrent ? ' branch-row__glyph--here' : ''}`}>
+                                <span
+                                  className={`branch-row__glyph${branch.isCurrent ? ' branch-row__glyph--here' : ''}`}
+                                >
                                   {branch.isCurrent ? '➤' : '⎇'}
                                 </span>
                                 <span className="branch-row__name">{branch.name}</span>
@@ -500,7 +521,9 @@ export function BranchesPanel({
                               </button>
                             ),
                           )}
-                          {workspaceRemotes.length > 0 && <p className="branches-panel__group">원격</p>}
+                          {workspaceRemotes.length > 0 && (
+                            <p className="branches-panel__group">원격</p>
+                          )}
                           {workspaceRemotes.map((branch) =>
                             currentRepository ? (
                               remoteRow(branch.name, branch.name, 0)
@@ -509,7 +532,11 @@ export function BranchesPanel({
                                 type="button"
                                 className="branch-row branch-row--remote branch-row--workspace-readonly"
                                 key={`remote:${branch.name}`}
-                                onClick={() => onOpenWorkspaceRepository(repository)}
+                                onClick={() => setSelectedName(branch.name)}
+                                onDoubleClick={() =>
+                                  onOpenWorkspaceRepository(repository, branch.name)
+                                }
+                                aria-label={`${repository.name} / ${branch.name} — 두 번 누르면 이력 보기`}
                               >
                                 <span className="branch-row__glyph">☁</span>
                                 <span className="branch-row__name">{branch.name}</span>
@@ -533,7 +560,10 @@ export function BranchesPanel({
             )}
           </div>
           {selectedTarget !== null && (
-            <div className="branches-panel__selection-actions" data-testid="branch-selection-actions">
+            <div
+              className="branches-panel__selection-actions"
+              data-testid="branch-selection-actions"
+            >
               <span>현재 저장소 브랜치는 기존 작업 메뉴를 그대로 쓸 수 있어요.</span>
               <button type="button" onClick={(event) => openMenu(event, selectedTarget)}>
                 <MoreHorizontal size={15} aria-hidden="true" /> 작업
@@ -561,7 +591,13 @@ export function BranchesPanel({
     <Panel title={T.branch} titleHint="branch" testId="branches-panel" pending={pending}>
       <div className="branches-panel">
         <div className="branches-panel__fetch">
-          <Button variant="ghost" size="sm" isDisabled={busy} onPress={onFetchRemotes} testId="fetch-remotes">
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={busy}
+            onPress={onFetchRemotes}
+            testId="fetch-remotes"
+          >
             <RefreshCw size={13} aria-hidden="true" /> {T.fetch}
           </Button>
           {lastFetchAt !== null && (

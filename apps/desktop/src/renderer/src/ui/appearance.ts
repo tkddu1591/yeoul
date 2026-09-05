@@ -16,6 +16,7 @@ function writeDocumentAppearance(appearance: Appearance): void {
 }
 
 export const appAppearance = {
+  document: { apply: writeDocumentAppearance },
   initial: {
     get(): Appearance {
       const appearance = appearancePreference.initial.get(
@@ -30,7 +31,11 @@ export const appAppearance = {
   selection: {
     apply(appearance: Appearance): void {
       writeDocumentAppearance(appearance)
-      void window.settingsApi.set({ colorMode: appearance.mode, colorTheme: appearance.theme })
+      void window.settingsApi.set({
+        colorMode: appearance.mode,
+        colorTheme: appearance.theme,
+        systemTheme: appearance.followSystem === true,
+      })
     },
   },
 }

@@ -17,6 +17,7 @@ import './diff-panel.css'
 interface DiffPanelProps {
   document: {
     path: string
+    target?: string
     diff: FileDiff
     change: { path: string; options: DiffOptions } | null
   } | null
@@ -95,6 +96,17 @@ export function DiffPanel({
       }
       testId="diff-panel"
     >
+      <p
+        className="m-0 border-b border-(--color-border) px-3 py-1 text-xs text-(--color-text-muted)"
+        data-testid="diff-comparison"
+      >
+        {document.target} ·{' '}
+        {document.change
+          ? document.change.options.staged
+            ? 'HEAD → 스테이지'
+            : '스테이지 → 작업 트리'
+          : '커밋 비교'}
+      </p>
       {/* key=path — 파일 전환 시 스크롤 위치와 가상 측정 캐시를 리셋한다 (이전 파일 끝에서 열리는 것 방지) */}
       <DiffView
         key={path}

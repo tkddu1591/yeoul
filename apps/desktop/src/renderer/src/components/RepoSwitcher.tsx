@@ -107,19 +107,28 @@ export function RepoSwitcher({
               >
                 <span className="repo-switcher__workspace-repository">
                   <GitBranch size={11} aria-hidden="true" />
-                  <span>{repository.relativePath}</span>
+                  <span>
+                    {repository.relativePath}
+                    {currentPath !== repository.path ? ` / ${folderName(currentPath)}` : ''}
+                  </span>
                 </span>
               </Tooltip>
             )}
             {workspace === null && (
               <Tooltip content={currentPath} summary={currentPath}>
-                <span className="app__repo-path" data-testid="repo-path">{currentPath}</span>
+                <span className="app__repo-path" data-testid="repo-path">
+                  {currentPath}
+                </span>
               </Tooltip>
             )}
             {workspace !== null && (
               <>
-                <span className="repo-switcher__test-path" data-testid="workspace-path">{workspace.path}</span>
-                <span className="repo-switcher__test-path" data-testid="repo-path">{currentPath}</span>
+                <span className="repo-switcher__test-path" data-testid="workspace-path">
+                  {workspace.path}
+                </span>
+                <span className="repo-switcher__test-path" data-testid="repo-path">
+                  {currentPath}
+                </span>
               </>
             )}
           </span>

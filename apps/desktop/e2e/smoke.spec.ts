@@ -100,6 +100,8 @@ async function createTwoBlockConflictRepo(): Promise<string> {
  */
 async function hoverAndCmdF(window: Page, selector: string): Promise<void> {
   const locator = window.locator(selector)
+  // Mouse routing is the fallback when there is no focused panel.
+  await window.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   let point = { x: 0, y: 0 }
   await expect(async () => {
     const box = (await locator.boundingBox())!
@@ -153,43 +155,43 @@ test('멀티레포 워크스페이스 — 별도 탐색기 없이 기존 탭과 
     await expect(window.getByTestId('repo-path')).toContainText(backPath)
     await expect(window.getByTestId('workspace-path')).toHaveText(workspacePath)
     await expect(window.getByTestId('workspace-changes-panel')).toBeVisible()
-    await expect(window.getByTestId('workspace-changes-back')).toContainText('server.txt')
-    await expect(window.getByTestId('workspace-changes-front')).toContainText('client.txt')
+    await expect(window.getByTestId('workspace-file-back-unstaged-server.txt')).toBeVisible()
+    await expect(window.getByTestId('workspace-file-front-unstaged-client.txt')).toBeVisible()
     await expect(window.getByTestId('workspace-history-panel')).toContainText('back')
     await expect(window.getByTestId('workspace-history-panel')).toContainText('front')
 
     // 파일 체크박스 + 상단 버튼 — 작업 뒤에도 원래 보던 back 저장소로 돌아온다.
     await window.getByTestId('workspace-check-front-unstaged-client.txt').check()
     await window.getByTestId('workspace-stage-selected').click()
-    await expect(window.getByTestId('workspace-changes-front')).toContainText('저장 예정')
+    await expect(window.getByTestId('workspace-file-front-staged-client.txt')).toBeVisible()
     await expect(window.getByTestId('repo-path')).toHaveText(backPath)
 
     // 레포 체크박스는 그 저장소의 변경을 한 번에 선택한다.
     await window.getByTestId('workspace-check-repository-back').check()
     await window.getByTestId('workspace-stage-selected').click()
-    await expect(window.getByTestId('workspace-changes-back')).toContainText('저장 예정')
+    await expect(window.getByTestId('workspace-file-back-staged-server.txt')).toBeVisible()
 
     // 워크스페이스 전체 체크 후 선택 내리기 — 두 저장소를 순차 처리한다.
     await window.getByTestId('workspace-check-all').check()
     await window.getByTestId('workspace-unstage-selected').click()
-    await expect(window.getByTestId('workspace-changes-back')).toContainText('변경사항')
-    await expect(window.getByTestId('workspace-changes-front')).toContainText('변경사항')
+    await expect(window.getByTestId('workspace-file-back-unstaged-server.txt')).toBeVisible()
+    await expect(window.getByTestId('workspace-file-front-unstaged-client.txt')).toBeVisible()
     await expect(window.getByTestId('repo-path')).toHaveText(backPath)
 
     // 레포 전체 +/-는 평소 숨기고 헤더를 가리킬 때만 보인다.
-    const frontRepository = window.getByTestId('workspace-changes-front').locator('.workspace-change-tree__repository')
-    const frontActions = frontRepository.locator('.workspace-change-tree__actions')
+    const frontRepository = window.getByTestId('workspace-changes-front')
+    const frontActions = window.getByTestId('workspace-stage-all-front')
     await expect(frontActions).toHaveCSS('opacity', '0')
     await frontRepository.hover()
     await expect(frontActions).toHaveCSS('opacity', '1')
     await window.getByTestId('workspace-stage-all-front').click()
-    await expect(window.getByTestId('workspace-changes-front')).toContainText('저장 예정')
+    await expect(window.getByTestId('workspace-file-front-staged-client.txt')).toBeVisible()
 
     // 파일별 +/- 버튼은 없고, 한 건 내리기는 우클릭 메뉴에서 한다.
     await expect(window.locator('.workspace-change-row__move')).toHaveCount(0)
     await window.getByTestId('workspace-file-front-staged-client.txt').click({ button: 'right' })
     await window.getByTestId('context-workspace-unstage-file').click()
-    await expect(window.getByTestId('workspace-changes-front')).toContainText('변경사항')
+    await expect(window.getByTestId('workspace-file-front-unstaged-client.txt')).toBeVisible()
     await window.screenshot({ path: 'test-results/workspace-multi-repo.png' })
 
     await window.getByTestId('left-tab-branches').click()
@@ -197,7 +199,10 @@ test('멀티레포 워크스페이스 — 별도 탐색기 없이 기존 탭과 
     await expect(window.getByTestId('workspace-branches-front')).toContainText('ui')
     await window.screenshot({ path: 'test-results/workspace-multi-repo-branches.png' })
 
-    await window.getByTestId('workspace-branches-front').locator('.workspace-branch-tree__name').click()
+    await window
+      .getByTestId('workspace-branches-front')
+      .locator('.workspace-branch-tree__name')
+      .click()
     await expect(window.getByTestId('repo-path')).toContainText(frontPath)
 
     await window.getByTestId('left-tab-worktrees').click()
@@ -301,7 +306,7 @@ test('빈 메시지로 저장하면 규칙 기반 제안이 대신 들어간다'
     )
     // E9 — commit-hint(왼쪽 슬롯)는 이제 항상 무언가를 말한다. 지금 상태(1개 스테이지·메시지
     // 비움·제안 있음)는 누를 수 있는 상태라 "몇 개 파일"을 커밋하는지를 보여준다.
-    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일')
+    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일 커밋')
     await expect(window.getByTestId('commit-button')).toBeEnabled()
 
     // 메시지를 입력하지 않고 저장 — 제안이 커밋 메시지가 된다
@@ -393,10 +398,7 @@ test('커밋을 누르면 트리 아래에 상세가 열리고 파일 diff는 �
   const repo = await createRepoWithChange()
   // 본문 있는 커밋을 하나 더 쌓는다 — 상세에서 본문 표시를 검증한다
   await execGitOrThrow(['add', '-A'], { cwd: repo })
-  await execGitOrThrow(
-    ['commit', '-m', '두 번째 저장', '-m', '자세한 설명 줄'],
-    { cwd: repo },
-  )
+  await execGitOrThrow(['commit', '-m', '두 번째 저장', '-m', '자세한 설명 줄'], { cwd: repo })
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo },
@@ -529,16 +531,20 @@ test('960px 최소 창에서 중앙 diff 폭이 380px 이상으로 보장된다 
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('diff-view-unified')).toBeVisible()
     // 중앙(diff) ≥ 380px — computeColumns가 좌·우를 함께 줄여 만든 보장 (E2 후속 노트 해소)
-    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(378)
+    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(
+      378,
+    )
     // 좌·우 열은 줄되 살아 있다 — 저장 폼(좌측 하단)·타임라인이 함께 보인다
     await expect(window.getByTestId('commit-button')).toBeVisible()
-    expect(
-      (await window.getByTestId('history-panel').boundingBox())!.width,
-    ).toBeGreaterThanOrEqual(200)
+    expect((await window.getByTestId('history-panel').boundingBox())!.width).toBeGreaterThanOrEqual(
+      200,
+    )
     // 하단 상세가 열려도 중앙 보장은 유지된다
     await window.locator('[data-testid^="history-item-"]').first().click()
     await expect(window.getByTestId('commit-detail-panel')).toBeVisible()
-    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(378)
+    expect((await window.getByTestId('diff-panel').boundingBox())!.width).toBeGreaterThanOrEqual(
+      378,
+    )
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -792,6 +798,7 @@ test('겹치면 충돌 화면에서 한쪽을 고르고 저장하기로 마무�
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-view')).toContainText('rival')
+    await window.getByText('파일 전체 적용', { exact: true }).click()
     await window.getByTestId('conflict-theirs').click()
     await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
     await window.getByTestId('confirm-accept').click()
@@ -830,6 +837,7 @@ test('겹침을 전부 내 것으로 정리해도 저장하기로 합치기를 �
     await window.getByTestId('list-option-rival').click()
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.conflict} 1개 남음`)
     await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByText('파일 전체 적용', { exact: true }).click()
     await window.getByTestId('conflict-ours').click()
     await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
     await window.getByTestId('confirm-accept').click()
@@ -975,10 +983,13 @@ test('되돌리기가 겹치면 상태 바에서 취소할 수 있다', async ()
     await expect(window.getByTestId('merge-bar')).toContainText(`${T.commit} 되돌리는 중`)
     // 전부 내 것을 유지하면 바뀌는 내용이 없다 — 저장하기 대신 취소로 마무리하도록 안내한다
     await window.getByTestId('file-unstaged-app.txt').click()
+    await window.getByText('파일 전체 적용', { exact: true }).click()
     await window.getByTestId('conflict-ours').click()
     await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
     await window.getByTestId('confirm-accept').click()
-    await expect(window.getByTestId('merge-bar')).toContainText(`${T.revert} 취소를 눌러 마무리해요`)
+    await expect(window.getByTestId('merge-bar')).toContainText(
+      `${T.revert} 취소를 눌러 마무리해요`,
+    )
     // 되돌리는 중에는 우클릭 되돌리기가 비활성 — 이중 실행을 막는다 (통합 리뷰)
     await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
     await expect(window.getByTestId('context-revert')).toBeDisabled()
@@ -1327,7 +1338,9 @@ test('이 저장만 가져오기 (cherry-pick) — 성공과 충돌·취소', as
     // (1) 깔끔한 가져오기 — 새 저장이 생기고 파일이 도착한다
     await window.getByTestId(`history-item-${featureHash}`).click({ button: 'right' })
     await window.getByTestId('context-cherry-pick').click()
-    await expect(window.getByTestId('notice')).toContainText(`${T.cherryPick}해 새 ${T.commit}을 만들었어요`)
+    await expect(window.getByTestId('notice')).toContainText(
+      `${T.cherryPick}해 새 ${T.commit}을 만들었어요`,
+    )
     await expect(window.getByTestId('history-count')).toHaveText('5')
     expect(await readFile(join(repo, 'feature.txt'), 'utf8')).toBe('f\n')
     // (2) 겹치는 가져오기 — cherry-picking 상태 바가 뜨고 취소로 돌아온다
@@ -1478,7 +1491,10 @@ test('실험 공간 탭 — 목록·상태 배지·검색 (E7a)', async () => {
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branches-panel')).toBeVisible()
     // E7g: 상태는 칩 텍스트 대신 아이콘(➤)·Tooltip(data-tooltip)·인라인 ↑↓로 표시된다 (E7j 전환)
-    await expect(window.getByTestId('branch-row-main')).toHaveAttribute('data-tooltip', new RegExp(T.head))
+    await expect(window.getByTestId('branch-row-main')).toHaveAttribute(
+      'data-tooltip',
+      new RegExp(T.head),
+    )
     await expect(
       window.getByTestId('branch-row-main').locator('.branch-row__ahead, .branch-row__behind'),
     ).toHaveCount(0)
@@ -1515,7 +1531,10 @@ test('실험 공간 탭 — 우클릭 이동(checkout)에 현재 표시가 따�
     await window.getByTestId('branch-row-sidework').click({ button: 'right' })
     await window.getByTestId('context-switch').click()
     // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
-    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute('data-tooltip', new RegExp(T.head))
+    await expect(window.getByTestId('branch-row-sidework')).toHaveAttribute(
+      'data-tooltip',
+      new RegExp(T.head),
+    )
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('sidework')
   } finally {
@@ -1580,12 +1599,15 @@ test('재배치(rebase) — 충돌 → 새 기반/내 저장 선택 → 계속�
     await window.getByTestId('context-rebase').click()
     await window.getByRole('button', { name: T.rebase }).click()
     // 충돌 — 4겸용 상태 바 + 진행 표시(실측 2: msgnum/end)
-    await expect(window.getByTestId('merge-bar')).toContainText(`${T.commit} ${T.rebase} 중 (1개 중 1번째)`)
+    await expect(window.getByTestId('merge-bar')).toContainText(
+      `${T.commit} ${T.rebase} 중 (1개 중 1번째)`,
+    )
     // 변경 탭의 ! 파일에서 해결 — rebase 라벨 반전(초록=새 기반, 보라=재배치 중인 내 저장)
     await window.getByTestId('left-tab-changes').click()
     await window.getByTestId('file-unstaged-app.txt').click()
     await expect(window.getByTestId('conflict-panel')).toBeVisible()
-    await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 사용')
+    await expect(window.getByTestId('conflict-ours')).toContainText('새 기반 (ours)')
+    await window.getByText('파일 전체 적용', { exact: true }).click()
     await window.getByTestId('conflict-theirs').click()
     await expect(window.getByText('파일 전체의 충돌 선택을 바꿀까요?')).toBeVisible()
     await window.getByTestId('confirm-accept').click()
@@ -1664,7 +1686,10 @@ test('실험 공간 탭 — 원격 공간을 내 공간으로 가져온다(추�
     await window.getByTestId('context-checkout-remote').click()
     await expect(window.getByTestId('notice')).toContainText('가져와 이동했어요')
     // E7g: "지금 여기"는 Tooltip(data-tooltip) — 행 텍스트는 아이콘(➤) (E7j 전환)
-    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute('data-tooltip', new RegExp(T.head))
+    await expect(window.getByTestId('branch-row-incoming')).toHaveAttribute(
+      'data-tooltip',
+      new RegExp(T.head),
+    )
     const current = await execGitOrThrow(['branch', '--show-current'], { cwd: repo })
     expect(current.stdout.trim()).toBe('incoming')
   } finally {
@@ -1855,7 +1880,10 @@ test('워크트리 탭 — 클릭하면 새 터미널이 그 폴더에서 열린
   await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1895,7 +1923,10 @@ test('설정 — 앱 전체 전환으로 바꾸면 클릭 시 헤더·역사가 
   await execGitOrThrow(['add', '-A'], { cwd: `${repo}-feature-login` })
   await execGitOrThrow(['commit', '-m', '워크트리 전용 저장'], { cwd: `${repo}-feature-login` })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1928,7 +1959,10 @@ test('워크트리 탭 — 미저장 변경이 있으면 지우기가 2단 확�
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   await writeFile(join(`${repo}-feature-login`, 'dirty.txt'), 'd\n')
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -1960,7 +1994,10 @@ test('감시 — 링크드 워크트리를 앱에서 열면 그 안의 외부 �
   await execGitOrThrow(['branch', 'feature/login'], { cwd: repo })
   await execGitOrThrow(['worktree', 'add', `${repo}-feature-login`, 'feature/login'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -2152,7 +2189,9 @@ test('원격 새로고침 — 원격의 새 실험 공간이 목록에 나타난
     await window.getByTestId('left-tab-branches').click()
     await expect(window.getByTestId('branch-row-origin/remote-only')).toHaveCount(0)
     await window.getByTestId('fetch-remotes').click()
-    await expect(window.getByTestId('branch-row-origin/remote-only')).toBeVisible({ timeout: 10_000 })
+    await expect(window.getByTestId('branch-row-origin/remote-only')).toBeVisible({
+      timeout: 10_000,
+    })
     await expect(window.getByTestId('fetch-at')).toContainText('방금 전')
   } finally {
     await app.close()
@@ -2236,11 +2275,15 @@ test('백업 — 연결 없는 실험 공간은 자동 연결하며 알린다 (E
     await window.getByTestId('backup').click()
     await expect(window.getByText('처음 푸시할 위치를 확인해 주세요')).toBeVisible()
     await window.getByTestId('confirm-accept').click()
-    await expect(window.getByTestId('notice')).toContainText(`연결하며 ${T.push}했어요`, { timeout: 10_000 })
+    await expect(window.getByTestId('notice')).toContainText(`연결하며 ${T.push}했어요`, {
+      timeout: 10_000,
+    })
     await window.getByTestId('left-tab-branches').click()
     // E7g: "동기화됨" 칩 대신 침묵(인라인 ↑↓ 배지가 없음)이 신호
     await expect(
-      window.getByTestId('branch-row-fresh-space').locator('.branch-row__ahead, .branch-row__behind'),
+      window
+        .getByTestId('branch-row-fresh-space')
+        .locator('.branch-row__ahead, .branch-row__behind'),
     ).toHaveCount(0)
   } finally {
     await app.close()
@@ -2287,9 +2330,7 @@ test('창 제목이 "여울"이다 — 한 줄 타이틀바에서도 창 전환 
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('refresh')).toBeVisible()
-    const title = await app.evaluate(({ BaseWindow }) =>
-      BaseWindow.getAllWindows()[0]?.getTitle(),
-    )
+    const title = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]?.getTitle())
     expect(title).toBe('여울')
   } finally {
     await app.close()
@@ -2409,7 +2450,7 @@ test('E7h — 알림 배너가 좌측 탭들을 가리지도, 가려지지도 �
     // 배너 박스가 좌측 탭 구역(변경/실험 공간/워크트리)과 겹치지 않는다 — 탭 3개 모두 온전히 클릭 가능
     const noticeBox = (await notice.boundingBox())!
     const tabBox = (await window.getByTestId('left-tab-worktrees').boundingBox())!
-    expect(noticeBox.x).toBeGreaterThanOrEqual(tabBox.x + tabBox.width)
+    expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(tabBox.y)
     await window.getByTestId('left-tab-worktrees').click()
     await window.getByTestId('left-tab-changes').click()
   } finally {
@@ -2495,7 +2536,10 @@ test('E7h — 터미널 탭이 워크트리별 묶음으로 전환·복원된다
   await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'grp-side'], { cwd: repo })
   // dockOpen 영속 격리 — 이전 터미널 테스트의 열림 상태를 물려받지 않게 (E7b 관례)
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -2539,7 +2583,10 @@ test('E7h — 워크트리를 지우면 그 그룹 터미널도 정리된다', a
   const wtPath = `${repo}-purge`
   await execGitOrThrow(['worktree', 'add', '--end-of-options', wtPath, 'purge-side'], { cwd: repo })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -2724,9 +2771,9 @@ test('E7h ⌘F — 마우스 위치의 패널에 열린다', async () => {
     await expect(
       window.locator('[data-testid="history-panel"] [data-testid="find-bar"]'),
     ).toHaveCount(1)
-    await expect(
-      window.locator('[data-testid="diff-panel"] [data-testid="find-bar"]'),
-    ).toHaveCount(0)
+    await expect(window.locator('[data-testid="diff-panel"] [data-testid="find-bar"]')).toHaveCount(
+      0,
+    )
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -2810,8 +2857,12 @@ test('E7j — 같은 이름 워크트리가 출처·이름으로 구분된다', 
   const leaf = basename(repo)
   const oneParent = join(base, 'holder-one')
   const twoParent = join(base, 'holder-two')
-  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(oneParent, leaf), 'wt-one'], { cwd: repo })
-  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(twoParent, leaf), 'wt-two'], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(oneParent, leaf), 'wt-one'], {
+    cwd: repo,
+  })
+  await execGitOrThrow(['worktree', 'add', '--end-of-options', join(twoParent, leaf), 'wt-two'], {
+    cwd: repo,
+  })
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo },
@@ -2967,7 +3018,9 @@ test('E7k — 분리됨 워크트리 카드에 제목·시각·포함 브랜치�
   await execGitOrThrow(['branch', 'holder'], { cwd: repo })
   const head = (await execGitOrThrow(['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
   const wtPath = `${repo}-detached`
-  await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], { cwd: repo })
+  await execGitOrThrow(['worktree', 'add', '--detach', '--end-of-options', wtPath, head], {
+    cwd: repo,
+  })
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo },
@@ -3016,12 +3069,16 @@ test('E8 — 커밋 버튼은 스테이지가 비면 사유와 함께 비활성�
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
     await expect(window.getByTestId('commit-button')).toBeDisabled()
-    await expect(window.getByTestId('commit-hint')).toContainText('올린 파일이 없어요')
+    await expect(window.getByTestId('commit-hint')).toContainText('스테이지에 추가해 주세요')
     await window.getByTestId('check-unstaged-app.txt').click()
     await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('commit-button')).toBeEnabled()
@@ -3100,7 +3157,11 @@ test('E8 — 목록 길이가 크게 다를 때 짧은 쪽 카드가 눌려 사�
   const repo = await createRepoWithManyChanges(30, 2)
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
@@ -3113,7 +3174,9 @@ test('E8 — 목록 길이가 크게 다를 때 짧은 쪽 카드가 눌려 사�
     await expect(window.getByTestId('file-staged-file-0.txt')).toBeVisible()
     const box = await window.evaluate(() => {
       const container = document.querySelector('.changes-panel') as HTMLElement
-      const panels = Array.from(document.querySelectorAll('.app__left-inner > .changes-panel .ui-panel')) as HTMLElement[]
+      const panels = Array.from(
+        document.querySelectorAll('.app__left-inner > .changes-panel .ui-panel'),
+      ) as HTMLElement[]
       return {
         containerHeight: container.getBoundingClientRect().height,
         panelHeights: panels.map((p) => p.getBoundingClientRect().height),
@@ -3133,7 +3196,11 @@ test('E9 — ⌘↵로 커밋된다', async () => {
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
@@ -3155,7 +3222,11 @@ test('E9 — 커밋 불가 상태에서는 ⌘↵가 무시된다', async () => 
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
@@ -3179,18 +3250,22 @@ test('E9 — 왼쪽 슬롯이 항상 상태를 말한다', async () => {
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
     // ① 아무것도 스테이지하지 않은 상태
-    await expect(window.getByTestId('commit-hint')).toContainText('올린 파일이 없어요')
+    await expect(window.getByTestId('commit-hint')).toContainText('스테이지에 추가해 주세요')
     // ② 1개 스테이지 후 — E8에서는 이 자리가 빈 문자열이라 높이 0이었다.
     // 정확 문구 + 가시성을 함께 걸어 그 회귀를 잡는다
     await window.getByTestId('check-unstaged-app.txt').click()
     await window.getByTestId('stage-selected').click()
     await expect(window.getByTestId('staged-count')).toHaveText('1')
-    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일')
+    await expect(window.getByTestId('commit-hint')).toHaveText('1개 파일 커밋')
     await expect(window.getByTestId('commit-hint')).toBeVisible()
   } finally {
     await app.close()
@@ -3202,7 +3277,11 @@ test('E9 — 한글 조합 중 ⌘↵는 커밋하지 않는다 (IME 가드)', a
   const repo = await createRepoWithChange()
   const app = await electron.launch({
     args: [APP_ROOT],
-    env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')) },
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: await mkdtemp(join(tmpdir(), 'gg-ud-')),
+    },
   })
   try {
     const window = await app.firstWindow()
@@ -3425,7 +3504,9 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
       return true
     })
     // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
-    expect(patched, 'repo:status 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(true)
+    expect(patched, 'repo:status 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
+      true,
+    )
 
     // 파일은 전혀 건드리지 않는다 — 감시(watcher)가 반응할 소스가 없는 채로 포커스 이벤트만
     // 직접 쏜다. OS 포커스도, 실제 창 표시도, 다른 창과의 경합도 필요 없다 — 결정적이라
@@ -3435,7 +3516,10 @@ test('E10 — 창이 포커스를 받으면 파일 변화 없이도 재조회가
     })
     await expect
       .poll(
-        () => app.evaluate(() => (globalThis as unknown as { __refreshCycles: number }).__refreshCycles),
+        () =>
+          app.evaluate(
+            () => (globalThis as unknown as { __refreshCycles: number }).__refreshCycles,
+          ),
         { timeout: 5_000 },
       )
       .toBeGreaterThan(0)
@@ -3673,9 +3757,7 @@ test('E14c — 좌측을 접으면 터미널(xterm)이 넓어진 도크 폭으�
     // 240ms 전환 정착 대기 — 좌측 폭 0(E12 관용구)까지 기다린 뒤에 최종 뷰 폭을 읽는다.
     // 전환 중간 폭으로 단언하면 fit의 셀 반올림 슬랙과 겹쳐 오탐·과탐이 생긴다
     await window.waitForTimeout(320)
-    await expect
-      .poll(async () => (await window.locator('.app__left').boundingBox())!.width)
-      .toBe(0)
+    await expect.poll(async () => (await window.locator('.app__left').boundingBox())!.width).toBe(0)
     const viewAfter = (await view.boundingBox())!.width
     expect(viewAfter).toBeGreaterThan(viewBefore + 50)
 
@@ -3769,7 +3851,10 @@ test('E12 — 워크트리 A에 탭 2개, B로 전환하면 B의 첫 탭은 1이
     cwd: repo,
   })
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ worktreeSelectAction: 'terminal' }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ worktreeSelectAction: 'terminal' }),
+  )
   const app = await electron.launch({
     args: [APP_ROOT],
     env: { ...process.env, GIT_GUI_E2E_REPO: repo, GIT_GUI_USER_DATA: userData },
@@ -4053,10 +4138,14 @@ test('E13 후속 — 닫힌 도크·접힌 사이드로는 Tab 포커스가 들�
     await window.getByTestId('left-collapse-toggle').click()
     await window.getByTestId('right-collapse-toggle').click()
     await expect
-      .poll(async () => (await window.locator('.app__left').boundingBox())!.width, { timeout: 2000 })
+      .poll(async () => (await window.locator('.app__left').boundingBox())!.width, {
+        timeout: 2000,
+      })
       .toBe(0)
     await expect
-      .poll(async () => (await window.locator('.app__right').boundingBox())!.width, { timeout: 2000 })
+      .poll(async () => (await window.locator('.app__right').boundingBox())!.width, {
+        timeout: 2000,
+      })
       .toBe(0)
 
     // ② body에서 출발해 Tab 40번 — 리뷰어는 15번이면 닿았다. 여유 있게 돌린다
@@ -4089,7 +4178,9 @@ test('E13 후속 — 닫힌 도크·접힌 사이드로는 Tab 포커스가 들�
     }
     // 공허한 통과 방지 — 접히지 않은 곳(헤더·중앙)에서는 Tab이 실제로 여러 요소를 돌아야 한다
     const distinct = new Set(visited.filter((entry) => !entry.startsWith('body')))
-    expect(distinct.size, `Tab이 실제로 돈 곳: ${[...distinct].join(', ')}`).toBeGreaterThanOrEqual(3)
+    expect(distinct.size, `Tab이 실제로 돈 곳: ${[...distinct].join(', ')}`).toBeGreaterThanOrEqual(
+      3,
+    )
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -4125,7 +4216,13 @@ async function sampleCollapseFrames(
         const t = performance.now() - t0
         const a = trackEl.getBoundingClientRect()
         const b = innerEl.getBoundingClientRect()
-        store.__e13.push({ t, trackW: a.width, trackH: a.height, innerW: b.width, innerH: b.height })
+        store.__e13.push({
+          t,
+          trackW: a.width,
+          trackH: a.height,
+          innerW: b.width,
+          innerH: b.height,
+        })
         // 240ms 전환 + 클릭 왕복 + 여유. 끝나면 플래그로 알린다(고정 sleep 대신 폴링으로 회수)
         if (t < 1500) requestAnimationFrame(tick)
         else store.__e13done = true
@@ -4136,15 +4233,26 @@ async function sampleCollapseFrames(
   )
   await click()
   await expect
-    .poll(async () => window.evaluate(() => (window as unknown as { __e13done: boolean }).__e13done), {
-      timeout: 5000,
-    })
+    .poll(
+      async () => window.evaluate(() => (window as unknown as { __e13done: boolean }).__e13done),
+      {
+        timeout: 5000,
+      },
+    )
     .toBe(true)
   return window.evaluate(
     () =>
-      (window as unknown as {
-        __e13: Array<{ t: number; trackW: number; trackH: number; innerW: number; innerH: number }>
-      }).__e13,
+      (
+        window as unknown as {
+          __e13: Array<{
+            t: number
+            trackW: number
+            trackH: number
+            innerW: number
+            innerH: number
+          }>
+        }
+      ).__e13,
   )
 }
 
@@ -4240,10 +4348,15 @@ test('E13 후속 — 접히는 내내 안쪽 콘텐츠 상자는 펼친 크기 �
       Math.max(...innerWidths) - Math.min(...innerWidths),
       `.app__left-inner 폭이 흔들렸다 — 추이 ${innerWidths.map((w) => Math.round(w)).join('→')}`,
     ).toBeLessThan(1)
-    expect(Math.min(...innerWidths), '안쪽 상자는 접혀도 펼친 폭 그대로').toBeCloseTo(expandedWidth, 0)
+    expect(Math.min(...innerWidths), '안쪽 상자는 접혀도 펼친 폭 그대로').toBeCloseTo(
+      expandedWidth,
+      0,
+    )
     // 실제로 "잘리는" 상태를 지났다 — 안쪽이 트랙보다 넓은 프레임이 여러 번 있었다
     const clippedFrames = left.filter((s) => s.innerW > s.trackW + 1)
-    expect(clippedFrames.length, '안쪽이 트랙보다 넓은(=잘리는) 프레임 수').toBeGreaterThanOrEqual(3)
+    expect(clippedFrames.length, '안쪽이 트랙보다 넓은(=잘리는) 프레임 수').toBeGreaterThanOrEqual(
+      3,
+    )
 
     // ── 터미널 도크: 세로축 ──────────────────────────────────────────────
     await window.getByTestId('terminal-toggle').click()
@@ -4270,7 +4383,10 @@ test('E13 후속 — 접히는 내내 안쪽 콘텐츠 상자는 펼친 크기 �
     )
     expect(dock.at(-1)!.trackH, '표본 끝에는 도크 행 트랙이 0이어야 한다').toBe(0)
     const clippedDockFrames = dock.filter((s) => s.innerH > s.trackH + 1)
-    expect(clippedDockFrames.length, '도크 본체가 행 트랙보다 높은 프레임 수').toBeGreaterThanOrEqual(3)
+    expect(
+      clippedDockFrames.length,
+      '도크 본체가 행 트랙보다 높은 프레임 수',
+    ).toBeGreaterThanOrEqual(3)
   } finally {
     await app.close()
     await rm(repo, { recursive: true, force: true })
@@ -4343,7 +4459,6 @@ test('E14a — 파일을 옮겨도 헤더가 잠기지 않는다 (전체 깜빡�
           subtree: true,
           characterData: true,
         })
-
         ;(document.querySelector('[data-testid="file-unstaged-b.txt"]') as HTMLElement).click()
         await new Promise((resolve) => setTimeout(resolve, 800))
         headerObserver.disconnect()
@@ -4605,13 +4720,16 @@ test('E14a — 빠른 조회에서는 로딩 표시가 보이지 않는다', asy
       // -1은 DOM에 없음, 0은 붙었지만 지연 중이다. 어느 쪽이든 사용자가 볼 수 있는 불투명도로
       // 배어나오지 않아야 한다. 정확한 animation-delay 연결은 느린 조회 테스트에서 스피너가 실제로
       // 보이는 동안 직접 검사한다.
-      expect(Math.max(...samples.opacities), `빠른 조회인데 스피너가 배어났다 — ${trace}`).toBeLessThanOrEqual(
-        0.05,
-      )
+      expect(
+        Math.max(...samples.opacities),
+        `빠른 조회인데 스피너가 배어났다 — ${trace}`,
+      ).toBeLessThanOrEqual(0.05)
 
       // 토큰 정본도 함께 고정한다 — 위 0.4s가 어디서 왔는지의 근거다
       const delay = await window.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--motion-pending-delay').trim(),
+        getComputedStyle(document.documentElement)
+          .getPropertyValue('--motion-pending-delay')
+          .trim(),
       )
       expect(delay).toBe('400ms')
     } finally {
@@ -4699,7 +4817,8 @@ test('E14a — 느린 조회에서는 로딩 표시가 배어난다', async () =
           // -1 = DOM에 없다 (있는데 투명한 것과 구분한다)
           const style = spinner === null ? null : getComputedStyle(spinner)
           const value = style === null ? -1 : Number(style.opacity)
-          if (state.animationDelay === null && style !== null) state.animationDelay = style.animationDelay
+          if (state.animationDelay === null && style !== null)
+            state.animationDelay = style.animationDelay
           if (value > state.max) state.max = value
           if (state.trace.length < 150)
             state.trace.push(`${Math.round(performance.now() - t0)}:${value}`)
@@ -4999,7 +5118,10 @@ test('E15a — 저장소를 바꾸면 옛 저장소의 흔적(가져옴 시각·
  */
 async function seedRecentRepos(recentRepos: string[]): Promise<string> {
   const userData = await mkdtemp(join(tmpdir(), 'git-gui-e2e-userdata-'))
-  await writeFile(join(userData, 'settings.json'), JSON.stringify({ autoFetch: false, recentRepos }))
+  await writeFile(
+    join(userData, 'settings.json'),
+    JSON.stringify({ autoFetch: false, recentRepos }),
+  )
   return userData
 }
 
@@ -5203,9 +5325,10 @@ test('E15a — ⌘O가 폴더 선택을 연다', async () => {
       return true
     })
     // 계측이 안 걸렸는데 0건을 세고 통과하는 공허한 성공을 막는다
-    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
-      true,
-    )
+    expect(
+      patched,
+      'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다',
+    ).toBe(true)
 
     await window.keyboard.press('Meta+o')
     await expect
@@ -5213,8 +5336,7 @@ test('E15a — ⌘O가 폴더 선택을 연다', async () => {
         () =>
           app.evaluate(
             () =>
-              (globalThis as unknown as { __workspaceSelectCalls: number })
-                .__workspaceSelectCalls,
+              (globalThis as unknown as { __workspaceSelectCalls: number }).__workspaceSelectCalls,
           ),
         { timeout: 5_000 },
       )
@@ -5247,43 +5369,44 @@ async function stubWorkspaceSelect(
   picked: string | null,
   currentPath?: string,
 ): Promise<boolean> {
-  return app.evaluate(({ ipcMain }, selection) => {
-    const impl = ipcMain as unknown as {
-      _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
-    }
-    const open = impl._invokeHandlers.get('repo:open')
-    if (impl._invokeHandlers.get('workspace:select') === undefined || open === undefined) return false
-    const globals = globalThis as unknown as { __workspaceSelectCalls: number }
-    globals.__workspaceSelectCalls = 0
-    impl._invokeHandlers.set('workspace:select', async (event, ..._rest) => {
-      globals.__workspaceSelectCalls += 1
-      if (selection.picked === null) return null
-      // 받은 event를 그대로 넘긴다 — 실제 검증·등록 경로를 그대로 탄다.
-      // E15b 전에는 `open(null, result)`였다("핸들러는 event를 안 쓴다"). 그 가정은 E15b에서
-      // 거짓이 됐다 — repo:open이 event.sender.id로 이 창의 저장소를 창 레지스트리에 반영한다
-      const opened = (await open(event, selection.picked)) as { ok: boolean; path?: string }
-      if (!opened.ok || opened.path === undefined) return null
-      // repo:open은 allowlist 등록과 함께 탭 레지스트리도 바꾼다. 실제 workspace:select는
-      // 레지스트리의 저장소를 건드리지 않으므로, 현재 경로를 다시 열어 원래 상태로 돌려놓는다.
-      // 안 그러면 renderer가 이어서 repo:open을 부를 때 showExisting이 '현재 탭에 이미 열림'으로
-      // 오판해 화면 전환을 생략한다.
-      if (selection.currentPath !== undefined) await open(event, selection.currentPath)
-      return {
-        path: opened.path,
-        name: selection.pickedName,
-        repositories: [
-          { path: opened.path, relativePath: '.', name: selection.pickedName },
-        ],
+  return app.evaluate(
+    ({ ipcMain }, selection) => {
+      const impl = ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => unknown>
       }
-    })
-    return true
-  }, { picked, pickedName: picked === null ? '' : basename(picked), currentPath })
+      const open = impl._invokeHandlers.get('repo:open')
+      if (impl._invokeHandlers.get('workspace:select') === undefined || open === undefined)
+        return false
+      const globals = globalThis as unknown as { __workspaceSelectCalls: number }
+      globals.__workspaceSelectCalls = 0
+      impl._invokeHandlers.set('workspace:select', async (event, ..._rest) => {
+        globals.__workspaceSelectCalls += 1
+        if (selection.picked === null) return null
+        // 받은 event를 그대로 넘긴다 — 실제 검증·등록 경로를 그대로 탄다.
+        // E15b 전에는 `open(null, result)`였다("핸들러는 event를 안 쓴다"). 그 가정은 E15b에서
+        // 거짓이 됐다 — repo:open이 event.sender.id로 이 창의 저장소를 창 레지스트리에 반영한다
+        const opened = (await open(event, selection.picked)) as { ok: boolean; path?: string }
+        if (!opened.ok || opened.path === undefined) return null
+        // repo:open은 allowlist 등록과 함께 탭 레지스트리도 바꾼다. 실제 workspace:select는
+        // 레지스트리의 저장소를 건드리지 않으므로, 현재 경로를 다시 열어 원래 상태로 돌려놓는다.
+        // 안 그러면 renderer가 이어서 repo:open을 부를 때 showExisting이 '현재 탭에 이미 열림'으로
+        // 오판해 화면 전환을 생략한다.
+        if (selection.currentPath !== undefined) await open(event, selection.currentPath)
+        return {
+          path: opened.path,
+          name: selection.pickedName,
+          repositories: [{ path: opened.path, relativePath: '.', name: selection.pickedName }],
+        }
+      })
+      return true
+    },
+    { picked, pickedName: picked === null ? '' : basename(picked), currentPath },
+  )
 }
 
 const workspaceSelectCalls = (app: ElectronApplication): Promise<number> =>
   app.evaluate(
-    () =>
-      (globalThis as unknown as { __workspaceSelectCalls: number }).__workspaceSelectCalls,
+    () => (globalThis as unknown as { __workspaceSelectCalls: number }).__workspaceSelectCalls,
   )
 
 /**
@@ -5308,9 +5431,10 @@ test('E15a — 도크 터미널이 포커스면 ⌘O·Ctrl+O를 가로채지 않
     const window = await app.firstWindow()
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
     const patched = await stubWorkspaceSelect(app, null)
-    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
-      true,
-    )
+    expect(
+      patched,
+      'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다',
+    ).toBe(true)
 
     await window.getByTestId('terminal-toggle').click()
     await expect(window.getByTestId('terminal-dock')).toBeVisible()
@@ -5358,9 +5482,10 @@ test('E15a — ⌘O 전환은 옛 저장소에 매인 확인창을 남기지 않
     await expect(window.getByTestId('file-unstaged-app.txt')).toBeVisible()
     // ⌘O가 열 OS 다이얼로그를 대신해 "저장소 B를 골랐다"로 답한다
     const patched = await stubWorkspaceSelect(app, pathB, realpathSync(repoA))
-    expect(patched, 'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다').toBe(
-      true,
-    )
+    expect(
+      patched,
+      'workspace:select 핸들러를 감싸지 못했다 — 이 테스트는 아무것도 재지 못한다',
+    ).toBe(true)
 
     // 저장소 A의 저장 하나를 겨냥한 입력창 — 안에 A의 해시가 들어 있다
     await window.locator('[data-testid^="history-item-"]').first().click({ button: 'right' })
@@ -5805,12 +5930,16 @@ test('E15b — 껐다 켜면 열려 있던 창들이 저장소와 레이아웃 �
     try {
       await expect.poll(() => second.windows().length, { timeout: 30_000 }).toBe(2)
       const pages = second.windows()
-      await Promise.all(pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })))
+      await Promise.all(
+        pages.map((page) => page.locator('.app__header').waitFor({ timeout: 30_000 })),
+      )
       // E2E 창 비간섭 — 복원 2회차는 GIT_GUI_E2E_REPO 없이 뜨므로, harness가 GIT_GUI_E2E=1을
       // 주입하지 않으면 isE2E 판정이 무너져 창이 **사용자 화면에 실제로 뜬다**(사용자 불만).
       // 복원 계열 전체를 대표해 여기 한 곳에서 "모든 창이 숨김"을 못박는다.
       expect(
-        await second.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().map((w) => w.isVisible())),
+        await second.evaluate(({ BaseWindow }) =>
+          BaseWindow.getAllWindows().map((w) => w.isVisible()),
+        ),
       ).toEqual([false, false])
       // (2) 순서는 등록 순서 = 저장 순서다
       const paths = await Promise.all(
@@ -6390,8 +6519,8 @@ test('E15c — 탭 클릭으로 전환된다 (실제 가시성이 바뀐다)', a
     // 실물 가시성 — 보이는 자식 뷰가 A 하나가 될 때까지 (클릭→IPC→setVisible은 비동기다)
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -6519,8 +6648,8 @@ test('E15c — 전환기에서 딴 탭에 열린 저장소를 클릭하면 이 �
     // 데려간다 — 보이는 뷰가 A 탭 하나가 될 때까지 (클릭→IPC→setVisible은 비동기다)
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -6588,8 +6717,8 @@ test('E15c — "새 탭에서 열기" 중복은 탭을 안 만들고 그 탭을 
     await second.getByTestId(`tab-${tabA.id}`).click()
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -6605,8 +6734,8 @@ test('E15c — "새 탭에서 열기" 중복은 탭을 안 만들고 그 탭을 
     // (1) 활성 전환 — 중복 분기가 돌았고 성공했다는 양성 신호
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabB.id])
@@ -6800,8 +6929,8 @@ test('E15c — 한 탭에서 좌측을 접으면 같은 창의 다른 탭도 접
     await second.getByTestId(`tab-${tabA.id}`).click()
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -6816,8 +6945,8 @@ test('E15c — 한 탭에서 좌측을 접으면 같은 창의 다른 탭도 접
     await first.getByTestId(`tab-${tabB.id}`).click()
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabB.id])
@@ -6948,8 +7077,8 @@ test('E15c — 껐다 켜면 탭들이 순서·활성·레이아웃 그대로 �
       await tabPageEmpty.getByTestId(`tab-${tabB.id}`).click()
       await expect(async () => {
         const visible = await first.evaluate(({ BaseWindow }) =>
-          BaseWindow.getAllWindows()[0]!.contentView.children
-            .filter((child) => child.getVisible())
+          BaseWindow.getAllWindows()[0]!
+            .contentView.children.filter((child) => child.getVisible())
             .map((child) => (child as Electron.WebContentsView).webContents.id),
         )
         expect(visible).toEqual([tabB.id])
@@ -7000,8 +7129,8 @@ test('E15c — 껐다 켜면 탭들이 순서·활성·레이아웃 그대로 �
       // (2) 활성 — 가운데 B. 장부와 실물(getVisible) 둘 다 문다
       expect(tabs.map((tab) => tab.active)).toEqual([false, true, false])
       const visible = await second.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabs[1]!.id])
@@ -7192,8 +7321,8 @@ test('E15c 리뷰 N-3 — 복원에서 버려진 탭이 있어도 저장된 활�
 
     // 실물 — 보이는 뷰는 C 탭 하나뿐이다
     const visible = await app.evaluate(({ BaseWindow }) =>
-      BaseWindow.getAllWindows()[0]!.contentView.children
-        .filter((child) => child.getVisible())
+      BaseWindow.getAllWindows()[0]!
+        .contentView.children.filter((child) => child.getVisible())
         .map((child) => (child as Electron.WebContentsView).webContents.id),
     )
     expect(visible).toEqual([tabs[1]!.id])
@@ -7251,8 +7380,8 @@ test('E15e — 활성 탭이 크래시하면 산 이웃이 활성을 잇는다',
 
     // 사전 조건 못박기 — 막 연 B가 활성(보이는 뷰)이다. 이게 참이어야 아래 전환 단언이 공허하지 않다
     const before = await app.evaluate(({ BaseWindow }) =>
-      BaseWindow.getAllWindows()[0]!.contentView.children
-        .filter((child) => child.getVisible())
+      BaseWindow.getAllWindows()[0]!
+        .contentView.children.filter((child) => child.getVisible())
         .map((child) => (child as Electron.WebContentsView).webContents.id),
     )
     expect(before).toEqual([tabB.id])
@@ -7265,8 +7394,8 @@ test('E15e — 활성 탭이 크래시하면 산 이웃이 활성을 잇는다',
     // 인질 해방 — 산 이웃 A가 활성 실물이 된다. 수정 전에는 죽은 B가 활성으로 남아 여기서 빨갛다
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -7317,9 +7446,32 @@ test('E15e — 유일 탭이 크래시하면 자동 재시동된다', async () =
         (BaseWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView)
           .webContents.id,
     )
-    await app.evaluate(({ webContents }, id: number) => {
-      webContents.fromId(id)!.forcefullyCrashRenderer()
-    }, tabId)
+    // A DOM query dispatched into the dying execution context can remain pending even after
+    // the replacement renderer is healthy. Subscribe before the crash and cross the new-load
+    // barrier before polling repository UI; increasing the polling timeout cannot fix that race.
+    await app.evaluate(
+      ({ webContents }, id: number) =>
+        new Promise<void>((resolve, reject) => {
+          const contents = webContents.fromId(id)!
+          const previousProcess = contents.getOSProcessId()
+          const cleanup = () => {
+            clearTimeout(timer)
+            contents.removeListener('did-finish-load', loaded)
+          }
+          const loaded = () => {
+            if (contents.getOSProcessId() === previousProcess || contents.isCrashed()) return
+            cleanup()
+            resolve()
+          }
+          const timer = setTimeout(() => {
+            cleanup()
+            reject(new Error('새 렌더러가 재시동되지 않았어요.'))
+          }, 10000)
+          contents.on('did-finish-load', loaded)
+          contents.forcefullyCrashRenderer()
+        }),
+      tabId,
+    )
     // 재시동 — 같은 webContents(id 불변)가 다시 로드를 마치고 repo-path를 그린다.
     // 수정 전에는 죽은 채 잔류해 이 poll이 타임아웃으로 빨갛다
     await expect
@@ -7388,8 +7540,8 @@ test('E15e — 산 탭바에 죽음 표시가 뜨고, 클릭하면 되살아나 
     await pageB.getByTestId(`tab-${tabA.id}`).click()
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -7414,8 +7566,8 @@ test('E15e — 산 탭바에 죽음 표시가 뜨고, 클릭하면 되살아나 
     // 활성화는 즉시다 — 화면은 did-finish-load가 채우고 그동안은 뷰 배경색이 선다(흰 프레임 방지)
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabB.id])
@@ -7504,8 +7656,8 @@ test('E15e — 마지막 산 탭을 닫아 크래시 탭만 남으면 재시동�
     await expect(async () => {
       const shape = await app.evaluate(({ BaseWindow }) => ({
         windows: BaseWindow.getAllWindows().length,
-        visible: BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        visible: BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       }))
       expect(shape).toEqual({ windows: 1, visible: [tabA.id] })
@@ -7675,8 +7827,8 @@ test('E15e — 수동 클릭 복구는 자동 재시동 상한 너머에서도 �
     for (let click = 1; click <= 4; click++) {
       await expect(async () => {
         const visible = await app.evaluate(({ BaseWindow }) =>
-          BaseWindow.getAllWindows()[0]!.contentView.children
-            .filter((child) => child.getVisible())
+          BaseWindow.getAllWindows()[0]!
+            .contentView.children.filter((child) => child.getVisible())
             .map((child) => (child as Electron.WebContentsView).webContents.id),
         )
         expect(visible).toEqual([tabA.id])
@@ -7803,8 +7955,8 @@ test('E15d — 탭을 끌어 같은 탭바 안 순서를 바꾸고, 4px 미만 �
     // 실물 가시성 — 보이는 뷰가 A 하나가 된다 (E15c Task 5 ② 관용구: 가시성 단언은 main에서)
     await expect(async () => {
       const visible = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visible).toEqual([tabA.id])
@@ -8029,7 +8181,9 @@ test('E15d — 크래시 탭 드롭은 취소되고, 산 탭을 창 밖에 놓�
 
     // A를 활성으로 — 이후 크래시·드래그 단언은 전부 산 렌더러(first)와 main에서 한다
     await pageB.getByTestId(`tab-${tabA.id}`).click()
-    const bounds = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.getBounds())
+    const bounds = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.getBounds(),
+    )
     // 창 밖 좌표 — 어느 창의 bounds에도 안 들어간다 (오른쪽 바깥)
     const outside = { x: bounds.x + bounds.width + 300, y: bounds.y + 300 }
 
@@ -8065,8 +8219,8 @@ test('E15d — 크래시 탭 드롭은 취소되고, 산 탭을 창 밖에 놓�
     await first.evaluate((id: number) => window.gitApi.tabs.activate(id), tabA.id)
     await expect(async () => {
       const visibleIds = await app.evaluate(({ BaseWindow }) =>
-        BaseWindow.getAllWindows()[0]!.contentView.children
-          .filter((child) => child.getVisible())
+        BaseWindow.getAllWindows()[0]!
+          .contentView.children.filter((child) => child.getVisible())
           .map((child) => (child as Electron.WebContentsView).webContents.id),
       )
       expect(visibleIds).toEqual([tabA.id])
@@ -8151,7 +8305,9 @@ test('E15d — 마지막 탭을 떼어내면 커서 위치의 새 창이 생기�
         }),
     )
     const tabA = tabs[0]!
-    const bounds = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.getBounds())
+    const bounds = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.getBounds(),
+    )
     // 어느 탭바도 아닌 곳 — 창 **본문**(탭바 아래)도 "그 외"다(스펙 §2 셋째 행). 화면 안 좌표라
     // 새 창 위치 단언이 디스플레이 크기에 안 걸린다 (진짜 창 밖 드롭은 ②가 문다)
     const dropAt = { x: bounds.x + 500, y: bounds.y + 400 }

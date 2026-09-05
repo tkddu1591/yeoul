@@ -29,8 +29,8 @@ export function GeneralSettingsPanel({
     <section className="settings-dialog__page" aria-labelledby="general-settings-title">
       <div className="settings-dialog__page-heading">
         <span className="settings-dialog__eyebrow">작업 흐름</span>
-        <h2 id="general-settings-title">여울이 움직이는 방식</h2>
-        <p>자주 쓰는 동작을 내 작업 방식에 맞춰 두면, 선택과 동기화가 더 자연스러워져요.</p>
+        <h2 id="general-settings-title">작업 동작</h2>
+        <p>모든 저장소에 적용돼요. 변경 사항은 자동으로 저장됩니다.</p>
       </div>
 
       <fieldset className="settings-dialog__setting-card">
@@ -68,7 +68,9 @@ export function GeneralSettingsPanel({
             </span>
             <span className="settings-dialog__setting-copy">
               <strong>앱 전체 따라가기</strong>
-              <small>변경·{T.history}·{T.branch}와 터미널을 모두 그 {T.worktree} 기준으로 바꿔요.</small>
+              <small>
+                변경·{T.history}·{T.branch}와 터미널을 모두 그 {T.worktree} 기준으로 바꿔요.
+              </small>
             </span>
             <input
               className="settings-dialog__option-input"
@@ -87,7 +89,9 @@ export function GeneralSettingsPanel({
 
       <fieldset className="settings-dialog__setting-card">
         <legend>원격 변경을 받아올 때</legend>
-        <p className="settings-dialog__setting-description">내 {T.commit}을 원격 최신과 합치는 방식을 골라요.</p>
+        <p className="settings-dialog__setting-description">
+          내 {T.commit}을 원격 최신과 합치는 방식을 골라요.
+        </p>
         <div className="settings-dialog__choice-grid">
           <label
             className="settings-dialog__setting-option settings-dialog__setting-option--compact"
@@ -98,7 +102,7 @@ export function GeneralSettingsPanel({
             </span>
             <span className="settings-dialog__setting-copy">
               <strong>{T.merge}하며 받기</strong>
-              <small>두 흐름을 합친 새 저장을 남겨요.</small>
+              <small>필요할 때 병합 커밋으로 두 이력을 합쳐요.</small>
             </span>
             <input
               className="settings-dialog__option-input"
@@ -118,7 +122,7 @@ export function GeneralSettingsPanel({
             </span>
             <span className="settings-dialog__setting-copy">
               <strong>{T.rebase}로 받기</strong>
-              <small>내 저장을 최신 위에 다시 쌓아 일직선으로 만들어요.</small>
+              <small>로컬 커밋을 원격 최신 커밋 위에 다시 적용해요.</small>
             </span>
             <input
               className="settings-dialog__option-input"

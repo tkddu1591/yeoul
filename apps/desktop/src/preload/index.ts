@@ -29,6 +29,15 @@ import { appearancePreference } from '../shared/appearance'
 const api: GitApi = {
   jobs: {
     cancel: (repoPath) => ipcRenderer.invoke(CHANNELS.jobsCancel, repoPath),
+    history: () => ipcRenderer.invoke(CHANNELS.jobsHistory),
+    onChanged: (listener) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        entry: import('@git-gui/ipc-contract').GitActivity,
+      ) => listener(entry)
+      ipcRenderer.on(CHANNELS.jobsChanged, wrapped)
+      return () => ipcRenderer.removeListener(CHANNELS.jobsChanged, wrapped)
+    },
   },
   repo: {
     select: () => ipcRenderer.invoke(CHANNELS.repoSelect),
@@ -50,9 +59,15 @@ const api: GitApi = {
   },
   workspace: {
     select: () => ipcRenderer.invoke(CHANNELS.workspaceSelect),
+    open: (path) => ipcRenderer.invoke(CHANNELS.workspaceOpen, path),
     initial: () => ipcRenderer.invoke(CHANNELS.workspaceInitial),
     refresh: () => ipcRenderer.invoke(CHANNELS.workspaceRefresh),
-    overview: () => ipcRenderer.invoke(CHANNELS.workspaceOverview),
+    overview: (request) => ipcRenderer.invoke(CHANNELS.workspaceOverview, request),
+    move: (request) => ipcRenderer.invoke(CHANNELS.workspaceMove, request),
+    onChanged: (listener) => {
+      ipcRenderer.on(CHANNELS.workspaceChanged, listener)
+      return () => ipcRenderer.removeListener(CHANNELS.workspaceChanged, listener)
+    },
     close: () => ipcRenderer.invoke(CHANNELS.workspaceClose),
   },
   window: {
@@ -150,8 +165,7 @@ const api: GitApi = {
       unstage: (repoPath, request) =>
         ipcRenderer.invoke(CHANNELS.changesLineUnstage, repoPath, request),
     },
-    discard: (repoPath, request) =>
-      ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, request),
+    discard: (repoPath, request) => ipcRenderer.invoke(CHANNELS.changesDiscard, repoPath, request),
     removeFile: (repoPath, request) =>
       ipcRenderer.invoke(CHANNELS.changesRemoveFile, repoPath, request),
     diff: (repoPath, path, options: DiffOptions) =>
@@ -206,13 +220,15 @@ const hostingApi: HostingApi = {
   pulls: {
     list: (repoPath) => ipcRenderer.invoke(HOSTING_CHANNELS.pullsList, repoPath),
     create: (repoPath, input) => ipcRenderer.invoke(HOSTING_CHANNELS.pullCreate, repoPath, input),
-    open: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullOpen, repoPath, number),
+    open: (repoPath, number, section) =>
+      ipcRenderer.invoke(HOSTING_CHANNELS.pullOpen, repoPath, number, section),
     detail: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullDetail, repoPath, number),
     comment: (repoPath, number, body) =>
       ipcRenderer.invoke(HOSTING_CHANNELS.pullComment, repoPath, number, body),
     approve: (repoPath, number) =>
       ipcRenderer.invoke(HOSTING_CHANNELS.pullApprove, repoPath, number),
-    merge: (repoPath, number) => ipcRenderer.invoke(HOSTING_CHANNELS.pullMerge, repoPath, number),
+    merge: (repoPath, number, sha) =>
+      ipcRenderer.invoke(HOSTING_CHANNELS.pullMerge, repoPath, number, sha),
   },
 }
 

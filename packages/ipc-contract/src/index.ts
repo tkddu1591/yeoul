@@ -96,6 +96,27 @@ export interface WorkspaceInfo {
   repositories: WorkspaceRepository[]
 }
 
+export interface WorkspaceWorktreeOverview {
+  worktree: WorktreeInfo
+  status: RepositoryStatus | null
+  error: string | null
+}
+
+export interface WorkspaceOverviewRequest {
+  historyLimit?: number
+  query?: string
+  discover?: boolean
+}
+
+export interface WorkspaceChangeBatch {
+  target: 'staged' | 'unstaged'
+  groups: Array<{ path: string; paths: string[] }>
+}
+
+export interface WorkspaceChangeResult {
+  results: Array<{ path: string; status: 'completed' | 'failed' | 'pending'; error: string | null }>
+}
+
 /** 워크스페이스 관제 화면에서 저장소 하나를 요약한 읽기 전용 데이터. */
 export interface WorkspaceRepositoryOverview {
   repository: WorkspaceRepository
@@ -103,6 +124,9 @@ export interface WorkspaceRepositoryOverview {
   branches: BranchOverview | null
   worktrees: WorktreeInfo[] | null
   history: CommitSummary[] | null
+  workingTrees?: WorkspaceWorktreeOverview[]
+  historyMore?: boolean
+  errors?: Partial<Record<'status' | 'branches' | 'worktrees' | 'history', string>>
   /** 이 저장소만 읽지 못해도 나머지 저장소는 계속 보여 준다. */
   error: string | null
 }
@@ -121,10 +145,21 @@ export interface WorkspaceOverview {
  * (rev-parse --is-inside-work-tree + 루트 정규화)을 거친 뒤에만 값을 돌려준다 (E15a).
  * 파일 `path`는 저장소 루트 상대 경로만 허용된다 (절대 경로·`..`·빈 문자열 거부).
  */
+export interface GitActivity {
+  id: number
+  operation: string
+  cwd: string
+  startedAt: number
+  status: 'running' | 'completed' | 'failed' | 'canceled'
+  durationMs: number
+}
+
 export interface GitApi {
   jobs: {
     /** 현재 저장소에서 실행 중인 Git 프로세스를 중단한다. */
-    cancel(repoPath: string): Promise<number>
+    cancel(repoPath?: string): Promise<number>
+    history(): Promise<GitActivity[]>
+    onChanged(listener: (entry: GitActivity) => void): () => void
   }
   repo: {
     /** 폴더 선택 다이얼로그. 취소하면 null. 반환 경로는 저장소 루트로 정규화된다 */
@@ -163,12 +198,15 @@ export interface GitApi {
   workspace: {
     /** 폴더를 고르고 그 안의 Git 저장소를 찾는다. 취소하면 null. */
     select(): Promise<WorkspaceInfo | null>
+    open(path: string): Promise<WorkspaceInfo>
     /** 복원된 이 탭의 워크스페이스를 다시 검색한다. 없거나 유효하지 않으면 null. */
     initial(): Promise<WorkspaceInfo | null>
     /** 현재 탭 워크스페이스의 저장소 목록을 다시 검색한다. */
     refresh(): Promise<WorkspaceInfo | null>
     /** 하위 모든 저장소의 로컬·원격 브랜치와 워크트리를 병렬로 모은다. */
-    overview(): Promise<WorkspaceOverview | null>
+    overview(request?: WorkspaceOverviewRequest): Promise<WorkspaceOverview | null>
+    onChanged(listener: () => void): () => void
+    move(request: WorkspaceChangeBatch): Promise<WorkspaceChangeResult>
     /** 현재 저장소는 유지하고 워크스페이스 문맥만 닫는다. */
     close(): Promise<void>
   }
@@ -286,7 +324,12 @@ export interface GitApi {
     ): Promise<void>
     markResolved(repoPath: string, path: string): Promise<void>
     /** 충돌 파일 내용 통째 저장(블록 선택·자세히 보기 직접 수정) — add하지 않는다. 비충돌 파일은 거부된다 */
-    saveText(repoPath: string, path: string, content: string, expectedContent: string): Promise<void>
+    saveText(
+      repoPath: string,
+      path: string,
+      content: string,
+      expectedContent: string,
+    ): Promise<void>
     /** 처음부터 다시 — 겹침 표시를 되살린다(checkout -m) */
     reset(repoPath: string, path: string, expectedContent: string): Promise<void>
   }
@@ -325,11 +368,21 @@ export interface GitApi {
     /** 커밋 상세 — hash는 40자 hex 전체 해시만 허용된다 */
     show(repoPath: string, hash: string): Promise<CommitDetail>
     /** 커밋 안 단일 파일 diff — 첫 부모 기준. rename이면 origPath 동봉 */
-    diffFile(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    diffFile(
+      repoPath: string,
+      hash: string,
+      path: string,
+      origPath: string | null,
+    ): Promise<FileDiff>
     /** 이 파일만 그 시점 내용으로 적용(checkout) — 미저장 변경은 엔진이 파일 단위 자동 보관 후 진행 */
     restoreFile(repoPath: string, hash: string, path: string): Promise<RestoreFileResult>
     /** 그 시점과 지금 워크트리(미저장 포함)의 단일 파일 diff — rename이면 origPath 동봉 */
-    diffAgainstWorktree(repoPath: string, hash: string, path: string, origPath: string | null): Promise<FileDiff>
+    diffAgainstWorktree(
+      repoPath: string,
+      hash: string,
+      path: string,
+      origPath: string | null,
+    ): Promise<FileDiff>
     revert(repoPath: string, hash: string): Promise<RevertResult>
     revertAbort(repoPath: string): Promise<void>
     /** 이 저장 하나만 지금 공간으로 가져온다(cherry-pick) — 병합 커밋은 거부된다 */
@@ -369,6 +422,8 @@ export const GIT_API_KEY = 'gitApi' as const
 export const CHANNELS = {
   repoSelect: 'repo:select',
   jobsCancel: 'jobs:cancel',
+  jobsChanged: 'jobs:changed',
+  jobsHistory: 'jobs:history',
   repoClone: 'repo:clone',
   repoInit: 'repo:init',
   repoInitialPath: 'repo:initial-path',
@@ -380,9 +435,12 @@ export const CHANNELS = {
   repoOpenPath: 'repo:open-path',
   repoHome: 'repo:home',
   workspaceSelect: 'workspace:select',
+  workspaceOpen: 'workspace:open',
   workspaceInitial: 'workspace:initial',
   workspaceRefresh: 'workspace:refresh',
   workspaceOverview: 'workspace:overview',
+  workspaceChanged: 'workspace:changed',
+  workspaceMove: 'workspace:move',
   workspaceClose: 'workspace:close',
   remotesFetch: 'remotes:fetch',
   remotesList: 'remotes:list',
@@ -486,7 +544,7 @@ export interface HostingApi {
     /** 리뷰 요청 생성 — main이 브랜치·기본 공간을 검사하고 upstream 없으면 백업(push) 후 생성한다 */
     create(repoPath: string, input: { title: string; body: string }): Promise<PullSummary>
     /** 리뷰 요청을 브라우저로 연다 — URL은 main이 보관한 목록에서만 찾는다(임의 URL 열기 금지) */
-    open(repoPath: string, number: number): Promise<void>
+    open(repoPath: string, number: number, section?: 'files' | 'checks'): Promise<void>
     /** 상세 + 코멘트 타임라인 한 번에 — 밖에서 닫힌 404는 친절 문구로 온다 */
     detail(repoPath: string, number: number): Promise<PullDetailView>
     /** 답변 달기 — 빈 본문은 main에서 거부된다 */
@@ -494,7 +552,7 @@ export interface HostingApi {
     /** 승인 — 자기 PR이면 친절 문구로 거부된다 */
     approve(repoPath: string, number: number): Promise<void>
     /** 병합(병합 커밋) — 로컬 동기화는 별도(기존 전환·받아오기 흐름을 UI가 제안) */
-    merge(repoPath: string, number: number): Promise<void>
+    merge(repoPath: string, number: number, sha?: string): Promise<void>
   }
 }
 
@@ -544,11 +602,15 @@ export type ColorTheme = 'yeoul' | 'blue' | 'forest' | 'retro' | 'violet'
 export interface Appearance {
   mode: ColorMode
   theme: ColorTheme
+  followSystem?: boolean
 }
 
 export interface AppSettings extends WindowLayout {
   colorMode?: ColorMode
   colorTheme?: ColorTheme
+  systemTheme?: boolean
+  codeFontSize?: 12 | 14 | 16
+  listDensity?: 'compact' | 'comfortable'
   /** 워크트리 선택 시 동작 — 클릭의 기본 동작만 결정한다(우클릭엔 항상 둘 다) (E7c) */
   worktreeSelectAction?: 'terminal' | 'switch-app'
   /** 받아오기 방식 — merge(기본)/rebase (E7e) */
@@ -557,6 +619,7 @@ export interface AppSettings extends WindowLayout {
   autoFetch?: boolean
   /** 최근 연 저장소 — 최신이 앞 (E15a) */
   recentRepos?: string[]
+  recentWorkspaceRoots?: Record<string, string>
 }
 
 /** 알려진 필드·올바른 타입만 남긴다 — 렌더러 입력과 디스크 파일 양쪽에 적용하는 공용 방어 */
@@ -583,12 +646,20 @@ export function sanitizeSettings(value: unknown): AppSettings {
   if (typeof candidate.terminalHeight === 'number' && Number.isFinite(candidate.terminalHeight)) {
     settings.terminalHeight = candidate.terminalHeight
   }
-  if (candidate.worktreeSelectAction === 'terminal' || candidate.worktreeSelectAction === 'switch-app') {
+  if (
+    candidate.worktreeSelectAction === 'terminal' ||
+    candidate.worktreeSelectAction === 'switch-app'
+  ) {
     settings.worktreeSelectAction = candidate.worktreeSelectAction
   }
   if (candidate.pullMode === 'merge' || candidate.pullMode === 'rebase') {
     settings.pullMode = candidate.pullMode
   }
+  if (typeof candidate.systemTheme === 'boolean') settings.systemTheme = candidate.systemTheme
+  if ([12, 14, 16].includes(candidate.codeFontSize ?? 0))
+    settings.codeFontSize = candidate.codeFontSize
+  if (candidate.listDensity === 'compact' || candidate.listDensity === 'comfortable')
+    settings.listDensity = candidate.listDensity
   if (typeof candidate.autoFetch === 'boolean') settings.autoFetch = candidate.autoFetch
   if (typeof candidate.leftCollapsed === 'boolean') settings.leftCollapsed = candidate.leftCollapsed
   if (typeof candidate.rightCollapsed === 'boolean') {
@@ -597,6 +668,20 @@ export function sanitizeSettings(value: unknown): AppSettings {
   // 배열이 아니면 통째로 버리고, 문자열 아닌 원소만 골라낸다 — 이 목록은 디스크 파일에서 오고
   // 그 값이 repo.open의 인자가 된다 (E15a). sparse array의 hole은 spread로 실체화한 뒤
   // filter가 걷어낸다 (assertStringArray와 같은 이유)
+  if (
+    candidate.recentWorkspaceRoots &&
+    typeof candidate.recentWorkspaceRoots === 'object' &&
+    !Array.isArray(candidate.recentWorkspaceRoots)
+  ) {
+    settings.recentWorkspaceRoots = Object.fromEntries(
+      Object.entries(candidate.recentWorkspaceRoots)
+        .filter(
+          ([path, root]) =>
+            path.startsWith('/') && typeof root === 'string' && root.startsWith('/'),
+        )
+        .slice(-100),
+    )
+  }
   if (Array.isArray(candidate.recentRepos)) {
     settings.recentRepos = [...(candidate.recentRepos as unknown[])].filter(
       (entry): entry is string => typeof entry === 'string',
@@ -720,10 +805,7 @@ export function sanitizePersistedSettings(value: unknown): PersistedSettings {
   // E7d 옛 설정은 light/dark를 `theme` 하나에 저장했다. 이제 모드와 색상 테마가 분리됐으므로
   // 기존 사용자의 선택을 colorMode로 한 번 마이그레이션하고 색상 테마는 기본 여울을 쓴다.
   const legacyTheme = (value as { theme?: unknown }).theme
-  if (
-    settings.colorMode === undefined &&
-    (legacyTheme === 'light' || legacyTheme === 'dark')
-  ) {
+  if (settings.colorMode === undefined && (legacyTheme === 'light' || legacyTheme === 'dark')) {
     settings.colorMode = legacyTheme
   }
   // 창 목록 (E15b → E15c) — recentRepos와 **같은 이유로** 방어한다: 이 값은 사람이 편집할 수

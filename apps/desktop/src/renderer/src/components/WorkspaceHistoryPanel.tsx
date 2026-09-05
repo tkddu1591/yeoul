@@ -1,143 +1,151 @@
-import { GitCommitHorizontal, RefreshCw } from 'lucide-react'
+import { GitCommitHorizontal, RefreshCw, Search } from 'lucide-react'
 import { useState } from 'react'
 import type { WorkspaceRepository } from '@git-gui/ipc-contract'
-import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
-import { Tooltip } from '../ui/Tooltip'
+import { VirtualList } from '../ui/VirtualList'
 import { useNow } from '../ui/use-now'
-import { FindBar } from './FindBar'
-import { RepositoryBadge } from './RepositoryBadge'
 import { formatAbsoluteTime, formatRelativeTime } from './relative-time'
 import type { WorkspaceHistoryItem } from './workspace-overview-items'
-import { T } from '../terms'
-import './workspace-history-panel.css'
 
-interface WorkspaceHistoryPanelProps {
+interface WorkspaceHistoryModel {
   items: WorkspaceHistoryItem[]
   repository: WorkspaceRepository | null
   selectedHash: string | null
+  error: string | null
+  query: string
+  hasMore: boolean
+}
+interface WorkspaceHistoryPanelProps {
+  history: WorkspaceHistoryModel
   busy: boolean
   loading: boolean
-  error: string | null
-  findOpen: boolean
-  findNonce: number
-  onFindClose(): void
   onRefresh(): void
+  onSearch(query: string): void
+  onLoadMore(): void
   onSelect(item: WorkspaceHistoryItem): void
 }
-
-/** 여러 저장소의 커밋을 시간순으로 합치고, 각 행에 저장소 출처를 보존한다. */
 export function WorkspaceHistoryPanel({
-  items,
-  repository,
-  selectedHash,
+  history,
   busy,
   loading,
-  error,
-  findOpen,
-  findNonce,
-  onFindClose,
   onRefresh,
+  onSearch,
+  onLoadMore,
   onSelect,
 }: WorkspaceHistoryPanelProps) {
-  const [query, setQuery] = useState('')
-  const normalizedQuery = findOpen ? query.trim().toLowerCase() : ''
-  const visibleItems =
-    normalizedQuery === ''
-      ? items
-      : items.filter(({ repository: itemRepository, commit }) =>
-          [itemRepository.name, itemRepository.relativePath, commit.subject, commit.hash, commit.authorName]
-            .some((value) => value.toLowerCase().includes(normalizedQuery)),
-        )
+  const [query, setQuery] = useState(history.query)
   const now = useNow()
   return (
-    <Panel
-      title={T.history}
-      titleHint="workspace log"
-      pending={loading}
-      testId="workspace-history-panel"
-      accessory={
-        <>
-          <Button variant="ghost" size="sm" isDisabled={loading} onPress={onRefresh} testId="workspace-history-refresh">
-            <RefreshCw size={13} aria-hidden="true" /> 전체
+    <Panel.Root testId="workspace-history-panel" className="min-h-0 flex-1 border-0! rounded-none!">
+      <Panel.Header>
+        <Panel.Title>작업 공간 이력</Panel.Title>
+        <Panel.Actions>
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={loading}
+            onPress={onRefresh}
+            testId="workspace-history-refresh"
+          >
+            <RefreshCw size={14} /> 새로고침
           </Button>
-          <Badge tone="count">{visibleItems.length}</Badge>
-        </>
-      }
-    >
-      <div className="workspace-history">
-        {findOpen && (
-          <FindBar
-            query={query}
-            position={visibleItems.length === 0 ? -1 : 0}
-            count={visibleItems.length}
-            mode="filter"
-            focusSignal={findNonce}
-            placeholder="저장소·메시지·해시 찾기"
-            onQuery={setQuery}
-            onNext={() => {}}
-            onPrev={() => {}}
-            onClose={() => {
-              setQuery('')
-              onFindClose()
-            }}
+        </Panel.Actions>
+      </Panel.Header>
+      <Panel.Body className="flex flex-col" data-find-scope="history">
+        <form
+          className="flex gap-1 border-b border-(--color-border) p-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSearch(query)
+          }}
+        >
+          <input
+            className="min-w-0 flex-1 rounded border border-(--color-border) bg-(--color-surface) px-2 text-sm"
+            aria-label="전체 커밋 검색"
+            placeholder="전체 이력에서 메시지·해시 검색"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
-        )}
-        {error !== null && <p className="workspace-history__empty" role="alert">{error}</p>}
-        {visibleItems.length === 0 && error === null ? (
-          <p className="workspace-history__empty">
-            {loading ? '저장소 이력을 모으고 있어요…' : '보여줄 커밋이 없어요.'}
+          <Button variant="ghost" size="sm" type="submit" aria-label="검색" isDisabled={loading}>
+            <Search size={14} />
+          </Button>
+          {history.query && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={() => {
+                setQuery('')
+                onSearch('')
+              }}
+            >
+              해제
+            </Button>
+          )}
+        </form>
+        <p className="m-0 px-3 py-1 text-xs text-(--color-text-muted)" role="status">
+          {loading
+            ? '이력 갱신 중…'
+            : `${history.items.length}개 표시${history.query ? ` · 검색: ${history.query}` : ''}`}
+        </p>
+        {history.items.length >= 5000 && (
+          <p className="m-0 px-3 py-1 text-xs text-(--color-text-muted)">
+            전체 활동은 저장소당 최대 5,000개를 표시해요. 더 오래된 이력은 검색·현재 저장소
+            그래프에서 확인하세요.
           </p>
-        ) : (
-          <div className="workspace-history__scroll" data-testid="workspace-history-scroll">
-            <ol className="workspace-history__list">
-              {visibleItems.map((item) => {
-                const currentRepository = item.repository.path === repository?.path
-                const selected = currentRepository && item.commit.hash === selectedHash
-                return (
-                  <li className="workspace-history__row" key={`${item.repository.path}:${item.commit.hash}`}>
-                    <Tooltip
-                      content={
-                        <>
-                          <div className="ui-tooltip__title">{item.commit.subject}</div>
-                          <div className="ui-tooltip__meta">
-                            {item.repository.relativePath} · {formatAbsoluteTime(item.commit.committedAt)} · {item.commit.authorName}
-                          </div>
-                        </>
-                      }
-                      summary={item.commit.subject}
-                    >
-                      <button
-                        type="button"
-                        className={`workspace-history__item${selected ? ' workspace-history__item--selected' : ''}`}
-                        disabled={busy}
-                        onClick={() => onSelect(item)}
-                        aria-current={selected ? 'true' : undefined}
-                        data-testid={`workspace-history-item-${item.repository.relativePath}-${item.commit.hash}`}
-                      >
-                        <span className="workspace-history__rail" aria-hidden="true">
-                          <GitCommitHorizontal size={15} />
-                        </span>
-                        <span className="workspace-history__body">
-                          <span className="workspace-history__title">
-                            <RepositoryBadge repository={item.repository} current={currentRepository} />
-                            <strong>{item.commit.subject}</strong>
-                          </span>
-                          <span className="workspace-history__meta">
-                            {formatRelativeTime(item.commit.committedAt, now)} · {item.commit.authorName}
-                          </span>
-                        </span>
-                        <span className="workspace-history__hash">{item.commit.shortHash}</span>
-                      </button>
-                    </Tooltip>
-                  </li>
-                )
-              })}
-            </ol>
-          </div>
         )}
-      </div>
-    </Panel>
+        {history.error && (
+          <p role="alert" className="px-3 text-xs text-(--color-danger)">
+            {history.error}
+          </p>
+        )}
+        {!history.items.length && !loading && (
+          <p className="px-3 text-sm text-(--color-text-muted)">표시할 커밋이 없어요.</p>
+        )}
+        <VirtualList
+          items={history.items}
+          rowHeight={58}
+          getKey={(item) => `${item.repository.path}:${item.commit.hash}`}
+          testId="workspace-history-scroll"
+          renderItem={(item) => {
+            const selected =
+              item.repository.path === history.repository?.path &&
+              item.commit.hash === history.selectedHash
+            return (
+              <button
+                type="button"
+                data-navigation
+                disabled={busy}
+                onClick={() => onSelect(item)}
+                aria-current={selected || undefined}
+                className={`workspace-history__row flex h-full w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-3 text-left text-(--color-text) hover:bg-(--color-selection-bg) focus-visible:outline-2 focus-visible:outline-(--color-focus) ${selected ? 'bg-(--color-selection-bg)' : ''}`}
+                title={`${item.repository.path}\n${item.commit.subject}\n${formatAbsoluteTime(item.commit.committedAt)}`}
+                data-testid={`workspace-history-item-${item.repository.relativePath}-${item.commit.hash}`}
+              >
+                <GitCommitHorizontal size={14} className="shrink-0 text-(--color-accent)" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{item.commit.subject}</span>
+                  <span className="block truncate text-xs text-(--color-text-muted)">
+                    {item.repository.name} · {formatRelativeTime(item.commit.committedAt, now)} ·{' '}
+                    {item.commit.authorName}
+                  </span>
+                </span>
+                <span className="text-xs text-(--color-text-muted)">{item.commit.shortHash}</span>
+              </button>
+            )
+          }}
+        />
+        {history.hasMore && (
+          <Button
+            variant="ghost"
+            isDisabled={loading}
+            onPress={onLoadMore}
+            testId="workspace-history-more"
+          >
+            이전 커밋 더 보기
+          </Button>
+        )}
+      </Panel.Body>
+    </Panel.Root>
   )
 }

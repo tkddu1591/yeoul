@@ -1,7 +1,9 @@
+import { useReviewPreferences } from '../hook/use-review-preferences'
+import { CODE_FONT_CLASSES } from '../ui/settings/code-font'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { DiffHunk, DiffLine, FileDiff } from '@git-gui/domain'
-import { buildDiffRows, type DiffRow } from './diff-rows'
+import { diffRowsAdapter, type DiffRow } from '../adapter/diff-rows.adapter'
 import { FindBar } from './FindBar'
 import { cycleIndex, matchIndices } from './find-matches'
 import { T } from '../terms'
@@ -59,11 +61,13 @@ function SplitCell({
   line,
   side,
   duplicate = false,
+  children,
 }: {
   line: DiffLine | null
   side: 'left' | 'right'
   /** 좌우에 같은 라인이 놓인 사본(context 등) — 오른쪽 사본은 스크린리더 중복 낭독을 막는다 */
   duplicate?: boolean
+  children?: ReactNode
 }) {
   if (line === null) {
     return <div className="diff-cell diff-cell--empty" aria-hidden="true" />
@@ -75,6 +79,7 @@ function SplitCell({
         {lineNo ?? ''}
       </span>
       <span className="diff-line__text">{line.text || ' '}</span>
+      {children}
     </div>
   )
 }
@@ -93,8 +98,10 @@ export function DiffView({
   onHunkAction,
   onLineAction,
 }: DiffViewProps) {
+  const preference = useReviewPreferences()
+  const codeClass = CODE_FONT_CLASSES[preference.data.codeFontSize]
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const rows = buildDiffRows(diff.hunks, view)
+  const rows = diffRowsAdapter.row.toList(diff.hunks, view)
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -115,12 +122,14 @@ export function DiffView({
   }
 
   if (diff.isBinary) {
-    return <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
+    return (
+      <p className="diff-panel__empty">텍스트가 아닌 파일이라 내용 비교를 보여드릴 수 없어요</p>
+    )
   }
   if (diff.hunks.length === 0 && diff.meta.length > 0) {
     // 내용 변경 없는 메타 변경(권한 모드·rename 등) — 원문을 그대로 보여준다 (정보 손실 방지)
     return (
-      <div className="diff-panel__code">
+      <div className={`diff-panel__code ${codeClass}`}>
         {diff.meta.map((line, index) => (
           <div key={index} className="diff-line diff-line--note">
             <span className="diff-line__text">{line}</span>
@@ -157,7 +166,7 @@ export function DiffView({
       )}
       <div ref={scrollRef} className="virtual-scroll" data-testid={`diff-view-${view}`}>
         <div
-          className="diff-panel__code"
+          className={`diff-panel__code ${codeClass}`}
           style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
         >
           {virtualizer.getVirtualItems().map((item) => {
@@ -198,12 +207,32 @@ export function DiffView({
                   />
                 ) : (
                   <div className="diff-split-row">
-                    <SplitCell line={row.left} side="left" />
+                    <SplitCell line={row.left} side="left">
+                      {hunkMode && row.left?.kind === 'del' && (
+                        <button
+                          className="diff-line__action"
+                          type="button"
+                          onClick={() => onLineAction(row.hunk, row.leftIndex)}
+                        >
+                          {hunkMode === 'stage' ? '이 줄 올리기' : '이 줄 내리기'}
+                        </button>
+                      )}
+                    </SplitCell>
                     <SplitCell
                       line={row.right}
                       side="right"
                       duplicate={row.right !== null && row.left === row.right}
-                    />
+                    >
+                      {hunkMode && row.right?.kind === 'add' && (
+                        <button
+                          className="diff-line__action"
+                          type="button"
+                          onClick={() => onLineAction(row.hunk, row.rightIndex)}
+                        >
+                          {hunkMode === 'stage' ? '이 줄 올리기' : '이 줄 내리기'}
+                        </button>
+                      )}
+                    </SplitCell>
                   </div>
                 )}
               </div>

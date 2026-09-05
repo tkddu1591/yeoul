@@ -1,3 +1,5 @@
+import { workspaceOverviewQuery } from './workspace-overview-query'
+import type { WorkspaceChangeResult } from '@git-gui/ipc-contract'
 import { create } from 'zustand'
 import type {
   BranchCompare,
@@ -47,15 +49,8 @@ import { findRevivableChange } from './selection-revive'
 import { pushRecentRepo, removeRecentRepo } from '../components/recent-repos'
 import { T } from '../terms'
 import { loadPullMode, savePullMode, type PullMode } from '../ui/settings/sync-settings'
-import {
-  loadRecentRepos,
-  onRecentReposChanged,
-  saveRecentRepos,
-} from '../ui/settings/recent-repos-settings'
-import {
-  workspaceChangeCommand,
-  type WorkspaceChangeMoveRequest,
-} from './workspace-change-command'
+import { recentPlacesQuery } from './recent-places-query'
+import { workspaceChangeCommand, type WorkspaceChangeMoveRequest } from './workspace-change-command'
 
 const git = () => window.gitApi
 const hosting = () => window.hostingApi
@@ -103,6 +98,7 @@ interface RepositoryStore {
   pullMode: PullMode
   /** 최근 연 저장소 — 최신이 앞. 성공한 열기만 들어간다. 설정 영속 (E15a) */
   recentRepos: string[]
+  recentWorkspaceRoots: Record<string, string>
   remotes: RemoteInfo[]
   shelf: ShelfEntry[]
   history: CommitSummary[]
@@ -140,7 +136,7 @@ interface RepositoryStore {
    * E15c Task 6 — path를 준 경우는 중복 차단을 먼저 지난다(스펙 §3 첫 행): 어느 창의 탭에든
    * 이미 열려 있으면 이 탭이 갈아타지 않고 main이 그 탭으로 데려간다
    */
-  openRepository(path?: string): Promise<boolean>
+  openRepository(path?: string, preserveWorkspace?: boolean): Promise<boolean>
   /** 워크스페이스의 하위 저장소 목록을 다시 검색한다. */
   refreshWorkspace(): Promise<void>
   /** 현재 저장소는 유지한 채 멀티레포 문맥만 닫는다. */
@@ -252,7 +248,7 @@ interface RepositoryStore {
   unstage(paths: string[]): Promise<void>
   workspaceChanges: {
     /** 여러 저장소의 변경을 차례로 옮긴 뒤 사용자가 원래 보던 저장소로 돌아온다. */
-    move(request: WorkspaceChangeMoveRequest): Promise<void>
+    move(request: WorkspaceChangeMoveRequest): Promise<WorkspaceChangeResult>
   }
   hunk: {
     stage(request: HunkStageRequest): Promise<void>
@@ -326,7 +322,7 @@ interface RepositoryStore {
   /** 리뷰 요청 생성(빈 본문) — 성공 시 notice 안내 + 목록·스냅샷 갱신. 성공 여부 반환 */
   createPull(title: string): Promise<boolean>
   /** 리뷰 요청을 브라우저로 연다 — 주소는 main이 보관한 목록에서만 */
-  openPull(number: number): Promise<void>
+  openPull(number: number, section?: 'files' | 'checks'): Promise<void>
   /** 리뷰 상세 열기(상세+코멘트 한 번에) — 우측 열이 리뷰 상세로 전환된다. 커밋 상세와 상호 배타 */
   openPullDetail(number: number): Promise<void>
   /** 리뷰 상세 닫기 — 동기 상태 변경이라 잠금 불필요 */
@@ -378,8 +374,7 @@ async function fetchSnapshot(
     git().remotes.list(repoPath),
   ])
   // 재배치 중일 때만 진행 위치를 읽는다 — 상태 바 "M/N번째" (E7a)
-  const rebaseProgress =
-    status.state === 'rebasing' ? await git().rebase.progress(repoPath) : null
+  const rebaseProgress = status.state === 'rebasing' ? await git().rebase.progress(repoPath) : null
   return { status, history, branches, shelf, branchOverview, rebaseProgress, worktrees, remotes }
 }
 
@@ -513,7 +508,7 @@ function forgetRepoIfCertain(
   if (reason === 'failed') return
   const recentRepos = removeRecentRepo(get().recentRepos, path)
   set({ recentRepos })
-  saveRecentRepos(recentRepos)
+  recentPlacesQuery.selection.set({ paths: recentRepos, roots: get().recentWorkspaceRoots })
 }
 
 /**
@@ -583,7 +578,8 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   lastFetchAt: null,
   historyRef: null,
   pullMode: loadPullMode(),
-  recentRepos: loadRecentRepos(),
+  recentRepos: recentPlacesQuery.data.get().paths,
+  recentWorkspaceRoots: recentPlacesQuery.data.get().roots,
   remotes: [],
   pulls: [],
   pullDetail: null,
@@ -594,7 +590,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     git().repo.onChanged((changedPath) => {
       if (get().repoPath === changedPath) void get().externalRefresh()
     })
-    onRecentReposChanged((recentRepos) => set({ recentRepos }))
+    recentPlacesQuery.events.subscribe((places) =>
+      set({ recentRepos: places.paths, recentWorkspaceRoots: places.roots }),
+    )
     // 창 복귀 시 재조회 — 사용자가 명시적으로 돌아온 순간이라 최신화가 우선이다 (E10)
     windowApi().onFocused(() => {
       if (get().repoPath !== null) void get().refresh()
@@ -626,20 +624,25 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     resetSuppression()
   },
 
-  async openRepository(path) {
+  async openRepository(path, preserveWorkspace = false) {
     return runWrite(set, get, async () => {
       // 인자 없음은 폴더 선택이다. 이제 선택 폴더 자체가 저장소가 아니어도 하위 저장소를 찾아
       // 워크스페이스로 연다. 일반 저장소 하나를 고르면 repositories가 하나라 기존 흐름과 같다.
       let opened: string | null
-      if (path === undefined) {
-        const workspace = await git().workspace.select()
+      const savedWorkspace =
+        path && !preserveWorkspace ? get().recentWorkspaceRoots[path] : undefined
+      if (savedWorkspace && path && (await git().tabs.showExisting(path))) return
+      if (path === undefined || savedWorkspace) {
+        const workspace = savedWorkspace
+          ? await git().workspace.open(savedWorkspace)
+          : await git().workspace.select()
         if (workspace === null) return
         const repository =
+          workspace.repositories.find((entry) => entry.path === path) ??
           workspace.repositories.find((entry) => entry.path === workspace.path) ??
           workspace.repositories[0]
         if (repository === undefined) return
-        const isWorkspace =
-          workspace.repositories.length > 1 || repository.path !== workspace.path
+        const isWorkspace = workspace.repositories.length > 1 || repository.path !== workspace.path
         if (isWorkspace) set({ workspace, workspaceRepository: repository })
         else {
           await git().workspace.close()
@@ -651,7 +654,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       } else {
         const belongsToWorkspace =
           get().workspace?.repositories.some((repository) => repository.path === path) === true
-        if (!belongsToWorkspace && get().workspace !== null) {
+        if (!preserveWorkspace && !belongsToWorkspace && get().workspace !== null) {
           await git().workspace.close()
           set({ workspace: null, workspaceRepository: null })
         }
@@ -716,8 +719,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 최근 목록 갱신 — 성공한 뒤에만. 넘긴 경로가 아니라 main이 정규화한 저장소 루트를 넣는다
       // (하위 폴더를 골랐을 수 있다 — 이후 IPC에서 유효한 값은 이쪽뿐이다)
       const recentRepos = pushRecentRepo(get().recentRepos, opened)
-      set({ recentRepos })
-      saveRecentRepos(recentRepos)
+      const root = get().workspace?.path
+      const recentWorkspaceRoots = root
+        ? { ...get().recentWorkspaceRoots, [opened]: root }
+        : get().recentWorkspaceRoots
+      set({ recentRepos, recentWorkspaceRoots })
+      recentPlacesQuery.selection.set({ paths: recentRepos, roots: get().recentWorkspaceRoots })
     })
   },
 
@@ -801,30 +808,37 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 이 조회는 'snapshot'만 선점하고 center·right·left에는 **양보한다** — reviveSelections로
     // 그 자리를 쓰긴 하지만 소유하지는 않는다. 선점하면 배경 갱신이 사용자의 클릭을 무효화한다
     // (E14a 스펙 §2-4-3). 착지 때 남이 가져간 자리만 빼고 스냅샷 나머지는 그대로 반영한다
-    await runRepoRead(set, get, 'snapshot', repoPath, async (isCurrent, isTaken) => {
-      // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
-      // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
-      // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
-      // 대상이 아니지만, 그렇다고 CLEAR_SELECTIONS로 매번 닫아 버리면 저장할 때마다 열어 둔
-      // 리뷰 패널이 사라진다 (E10 보완 — Important 3). diffLabel만 남고 diff는 못 살아난 경우도
-      // DiffPanel이 diff===null이면 빈 상태를 그려 안전하다(실측 — apps/desktop/.../DiffPanel.tsx)
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
-      const kept = {
-        conflictFile: get().conflictFile,
-        pullDetail: get().pullDetail,
-        diffLabel: get().diffLabel,
-      }
-      const revived = await reviveSelections(repoPath, get(), snapshot.status)
-      const hostingStatus = await hosting().status(repoPath)
-      // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
-      if (!isCurrent()) return
-      set({
-        ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken),
-        hostingStatus,
-        ...snapshot,
-      })
-    }, { defersTo: SNAPSHOT_DEFERS })
+    await runRepoRead(
+      set,
+      get,
+      'snapshot',
+      repoPath,
+      async (isCurrent, isTaken) => {
+        // 외부(CLI 등)에서 상태가 바뀌었을 수 있다 — 스냅샷을 새로 뜨되, 보고 있던 선택은
+        // 재조회해 유지한다 (E7d ⑤: 새로고침은 '최신화'지 '닫기'가 아니다). 충돌 뷰 유지는 E7b 관례.
+        // pullDetail(리뷰 상세 패널)·diffLabel도 같은 이유로 유지한다 — 재조회 키가 없어 revive
+        // 대상이 아니지만, 그렇다고 CLEAR_SELECTIONS로 매번 닫아 버리면 저장할 때마다 열어 둔
+        // 리뷰 패널이 사라진다 (E10 보완 — Important 3). diffLabel만 남고 diff는 못 살아난 경우도
+        // DiffPanel이 diff===null이면 빈 상태를 그려 안전하다(실측 — apps/desktop/.../DiffPanel.tsx)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
+        const kept = {
+          conflictFile: get().conflictFile,
+          pullDetail: get().pullDetail,
+          diffLabel: get().diffLabel,
+        }
+        const revived = await reviveSelections(repoPath, get(), snapshot.status)
+        const hostingStatus = await hosting().status(repoPath)
+        // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+        if (!isCurrent()) return
+        set({
+          ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken),
+          hostingStatus,
+          ...snapshot,
+        })
+      },
+      { defersTo: SNAPSHOT_DEFERS },
+    )
   },
 
   async externalRefresh() {
@@ -849,23 +863,33 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     // 선점·양보는 refresh와 같다 — 이 경로도 reviveSelections로 선택 상태를 쓰되 소유하진 않는다.
     // 오히려 여기가 더 중요하다: 에디터 자동 저장마다 도니, 선점하면 파일을 훑는 내내
     // 배경 갱신이 클릭을 되돌린다 (E14a 스펙 §2-4-3)
-    await runRepoRead(set, get, 'snapshot', repoPath, async (isCurrent, isTaken) => {
-      // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
-      // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
-      // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
-      // 지우면 에디터 자동 저장 한 번에 열어 둔 리뷰 패널이 닫힌다 (E10 보완 — Important 3)
-      const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
-      // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
-      const kept = {
-        conflictFile: get().conflictFile,
-        pullDetail: get().pullDetail,
-        diffLabel: get().diffLabel,
-      }
-      const revived = await reviveSelections(repoPath, get(), snapshot.status)
-      // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
-      if (!isCurrent()) return
-      set({ ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken), ...snapshot })
-    }, { defersTo: SNAPSHOT_DEFERS })
+    await runRepoRead(
+      set,
+      get,
+      'snapshot',
+      repoPath,
+      async (isCurrent, isTaken) => {
+        // 수동 새로고침과 같은 의미론 (E7d ⑤: 재조회 유지) — 충돌 뷰는 편집 초안(컴포넌트 로컬)
+        // 보호를 위해 그대로 유지한다 (E7b 품질 리뷰). pullDetail·diffLabel도 refresh()와 같은
+        // 이유로 유지한다 — 이 재조회는 워킹트리 감시가 붙잡은 모든 외부 저장마다 도니, 여기서
+        // 지우면 에디터 자동 저장 한 번에 열어 둔 리뷰 패널이 닫힌다 (E10 보완 — Important 3)
+        const snapshot = await fetchSnapshot(repoPath, get().historyLimit)
+        // 유지 항목은 revive 조회를 기다리기 전에 읽는다 — 예전 객체 리터럴의 평가 순서 그대로다
+        const kept = {
+          conflictFile: get().conflictFile,
+          pullDetail: get().pullDetail,
+          diffLabel: get().diffLabel,
+        }
+        const revived = await reviveSelections(repoPath, get(), snapshot.status)
+        // 그 사이 더 최신 스냅샷 조회가 끝났다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
+        if (!isCurrent()) return
+        set({
+          ...deferSelections({ ...CLEAR_SELECTIONS, ...kept, ...revived }, isTaken),
+          ...snapshot,
+        })
+      },
+      { defersTo: SNAPSHOT_DEFERS },
+    )
   },
 
   async switchBranch(name) {
@@ -978,32 +1002,22 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   workspaceChanges: {
     async move(request) {
-      const originalPath = get().repoPath
-      let operationError: string | null = null
-
-      for (const group of request.groups) {
-        const paths = workspaceChangeCommand.path.toList(group.changes, request.target)
-        if (paths.length === 0) continue
-        if (get().repoPath !== group.repository.path) {
-          const opened = await get().openRepository(group.repository.path)
-          if (!opened || get().repoPath !== group.repository.path) {
-            operationError = get().error ?? `${group.repository.name} 저장소로 전환하지 못했어요.`
-            break
-          }
-        }
-        if (request.target === 'staged') await get().stage(paths)
-        else await get().unstage(paths)
-        if (get().error !== null) {
-          operationError = get().error
-          break
-        }
-      }
-
-      if (originalPath !== null && get().repoPath !== originalPath) {
-        const restored = await get().openRepository(originalPath)
-        if (!restored && operationError === null) operationError = get().error
-      }
-      if (operationError !== null) set({ error: operationError })
+      let result: WorkspaceChangeResult = { results: [] }
+      await runWrite(set, get, async () => {
+        result = await workspaceOverviewQuery.changes.move({
+          target: request.target,
+          groups: request.groups.map((group) => ({
+            path: group.repository.path,
+            paths: workspaceChangeCommand.path.toList(group.changes, request.target),
+          })),
+        })
+        const repoPath = get().repoPath
+        if (repoPath)
+          set({ ...CLEAR_SELECTIONS, ...(await fetchSnapshot(repoPath, get().historyLimit)) })
+        const failure = result.results.find((item) => item.status === 'failed')
+        set({ error: failure?.error ?? null })
+      })
+      return result
     },
   },
 
@@ -1118,7 +1132,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       // 그 사이 다른 파일을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
       // 파일 diff·커밋 상세·충돌 뷰는 상호 배타 — 중앙 패널이 하나다
-      set({ selected, diff, diffLabel: null, commitDetail: null, commitFile: null, conflictFile: null })
+      set({
+        selected,
+        diff,
+        diffLabel: null,
+        commitDetail: null,
+        commitFile: null,
+        conflictFile: null,
+      })
     })
   },
 
@@ -1156,7 +1177,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     if (!repoPath || !commitDetail) return
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
     await runRepoRead(set, get, 'center', repoPath, async (isCurrent) => {
-      const diff = await git().commits.diffFile(repoPath, commitDetail.hash, file.path, file.origPath)
+      const diff = await git().commits.diffFile(
+        repoPath,
+        commitDetail.hash,
+        file.path,
+        file.origPath,
+      )
       // 그 사이 다른 파일을 눌렀다면 이 결과는 낡았다 — 덮지 않고 버린다 (E14a)
       if (!isCurrent()) return
       set({ diff, commitFile: file, diffLabel: null })
@@ -1221,7 +1247,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           'up-to-date': '이미 모두 반영되어 있어요.',
         }
-        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
+        const shelfNotice = result.autoShelved
+          ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -1262,7 +1290,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           'up-to-date': '이미 최신이에요.',
         }
-        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
+        const shelfNotice = result.autoShelved
+          ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -1282,10 +1312,15 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       let notice: string | null = null
       try {
         const result = await git().commits.revert(repoPath, hash)
-        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
+        const shelfNotice = result.autoShelved
+          ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : ''
         // 충돌 안내는 reverting 상태 바가 담당한다 — 보관 안내만 남긴다 (join으로 선행 공백 방지)
         notice =
-          [result.outcome === 'reverted' ? `되돌리는 새 ${T.commit}을 만들었어요.` : null, shelfNotice]
+          [
+            result.outcome === 'reverted' ? `되돌리는 새 ${T.commit}을 만들었어요.` : null,
+            shelfNotice,
+          ]
             .filter((part) => part)
             .join(' ') || null
       } finally {
@@ -1325,7 +1360,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           conflict: null,
           empty: `이미 지금 내용에 들어 있는 ${T.commit}이에요 — 새로 만든 ${T.commit}은 없어요.`,
         }
-        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
+        const shelfNotice = result.autoShelved
+          ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : ''
         // conflict(안내 null) + 자동 보관 조합에서 선행 공백이 남지 않게 join으로 조립한다 (품질 리뷰)
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
@@ -1516,7 +1553,9 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
           // 충돌 안내는 rebasing 상태 바가 상주하며 담당한다
           conflict: null,
         }
-        const shelfNotice = result.autoShelved ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.` : ''
+        const shelfNotice = result.autoShelved
+          ? `${T.commit} 안 된 변경은 ${T.stash}에 넣어뒀어요.`
+          : ''
         notice = [notices[result.outcome], shelfNotice].filter((part) => part).join(' ') || null
       } finally {
         set({
@@ -2002,7 +2041,12 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
 
   async refreshPulls() {
     const { repoPath, hostingStatus } = get()
-    if (!repoPath || hostingStatus === null || !hostingStatus.connected || hostingStatus.repo === null) {
+    if (
+      !repoPath ||
+      hostingStatus === null ||
+      !hostingStatus.connected ||
+      hostingStatus.repo === null
+    ) {
       return
     }
     // 읽기 전용 조회 — 전역 busy도 억제 창도 건드리지 않는다 (E14a · E10 보완 — Important 2)
@@ -2072,11 +2116,11 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     })
   },
 
-  async openPull(number) {
+  async openPull(number, section) {
     const { repoPath } = get()
     if (!repoPath) return
     await runWrite(set, get, async () => {
-      await hosting().pulls.open(repoPath, number)
+      await hosting().pulls.open(repoPath, number, section)
     })
   },
 
@@ -2143,7 +2187,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
     return runWrite(set, get, async () => {
       const number = pullDetail.detail.number
       const base = pullDetail.detail.baseBranch
-      await hosting().pulls.merge(repoPath, number)
+      await hosting().pulls.merge(repoPath, number, pullDetail.detail.headSha ?? undefined)
       // 상세를 다시 읽어 '병합됨' 배지로 갱신한다. 로컬 반영은 App의 후속 제안(전환+받아오기)이 담당.
       // 재조회 실패가 이미 성공한 병합을 에러로 뒤집지 않게 삼킨다 (품질 리뷰)
       let refreshed = get().pullDetail

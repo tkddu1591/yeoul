@@ -1,3 +1,7 @@
+import { useReviewPreferences } from '../hook/use-review-preferences'
+import { CODE_FONT_CLASSES } from '../ui/settings/code-font'
+import { useConflictDraft } from '../hook/use-conflict-draft'
+import type { ConflictDocument } from '../adapter/conflict-document.adapter'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown, Check, CheckCheck, Download, PenLine, RotateCcw, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -10,17 +14,11 @@ import './conflict-panel.css'
 import './virtual.css'
 
 interface ConflictPanelProps {
-  path: string
-  content: string
+  document: ConflictDocument
   busy: boolean
-  /**
-   * 어느 흐름의 충돌인가 — merge는 "가져온 것", revert는 "되돌린 결과물"로 문구를 분기한다 (품질 리뷰).
-   * rebase는 git의 ours/theirs가 뒤집힌다 — 초록(ours)=새 기반, 보라(theirs)=재배치 중인 내 저장 (E7a)
-   */
-  mode: 'merging' | 'reverting' | 'rebasing'
   /** 파일 전체 한쪽 확정 — ours=내 것 유지, theirs=가져온 것 사용 (빠른 길) */
   onResolve(choice: 'ours' | 'theirs'): void
-  /** 확정(git add) — "고른 대로 확정"과 "직접 수정했어요"가 공유한다. 마커가 남아 있으면 확인창을 거친다 */
+  /** 확정(git add) — "해결 표시 (스테이지)"과 "외부 편집 결과 확인"가 공유한다. 마커가 남아 있으면 확인창을 거친다 */
   onMarkResolved(): void
   /** 최신 파일 내용 재조회 — 외부 편집 후의 stale 검사(거짓 경고)를 막는다. 실패 시 null */
   onReload(): Promise<string | null>
@@ -36,15 +34,13 @@ interface ConflictPanelProps {
 
 /**
  * 충돌 해결 화면 (스펙 §7 2단 구조) — 기본은 하나씩 선택형: 겹침 블록마다 카드로
- * 양쪽을 나란히 보여 주고 한쪽을 고르면 파일에 즉시 반영된다(확정은 "고른 대로 확정"에서만).
+ * 양쪽을 나란히 보여 주고 한쪽을 고르면 파일에 즉시 반영된다(확정은 "해결 표시 (스테이지)"에서만).
  * "자세히 보기"는 합쳐진 결과(남은 마커 포함)를 직접 수정하는 상세 뷰의 단순화 버전이다.
  * 초록 = 내 것(HEAD), 보라 = 가져온 것(revert에서는 되돌린 결과물).
  */
 export function ConflictPanel({
-  path,
-  content,
+  document,
   busy,
-  mode,
   onResolve,
   onMarkResolved,
   onReload,
@@ -53,19 +49,18 @@ export function ConflictPanel({
   onReset,
   pending,
 }: ConflictPanelProps) {
-  const takenLabel =
-    mode === 'reverting'
-      ? '되돌린 결과물'
-      : mode === 'rebasing'
-        ? `${T.rebase} 중인 내 ${T.commit}`
-        : '가져온 것'
-  // rebase에서는 초록(ours)이 "내 것"이 아니라 새 기반이다 — 이름을 정직하게 바꾼다 (E7a)
-  const mineLabel = mode === 'rebasing' ? '새 기반' : '내 것'
+  const preference = useReviewPreferences()
+  const codeClass = CODE_FONT_CLASSES[preference.data.codeFontSize]
+  const { path, content } = document
+  const takenLabel = document.target
+  const mineLabel = document.source
   const [confirmingMark, setConfirmingMark] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [confirmingWholeFile, setConfirmingWholeFile] = useState<'ours' | 'theirs' | null>(null)
-  const [view, setView] = useState<'cards' | 'edit'>('cards')
-  const [draft, setDraft] = useState('')
+  const editor = useConflictDraft(document.identity)
+  const [view, setView] = useState<'cards' | 'edit'>(() => (editor.data.draft ? 'edit' : 'cards'))
+  const draft = editor.data.draft?.text ?? ''
+  const stale = editor.data.draft !== undefined && editor.data.draft.base !== content
   const items = buildConflictView(content)
   // 블록 카드의 아이템 위치 — "다음 겹침" 순환 점프·선택 후 자동 스크롤에 쓴다
   const blockItemIndexes = items.reduce<number[]>((acc, item, index) => {
@@ -142,7 +137,7 @@ export function ConflictPanel({
       // 외부 편집이 있었을 수 있다 — 최신 내용으로 편집을 시작한다 (markResolved와 동일 원칙)
       const fresh = await onReload()
       if (fresh === null) return
-      setDraft(fresh)
+      editor.entry.start(fresh)
       setView('edit')
     })()
   }
@@ -156,11 +151,12 @@ export function ConflictPanel({
     >
       {view === 'cards' ? (
         <>
-          <p className="conflict-panel__hint">
-            두 버전이 같은 곳을 다르게 고쳤어요. {T.conflict}마다 카드에서 한쪽을 골라 주세요 — 초록이{' '}
-            <strong>{mineLabel}</strong>, 보라가 <strong>{takenLabel}</strong>이에요. 고르면 파일에 바로
-            반영되지만, "고른 대로 확정"을 누르기 전에는 아무것도 확정되지 않아요. 선택하지 않은
-            쪽도 사라지지 않고 {T.history}에 남아 있어요.
+          <p className="conflict-panel__hint leading-normal!">
+            <strong>
+              {mineLabel} ← {takenLabel}
+            </strong>
+            <br />
+            선택하면 파일에 반영돼요. 모든 충돌 해결 → 해결 표시 → 커밋 순서로 완료해 주세요.
           </p>
           {/* 해결 버튼은 헤더가 아니라 전용 줄에 — 좁은 폭에서도 잘리지 않고 줄바꿈된다 (리뷰 실측) */}
           <div className="conflict-panel__actions">
@@ -184,29 +180,36 @@ export function ConflictPanel({
                 onPress={markResolved}
                 testId="conflict-confirm"
               >
-                <CheckCheck size={13} aria-hidden="true" /> 고른 대로 확정
+                <CheckCheck size={13} aria-hidden="true" /> 해결 표시 (스테이지)
               </Button>
             )}
-            <Button
-              variant="neutral"
-              className="conflict-panel__btn--mine"
-              size="sm"
-              isDisabled={busy}
-              onPress={() => setConfirmingWholeFile('ours')}
-              testId="conflict-ours"
-            >
-              <User size={13} aria-hidden="true" /> 파일 전체: {mineLabel} 사용
-            </Button>
-            <Button
-              variant="neutral"
-              className="conflict-panel__btn--branch"
-              size="sm"
-              isDisabled={busy}
-              onPress={() => setConfirmingWholeFile('theirs')}
-              testId="conflict-theirs"
-            >
-              <Download size={13} aria-hidden="true" /> 파일 전체: {takenLabel} 사용
-            </Button>
+            <details className="relative text-xs">
+              <summary className="cursor-pointer rounded border border-(--color-border) px-2 py-1">
+                파일 전체 적용
+              </summary>
+              <div className="absolute top-full left-0 z-20 flex w-64 flex-col gap-1 rounded border border-(--color-border) bg-(--color-surface) p-2 shadow-lg">
+                <Button
+                  variant="neutral"
+                  className="conflict-panel__btn--mine"
+                  size="sm"
+                  isDisabled={busy}
+                  onPress={() => setConfirmingWholeFile('ours')}
+                  testId="conflict-ours"
+                >
+                  <User size={13} aria-hidden="true" /> 파일 전체: {mineLabel} 사용
+                </Button>
+                <Button
+                  variant="neutral"
+                  className="conflict-panel__btn--branch"
+                  size="sm"
+                  isDisabled={busy}
+                  onPress={() => setConfirmingWholeFile('theirs')}
+                  testId="conflict-theirs"
+                >
+                  <Download size={13} aria-hidden="true" /> 파일 전체: {takenLabel} 사용
+                </Button>
+              </div>
+            </details>
             <Button
               variant="ghost"
               size="sm"
@@ -214,7 +217,7 @@ export function ConflictPanel({
               onPress={markResolved}
               testId="conflict-mark"
             >
-              <Check size={13} aria-hidden="true" /> 직접 수정했어요
+              <Check size={13} aria-hidden="true" /> 외부 편집 결과 확인
             </Button>
             <Button
               variant="ghost"
@@ -244,7 +247,11 @@ export function ConflictPanel({
               <RotateCcw size={13} aria-hidden="true" /> 처음부터 다시
             </Button>
           </div>
-          <div ref={scrollRef} className="virtual-scroll conflict-panel__scroll" data-testid="conflict-view">
+          <div
+            ref={scrollRef}
+            className="virtual-scroll conflict-panel__scroll"
+            data-testid="conflict-view"
+          >
             <div
               className="conflict-panel__code"
               style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
@@ -264,7 +271,10 @@ export function ConflictPanel({
                         <span className="conflict-line__text">{item.text || ' '}</span>
                       </div>
                     ) : (
-                      <div className="conflict-card" data-testid={`conflict-card-${item.block.index}`}>
+                      <div
+                        className="conflict-card"
+                        data-testid={`conflict-card-${item.block.index}`}
+                      >
                         <p className="conflict-card__title">
                           {done + item.block.index + 1}번째 {T.conflict} — 어느 쪽을 쓸까요?
                         </p>
@@ -273,7 +283,7 @@ export function ConflictPanel({
                             <span className="conflict-card__side-label">
                               <User size={12} aria-hidden="true" /> {mineLabel}
                             </span>
-                            <pre className="conflict-card__code">
+                            <pre className={`conflict-card__code ${codeClass}`}>
                               {item.block.ours.join('\n') || '(비어 있음)'}
                             </pre>
                             <Button
@@ -291,7 +301,7 @@ export function ConflictPanel({
                             <span className="conflict-card__side-label">
                               <Download size={12} aria-hidden="true" /> {takenLabel}
                             </span>
-                            <pre className="conflict-card__code">
+                            <pre className={`conflict-card__code ${codeClass}`}>
                               {item.block.theirs.join('\n') || '(비어 있음)'}
                             </pre>
                             <Button
@@ -325,31 +335,51 @@ export function ConflictPanel({
             <Button
               variant="primary"
               size="sm"
-              isDisabled={busy}
+              isDisabled={busy || stale}
               onPress={() => {
                 void (async () => {
                   // 저장이 거부되면(외부 비충돌화·용량 초과) 초안을 잃지 않게 편집 화면을 유지한다 (품질 리뷰)
-                  if (await onSaveText(draft)) setView('cards')
+                  const fresh = await onReload()
+                  if (fresh !== editor.data.draft?.base) return
+                  if (await onSaveText(draft)) {
+                    editor.entry.clear()
+                    setView('cards')
+                  }
                 })()
               }}
               testId="conflict-edit-save"
             >
-              <Check size={13} aria-hidden="true" /> 저장하고 선택형으로
+              <Check size={13} aria-hidden="true" /> 파일 저장 후 충돌 검토
             </Button>
             <Button
               variant="ghost"
               size="sm"
               isDisabled={busy}
-              onPress={() => setView('cards')}
+              onPress={() => {
+                editor.entry.clear()
+                setView('cards')
+              }}
               testId="conflict-edit-cancel"
             >
               저장 없이 돌아가기
             </Button>
           </div>
+          {stale && (
+            <p role="alert" className="px-3 text-sm text-(--color-danger)">
+              외부에서 파일이 바뀌었어요. 초안을 복사해 보관하고 현재 파일을 다시 열어 주세요.
+              <Button
+                variant="ghost"
+                size="sm"
+                onPress={() => void navigator.clipboard.writeText(draft)}
+              >
+                초안 복사
+              </Button>
+            </p>
+          )}
           <textarea
-            className="conflict-panel__editor"
+            className={`conflict-panel__editor ${codeClass}`}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => editor.entry.set(event.target.value)}
             spellCheck={false}
             aria-label="병합 결과 직접 수정"
             data-testid="conflict-edit-text"
@@ -367,9 +397,8 @@ export function ConflictPanel({
         }}
         onCancel={() => setConfirmingWholeFile(null)}
       >
-        이 파일의 모든 충돌 블록을{' '}
-        {confirmingWholeFile === 'ours' ? mineLabel : takenLabel} 내용으로 한 번에 바꾸고 해결 표시해요.
-        지금까지 블록별로 고른 조합은 덮어써져요.
+        이 파일의 모든 충돌 블록을 {confirmingWholeFile === 'ours' ? mineLabel : takenLabel}{' '}
+        내용으로 한 번에 바꾸고 해결 표시해요. 지금까지 블록별로 고른 조합은 덮어써져요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingMark}
@@ -381,8 +410,8 @@ export function ConflictPanel({
         }}
         onCancel={() => setConfirmingMark(false)}
       >
-        파일에 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)가 그대로 있어요. 이대로 해결 표시하면 표시
-        줄까지 저장돼요. 편집기에서 정리한 뒤 다시 시도하는 것을 권해요.
+        파일에 {T.conflict} 표시(&lt;&lt;&lt;&lt;&lt;&lt;&lt;)가 그대로 있어요. 이대로 해결 표시하면
+        표시 줄까지 저장돼요. 편집기에서 정리한 뒤 다시 시도하는 것을 권해요.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmingReset}

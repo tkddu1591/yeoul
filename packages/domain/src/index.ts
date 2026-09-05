@@ -5,3 +5,5 @@ export * from './diff'
 export * from './mutation'
 export * from './sync'
 export * from './remote'
+
+export * from './pull-policy'

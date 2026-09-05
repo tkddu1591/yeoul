@@ -1,3 +1,4 @@
+import { gitProcessActivity } from './activity'
 import { spawn } from 'node:child_process'
 
 const activeProcesses = new Map<string, Set<ReturnType<typeof spawn>>>()
@@ -36,15 +37,24 @@ function getOperation(args: readonly string[]): string {
   return args[2] ?? 'unknown'
 }
 
+/** Every POSIX Git invocation owns its process group, including credential/network helpers. */
+function terminateGit(child: ReturnType<typeof spawn>): boolean {
+  if (child.pid === undefined) return false
+  try {
+    if (process.platform !== 'win32') return process.kill(-child.pid, 'SIGTERM')
+    return child.kill('SIGTERM')
+  } catch {
+    return false
+  }
+}
+
 /** 현재 저장소에서 실행 중인 Git 프로세스를 중단한다. 반환값은 신호를 보낸 프로세스 수다. */
 export function cancelGitProcesses(cwd: string): number {
   const processes = activeProcesses.get(cwd)
   if (processes === undefined) return 0
   let canceled = 0
   for (const process of processes) {
-    if (process.killed) continue
-    process.kill('SIGTERM')
-    canceled += 1
+    if (terminateGit(process)) canceled += 1
   }
   return canceled
 }
@@ -75,11 +85,10 @@ export class GitError extends Error {
     super(
       result.signal === 'SIGTERM'
         ? 'Git 작업이 중단됐어요. 사용자가 중단했거나 제한 시간을 넘겼을 수 있어요.'
-        :
-      // 일부 명령(commit의 "nothing to commit" 등)은 설명을 stdout으로 낸다 — stderr가 비면 stdout으로 폴백
-      `git ${args.join(' ')} failed (exit ${result.exitCode}${
-        result.signal ? `, signal ${result.signal}` : ''
-      }): ${result.stderr.trim() || result.stdout.trim()}`,
+        : // 일부 명령(commit의 "nothing to commit" 등)은 설명을 stdout으로 낸다 — stderr가 비면 stdout으로 폴백
+          `git ${args.join(' ')} failed (exit ${result.exitCode}${
+            result.signal ? `, signal ${result.signal}` : ''
+          }): ${result.stderr.trim() || result.stdout.trim()}`,
     )
     this.name = 'GitError'
   }
@@ -122,16 +131,40 @@ export function execGit(args: string[], options: GitExecOptions): Promise<GitRes
   env.GIT_EDITOR = 'true' // 에디터를 여는 명령이 GUI를 행시키지 않도록
   env.LC_ALL = 'C' // stderr 메시지를 영어로 고정 — unborn 감지 등 문자열 매칭의 로케일 의존 제거
   if (options.env?.GIT_AUTHOR_NAME !== undefined) env.GIT_AUTHOR_NAME = options.env.GIT_AUTHOR_NAME
-  if (options.env?.GIT_AUTHOR_EMAIL !== undefined) env.GIT_AUTHOR_EMAIL = options.env.GIT_AUTHOR_EMAIL
+  if (options.env?.GIT_AUTHOR_EMAIL !== undefined)
+    env.GIT_AUTHOR_EMAIL = options.env.GIT_AUTHOR_EMAIL
   if (options.env?.GIT_AUTHOR_DATE !== undefined) env.GIT_AUTHOR_DATE = options.env.GIT_AUTHOR_DATE
 
   return new Promise<GitResult>((resolve, reject) => {
     const startedAt = Date.now()
-    const child = spawn('git', args, { cwd: options.cwd, env, signal: options.signal })
+    const activity = gitProcessActivity.entry.start(getOperation(args), options.cwd)
+    let activityFinished = false
+    const finishActivity = (status: 'completed' | 'failed' | 'canceled') => {
+      if (activityFinished) return
+      activityFinished = true
+      gitProcessActivity.entry.finish(activity, status)
+    }
+    if (options.signal?.aborted) {
+      finishActivity('canceled')
+      reject(new Error('Git 작업을 중단했어요.'))
+      return
+    }
+    const child = spawn('git', args, {
+      cwd: options.cwd,
+      env,
+      detached: process.platform !== 'win32',
+    })
+    const onAbort = () => {
+      terminateGit(child)
+      finishActivity('canceled')
+      reject(new Error('Git 작업을 중단했어요.'))
+    }
+    options.signal?.addEventListener('abort', onAbort, { once: true })
     const processes = activeProcesses.get(options.cwd) ?? new Set<ReturnType<typeof spawn>>()
     processes.add(child)
     activeProcesses.set(options.cwd, processes)
     const forget = () => {
+      options.signal?.removeEventListener('abort', onAbort)
       processes.delete(child)
       if (processes.size === 0) activeProcesses.delete(options.cwd)
     }
@@ -139,7 +172,7 @@ export function execGit(args: string[], options: GitExecOptions): Promise<GitRes
     const timeout =
       timeoutMs > 0
         ? setTimeout(() => {
-            child.kill('SIGTERM')
+            terminateGit(child)
           }, timeoutMs)
         : null
     timeout?.unref()
@@ -150,11 +183,13 @@ export function execGit(args: string[], options: GitExecOptions): Promise<GitRes
     child.stdout.on('data', (chunk: string) => (stdout += chunk))
     child.stderr.on('data', (chunk: string) => (stderr += chunk))
     child.on('error', (cause) => {
+      finishActivity(options.signal?.aborted ? 'canceled' : 'failed')
       if (timeout !== null) clearTimeout(timeout)
       forget()
       reject(cause)
     })
     child.on('close', (code, signal) => {
+      finishActivity(signal === 'SIGTERM' ? 'canceled' : code === 0 ? 'completed' : 'failed')
       if (timeout !== null) clearTimeout(timeout)
       forget()
       const result = { stdout, stderr, exitCode: code ?? -1, signal }

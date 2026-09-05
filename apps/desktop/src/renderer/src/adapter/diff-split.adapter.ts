@@ -11,7 +11,7 @@ export interface SplitRow {
  * '\ No newline' note는 실제 git 출력에서 del 런과 add 런 "사이"에 온다 —
  * 런 뒤의 note를 해당 측에 귀속시켜 변경 쌍의 좌우 정렬이 깨지지 않게 한다.
  */
-export function pairHunkLines(lines: DiffLine[]): SplitRow[] {
+function pair(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = []
   let index = 0
   while (index < lines.length) {
@@ -63,3 +63,5 @@ export function pairHunkLines(lines: DiffLine[]): SplitRow[] {
   }
   return rows
 }
+
+export const diffSplitAdapter = { hunk: { pair } }

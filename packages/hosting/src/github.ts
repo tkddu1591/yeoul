@@ -1,4 +1,5 @@
-import { buildPullTimeline, type PullComment } from './pull-timeline'
+import { pullAdapter } from './pull.adapter'
+import { pullTimelineAdapter, type PullComment } from './pull-timeline'
 
 /** 리뷰 요청(pull request) 요약 — UI 목록과 생성 결과가 공유한다 */
 export interface PullSummary {
@@ -29,6 +30,14 @@ export interface PullDetail {
   url: string
   headBranch: string
   baseBranch: string
+  body?: string
+  isDraft?: boolean
+  headSha?: string | null
+  mergeable?: boolean | null
+  mergeState?: string
+  changedFiles?: number
+  additions?: number
+  deletions?: number
 }
 
 /** Hosting adapter의 GitHub 구현 표면 — 네임스페이스 객체 (main 프로세스 전용) */
@@ -55,7 +64,7 @@ export interface GitHubHosting {
     /** 승인 — POST /pulls/{n}/reviews { event: APPROVE }. 자기 PR 422는 친절 문구로 */
     approve(owner: string, repo: string, number: number): Promise<void>
     /** 병합(병합 커밋 — 조상 기록 보존) — PUT /pulls/{n}/merge. 405·409는 친절 문구로 */
-    merge(owner: string, repo: string, number: number): Promise<void>
+    merge(owner: string, repo: string, number: number, sha?: string): Promise<void>
   }
 }
 
@@ -78,47 +87,6 @@ function toFriendlyMessage(status: number, body: string): string {
     return '이 브랜치의 풀 리퀘스트가 이미 있어요.'
   }
   return `GitHub 요청이 실패했어요. (HTTP ${status})`
-}
-
-/** GitHub REST 응답의 pull 객체 — 우리가 쓰는 필드만 */
-interface RawPull {
-  number: number
-  title: string
-  draft?: boolean
-  html_url: string
-  head: { ref: string }
-  base: { ref: string }
-}
-
-function toPullSummary(raw: unknown): PullSummary {
-  const pull = raw as RawPull
-  return {
-    number: pull.number,
-    title: pull.title,
-    headBranch: pull.head.ref,
-    baseBranch: pull.base.ref,
-    url: pull.html_url,
-    isDraft: pull.draft === true,
-  }
-}
-
-/** GitHub REST 응답의 pull 상세 — 우리가 쓰는 필드만 */
-interface RawPullDetail extends RawPull {
-  state: string
-  merged?: boolean
-}
-
-function toPullDetail(raw: unknown): PullDetail {
-  const pull = raw as RawPullDetail
-  return {
-    number: pull.number,
-    title: pull.title,
-    state: pull.state === 'closed' ? 'closed' : 'open',
-    merged: pull.merged === true,
-    url: pull.html_url,
-    headBranch: pull.head.ref,
-    baseBranch: pull.base.ref,
-  }
 }
 
 export function createGitHubHosting({
@@ -157,6 +125,24 @@ export function createGitHubHosting({
   }
 
   // 저장소 좌표는 remote URL에서 왔다 — URL 경로로 밀수되지 않게 세그먼트 단위로 인코딩한다
+  async function readCollection(path: string): Promise<unknown[]> {
+    const items: unknown[] = []
+    for (let page = 1; page <= 100; page++) {
+      const batch = (await request(
+        'GET',
+        page === 1 ? path : `${path}&page=${page}`,
+        undefined,
+        pullNotFound,
+      )) as unknown[]
+      if (!Array.isArray(batch)) throw new Error('GitHub 목록 응답을 읽지 못했어요.')
+      items.push(...batch)
+      if (batch.length < 100) return items
+    }
+    throw new Error(
+      '리뷰 기록이 너무 많아 현재 상태를 확인하지 못했어요. GitHub에서 확인해 주세요.',
+    )
+  }
+
   const repoPath = (owner: string, repo: string): string =>
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`
 
@@ -183,32 +169,24 @@ export function createGitHubHosting({
           'GET',
           `${repoPath(owner, repo)}/pulls?state=open&per_page=50`,
         )) as unknown[]
-        return raw.map(toPullSummary)
+        return raw.map(pullAdapter.summary.from)
       },
       async create(owner, repo, input) {
-        return toPullSummary(await request('POST', `${repoPath(owner, repo)}/pulls`, input))
+        return pullAdapter.summary.from(
+          await request('POST', `${repoPath(owner, repo)}/pulls`, input),
+        )
       },
       async get(owner, repo, number) {
-        return toPullDetail(
+        return pullAdapter.detail.from(
           await request('GET', `${repoPath(owner, repo)}/pulls/${number}`, undefined, pullNotFound),
         )
       },
       async comments(owner, repo, number) {
         const [issueComments, reviews] = await Promise.all([
-          request(
-            'GET',
-            `${repoPath(owner, repo)}/issues/${number}/comments?per_page=100`,
-            undefined,
-            pullNotFound,
-          ),
-          request(
-            'GET',
-            `${repoPath(owner, repo)}/pulls/${number}/reviews?per_page=100`,
-            undefined,
-            pullNotFound,
-          ),
+          readCollection(`${repoPath(owner, repo)}/issues/${number}/comments?per_page=100`),
+          readCollection(`${repoPath(owner, repo)}/pulls/${number}/reviews?per_page=100`),
         ])
-        return buildPullTimeline(issueComments as unknown[], reviews as unknown[])
+        return pullTimelineAdapter.item.toList(issueComments as unknown[], reviews as unknown[])
       },
       async addComment(owner, repo, number, body) {
         await request(
@@ -232,12 +210,12 @@ export function createGitHubHosting({
           },
         )
       },
-      async merge(owner, repo, number) {
+      async merge(owner, repo, number, sha) {
         // 병합 커밋(merge commit) 고정 — 앱 철학: 조상 기록을 남긴다(squash·rebase 비목표)
         await request(
           'PUT',
           `${repoPath(owner, repo)}/pulls/${number}/merge`,
-          { merge_method: 'merge' },
+          { merge_method: 'merge', ...(sha ? { sha } : {}) },
           (status) => {
             if (status === 405) {
               return '아직 병합할 수 없어요. 충돌이나 진행 중인 검사가 있는지 브라우저에서 확인해 주세요.'

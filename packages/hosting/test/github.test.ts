@@ -36,7 +36,12 @@ async function startMock(
       raw += chunk.toString('utf8')
     })
     req.on('end', () => {
-      requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body: raw })
+      requests.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        headers: req.headers,
+        body: raw,
+      })
       res.writeHead(status, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(body))
     })
@@ -58,7 +63,12 @@ async function startMockRouter(
       raw += chunk.toString('utf8')
     })
     req.on('end', () => {
-      requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body: raw })
+      requests.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        headers: req.headers,
+        body: raw,
+      })
       const key = `${req.method} ${(req.url ?? '/').split('?')[0]}`
       const route = routes[key] ?? { status: 404, body: { message: 'Not Found' } }
       res.writeHead(route.status, { 'Content-Type': 'application/json' })
@@ -160,7 +170,12 @@ describe('createGitHubHosting', () => {
     })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     await expect(
-      hosting.pulls.create('octo', 'hello', { title: 't', head: 'feature', base: 'main', body: '' }),
+      hosting.pulls.create('octo', 'hello', {
+        title: 't',
+        head: 'feature',
+        base: 'main',
+        body: '',
+      }),
     ).rejects.toThrow('이 브랜치의 풀 리퀘스트가 이미 있어요.')
   })
 
@@ -186,6 +201,14 @@ describe('createGitHubHosting', () => {
       title: '로그인 버튼 색 실험',
       state: 'open',
       merged: false,
+      body: '',
+      isDraft: false,
+      headSha: null,
+      mergeable: null,
+      mergeState: 'unknown',
+      changedFiles: 0,
+      additions: 0,
+      deletions: 0,
       url: 'https://github.com/octo/hello/pull/7',
       headBranch: 'feature',
       baseBranch: 'main',
@@ -238,8 +261,23 @@ describe('createGitHubHosting', () => {
     })
     const hosting = createGitHubHosting({ baseUrl: mock.baseUrl, token: 't' })
     expect(await hosting.pulls.comments('octo', 'hello', 7)).toEqual([
-      { id: 1, author: 'octo', body: '먼저 남긴 질문', createdAt: 1784541600, kind: 'comment', state: null },
-      { id: 2, author: 'reviewer', body: '', createdAt: 1784545200, kind: 'review', state: 'approved' },
+      {
+        id: 1,
+        author: 'octo',
+        body: '먼저 남긴 질문',
+        createdAt: 1784541600,
+        kind: 'comment',
+        state: null,
+      },
+      {
+        id: 2,
+        author: 'reviewer',
+        body: '',
+        createdAt: 1784545200,
+        kind: 'review',
+        commitId: null,
+        state: 'approved',
+      },
     ])
     const urls = mock.requests.map((request) => request.url).sort()
     expect(urls).toEqual([

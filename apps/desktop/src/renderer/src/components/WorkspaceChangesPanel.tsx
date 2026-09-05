@@ -1,21 +1,29 @@
-import { ChevronDown, ChevronRight, CircleMinus, CirclePlus, FolderGit2, RefreshCw } from 'lucide-react'
+import { useReviewPreferences } from '../hook/use-review-preferences'
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleMinus,
+  CirclePlus,
+  FolderGit2,
+  RefreshCw,
+  Search,
+} from 'lucide-react'
 import { useState } from 'react'
-import type { WorkspaceRepository } from '@git-gui/ipc-contract'
+import type { WorkspaceChangeResult, WorkspaceRepository } from '@git-gui/ipc-contract'
 import type { SelectedFile } from '../store/repository-store'
 import {
   workspaceChangeCommand,
   type WorkspaceChangeEntry,
   type WorkspaceChangeMoveRequest,
 } from '../store/workspace-change-command'
-import { Badge } from '../ui/Badge'
+import { useWorkspaceSelection } from '../hook/use-workspace-selection'
 import { Button } from '../ui/Button'
 import { ContextMenu } from '../ui/ContextMenu'
 import { Panel } from '../ui/Panel'
-import { Tooltip } from '../ui/Tooltip'
-import { KIND_GLYPHS, KIND_LABELS } from './change-kind'
+import { VirtualList } from '../ui/VirtualList'
 import { FindBar } from './FindBar'
+import { KIND_CLASSES, KIND_GLYPHS, KIND_LABELS } from './change-kind'
 import type { WorkspaceOverviewView } from './workspace-overview-view'
-import './workspace-changes-panel.css'
 
 interface WorkspaceChangesPanelProps {
   workspaceView: WorkspaceOverviewView
@@ -26,75 +34,9 @@ interface WorkspaceChangesPanelProps {
   onFindClose(): void
   onRefresh(): void
   onSelect(repository: WorkspaceRepository, selected: SelectedFile): void
-  onMove(request: WorkspaceChangeMoveRequest): Promise<void>
+  onMove(request: WorkspaceChangeMoveRequest): Promise<WorkspaceChangeResult>
 }
 
-interface WorkspaceChangeRowProps {
-  entry: WorkspaceChangeEntry
-  current: boolean
-  selected: boolean
-  checked: boolean
-  busy: boolean
-  onCheck(): void
-  onSelect(): void
-  onMenu(x: number, y: number): void
-}
-
-function WorkspaceChangeRow({
-  entry,
-  current,
-  selected,
-  checked,
-  busy,
-  onCheck,
-  onSelect,
-  onMenu,
-}: WorkspaceChangeRowProps) {
-  const { repository, change, staged } = entry
-  const kind = staged ? change.staged : change.unstaged
-  const slashIndex = change.path.lastIndexOf('/')
-  const directory = slashIndex >= 0 ? change.path.slice(0, slashIndex) : ''
-  const basename = slashIndex >= 0 ? change.path.slice(slashIndex + 1) : change.path
-  const label = `${repository.name}/${change.path} — ${kind === null ? '' : KIND_LABELS[kind]}`
-  return (
-    <div className={`workspace-change-row${selected ? ' workspace-change-row--selected' : ''}`}>
-      <span className="workspace-change-row__checkcell">
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={busy}
-          onChange={onCheck}
-          aria-label={`${repository.name}/${change.path} 선택`}
-          data-testid={`workspace-check-${repository.relativePath}-${staged ? 'staged' : 'unstaged'}-${change.path}`}
-        />
-      </span>
-      <Tooltip content={label} summary={label} describedBy={false}>
-        <button
-          type="button"
-          className={`workspace-change-row__main workspace-change-row__main--${kind ?? 'none'}`}
-          disabled={busy}
-          onClick={onSelect}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            onMenu(event.clientX, event.clientY)
-          }}
-          data-testid={`workspace-file-${repository.relativePath}-${staged ? 'staged' : 'unstaged'}-${change.path}`}
-        >
-          <span className="workspace-change-row__kind" aria-hidden="true">
-            {kind === null ? '' : KIND_GLYPHS[kind]}
-          </span>
-          <span className="workspace-change-row__copy">
-            <strong>{basename}</strong>
-            <span>{directory || '.'}</span>
-          </span>
-        </button>
-      </Tooltip>
-      {!current && <span className="workspace-change-row__switch">전환</span>}
-    </div>
-  )
-}
-
-/** 여러 저장소의 변경 파일을 저장소 루트 아래 staged/unstaged 트리로 표시한다. */
 export function WorkspaceChangesPanel({
   workspaceView,
   selected,
@@ -106,301 +48,311 @@ export function WorkspaceChangesPanel({
   onSelect,
   onMove,
 }: WorkspaceChangesPanelProps) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const [query, setQuery] = useState('')
-  const [moving, setMoving] = useState(false)
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
-  const [menu, setMenu] = useState<{ x: number; y: number; entry: WorkspaceChangeEntry } | null>(null)
-  const normalizedQuery = findOpen ? query.trim().toLowerCase() : ''
-  const repositories = workspaceView.overview?.repositories ?? []
-  const total = repositories.reduce((count, item) => count + (item.status?.changes.length ?? 0), 0)
-  const entries: WorkspaceChangeEntry[] = repositories.flatMap(({ repository, status }) =>
-    (status?.changes ?? []).flatMap((change) => [
-      ...(change.unstaged === null ? [] : [{ repository, change, staged: false }]),
-      ...(change.staged === null ? [] : [{ repository, change, staged: true }]),
-    ]),
+  const preference = useReviewPreferences()
+  const list = useWorkspaceSelection(workspaceView.overview, onMove)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: WorkspaceChangeEntry } | null>(
+    null,
   )
-  const validChecked = entries.filter((entry) => checked.has(workspaceChangeCommand.selection.key.get(entry)))
-  const selectedUnstaged = validChecked.filter((entry) => !entry.staged)
-  const selectedStaged = validChecked.filter((entry) => entry.staged)
-  const allChecked = entries.length > 0 && validChecked.length === entries.length
-  const interactionBusy = busy || moving
-
-  const moveEntries = async (
-    targetEntries: WorkspaceChangeEntry[],
-    target: WorkspaceChangeMoveRequest['target'],
-  ) => {
-    if (targetEntries.length === 0) return
-    setMoving(true)
-    try {
-      await onMove({ target, groups: workspaceChangeCommand.group.toList(targetEntries) })
-    } finally {
-      setMoving(false)
-      setChecked((current) => {
-        const next = new Set(current)
-        for (const entry of targetEntries) next.delete(workspaceChangeCommand.selection.key.get(entry))
-        return next
-      })
-    }
-  }
-
-  const toggleEntry = (entry: WorkspaceChangeEntry) => {
-    const key = workspaceChangeCommand.selection.key.get(entry)
-    setChecked((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const toggleEntries = (targetEntries: WorkspaceChangeEntry[], allTargetEntriesChecked: boolean) => {
-    setChecked((current) => {
-      const next = new Set(current)
-      for (const entry of targetEntries) {
-        const key = workspaceChangeCommand.selection.key.get(entry)
-        if (allTargetEntriesChecked) next.delete(key)
-        else next.add(key)
-      }
-      return next
-    })
-  }
-
-  const toggleRepository = (path: string) => {
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
-  }
-
+  const { data } = list
+  const disabled = busy || data.moving
+  const staged = data.selected.filter((entry) => entry.staged)
+  const unstaged = data.selected.filter((entry) => !entry.staged)
   return (
-    <Panel
-      title="변경"
-      titleHint="workspace status"
-      pending={workspaceView.loading || moving}
-      testId="workspace-changes-panel"
-      accessory={
-        <>
-          <Button variant="ghost" size="sm" isDisabled={workspaceView.loading} onPress={onRefresh} testId="workspace-changes-refresh">
-            <RefreshCw size={13} aria-hidden="true" /> 전체
+    <Panel.Root testId="workspace-changes-panel" className="border-0! rounded-none!">
+      <Panel.Header>
+        <Panel.Title>저장소 · 워크트리</Panel.Title>
+        <Panel.Actions>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="변경 검색"
+            onPress={() => setSearchOpen(true)}
+          >
+            <Search size={14} />
           </Button>
-          <Badge tone="count">{total}</Badge>
-        </>
-      }
-    >
-      <div className="workspace-changes" data-find-scope="changes">
-        {findOpen && (
+          <Button
+            variant="ghost"
+            size="sm"
+            isDisabled={workspaceView.loading}
+            onPress={onRefresh}
+            testId="workspace-changes-refresh"
+          >
+            <RefreshCw size={14} /> 새로고침
+          </Button>
+        </Panel.Actions>
+      </Panel.Header>
+      <Panel.Body className="flex flex-col" data-find-scope="changes">
+        {(findOpen || searchOpen) && (
           <FindBar
-            query={query}
-            position={total === 0 ? -1 : 0}
-            count={total}
+            query={data.query}
+            position={data.visibleEntries.length ? 0 : -1}
+            count={data.visibleEntries.length}
             mode="filter"
             focusSignal={findNonce}
-            placeholder="저장소 또는 파일 찾기"
-            onQuery={setQuery}
+            placeholder="저장소·워크트리·파일 검색"
+            onQuery={list.filter.set}
             onNext={() => {}}
             onPrev={() => {}}
             onClose={() => {
-              setQuery('')
+              list.filter.set('')
+              setSearchOpen(false)
               onFindClose()
             }}
           />
         )}
-        {workspaceView.error !== null && <p className="workspace-changes__empty" role="alert">{workspaceView.error}</p>}
-        <div className="workspace-changes__toolbar" data-testid="workspace-changes-toolbar">
-          <label className="workspace-changes__check-all">
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--color-border) px-3 py-2 text-xs"
+          data-testid="workspace-changes-toolbar"
+        >
+          <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={allChecked}
+              checked={data.all}
+              disabled={disabled || !data.visibleEntries.length}
               ref={(element) => {
-                if (element) element.indeterminate = validChecked.length > 0 && !allChecked
+                if (element) element.indeterminate = !data.all && data.selected.length > 0
               }}
-              onChange={() => toggleEntries(entries, allChecked)}
-              disabled={interactionBusy || entries.length === 0}
+              onChange={() => list.selection.toggle(data.visibleEntries, !data.all)}
               data-testid="workspace-check-all"
             />
-            모두 선택{validChecked.length > 0 ? ` (${validChecked.length})` : ''}
+            {data.query ? '검색 결과 선택' : '모두 선택'}
+            {data.selected.length ? ` (${data.selected.length})` : ''}
           </label>
           <Button
             variant="ghost"
             size="sm"
-            isDisabled={interactionBusy || selectedUnstaged.length === 0}
-            onPress={() => void moveEntries(selectedUnstaged, 'staged')}
+            isDisabled={disabled || !unstaged.length}
+            onPress={() => void list.change.move(unstaged, 'staged')}
             testId="workspace-stage-selected"
+            aria-label="선택한 파일을 스테이지에 추가"
           >
-            <CirclePlus size={13} aria-hidden="true" /> 선택 올리기
+            <CirclePlus size={13} /> 추가
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            isDisabled={interactionBusy || selectedStaged.length === 0}
-            onPress={() => void moveEntries(selectedStaged, 'unstaged')}
+            isDisabled={disabled || !staged.length}
+            onPress={() => void list.change.move(staged, 'unstaged')}
             testId="workspace-unstage-selected"
           >
-            <CircleMinus size={13} aria-hidden="true" /> 선택 내리기
+            <CircleMinus size={13} /> 제외
           </Button>
         </div>
-        <div className="workspace-changes__scroll">
-          {repositories.map(({ repository, status, error }) => {
-            const repositoryMatches =
-              normalizedQuery === '' ||
-              repository.name.toLowerCase().includes(normalizedQuery) ||
-              repository.relativePath.toLowerCase().includes(normalizedQuery)
-            const allChanges = status?.changes ?? []
-            const changes =
-              allChanges.filter(
-                (change) => repositoryMatches || change.path.toLowerCase().includes(normalizedQuery),
+        {data.hidden > 0 && (
+          <div className="flex items-center justify-between px-3 py-1 text-xs text-(--color-danger)">
+            검색 밖 {data.hidden}개 선택됨
+            <Button variant="ghost" size="sm" onPress={list.selection.clear}>
+              선택 해제
+            </Button>
+          </div>
+        )}
+        {workspaceView.loading && (
+          <p role="status" className="m-0 px-3 py-1 text-xs text-(--color-text-muted)">
+            작업 상태 갱신 중…
+          </p>
+        )}
+        {workspaceView.error && (
+          <p role="alert" className="px-3 text-sm text-(--color-danger)">
+            {workspaceView.error}
+          </p>
+        )}
+        {data.result && (
+          <p
+            role="status"
+            data-testid="workspace-batch-result"
+            className="m-0 px-3 py-1 text-xs text-(--color-text-muted)"
+          >
+            완료 {data.result.results.filter((item) => item.status === 'completed').length} · 실패{' '}
+            {data.result.results.filter((item) => item.status === 'failed').length} · 대기{' '}
+            {data.result.results.filter((item) => item.status === 'pending').length}
+            {data.result.results.some((item) => item.status !== 'completed') &&
+              ' — 선택된 남은 항목을 다시 실행할 수 있어요.'}
+          </p>
+        )}
+        {data.rows.length === 0 && !workspaceView.loading && (
+          <p className="px-3 text-sm text-(--color-text-muted)">
+            {data.query ? '검색 결과가 없어요.' : '작업 공간에 변경이 없어요.'}
+          </p>
+        )}
+        <VirtualList
+          items={data.rows}
+          isFocusable={(row) => row.kind !== 'empty'}
+          onNavigate={list.selection.navigate}
+          rowHeight={preference.data.listDensity === 'compact' ? 34 : 44}
+          getKey={(row) => row.key}
+          testId="workspace-file-list"
+          renderItem={(row) => {
+            if (row.kind === 'empty')
+              return (
+                <p className="m-0 truncate px-9 py-3 text-xs text-(--color-text-muted)">
+                  {row.text}
+                </p>
               )
-            if (!repositoryMatches && changes.length === 0) return null
-            const current = repository.path === workspaceView.currentRepository?.path
-            const repositoryCollapsed = collapsed.has(repository.path) && normalizedQuery === ''
-            const unstaged = changes.filter((change) => change.unstaged !== null)
-            const staged = changes.filter((change) => change.staged !== null)
-            const allUnstaged = allChanges.filter((change) => change.unstaged !== null)
-            const allStaged = allChanges.filter((change) => change.staged !== null)
-            const repositoryEntries = entries.filter((entry) => entry.repository.path === repository.path)
-            const checkedRepositoryEntries = repositoryEntries.filter((entry) =>
-              checked.has(workspaceChangeCommand.selection.key.get(entry)),
-            )
-            const allRepositoryEntriesChecked =
-              repositoryEntries.length > 0 && checkedRepositoryEntries.length === repositoryEntries.length
-            return (
-              <section
-                className={`workspace-change-tree${current ? ' workspace-change-tree--current' : ''}`}
-                key={repository.path}
-                data-testid={`workspace-changes-${repository.relativePath}`}
-              >
-                <div className="workspace-change-tree__repository">
+            if (row.kind === 'target') {
+              const target = row.target
+              const current =
+                target.repository.path ===
+                (workspaceView.currentPath ?? workspaceView.currentRepository?.path)
+              const all =
+                target.entries.length > 0 &&
+                target.entries.every((entry) =>
+                  data.checked.has(workspaceChangeCommand.selection.key.get(entry)),
+                )
+              return (
+                <div
+                  className={`group flex h-full items-center gap-2 border-b border-(--color-border) px-2 text-xs ${current ? 'bg-(--color-selection-bg)' : ''}`}
+                  data-testid={`workspace-changes-${target.repository.relativePath}`}
+                >
                   <button
                     type="button"
-                    className="workspace-change-tree__toggle"
-                    onClick={() => toggleRepository(repository.path)}
-                    aria-expanded={!repositoryCollapsed}
-                    aria-label={`${repository.name} ${repositoryCollapsed ? '펼치기' : '접기'}`}
+                    className="flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0 text-(--color-text)"
+                    data-navigation
+                    aria-label={`${target.repository.name} 접기·펼치기`}
+                    aria-expanded={!data.collapsed.has(target.repository.path)}
+                    onClick={() => list.group.toggle(target.repository.path)}
                   >
-                    {repositoryCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    {data.collapsed.has(target.repository.path) ? (
+                      <ChevronRight size={14} />
+                    ) : (
+                      <ChevronDown size={14} />
+                    )}
                   </button>
                   <input
                     type="checkbox"
-                    className="workspace-change-tree__check"
-                    checked={allRepositoryEntriesChecked}
-                    ref={(element) => {
-                      if (element) {
-                        element.indeterminate = checkedRepositoryEntries.length > 0 && !allRepositoryEntriesChecked
-                      }
-                    }}
-                    onChange={() => toggleEntries(repositoryEntries, allRepositoryEntriesChecked)}
-                    disabled={interactionBusy || repositoryEntries.length === 0}
-                    aria-label={`${repository.name} 변경 모두 선택`}
-                    data-testid={`workspace-check-repository-${repository.relativePath}`}
+                    aria-label={`${target.repository.name} 변경 모두 선택`}
+                    checked={all}
+                    disabled={disabled || !target.entries.length}
+                    onChange={() => list.selection.toggle(target.entries, !all)}
+                    data-testid={`workspace-check-repository-${target.repository.relativePath}`}
                   />
-                  <FolderGit2 size={14} aria-hidden="true" />
-                  <span className="workspace-change-tree__identity">
-                    <strong>{repository.name}</strong>
-                    <span>{repository.relativePath}</span>
+                  <FolderGit2 size={14} className="shrink-0" />
+                  <span
+                    className="min-w-0 flex-1 truncate"
+                    title={`${target.repository.path}\n${target.branch ?? '분리 HEAD'}`}
+                  >
+                    <strong>{target.repository.name}</strong>
+                    <span className="ml-2 hidden text-(--color-text-muted) min-[1200px]:inline">
+                      {target.branch ?? '분리 HEAD'}
+                    </span>
                   </span>
-                  <span className="workspace-change-tree__actions">
-                    <Tooltip content={`${repository.name} 변경 모두 올리기`} summary="모두 올리기" describedBy={false}>
-                      <button
-                        type="button"
-                        disabled={interactionBusy || allUnstaged.length === 0}
-                        onClick={() => void moveEntries(
-                          allUnstaged.map((change) => ({ repository, change, staged: false })),
-                          'staged',
-                        )}
-                        aria-label={`${repository.name} 변경 모두 올리기`}
-                        data-testid={`workspace-stage-all-${repository.relativePath}`}
-                      >
-                        <CirclePlus size={13} aria-hidden="true" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={`${repository.name} 변경 모두 내리기`} summary="모두 내리기" describedBy={false}>
-                      <button
-                        type="button"
-                        disabled={interactionBusy || allStaged.length === 0}
-                        onClick={() => void moveEntries(
-                          allStaged.map((change) => ({ repository, change, staged: true })),
-                          'unstaged',
-                        )}
-                        aria-label={`${repository.name} 변경 모두 내리기`}
-                        data-testid={`workspace-unstage-all-${repository.relativePath}`}
-                      >
-                        <CircleMinus size={13} aria-hidden="true" />
-                      </button>
-                    </Tooltip>
-                  </span>
-                  <span className="workspace-change-tree__count">{changes.length}</span>
-                  {current && <span className="workspace-change-tree__current">작업 중</span>}
+                  <span>{target.status?.changes.length ?? 0}</span>
+                  {current && (
+                    <span
+                      className="shrink-0 text-(--color-accent)"
+                      title="현재 작업 폴더"
+                      role="img"
+                      aria-label="현재 작업 폴더"
+                    >
+                      ●
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0 text-(--color-text-muted) opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                    disabled={disabled}
+                    aria-label={`${target.repository.name} 스테이지 추가`}
+                    onClick={() =>
+                      void list.change.move(
+                        target.entries.filter((entry) => !entry.staged),
+                        'staged',
+                      )
+                    }
+                    data-testid={`workspace-stage-all-${target.repository.relativePath}`}
+                  >
+                    <CirclePlus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0 text-(--color-text-muted) opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                    disabled={disabled}
+                    aria-label={`${target.repository.name} 스테이지 제외`}
+                    onClick={() =>
+                      void list.change.move(
+                        target.entries.filter((entry) => entry.staged),
+                        'unstaged',
+                      )
+                    }
+                    data-testid={`workspace-unstage-all-${target.repository.relativePath}`}
+                  >
+                    <CircleMinus size={14} />
+                  </button>
                 </div>
-                {!repositoryCollapsed && (
-                  <div className="workspace-change-tree__children">
-                    {error !== null ? (
-                      <p className="workspace-changes__empty">이 저장소를 읽지 못했어요. {error}</p>
-                    ) : (
-                      <>
-                        {unstaged.length > 0 && <p className="workspace-change-tree__group">변경사항</p>}
-                        {unstaged.map((change) => (
-                          <WorkspaceChangeRow
-                            key={`unstaged:${change.path}`}
-                            entry={{ repository, change, staged: false }}
-                            current={current}
-                            selected={current && selected?.staged === false && selected.change.path === change.path}
-                            checked={checked.has(workspaceChangeCommand.selection.key.get({ repository, change, staged: false }))}
-                            busy={interactionBusy}
-                            onCheck={() => toggleEntry({ repository, change, staged: false })}
-                            onSelect={() => onSelect(repository, { change, staged: false })}
-                            onMenu={(x, y) => setMenu({ x, y, entry: { repository, change, staged: false } })}
-                          />
-                        ))}
-                        {staged.length > 0 && <p className="workspace-change-tree__group">저장 예정</p>}
-                        {staged.map((change) => (
-                          <WorkspaceChangeRow
-                            key={`staged:${change.path}`}
-                            entry={{ repository, change, staged: true }}
-                            current={current}
-                            selected={current && selected?.staged === true && selected.change.path === change.path}
-                            checked={checked.has(workspaceChangeCommand.selection.key.get({ repository, change, staged: true }))}
-                            busy={interactionBusy}
-                            onCheck={() => toggleEntry({ repository, change, staged: true })}
-                            onSelect={() => onSelect(repository, { change, staged: true })}
-                            onMenu={(x, y) => setMenu({ x, y, entry: { repository, change, staged: true } })}
-                          />
-                        ))}
-                        {changes.length === 0 && <p className="workspace-changes__empty">깨끗해요.</p>}
-                      </>
-                    )}
-                  </div>
-                )}
-              </section>
+              )
+            }
+            const { entry } = row
+            const { repository, change } = entry
+            const kind = entry.staged ? change.staged : change.unstaged
+            const current =
+              repository.path ===
+              (workspaceView.currentPath ?? workspaceView.currentRepository?.path)
+            const active =
+              current && selected?.staged === entry.staged && selected.change.path === change.path
+            return (
+              <div
+                className={`workspace-change-row flex h-full items-center gap-2 px-3 ${active ? 'bg-(--color-selection-bg)' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={disabled}
+                  checked={data.checked.has(row.key)}
+                  aria-label={`${repository.name}/${change.path} 선택`}
+                  onChange={(event) => list.selection.toggle([entry], event.target.checked)}
+                  data-testid={`workspace-check-${repository.relativePath}-${entry.staged ? 'staged' : 'unstaged'}-${change.path}`}
+                />
+                <button
+                  type="button"
+                  data-navigation
+                  disabled={disabled}
+                  aria-current={active || undefined}
+                  className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded border-0 bg-transparent px-2 text-left text-xs text-(--color-text) hover:bg-(--color-selection-bg) focus-visible:outline-2 focus-visible:outline-(--color-focus)"
+                  title={`${repository.path}/${change.path}`}
+                  onClick={() => onSelect(repository, { change, staged: entry.staged })}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ') {
+                      event.preventDefault()
+                      list.selection.toggle([entry], !data.checked.has(row.key))
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    setMenu({ x: event.clientX, y: event.clientY, entry })
+                  }}
+                  data-testid={`workspace-file-${repository.relativePath}-${entry.staged ? 'staged' : 'unstaged'}-${change.path}`}
+                >
+                  <span role="img" aria-label={kind ? KIND_LABELS[kind] : '변경'}>
+                    {kind ? KIND_GLYPHS[kind] : ''}
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate ${kind ? KIND_CLASSES[kind] : ''}`}>
+                    {change.path}
+                  </span>
+                  {entry.staged && (
+                    <span className="shrink-0 rounded bg-(--color-selection-bg) px-1 text-(--color-accent)">
+                      스테이지
+                    </span>
+                  )}
+                </button>
+              </div>
             )
-          })}
-          {repositories.length === 0 && workspaceView.error === null && (
-            <p className="workspace-changes__empty">
-              {workspaceView.loading ? '저장소 변경사항을 모으고 있어요…' : '보여줄 저장소가 없어요.'}
-            </p>
-          )}
-        </div>
-        {menu !== null && (
+          }}
+        />
+        {menu && (
           <ContextMenu
             x={menu.x}
             y={menu.y}
+            onClose={() => setMenu(null)}
             items={[
               {
                 key: menu.entry.staged ? 'workspace-unstage-file' : 'workspace-stage-file',
-                label: menu.entry.staged ? '내리기' : '올리기',
-                disabled: interactionBusy,
-                onSelect: () => void moveEntries(
-                  [menu.entry],
-                  menu.entry.staged ? 'unstaged' : 'staged',
-                ),
+                label: menu.entry.staged ? '스테이지 제외' : '스테이지 추가',
+                disabled,
+                onSelect: () =>
+                  void list.change.move([menu.entry], menu.entry.staged ? 'unstaged' : 'staged'),
               },
             ]}
-            onClose={() => setMenu(null)}
           />
         )}
-      </div>
-    </Panel>
+      </Panel.Body>
+    </Panel.Root>
   )
 }

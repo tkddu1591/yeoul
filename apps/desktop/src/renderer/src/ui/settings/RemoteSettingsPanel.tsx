@@ -1,8 +1,10 @@
+import { remoteFormPolicy } from '../../service/remote-form.service'
 import { GitFork, Plus, Radio, Server, ShieldCheck } from 'lucide-react'
 import { Button } from '../Button'
 import type { RemoteInfo } from '@git-gui/domain'
 
 export interface RemoteSettingsState {
+  repository?: { path: string; name: string }
   items: RemoteInfo[]
   busy: boolean
   error: string | null
@@ -28,21 +30,26 @@ export function RemoteSettingsPanel({
   onAdd,
   onRemove,
 }: RemoteSettingsPanelProps) {
+  const validation = remoteFormPolicy.validation.get(draft)
   return (
     <section className="settings-dialog__page" aria-labelledby="remote-settings-title">
       <div className="settings-dialog__page-heading">
         <span className="settings-dialog__eyebrow">저장소 연결</span>
-        <h2 id="remote-settings-title">Git 원격 저장소</h2>
+        <h2 id="remote-settings-title">{remote.repository?.name ?? '현재 저장소'} · Git 원격</h2>
+        <p className="break-all text-xs!">{remote.repository?.path}</p>
         <p>코드를 주고받을 원격 주소를 관리해요. GitHub API 연결과 Git 인증은 서로 별개입니다.</p>
       </div>
 
-      <section className="settings-dialog__remote-section" aria-labelledby="connected-remotes-title">
+      <section
+        className="settings-dialog__remote-section"
+        aria-labelledby="connected-remotes-title"
+      >
         <div className="settings-dialog__section-heading">
           <div>
             <h3 id="connected-remotes-title">연결된 원격</h3>
             <span>{remote.items.length}개</span>
           </div>
-          <small>HTTPS는 macOS Keychain, SSH는 등록된 키를 사용해요.</small>
+          <small>Git에 설정된 credential helper와 SSH 키를 사용해요.</small>
         </div>
 
         {remote.items.length === 0 ? (
@@ -51,7 +58,7 @@ export function RemoteSettingsPanel({
               <Radio size={20} />
             </span>
             <strong>아직 연결된 원격이 없어요</strong>
-            <small>아래에서 주소를 추가하면 푸시와 Pull에 사용할 수 있어요.</small>
+            <small>아래에서 주소를 추가하면 푸시와 풀에 사용할 수 있어요.</small>
           </div>
         ) : (
           <ul className="settings-dialog__remote-list">
@@ -63,7 +70,7 @@ export function RemoteSettingsPanel({
                 <span className="settings-dialog__remote-copy">
                   <span>
                     <strong>{item.name}</strong>
-                    <small className="settings-dialog__connected-badge">연결됨</small>
+                    <small className="settings-dialog__connected-badge">주소 등록됨</small>
                   </span>
                   <code>{item.fetchUrl}</code>
                 </span>
@@ -119,12 +126,18 @@ export function RemoteSettingsPanel({
         </div>
         <div className="settings-dialog__remote-form-footer">
           <span>
-            <ShieldCheck size={14} aria-hidden="true" /> 인증 정보는 주소에 저장하지 않아요.
+            <ShieldCheck size={14} aria-hidden="true" /> 토큰·비밀번호를 URL에 포함하지 마세요.
           </span>
-          <Button variant="primary" size="sm" type="submit" isDisabled={remote.busy}>
+          <Button
+            variant="primary"
+            size="sm"
+            type="submit"
+            isDisabled={remote.busy || validation !== null}
+          >
             <Plus size={14} aria-hidden="true" /> 원격 추가
           </Button>
         </div>
+        {validation && <p className="text-xs text-(--color-text-muted)">{validation}</p>}
         {remote.error !== null && (
           <p className="settings-dialog__error" role="alert">
             {remote.error}

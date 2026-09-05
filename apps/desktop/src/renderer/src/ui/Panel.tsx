@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import { Tooltip } from './Tooltip'
 import './panel.css'
 
@@ -14,7 +14,7 @@ interface PanelProps {
   testId?: string
 }
 
-export function Panel({ title, titleHint, accessory, pending, children, testId }: PanelProps) {
+function LegacyPanel({ title, titleHint, accessory, pending, children, testId }: PanelProps) {
   const tooltipContent = titleHint !== undefined ? `${title} (${titleHint})` : title
   return (
     <section className="ui-panel" data-testid={testId}>
@@ -42,3 +42,36 @@ export function Panel({ title, titleHint, accessory, pending, children, testId }
     </section>
   )
 }
+
+function Root({
+  children,
+  className = '',
+  testId,
+}: {
+  children: ReactNode
+  className?: string
+  testId?: string
+}) {
+  return (
+    <section className={`ui-panel ${className}`} data-testid={testId}>
+      {children}
+    </section>
+  )
+}
+function Header({ children }: { children: ReactNode }) {
+  return <header className="ui-panel__head">{children}</header>
+}
+function Title({ children }: { children: ReactNode }) {
+  return <h2 className="min-w-0 truncate">{children}</h2>
+}
+function Actions({ children }: { children: ReactNode }) {
+  return <div className="ml-auto flex shrink-0 items-center gap-1">{children}</div>
+}
+function Body({ children, className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div {...props} className={`ui-panel__body min-h-0 flex-1 ${className}`}>
+      {children}
+    </div>
+  )
+}
+export const Panel = Object.assign(LegacyPanel, { Root, Header, Title, Actions, Body })

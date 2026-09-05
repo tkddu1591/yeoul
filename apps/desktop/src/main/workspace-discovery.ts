@@ -62,7 +62,7 @@ async function getRepositoryMetadata(path: string): Promise<RepositoryMetadata |
   return { path: repositoryPath, identity, isMainWorktree: identity === gitPath }
 }
 
-async function findRepositoryCandidates(root: string): Promise<string[]> {
+async function findRepositoryCandidates(root: string, signal?: AbortSignal): Promise<string[]> {
   const candidates = new Set<string>()
   const selectedRepository = await getRepositoryMetadata(root)
   if (selectedRepository !== null) candidates.add(selectedRepository.path)
@@ -70,6 +70,7 @@ async function findRepositoryCandidates(root: string): Promise<string[]> {
   const queue = [root]
   let scanned = 0
   while (queue.length > 0) {
+    signal?.throwIfAborted()
     const directory = queue.shift()!
     scanned += 1
     if (scanned > MAX_SCANNED_DIRECTORIES) {
@@ -96,19 +97,20 @@ async function findRepositoryCandidates(root: string): Promise<string[]> {
   return [...candidates]
 }
 
-async function scanFolder(selectedPath: string): Promise<WorkspaceInfo> {
+async function scanFolder(selectedPath: string, signal?: AbortSignal): Promise<WorkspaceInfo> {
   const selectedRealPath = await realpath(selectedPath)
   // 저장소 안쪽 폴더를 골랐다면 기존 동작처럼 저장소 루트까지 올린다. 껍데기 폴더라면
   // 선택한 위치 자체가 워크스페이스 루트다.
   const selectedRepository = await getRepositoryMetadata(selectedRealPath)
   const root = selectedRepository?.path ?? selectedRealPath
-  const candidates = await findRepositoryCandidates(root)
+  const candidates = await findRepositoryCandidates(root, signal)
   const repositoriesByIdentity = new Map<
     string,
     { repository: WorkspaceRepository; isMainWorktree: boolean }
   >()
 
   for (const candidate of candidates) {
+    signal?.throwIfAborted()
     const metadata = await getRepositoryMetadata(candidate)
     if (metadata === null || !isInside(root, metadata.path)) continue
     const relativePath = relative(root, metadata.path) || '.'
@@ -126,11 +128,13 @@ async function scanFolder(selectedPath: string): Promise<WorkspaceInfo> {
     }
   }
 
-  const repositories = [...repositoriesByIdentity.values()].map((entry) => entry.repository).sort((left, right) => {
-    if (left.relativePath === '.') return -1
-    if (right.relativePath === '.') return 1
-    return left.relativePath.localeCompare(right.relativePath)
-  })
+  const repositories = [...repositoriesByIdentity.values()]
+    .map((entry) => entry.repository)
+    .sort((left, right) => {
+      if (left.relativePath === '.') return -1
+      if (right.relativePath === '.') return 1
+      return left.relativePath.localeCompare(right.relativePath)
+    })
   if (repositories.length === 0) {
     throw new Error(
       '이 폴더와 하위 폴더에서 Git 저장소를 찾지 못했어요. 저장소가 들어 있는 상위 폴더를 선택해 주세요.',

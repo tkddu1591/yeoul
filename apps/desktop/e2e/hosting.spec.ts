@@ -37,13 +37,19 @@ function toApiPull(pull: MockPull) {
     title: pull.title,
     draft: false,
     html_url: `https://github.com/e2e/fixture/pull/${pull.number}`,
-    head: { ref: pull.head },
+    head: { ref: pull.head, sha: 'a'.repeat(40) },
     base: { ref: pull.base },
   }
 }
 
 function toApiPullDetail(pull: MockPull) {
-  return { ...toApiPull(pull), state: pull.merged ? 'closed' : 'open', merged: pull.merged }
+  return {
+    ...toApiPull(pull),
+    state: pull.merged ? 'closed' : 'open',
+    merged: pull.merged,
+    mergeable: true,
+    mergeable_state: 'clean',
+  }
 }
 
 async function startMockGitHub(options: { rejectApprove?: boolean } = {}): Promise<MockGitHub> {
@@ -165,6 +171,7 @@ async function startMockGitHub(options: { rejectApprove?: boolean } = {}): Promi
             body: review.body,
             state: review.state,
             submitted_at: review.submitted_at,
+            commit_id: 'a'.repeat(40),
           })),
         )
         return
@@ -406,7 +413,7 @@ test('리뷰 요청 상세를 열어 코멘트를 확인하고 답변을 단다'
     await window.getByTestId('review-pull-1').click()
     // 팝오버가 닫히고 우측 열이 리뷰 상세로 전환된다 — 제목·상태·타임라인
     await expect(window.getByTestId('review-detail-panel')).toContainText('#1 로그인 버튼 색 실험')
-    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
+    await expect(window.getByTestId('review-detail-status')).toContainText('검토 대기')
     await expect(window.getByTestId('review-detail-timeline')).toContainText(
       '버튼 색이 좋아요. 문구만 다듬어 주세요.',
     )
@@ -455,11 +462,11 @@ test('승인하면 승인됨 배지, 병합하면 병합됨 배지와 기본 공
     const window = await app.firstWindow()
     await window.getByTestId('review-open').click()
     await window.getByTestId('review-pull-1').click()
-    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
+    await expect(window.getByTestId('review-detail-status')).toContainText('검토 대기')
     // 승인 → 상세 재조회로 '승인됨' 배지 + 타임라인의 승인 항목
     await window.getByTestId('review-approve').click()
     await expect(window.getByTestId('review-detail-status')).toContainText('승인됨')
-    await expect(window.getByTestId('review-detail-timeline')).toContainText('승인했어요')
+    await expect(window.getByTestId('review-detail-timeline')).toContainText('승인')
     expect(mock.pulls[0]!.reviews).toHaveLength(1)
     // 병합 — 확인창을 거친다
     await window.getByTestId('review-merge').click()
@@ -513,7 +520,61 @@ test('내가 만든 리뷰 요청은 스스로 승인할 수 없다는 친절 �
     await window.getByTestId('review-approve').click()
     await expect(window.getByTestId('error')).toContainText('스스로 승인할 수 없어요')
     // 상세는 열린 채 남는다 — 다른 사람의 승인을 기다리면 된다
-    await expect(window.getByTestId('review-detail-status')).toContainText('열림')
+    await expect(window.getByTestId('review-detail-status')).toContainText('검토 대기')
+  } finally {
+    await app.close()
+    await mock.close()
+    await rm(repo, { recursive: true, force: true })
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test('UX — 과거 승인 뒤 수정 요청은 승인됨으로 표시하지 않고 병합을 막는다', async () => {
+  const mock = await startMockGitHub()
+  mock.pulls.push({
+    number: 1,
+    title: '수정 요청 확인',
+    head: 'feature',
+    base: 'main',
+    merged: false,
+    comments: [],
+    reviews: [
+      {
+        id: 1,
+        login: 'reviewer',
+        body: '',
+        state: 'APPROVED',
+        submitted_at: '2026-09-01T00:00:00Z',
+      },
+      {
+        id: 2,
+        login: 'reviewer',
+        body: '',
+        state: 'CHANGES_REQUESTED',
+        submitted_at: '2026-09-02T00:00:00Z',
+      },
+    ],
+  })
+  const repo = await createGitHubFixtureRepo({ branch: 'feature', withUpstream: true })
+  const userData = await mkdtemp(join(tmpdir(), 'yeoul-review-ux-'))
+  const app = await electron.launch({
+    args: [APP_ROOT],
+    env: {
+      ...process.env,
+      GIT_GUI_E2E_REPO: repo,
+      GIT_GUI_USER_DATA: userData,
+      GIT_GUI_GITHUB_API: mock.url,
+      GIT_GUI_E2E_GH_TOKEN: 'e2e-token',
+    },
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.getByTestId('review-open').click()
+    await page.getByTestId('review-pull-1').click()
+    await expect(page.getByTestId('review-detail-status')).toHaveText('수정 요청')
+    await expect(page.getByTestId('review-merge')).toBeDisabled()
+    await expect(page.getByTestId('review-detail-timeline')).toContainText('수정 요청')
+    await page.screenshot({ path: 'test-results/ux-review-fixed.png', animations: 'disabled' })
   } finally {
     await app.close()
     await mock.close()

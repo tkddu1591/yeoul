@@ -23,12 +23,16 @@ function getInitialTheme(stored: unknown): ColorTheme {
 export const appearancePreference = {
   initial: {
     get(
-      stored: { colorMode?: unknown; colorTheme?: unknown },
+      stored: { colorMode?: unknown; colorTheme?: unknown; systemTheme?: boolean },
       systemDark: boolean,
     ): Appearance {
       return {
-        mode: getInitialMode(stored.colorMode, systemDark),
+        mode: getInitialMode(
+          stored.systemTheme === true ? undefined : stored.colorMode,
+          systemDark,
+        ),
         theme: getInitialTheme(stored.colorTheme),
+        ...(stored.systemTheme === true ? { followSystem: true } : {}),
       }
     },
   },

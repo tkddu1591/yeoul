@@ -23,3 +23,15 @@ export const KIND_GLYPHS: Record<ChangeKind, string> = {
   untracked: 'U',
   conflicted: '!',
 }
+
+/** Theme-bound text colors; shape and accessible labels remain alongside color. */
+export const KIND_CLASSES: Record<ChangeKind, string> = {
+  modified: 'text-(--change-modified)',
+  added: 'text-(--change-added)',
+  deleted: 'text-(--change-deleted)',
+  renamed: 'text-(--change-renamed)',
+  copied: 'text-(--change-added)',
+  typechange: 'text-(--change-modified)',
+  untracked: 'text-(--change-untracked)',
+  conflicted: 'text-(--concept-conflict)',
+}
